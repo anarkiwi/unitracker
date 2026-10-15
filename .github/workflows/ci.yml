@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    env:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: .tunecache
+          key: tunecache-${{ hashFiles('tests/conftest.py') }}
+      - run: pip install -e ".[dev]"
+      - run: black --check src tests
+      - run: pylint src
+      - run: pylint --disable=missing-function-docstring tests
+      - run: pytest -n auto --cov=unitracker --cov-fail-under=85
