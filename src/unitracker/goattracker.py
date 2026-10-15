@@ -11,12 +11,12 @@ NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
 
 
 class LiftError(ValueError):
-    """The tune uses something the GoatTracker 2 machine does not cover."""
+    """The tune uses something the GoatTracker 2 playroutine does not cover."""
 
 
-def load_machine() -> dict:
-    """The GoatTracker 2 machine definition."""
-    text = resources.files("unitracker").joinpath("machines/goattracker2.yaml").read_text()
+def load_playroutine() -> dict:
+    """The GoatTracker 2 playroutine definition."""
+    text = resources.files("unitracker").joinpath("playroutines/goattracker2.yaml").read_text()
     return yaml.safe_load(text)
 
 
@@ -242,15 +242,15 @@ def lift(dec) -> dict:
     }
     missing = [name for name, used in unsupported.items() if used]
     if missing:
-        raise LiftError("not covered by the goattracker2 machine yet: " + ", ".join(missing))
+        raise LiftError("not covered by the goattracker2 playroutine yet: " + ", ".join(missing))
     song = dec.typed.to_song()
     build = info.build
-    machine = load_machine()
+    playroutine = load_playroutine()
     adparam = C.DEFAULT_ADPARAM
     if build.adparam is not None:
         adparam = build.adparam << 8 | build.srparam
     deftempo = build.deftempo if build.deftempo is not None else _default_tempo(song)
-    machine["constants"] = {"adparam": adparam, "deftempo": deftempo}
+    playroutine["constants"] = {"adparam": adparam, "deftempo": deftempo}
     freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
     phrases = _phrases(song, tracks)
@@ -281,5 +281,5 @@ def lift(dec) -> dict:
         },
         "tracks": tracks,
         "phrases": phrases,
-        "machine": machine,
+        "playroutine": playroutine,
     }

@@ -29,7 +29,7 @@ unitracker-play = "unitracker.cli:play_main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-unitracker = ["machines/*.yaml"]
+unitracker = ["playroutines/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

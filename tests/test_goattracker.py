@@ -142,7 +142,7 @@ def test_lift_document(metal_warrior):
     song = gt.lift(decompile_sid(metal_warrior.read_bytes(), subtune=0))
     assert song["meta"]["title"] == "Metal Warrior Title Remix"
     assert song["clock"] == gt.PAL_CLOCK
-    assert song["machine"]["constants"] == {"adparam": 0x0F00, "deftempo": 11}
+    assert song["playroutine"]["constants"] == {"adparam": 0x0F00, "deftempo": 11}
     assert [len(t["plays"]) for t in song["tracks"]] == [5, 5, 5]
     assert len(song["tables"]["ftab"]) == 128
     assert song["records"]["ins"][1]["sr"] == 0x88

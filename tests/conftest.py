@@ -18,15 +18,15 @@ def metal_warrior() -> Path:
     return Path(path)
 
 
-def mini_song(machine, tracks=None, phrases=None, **extra) -> dict:
-    """A one-voice song around ``machine``."""
+def mini_song(playroutine, tracks=None, phrases=None, **extra) -> dict:
+    """A one-voice song around ``playroutine``."""
     song = {
         "unitracker": 0,
         "clock": {"cycles_per_tick": 19656, "clock_hz": 985248},
         "voices": 1,
         "tracks": tracks or [{"plays": [{"phrase": "a"}], "loop": 0}],
         "phrases": phrases or {"a": [{}]},
-        "machine": machine,
+        "playroutine": playroutine,
     }
     song.update(extra)
     return song

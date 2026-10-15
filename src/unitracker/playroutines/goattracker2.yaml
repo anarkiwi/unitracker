@@ -1,4 +1,4 @@
-# GoatTracker 2 playroutine (player.s, buffered writes) as a unitracker machine.
+# GoatTracker 2 playroutine (player.s, buffered writes) as a unitracker playroutine.
 # The lifter fills in the build constants.
 name: goattracker2
 constants: {adparam: 0x0F00, deftempo: 5}

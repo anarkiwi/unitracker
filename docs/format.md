@@ -3,7 +3,7 @@
 A unitracker song is one YAML document. A backend writes it by lifting a native tune
 (`unitracker-gt` lifts GoatTracker 2), and the generic player (`unitracker-play`)
 plays it on an emulated SID. The player has no effects or player knowledge of its
-own. Everything a player does is described by the song's `machine`: integer cells,
+own. Everything a player does is described by the song's `playroutine`: integer cells,
 bounded accumulators, records of actions, and handlers.
 
 ## Top level
@@ -18,7 +18,7 @@ tables: {name: [ints]}        # integer arrays, indexed from 0; reads out of ran
 records: {name: {index: {field: int | [actions]}}}
 tracks: [track, ...]          # one per voice
 phrases: {name: [event, ...]}
-machine: {...}
+playroutine: {...}
 ```
 
 A record's missing int field reads as 0, and a missing action-list field is empty.
@@ -37,7 +37,7 @@ index; the play's `transpose` is added when the event is fetched. A `repeat` of 
 plays the phrase n times.
 
 The player keeps one cursor per voice. It does not decide when events are read. The
-machine decides that with the `fetch` action, which reads the next step and sets
+playroutine decides that with the `fetch` action, which reads the next step and sets
 these voice pseudo-cells:
 
 | cell | value |
@@ -49,16 +49,16 @@ these voice pseudo-cells:
 | `at_phrase_start` | 1 when the next `fetch` reads step 0 of a phrase |
 | `ended` | 1 once a track with `loop: null` has run out |
 
-## Machine
+## Playroutine
 
 ```yaml
-machine:
+playroutine:
   name: str
   constants: {name: int}
   functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
   global: {cell: {width: 8, init: 0}}                # width omitted: unbounded
   voice:  {cell: {width: 8, init: 0}}                # one copy per voice
-  records: {name: {index: {field: ...}}}             # machine-owned, e.g. command dispatch
+  records: {name: {index: {field: ...}}}             # playroutine-owned, e.g. command dispatch
   procs: {name: [actions]}
   init: [actions]                                    # first tick only, global scope
   tick: [actions]                                    # every later tick, global scope
@@ -134,5 +134,5 @@ buffered order (`BUFFEREDWRITES`: filter step first, then `mt_loadregs`):
 $15 $16 $17 $18,  then for each voice v (base 7v): +2 +3 +6 +5 +0 +1 +4
 ```
 
-A machine never writes registers directly, so every song's output is canonical by
+A playroutine never writes registers directly, so every song's output is canonical by
 construction.

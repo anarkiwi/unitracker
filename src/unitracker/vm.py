@@ -1,4 +1,4 @@
-"""The generic unitracker player: compiles a song's machine to Python and runs it."""
+"""The generic unitracker player: compiles a song's playroutine to Python and runs it."""
 
 from collections.abc import Iterator
 
@@ -141,23 +141,23 @@ def _tg(table, index):
 
 
 class _Codegen:
-    """Generates one Python module of functions from a song's machine."""
+    """Generates one Python module of functions from a song's playroutine."""
 
     # pylint: disable=too-many-instance-attributes
 
     def __init__(self, song):
-        machine = song["machine"]
-        self.machine = machine
-        self.constants = {k: int(v) for k, v in (machine.get("constants") or {}).items()}
+        playroutine = song["playroutine"]
+        self.playroutine = playroutine
+        self.constants = {k: int(v) for k, v in (playroutine.get("constants") or {}).items()}
         self.tables = {k: [int(x) for x in v] for k, v in (song.get("tables") or {}).items()}
         self.records = {}
-        for source in (song.get("records") or {}, machine.get("records") or {}):
+        for source in (song.get("records") or {}, playroutine.get("records") or {}):
             for name, rows in source.items():
                 if name in self.records:
                     raise SongError(f"record {name!r} defined twice")
                 self.records[name] = {int(k): (v or {}) for k, v in (rows or {}).items()}
-        self.gcells = _cells(machine.get("global"))
-        vcells = _cells(machine.get("voice"))
+        self.gcells = _cells(playroutine.get("global"))
+        vcells = _cells(playroutine.get("voice"))
         for name in PSEUDO:
             if name in vcells:
                 raise SongError(f"{name} is reserved")
@@ -166,8 +166,8 @@ class _Codegen:
         self.gindex = {n: i for i, n in enumerate(self.gcells)}
         self.vindex = {n: i for i, n in enumerate(vcells)}
         self.cursor_slot = len(vcells)
-        self.resolver_functions = Resolver(machine.get("functions")).functions
-        self.procs = machine.get("procs") or {}
+        self.resolver_functions = Resolver(playroutine.get("functions")).functions
+        self.procs = playroutine.get("procs") or {}
         self.fields = {}
         self.lines = []
         self.tail = []
@@ -220,9 +220,9 @@ class _Codegen:
         return name
 
     def build(self):
-        """Python source for the whole machine."""
-        self.request("f_init", self.machine.get("init") or [], False)
-        self.request("f_tick", self.machine.get("tick") or [], False)
+        """Python source for the whole playroutine."""
+        self.request("f_init", self.playroutine.get("init") or [], False)
+        self.request("f_tick", self.playroutine.get("tick") or [], False)
         while self.pending:
             name, actions, voice = self.pending.pop()
             body = []
@@ -235,7 +235,7 @@ class _Codegen:
 
     def ghost(self):
         """Source of ``f_ghost(out)``, filling the 25 register values."""
-        ghost = self.machine.get("ghost") or {}
+        ghost = self.playroutine.get("ghost") or {}
         gscope, vscope = _Scope(self, False), _Scope(self, True)
         out = ["def f_ghost(out):"]
         for reg, text in (ghost.get("global") or {}).items():
@@ -404,7 +404,7 @@ class SongPlayer:
             "_acc": _acc,
             "_fetch": _fetcher(gen),
         }
-        code = compile(gen.build(), f"<machine {song['machine'].get('name', '')}>", "exec")
+        code = compile(gen.build(), f"<playroutine {song['playroutine'].get('name', '')}>", "exec")
         exec(code, namespace)  # pylint: disable=exec-used
         self._entry = (namespace["f_init"], namespace["f_tick"], namespace["f_ghost"])
         regs = song.get("registers") or [0] * REG_COUNT

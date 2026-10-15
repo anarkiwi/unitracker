@@ -2,7 +2,7 @@
 
 A generic tracker song format for the C64 SID, a GoatTracker 2 lifter, and a generic
 player. A song is a YAML document holding the music (tracks, phrases, tables, records)
-and the machine that plays it (integer cells, bounded accumulators, event handlers). The
+and the playroutine that plays it (integer cells, bounded accumulators, event handlers). The
 player has no player-specific knowledge, and its register writes are flushed in one
 canonical order.
 
