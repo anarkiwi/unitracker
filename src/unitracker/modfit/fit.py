@@ -55,8 +55,8 @@ def src(t) -> str:
 class Fitter:
     """Proved accumulator fits for one playroutine."""
 
-    def __init__(self, pr: dict):
-        self.form = Form(pr)
+    def __init__(self, pr: dict, form: Form | None = None):
+        self.form = form or Form(pr)
 
     @staticmethod
     def cases(paths, cell: str) -> list:
@@ -125,10 +125,12 @@ class Fitter:
         """
         for cconds, cfinal in self.form.paths([candidate]):
             for conds, final in paths:
+                a, b = final.get(cell, cell), cfinal.get(cell, cell)
+                if a == b or not self.form.feasible((*guard, *conds, *cconds)):
+                    continue
                 smt = self.form.solver()
                 smt.solver.add(
-                    *(smt.cond(c) for c in (*guard, *conds, *cconds)),
-                    smt.term(final.get(cell, cell)) != smt.term(cfinal.get(cell, cell)),
+                    *(smt.cond(c) for c in (*guard, *conds, *cconds)), smt.term(a) != smt.term(b)
                 )
                 result = smt.solver.check()
                 if result != z3.unsat:

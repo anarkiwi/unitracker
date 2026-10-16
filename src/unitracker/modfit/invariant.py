@@ -10,21 +10,9 @@ import z3
 
 from unitracker.modfit import playroutine, resolve
 from unitracker.modfit.fit import Fitter, src
-from unitracker.modfit.flow import action_lists, cells_of, names, run_lists
+from unitracker.modfit.flow import NESTED, Writes, action_lists, cells_of, direct_writes, names
 from unitracker.modfit.form import Form, atoms, lin
 from unitracker.vm import PSEUDO
-
-NESTED = ("then", "else", "on_bound")
-
-
-def direct_writes(doc) -> set:
-    """Cells assigned in ``doc`` itself, not through calls, runs or ``for_voices`` bodies."""
-    if isinstance(doc, list):
-        return set().union(*(direct_writes(a) for a in doc))
-    out = set(doc.get("set") or {}) | set(doc.get("with") or {})
-    if "accumulate" in doc:
-        out.add(doc["accumulate"])
-    return out.union(*(direct_writes(doc.get(k) or []) for k in NESTED))
 
 
 def bodies(actions):
@@ -43,32 +31,6 @@ def units(pr: dict) -> dict:
     for path, actions in list(out.items()):
         out.update({f"{path}.for_voices.{i}": b for i, b in enumerate(bodies(actions))})
     return out
-
-
-class Writes:
-    """Cells an action list can assign, through calls, runs and ``for_voices`` bodies."""
-
-    def __init__(self, pr: dict):
-        self.pr = pr
-        self.procs = {}
-
-    def proc(self, name: str) -> set:
-        """Cells a proc can assign."""
-        if name not in self.procs:
-            self.procs[name] = set()
-            self.procs[name] = self.of(self.pr["procs"][name])
-        return self.procs[name]
-
-    def of(self, doc) -> set:
-        """Cells ``doc`` can assign."""
-        if isinstance(doc, list):
-            return set().union(*(self.of(a) for a in doc))
-        out = direct_writes(doc) | (set(PSEUDO) if "fetch" in doc else set())
-        if "call" in doc:
-            out |= self.proc(doc["call"])
-        if "run" in doc:
-            out |= self.of([a for body in run_lists(self.pr, doc["run"]) for a in body])
-        return out.union(*(self.of(doc.get(k) or []) for k in (*NESTED, "for_voices")))
 
 
 class Slicer:

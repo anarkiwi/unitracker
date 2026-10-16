@@ -26,13 +26,19 @@ def is_ones(m) -> bool:
     return isinstance(m, int) and m >= 0 and m & (m + 1) == 0
 
 
+SHOWN = {}
+
+
 def show(t) -> str:
-    """S-expression text of a term."""
+    """S-expression text of a term, memoised per tuple object."""
     if isinstance(t, bool):
         return "true" if t else "false"
-    if isinstance(t, tuple):
-        return "(" + " ".join(show(x) for x in t) + ")"
-    return str(t)
+    if not isinstance(t, tuple):
+        return str(t)
+    hit = SHOWN.get(id(t))
+    if hit is None or hit[0] is not t:
+        hit = SHOWN[id(t)] = (t, "(" + " ".join(show(x) for x in t) + ")")
+    return hit[1]
 
 
 def sexpr(t):
@@ -697,6 +703,7 @@ class Form(Algebra):
                 return self.accumulate(a, rest, conds, state)
             if "call" in a:
                 self.assign(a.get("with") or {}, state)
+                self.enter(a["call"])
                 return [
                     p
                     for cs, st in self.paths(self.procs[a["call"]], conds, state)
@@ -706,6 +713,9 @@ class Form(Algebra):
                 return self.opaque(a, rest, conds, state)
             self.assign(a["set"], state)
         return [(conds, state)]
+
+    def enter(self, proc: str) -> None:
+        """Called before a proc's actions are evaluated."""
 
     def opaque(self, a: dict, rest, conds, state) -> list:
         """Paths through an action this evaluator does not model."""

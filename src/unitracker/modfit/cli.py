@@ -9,6 +9,8 @@ from tqdm import tqdm
 
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.arith import Arith
+from unitracker.modfit.compose import command_lines
+from unitracker.modfit.keywords import table as keyword_table
 from unitracker.modfit.fit import Fitter, model_text, src
 from unitracker.modfit.invariant import fit_under, invariants
 from unitracker.modfit.orbit import report
@@ -82,6 +84,11 @@ def run(args) -> list:
             for c in tqdm(table["checks"], desc="check", unit="cell")
             for x in check_lines(*c.values())
         ]
+    if args.command == "command":
+        units = [(u.split(":") + [None])[:2] for u in args.units or specs()["commands"]]
+        return [x for name, kw in units for x in command_lines(name, kw)]
+    if args.command == "keywords":
+        return keyword_table(tuple(args.units) or ("goattracker2", "defmon", "sidwizard"))
     if args.command == "poly":
         units = [u.split(":") for u in args.units]
         return [x for u in tqdm(units, desc="poly", unit="op") for x in poly_lines(*u)]
@@ -101,6 +108,12 @@ def main(argv=None) -> None:
     )
     sub.add_parser("poly", help="print the arithmetic form").add_argument(
         "units", nargs="+", metavar="PLAYROUTINE:PATH"
+    )
+    sub.add_parser("command", help="compose keywords into setup and per-tick effects").add_argument(
+        "units", nargs="*", metavar="PLAYROUTINE[:NAME]"
+    )
+    sub.add_parser("keywords", help="match keyword and field signatures").add_argument(
+        "units", nargs="*", metavar="PLAYROUTINE"
     )
     orbit = sub.add_parser("orbit", help="test vibrato orbits as reflect accumulators")
     orbit.add_argument("units", nargs="*", metavar="PLAYROUTINE")

@@ -118,6 +118,45 @@ def run_lists(pr: dict, run: dict) -> list:
     return [r[run["field"]] for r in rows.values() if (r or {}).get(run["field"])]
 
 
+NESTED = ("then", "else", "on_bound")
+
+
+def direct_writes(doc) -> set:
+    """Cells assigned in ``doc`` itself, not through calls, runs or ``for_voices`` bodies."""
+    if isinstance(doc, list):
+        return set().union(*(direct_writes(a) for a in doc))
+    out = set(doc.get("set") or {}) | set(doc.get("with") or {})
+    if "accumulate" in doc:
+        out.add(doc["accumulate"])
+    return out.union(*(direct_writes(doc.get(k) or []) for k in NESTED))
+
+
+class Writes:
+    """Cells an action list can assign, through calls, runs and ``for_voices`` bodies."""
+
+    def __init__(self, pr: dict):
+        self.pr = pr
+        self.procs = {}
+
+    def proc(self, name: str) -> set:
+        """Cells a proc can assign."""
+        if name not in self.procs:
+            self.procs[name] = set()
+            self.procs[name] = self.of(self.pr["procs"][name])
+        return self.procs[name]
+
+    def of(self, doc) -> set:
+        """Cells ``doc`` can assign."""
+        if isinstance(doc, list):
+            return set().union(*(self.of(a) for a in doc))
+        out = direct_writes(doc) | (set(PSEUDO) if "fetch" in doc else set())
+        if "call" in doc:
+            out |= self.proc(doc["call"])
+        if "run" in doc:
+            out |= self.of([a for body in run_lists(self.pr, doc["run"]) for a in body])
+        return out.union(*(self.of(doc.get(k) or []) for k in (*NESTED, "for_voices")))
+
+
 def meet(a, b):
     """Intersection of two optional sets, ``None`` meaning no path."""
     return b if a is None else a if b is None else a & b
@@ -278,11 +317,12 @@ class Flow:
         read = set().union(*(names(s) for g in ghost.values() for s in (g or {}).values()))
         local = set(self.width) - entry_live(pr, False) - read
         self.local = {c for c in local if self.width[c] is None}
-        self.edges, self.writes = {}, {}
-        for path, actions in action_lists(pr).items():
-            rec = path.split(".")[1] if path.startswith("record_types.") else None
+        self.edges, self.writes, self.log, self.path = {}, {}, [], None
+        for self.path, actions in action_lists(pr).items():
+            rec = self.path.split(".")[1] if self.path.startswith("record_types.") else None
             self.block(actions, {}, rec)
         self.reach = self.registers()
+        self.timing = self.timed()
 
     # values -----------------------------------------------------------------
     def field(self, rtype: str, attr: str) -> Val:
@@ -344,6 +384,12 @@ class Flow:
         """A binary operator: shifts and masks move bits, arithmetic carries upwards."""
         # pylint: disable=too-many-return-statements
         k = n.right.value if isinstance(n.right, ast.Constant) else None
+        if isinstance(n.op, ast.Mult) and isinstance(n.left, ast.Constant):
+            a, b, k = b, a, n.left.value
+        if isinstance(n.op, ast.Mult) and k is not None and k > 0 and k & (k - 1) == 0:
+            return a.map(lambda m: (m << (k.bit_length() - 1)) & ALL)
+        if isinstance(n.op, ast.Add) and not a.support() & b.support():
+            return a | b
         if isinstance(n.op, ast.LShift) and k is not None:
             return a.map(lambda m: (m << k) & ALL)
         if isinstance(n.op, ast.RShift) and k is not None:
@@ -351,7 +397,9 @@ class Flow:
         if isinstance(n.op, ast.BitAnd):
             sa, sb = a.support(), b.support()
             return a.map(lambda m: m & sb) | b.map(lambda m: m & sa)
-        if isinstance(n.op, (ast.BitOr, ast.BitXor)):
+        if isinstance(n.op, ast.BitOr):
+            return a.map(lambda m: m & ~b.const) | b.map(lambda m: m & ~a.const)
+        if isinstance(n.op, ast.BitXor):
             return a | b
         if isinstance(n.op, ast.Mult) and k is not None:
             return a.map(lambda m: spread(m * (k & -k)) if k else 0)
@@ -366,14 +414,18 @@ class Flow:
         return self.value(parse(str(src)), env, rec)
 
     # assignments ------------------------------------------------------------
-    def assign(self, cell: str, v: Val, env: dict) -> None:
-        """Record ``cell := v`` (wrapped to its width), or bind a local temporary."""
+    def assign(self, cell: str, v: Val, env: dict, step: Val | None = None) -> None:
+        """Record ``cell := v`` (wrapped to its width), or bind a local temporary.
+
+        ``log`` keeps ``(list path, cell, value or step, is a step)`` per assignment.
+        """
         w = self.width.get(cell)
         if w is not None:
             v = v.map(lambda m: m & ((1 << w) - 1))
         if cell in self.local:
             env[cell] = v
             return
+        self.log.append((self.path, cell, v if step is None else step, step is not None))
         for n, b in v.rel.items():
             mine = self.edges.setdefault(n, {}).setdefault(cell, {})
             for i, m in b.items():
@@ -412,7 +464,7 @@ class Flow:
         v = functools.reduce(
             Val.__or__, parts, (source(cell, self.width.get(cell)) | step).map(spread)
         )
-        self.assign(cell, v | v.onto(v.support()), env)
+        self.assign(cell, v | v.onto(v.support()), env, step)
         self.block(a.get("on_bound"), env, rec)
 
     # registers --------------------------------------------------------------
@@ -458,6 +510,28 @@ class Flow:
                     grew = True
         return grew
 
+    def timed(self) -> set:
+        """Cells that can steer a test guarding a ``fetch``, by data or the branches it guards."""
+        writes, edges, seeds = Writes(self.pr), {}, set()
+        for actions in action_lists(self.pr).values():
+            for test, body in guarded(actions):
+                for n in names(test):
+                    edges.setdefault(n, set()).update(writes.of(body))
+                if "ev_kind" in writes.of(body):
+                    seeds |= names(test)
+        for n, outs in self.edges.items():
+            edges.setdefault(n, set()).update(outs)
+        back = {}
+        for n, outs in edges.items():
+            for m in outs:
+                back.setdefault(m, set()).add(n)
+        out, todo = set(seeds), list(seeds)
+        while todo:
+            for n in back.get(todo.pop(), set()) - out:
+                out.add(n)
+                todo.append(n)
+        return out
+
     def regs(self, name: str) -> set:
         """The registers ``name`` can reach."""
         return {r for r, bits in self.reach.get(name, {}).items() if any(bits.values())}
@@ -469,6 +543,8 @@ class Flow:
             q, off, _ = REGISTERS.get(r, (f"${r:02X}", 0, 0xFF))
             for m in bits.values():
                 out.setdefault(q, set()).update(off + j for j in range(8) if m >> j & 1)
+        if name in self.timing:
+            out["TIMING"] = {0}
         return {q: b for q, b in out.items() if b}
 
     def support(self, cell: str) -> int:
@@ -504,6 +580,31 @@ class Flow:
         """``(cell, source)`` of every assignment in the playroutine."""
         for actions in action_lists(self.pr).values():
             yield from walk_sets(actions)
+
+
+def walk(doc):
+    """Every action dict under ``doc``, nested ones included."""
+    todo = [doc]
+    while todo:
+        d = todo.pop()
+        if isinstance(d, list):
+            todo += reversed(d)
+        elif isinstance(d, dict):
+            yield d
+            todo += [v for v in d.values() if isinstance(v, (list, dict))]
+
+
+def guarded(doc):
+    """``(test, branch actions)`` of every ``if`` under ``doc``."""
+    if isinstance(doc, list):
+        for a in doc:
+            yield from guarded(a)
+    elif isinstance(doc, dict):
+        if "if" in doc:
+            yield doc["if"], (doc.get("then") or []) + (doc.get("else") or [])
+        for v in doc.values():
+            if isinstance(v, (list, dict)):
+                yield from guarded(v)
 
 
 def walk_sets(doc):
