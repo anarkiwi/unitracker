@@ -15,6 +15,7 @@ from unitracker.modfit.keywords import table as keyword_table
 from unitracker.modfit.fit import Fitter, model_text, src
 from unitracker.modfit.invariant import fit_under, invariants
 from unitracker.modfit.orbit import report
+from unitracker.modfit.sweeps import report as sweeps_report
 
 
 def fit_lines(name: str, path: str, cell: str) -> list:
@@ -52,13 +53,16 @@ def reachable_lines(fitter: Fitter, unit: tuple, actions, guard) -> list:
     return [f"      refuted under invariant {inv}: against {cands[0]}: {model_text(model)}"]
 
 
-def check_lines(name: str, path: str, cell: str, candidate: dict) -> list:
-    """A given candidate for a modulation, proved or refuted with a witness."""
+def check_lines(name: str, path: str, cell: str, candidate: dict, guard: str = "") -> list:
+    """A given candidate for a modulation, under an optional guard, proved or refuted."""
     pr = playroutine(name)
     actions, fitter = resolve(pr, path), Fitter(pr)
-    result, model = fitter.check(fitter.form.paths(actions), (), cell, candidate)
+    f = fitter.form
+    conds = (f.truth(f.expr(guard, {})),) if guard else ()
+    result, model = fitter.check(fitter.paths(actions, cell), conds, cell, candidate)
     verdict = "proved" if result == z3.unsat else "refuted"
-    lines = [f"== {name}:{path} -> {cell}", f"   check {candidate}: {verdict}"]
+    when = f" when {guard}" if guard else ""
+    lines = [f"== {name}:{path} -> {cell}", f"   check {candidate}{when}: {verdict}"]
     return lines + ([f"      witness {model_text(model)}"] if model else [])
 
 
@@ -93,6 +97,11 @@ def run(args) -> list:
         return keyword_table(tuple(args.units) or ("goattracker2", "defmon", "sidwizard"))
     if args.command == "generic":
         return generic_report(tuple(args.units) or PLAYERS, args.ticks)
+    if args.command == "sweeps":
+        table = specs()
+        fused = [x for u in table["fits"] if ":" in u["cell"] for x in fit_lines(*u.values())]
+        fused += [x for c in table["checks"] if ":" in c["cell"] for x in check_lines(*c.values())]
+        return sweeps_report(args.units, fused)
     if args.command == "poly":
         units = [u.split(":") for u in args.units]
         return [x for u in tqdm(units, desc="poly", unit="op") for x in poly_lines(*u)]
@@ -122,6 +131,9 @@ def main(argv=None) -> None:
     generic = sub.add_parser("generic", help="factorise every effect as a generic accumulator")
     generic.add_argument("units", nargs="*", metavar="PLAYROUTINE")
     generic.add_argument("--ticks", type=int, default=600)
+    sub.add_parser(
+        "sweeps", help="bounce orbits, fused pair fits and songs' table programs"
+    ).add_argument("units", nargs="*", metavar="SONG")
     orbit = sub.add_parser("orbit", help="test vibrato orbits as reflect accumulators")
     orbit.add_argument("units", nargs="*", metavar="PLAYROUTINE")
     orbit.add_argument("--ticks", type=int, default=600)

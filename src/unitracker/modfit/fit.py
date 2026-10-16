@@ -58,13 +58,16 @@ class Fitter:
     def __init__(self, pr: dict, form: Form | None = None):
         self.form = form or Form(pr)
 
-    @staticmethod
-    def cases(paths, cell: str) -> list:
-        """``[(dispatch guard, dynamic guard, value)]`` of ``cell`` over symbolic ``paths``."""
+    def cases(self, paths, cell: str) -> list:
+        """``[(dispatch guard, dynamic guard, value)]`` of ``cell`` over symbolic ``paths``.
+
+        A condition reading the cell, or for a fused pair either of its parts, is dynamic.
+        """
+        own = {cell, *self.form.pair.get(cell, (None, None))[:2]} - {None}
         out = []
         for conds, final in paths:
             if final.get(cell, cell) != cell:
-                dyn = tuple(c for c in conds if cell in atoms(c))
+                dyn = tuple(c for c in conds if own & atoms(c))
                 out.append((tuple(c for c in conds if c not in dyn), dyn, final[cell]))
         return out
 
@@ -159,19 +162,52 @@ class Fitter:
         return self.fit_paths(self.paths(actions, cell), cell, assume)
 
     def fit_paths(self, paths, cell: str, assume=()) -> list:
-        """``fit`` over symbolic ``paths``, each proof also assuming the conditions ``assume``."""
+        """``fit`` over symbolic ``paths``, each proof also assuming the conditions ``assume``.
+
+        Two fitted plain accumulates whose guards differ in one complementary test join as one
+        whose step selects on that test, when that is proved.
+        """
         groups = {}
         for case in self.cases(paths, cell):
             groups.setdefault(case[0], []).append(case)
-        out = []
+        out = {}
         for guard, cases in groups.items():
             cands = (
                 c
                 for c in self.candidates(cell, cases)
                 if self.check(paths, (*guard, *assume), cell, c)[0] == z3.unsat
             )
-            out.append((guard, next(cands, None)))
-        return out
+            out[guard] = next(cands, None)
+        joined = True
+        while joined:
+            joined = next(
+                (j for a in out for b in out if (j := self.join(paths, cell, assume, out, a, b))),
+                None,
+            )
+            if joined:
+                guard, a, b, found = joined
+                del out[a], out[b]
+                out[guard] = found
+        return list(out.items())
+
+    def join(self, paths, cell: str, assume, out: dict, a, b) -> tuple | None:
+        """``(guard, a, b, accumulate)`` of the fits of guards ``a`` and ``b`` joined, or None."""
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
+        fa, fb = out[a], out[b]
+        if a >= b or not fa or not fb or {*fa, *fb} != {"accumulate", "step"}:
+            return None
+        rest_a, rest_b = [c for c in a if c not in b], [c for c in b if c not in a]
+        if len(rest_a) != 1 or len(rest_b) != 1:
+            return None
+        if self.form.relation(rest_a[0], rest_b[0]) != "complement":
+            return None
+        f = self.form
+        step = f.ite(rest_a[0], f.expr(fa["step"], {}), f.expr(fb["step"], {}))
+        found = {"accumulate": cell, "step": src(step)}
+        guard = tuple(c for c in a if c in b)
+        if self.check(paths, (*guard, *assume), cell, found)[0] != z3.unsat:
+            return None
+        return guard, a, b, found
 
     def rejection(self, actions, guard, cell: str, assume=()) -> tuple:
         """``(shortest candidate, witness model)`` under ``guard``, or ``(None, None)``."""

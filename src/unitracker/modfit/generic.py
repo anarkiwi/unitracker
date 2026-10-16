@@ -17,6 +17,7 @@ from unitracker.modfit.keywords import NONE, role_text, signer
 from unitracker.modfit.compose import Merge
 from unitracker.modfit.timer import Timers, closed, grouped, signature, spans, timer_lines
 from unitracker.modfit.timer import vibrato_lines
+from unitracker.modfit.bounce import bounce_lines
 
 PLAYERS = ("goattracker2", "defmon", "sidwizard")
 HEAD = [
@@ -184,10 +185,11 @@ def grouping(rows: list) -> list:
 
 
 def report(names=PLAYERS, ticks: int = 600) -> list:
-    """The generic report: rows, grouping, timers and vibrato orbits."""
+    """The generic report: rows, grouping, timers, vibrato and bounce orbits."""
     rows = [r for name in names for r in Report(name).rows()]
     lines = ["# Generic accumulator events", ""] + table(rows)
     lines += ["", "# Grouping by role, respond and temporal kind", ""] + grouping(rows)
     lines += ["", "# Timers", ""] + [x for name in names for x in timer_lines(name)]
-    lines += ["", "# Vibrato orbits", ""] + vibrato_lines(names, ticks)
+    bounces = [tuple(u.values()) for u in specs()["bounces"] if u["playroutine"] in names]
+    lines += ["", "# Ping-pong orbits", ""] + vibrato_lines(names, ticks) + bounce_lines(bounces)
     return lines

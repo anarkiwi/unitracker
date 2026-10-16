@@ -48,8 +48,10 @@ def test_defmon_rows_and_timer_gates():
 
 def test_cli_generic(tmp_path, monkeypatch):
     monkeypatch.setattr(generic, "keywords", lambda pr: [])
+    monkeypatch.setattr(generic, "bounce_lines", lambda units: [f"== bounce {len(units)}"])
     out = tmp_path / "generic.txt"
     main(["--out", str(out), "generic", "defmon"])
     text = out.read_text()
     assert "# Grouping by role, respond and temporal kind" in text and "== defmon timers" in text
     assert "defmon | procs.acid [always] | acc | CUT[3:10]" in text
+    assert "# Ping-pong orbits" in text and "== bounce 1" in text
