@@ -9,7 +9,26 @@ defaults:
 tables:
   ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 instrument: {type: ins, base: 0}
-commands: {1: speedtab, 2: speedtab, 3: speedtab, 4: speedtab, 8: wavetab, 9: pulsetab, 10: filttab, 14: speedtab}
+note_offset: 0
+commands:
+  1: {name: slideup, ref: speedtab}
+  2: {name: slidedown, ref: speedtab}
+  3: {name: porta, ref: speedtab}
+  4: {name: vib, ref: speedtab}
+  5: {name: ad}
+  6: {name: sr}
+  7: {name: ctrl}
+  8: {name: run, ref: wavetab}
+  9: {name: run, ref: pulsetab}
+  10: {name: run, ref: filttab}
+  11: {name: resfilt}
+  12: {name: cut, arg: "arg << 3", raw: "arg >> 3"}
+  13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
+  14: {name: funk, ref: speedtab}
+  # F: d (bit 7 clear: all voices) gives d ticks per row for d >= 3, and d = 2 plays as 3.
+  15:
+    - {name: tempo, when: "arg >= 2 and arg < 0x80", arg: "arg if arg >= 3 else 3", raw: arg}
+    - {name: vtempo, when: "arg >= 0x82", arg: "(arg & 0x7F) if (arg & 0x7F) >= 3 else 3", raw: "arg | 0x80"}
 record_types:
   ins:
     prefix: i
@@ -34,6 +53,15 @@ record_types:
         - {type: speedtab, when: "w >= 0xF1 and w <= 0xF4"}
         - {type: pulsetab, when: "w == 0xF9"}
         - {type: filttab, when: "w == 0xFA"}
+    codec:
+      - when: "w < 0xF0"
+        keys:
+          wait: {value: w, omit: "w == 0 or w >= 0x10"}
+          ctrl: {value: "(w & 0x0F) if w >= 0xE0 else w", omit: "w < 0x10"}
+          note: {value: "(n & 0x7F) if n > 0x80 else ((n - 0x80) if n >= 0x40 else n)", abs: "n > 0x80", omit: "n == 0x80"}
+        raw:
+          w: "((ctrl | 0xE0) if ctrl < 0x10 else ctrl) if has_ctrl else wait"
+          n: "((note | 0x80) if note_abs else (note & 0x7F)) if has_note else 0x80"
     do:
       - if: "row.w >= 0xF0"
         then:
@@ -52,6 +80,10 @@ record_types:
     none: 0
     chain: next
     fields: [l, r, next]
+    codec:
+      - when: "l >= 0x80"
+        keys: {pw: "((l & 0x0F) << 8) | r"}
+        raw: {l: "0x80 | (pw >> 8)", r: "pw & 0xFF"}
     do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
     each: [{accumulate: pulse, step: "row.r - 0x100 if row.r >= 0x80 else row.r"}]
   # Filtertable row: l $80+ sets type and routing (and cut, a cutoff the player reads from the
@@ -61,6 +93,16 @@ record_types:
     none: 0
     chain: next
     fields: {l: 0, r: 0, cut: -1, next: 0}
+    codec:
+      - when: "l >= 0x80"
+        keys:
+          mode: "l & 0x70"
+          resfilt: r
+          cut: {value: "cut << 3", omit: "cut < 0"}
+        raw: {l: "0x80 | mode", r: resfilt, cut: "(cut >> 3) if has_cut else -1"}
+      - when: "l == 0"
+        keys: {cut: "r << 3"}
+        raw: {l: 0, r: "cut >> 3"}
     do:
       - if: "row.l >= 0x80"
         then:

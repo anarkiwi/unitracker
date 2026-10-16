@@ -24,26 +24,31 @@ def test_note_name_rejects_negative():
 
 
 @pytest.mark.parametrize(
-    "row,steps,ins,arg,atom",
+    "kind,note,steps,ins,command,atom",
     [
-        ((1, 24, 1, 0, 0), 3, "i1", None, "C2.i1*3"),
-        ((0, 0, 0, 0, 0), 1, None, None, "-"),
-        ((2, 0, 0, 0, 0), 4, None, None, "off*4"),
-        ((3, 0, 0, 0, 0), 1, None, None, "on"),
-        ((1, 46, 4, 1, 1), 1, "i4", "@s1", "A#3.i4!1:@s1"),
-        ((0, 0, 0, 15, 16), 48, None, "16", "-!15:16*48"),
-        ((0, 0, 0, 0, 5), 1, None, "5", "-!0:5"),
+        (1, 24, 3, "i1", None, "C2.i1*3"),
+        (0, 0, 1, None, None, "-"),
+        (2, 0, 4, None, None, "off*4"),
+        (3, 0, 1, None, None, "on"),
+        (1, 46, 1, "i4", "slideup:@s1", "A#3.i4!slideup:@s1"),
+        (0, 0, 48, None, "tempo:16", "-!tempo:16*48"),
+        (0, 0, 1, None, "run:none", "-!run:none"),
     ],
 )
-def test_format_and_parse(row, steps, ins, arg, atom):
-    assert format_atom(row, steps, ins, arg) == atom
+def test_format_and_parse(
+    kind, note, steps, ins, command, atom
+):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    assert format_atom(kind, note, steps, ins, command) == atom
     parsed = parse_atom(atom)
-    assert (parsed["kind"], parsed["steps"], parsed["ins"]) == (row[0], steps, ins)
-    assert parsed["cmd"] == row[3]
-    if row[0] == 1:
-        assert parsed["note"] == row[1]
-    if arg is not None:
-        assert parsed["arg"] == (arg if arg.startswith("@") else int(arg))
+    assert (parsed["kind"], parsed["steps"], parsed["ins"]) == (kind, steps, ins)
+    if kind == 1:
+        assert parsed["note"] == note
+    if command is None:
+        assert parsed["cmd"] is None and parsed["arg"] is None
+    else:
+        name, arg = command.split(":")
+        assert parsed["cmd"] == name
+        assert parsed["arg"] == (arg if arg[0] in "@n" else int(arg))
 
 
 def test_yaml_booleans_are_gate_atoms():
@@ -51,7 +56,9 @@ def test_yaml_booleans_are_gate_atoms():
     assert parse_atom(True)["kind"] == 3
 
 
-@pytest.mark.parametrize("bad", ["", "X4", "C4.1x", "C4!a:1", "C4*", 7, "C4 .i1", "C4!1:@1x"])
+@pytest.mark.parametrize(
+    "bad", ["", "X4", "C4.1x", "C4!1:1", "C4!A:1", "C4*", 7, "C4 .i1", "C4!run:@1x", "C4!run:-1"]
+)
 def test_parse_rejects(bad):
     with pytest.raises(AtomError):
         parse_atom(bad)
