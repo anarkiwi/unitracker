@@ -3,7 +3,9 @@
 `unitracker-modfit` reads modulation procs straight from the playroutine library
 (`src/unitracker/playroutines/*.yaml`) and tries to rewrite each one as a compact
 bounded accumulator (see *The bounded accumulator* in [format.md](format.md)). It proves
-every rewrite it reports, or shows where none holds.
+every rewrite it reports, or shows where none holds. It also composes each keyword's
+setup and per-tick effect, and matches keywords and record fields across playroutines
+by what they do to the SID.
 
 ## Method
 
@@ -17,9 +19,14 @@ every rewrite it reports, or shows where none holds.
    - `256·((E>>8)&255) + (E&255)` folds to `E`;
    - comparisons are canonicalised to `lt(E,0)` / `eq(E,0)`.
 
-   Byte pairs are found from the structure of the playroutine: either a joined
-   `(hi<<8)|lo`, or dataflow into the lo/hi halves of one SID ghost register pair. Each
-   pair is fused into one 16-bit update.
+   Cell pairs `(lo, hi, k)`, meaning `P = hi·2^k + (lo & (2^k−1))`, come from the
+   structure of the playroutine: a joined `(hi<<k)|lo` or `(hi<<k)|(lo&mask)` for any
+   constant `k`, or dataflow into the low and high register of one SID register pair
+   (`$00/$01`, `$02/$03`, `$15/$16`). For the dataflow case, `k` is the number of bits any
+   write ever gives `lo`, read from the masks and shifts of the bit dataflow (step 5). A
+   pair is kept only when `lo` never holds more than `k` bits. A pair's joint update is
+   fused into one `(k + width(hi))`-bit update `P + D` only when `D` is proved free of the
+   pair's parts; a fit on a pair cell runs on the fused paths.
 2. **Arithmetic form** (`arith.Arith`). Each written cell becomes
    `x + Σ [G_i]·(u_i − x)`, a multilinear polynomial in the brackets that does not depend
    on the order of the tests. Brackets are idempotent, infeasible products are dropped
@@ -41,11 +48,80 @@ every rewrite it reports, or shows where none holds.
    candidate is run concretely and accepted only when its per-tick deltas equal the
    original's over the whole run.
 
+5. **Bit dataflow and register roles** (`flow.Flow`). Every assignment is read as a bit
+   relation from each source name to the result bits each source bit can reach.
+   - Shifts and masks move bits; `x | c` cannot reach the bits `c` sets.
+   - A carry spreads upwards, except in a sum of operands with disjoint bits.
+   - A table, record index or test steers every bit of the value it selects.
+   - Temporaries come from def-before-use summaries: a widthless cell never read
+     before its own list assigns it.
+
+   The relations are composed to a fixpoint into the ghost registers, giving each
+   cell, field and event cell its *role*: the SID quantity bits it can reach. Quantities
+   are `FREQ`, `PW` 12-bit, `CUT` 11-bit (`$D415` bits 0–2, `$D416` bits 3–10), `CTRL`
+   bits, `AD`/`SR` nibbles, `RESFILT` (`$D417`) and `MODEVOL` (`$D418`). A cell that can
+   steer a test guarding a `fetch`, through data or the branches the test guards, also
+   has the role `TIMING`.
+6. **Inductive invariants** (`invariant`). When a fit is refuted by a witness, the
+   candidates are comparisons `cell op T`. `T` is a bound or reload term of the cell's
+   cases, a term compared with a wrapped expression of the cell, 0 or the width maximum.
+   A candidate is accepted when z3 proves two things. First, it holds at the cells'
+   initial values. Second, it holds after every action list that assigns one of its
+   cells (procs, templates, record lists, `init`), starting from any state that satisfies
+   it. Each such list is sliced to the actions that can affect the candidate's cells. A
+   nested `for_voices`, `run` or `fetch` havocs what it can write: the invariant is proved
+   before it and assumed after it. The refuted fit is then re-proved under each accepted
+   invariant (candidates from every case of the cell), and then under all of them
+   together.
+7. **Keyword composition** (`compose.Composer`). `specs.yaml` `commands:` gives, per
+   playroutine:
+   - the setup template (`CODE`, `arg`);
+   - the tick lists;
+   - the routing cells, which are left out of the report;
+   - a row template without a note, and one with a note.
+
+   The keywords are the playroutine's own `commands:` map, and a `when` is assumed
+   true. The setup is evaluated with branches joined: each cell becomes one `ite` term,
+   and a `return` clears a live condition that later assignments respect. Each `ite`
+   side is simplified under its condition. A tick list joins when it reads a cell the
+   setup changes. Cells the ticks change are freed (later ticks), the rest keep their
+   setup values. Each freed cell is fitted with `fit.Fitter`, on its tick term split at
+   the branch joins. On a row with a note, cells appear only where they can differ from
+   the same row with no command. *Routed tests* are the tests outside the setup's procs
+   that read a routing cell and whose value the keyword changes.
+8. **Signatures** (`keywords.Signer`). A keyword's or field's signature is a set of
+   `(role, kind, argument use)`:
+   - `LOAD` (the arg's bits reaching the role), `RESET` (a constant);
+   - `ARM`: a constant the ticks read, armed for per-tick behaviour;
+   - `MODE`: a cell the row procs test, a mode for later notes;
+   - `PTR`: a pointer into a chained record type, a program start;
+   - `REF`: a declared reference to an unchained record type;
+   - per tick: `ACC`, `TOWARD` and `LOAD` from the fits, `MOD` when no single
+     accumulator holds, and `REFLECT` when the orbit spec's proc runs and the fitted step
+     turns (several steps, or one reading a cell the tick moves).
+
+   Argument use is the arg's bit mapping into the role, `ref <type>`, `note-relative` (a
+   table index that also reads the event note) or `table`. Per-tick effects steered by a
+   started program's pointer are the program's, and are left out. Matches come from the
+   other playroutines, by class:
+   - *same effect*: identical signature;
+   - *same effect, different argument decoding*: same roles and kinds;
+   - *partial*: some shared quantity and kind;
+   - *different*: nothing shared.
+
+   A keyword with an identical signature in its own playroutine is a duplicate. It is
+   *partial* when the two differ on a row with a note (setup cells or routed tests).
+   Reasons name the differing entries, a *sticky override* (two loads of the arg, one cell
+   feeding the other) and a *mode for later notes*.
+
 ## Assumptions
 
 - A record field is a byte (0..255) unless its default is negative.
-- A cell with no `width` is scratch. Scratch cells are resolved within their action list
-  and are never reported as updates.
+- A cell with no `width` is scratch to `Form`: it is resolved within its action list and
+  never reported as an update by `fit`. Composition reports every cell whose value can
+  carry to the next tick or reach the ghost.
+- Composition runs `for_voices` once for the current voice, takes `fetch` cells from the
+  row template, and assumes a template's record row exists.
 - z3 works on 48-bit two's-complement bit-vectors. Playroutine values stay far inside
   this range, so bit-vector arithmetic, masks, shifts and signed comparisons agree with
   the unbounded integers.
@@ -56,8 +132,12 @@ every rewrite it reports, or shows where none holds.
 unitracker-modfit fit [PLAYROUTINE:PATH:CELL ...]    # default: every fit and check in modfit/specs.yaml
 unitracker-modfit poly PLAYROUTINE:PATH ...          # arithmetic form by bracket monomial
 unitracker-modfit orbit [PLAYROUTINE ...] [--ticks N]
-unitracker-modfit --out report.txt fit               # write the report to a file
+unitracker-modfit command [PLAYROUTINE[:NAME] ...]   # keyword setup and per-tick effects
+unitracker-modfit keywords [PLAYROUTINE ...]         # signature table with matches and verdicts
+unitracker-modfit --out out/modfit/keywords.txt keywords
 ```
+
+A pair cell is named `hi:lo` (`k = 8`) or `hi:lo:k`, e.g. `sidwizard:procs.tick_filt:vfhi:vflo:3`.
 
 `src/unitracker/modfit/specs.yaml` lists the modulations to fit, the given candidates to
 check (proved, or refuted with a witness) and the orbit specs. An
@@ -74,7 +154,12 @@ state and the record rows.
 | defMON `procs.pitch` → `sacc` | `accumulate`, signed `rate(mode)` |
 | defMON `procs.pulse` → `pw` | no single accumulator |
 | SID-Wizard `procs.tick_porta` → `voff` | no single accumulator; see below |
-| SID-Wizard `procs.tick_vibrato` → `vfc` | no single accumulator |
+| SID-Wizard `procs.tick_vibrato` → `vfc` | `accumulate`, step −1 (`255`), `max: (vper−1)&255`, proved under the invariant `vfc <= (vper−1)&255` |
+| GT `record_types.filttab.each` → `filtercutoff` | `accumulate`, step `row.r` |
+| SID-Wizard `procs.tick_pw` → `pwhi:pwlo` | `accumulate`, step `s8(b)` as `b` or `b − 256` |
+| SID-Wizard `procs.tick_filt` → `vfhi:vflo:3` | 11-bit `accumulate`, step `s8(flttab[fpos].b)`; set rows `8·b` |
+| defMON `procs.acid` → `acc` | refuted under the invariant `acc < 32768` (the reload reads the stepped cell) |
+| defMON `procs.acid` → `acc`, given | `accumulate`, `max: 0x7FFF`, `clamp: false`, `on_bound: acc := 512 + (acc & 255)`: proved |
 
 Each vibrato below is a single reflect accumulator, verified against the original over
 the full orbit (`D` is the spec's unit depth, `vd` a fresh 1-bit direction cell):
@@ -105,5 +190,23 @@ past the signed range and the two also differ.
 Not expressible yet:
 
 - defMON's pulse bounds depend on the high byte (`(pw >> 8) == 0x0F`).
-- SID-Wizard's `vfc` counter rewrite holds only on reachable states (`vfc ≤ vper`). The
-  witnesses fall outside them.
+- defMON's ACID reload `(floor << 8) | (acc & 0xFF)` reads the stepped cell; the candidate
+  reloads are cell-free, so the fit is refuted even under `acc < 32768`.
+
+| Pair | Source |
+| --- | --- |
+| `vfhi:vflo:3`, `fcuthi:fcutlo:3` | SID-Wizard: `(vfhi << 3) \| (vflo & 7)`; `fcutlo` reaches only `$D415`, written `t3 & 7` |
+| all 8:8 pairs | unchanged |
+
+| Keyword composition | Effect |
+| --- | --- |
+| SID-Wizard `!pitchup` / `!pitchdown` | `svib := $81`/`$82`; per tick `voff ± fm(arg, note+oct)` when `ci ≠ 0`, 0 when `arg = 0` |
+| SID-Wizard `!attack` | `aov := arg`, `dov := −1`, `sad := (arg << 4) \| (ins[ci].ad & 15)` when `ci ≠ 0` |
+| SID-Wizard `!iattack` … `!irelease` | setup and ticks equal the plain small FX on a row without a note |
+| SID-Wizard `!iattack` on a note row | `note_setup` test `… and pifx != 0` sets `carry` |
+| GoatTracker `!ad` | `ad := arg` |
+| GoatTracker `!porta` | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
+| defMON `!run2` | `rowB := arg`, `cntB := 0`; per tick `layer_b` runs the sidTAB row |
+
+The keyword and field table is written by `unitracker-modfit keywords` (one row per keyword
+or field: signature, matches, verdict, reason).
