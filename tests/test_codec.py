@@ -9,6 +9,7 @@ from pygoattracker import decompile_sid
 from unitracker import songio
 from unitracker.codec import (
     COMMAND_NAMES,
+    MOD_KEYS,
     ROW_KEYS,
     CodecError,
     CommandCodec,
@@ -73,10 +74,91 @@ def test_goattracker_pulse_and_filter_rows(name, raw, shared):
 
 @pytest.mark.parametrize(
     "name,raw",
-    [("ctrltab", {"w": 0xF1, "n": 1}), ("pulsetab", {"l": 32, "r": 16}), ("filttab", {"l": 5})],
+    [
+        ("ctrltab", {"w": 0xF1, "n": 1}),
+        ("pulsetab", {"l": 0, "r": 16}),
+        ("filttab", {"l": 5, "r": 1, "cut": 3}),
+    ],
 )
 def test_goattracker_leftover_rows_have_no_shape(name, raw):
     assert codec(GT, GT_TYPES, name).encode(raw) is None
+
+
+@pytest.mark.parametrize(
+    "name,raw,shared",
+    [
+        ("pulsetab", {"l": 32, "r": 16}, {"step": 16, "for": 32}),
+        ("pulsetab", {"l": 64, "r": 240}, {"step": -16, "for": 64}),
+        ("pulsetab", {"l": 5, "r": 0}, {"for": 5}),
+        ("filttab", {"l": 5, "r": 1}, {"step": 8, "for": 5}),
+        ("filttab", {"l": 127, "r": 0x80}, {"step": -1024, "for": 127}),
+        ("mod", {"cmd": 1, "arg": 1, "l": 0, "r": 32}, {"reg": "freq", "step": 32}),
+        ("mod", {"cmd": 2, "arg": 1, "l": 1, "r": 2}, {"reg": "freq", "step": -258}),
+        (
+            "mod",
+            {"cmd": 2, "arg": 1, "l": 0x80, "r": 3},
+            {"reg": "freq", "step": -8, "rel": "note"},
+        ),
+        ("mod", {"cmd": 1, "arg": 0}, {"reg": "freq"}),
+        ("mod", {"cmd": 3, "arg": 0}, {"reg": "freq", "to": "note"}),
+        ("mod", {"cmd": 3, "arg": 1, "l": 0, "r": 0}, {"reg": "freq", "step": 0, "to": "note"}),
+        (
+            "mod",
+            {"cmd": 3, "arg": 1, "l": 0x80, "r": 0},
+            {"reg": "freq", "step": 1, "rel": "note", "to": "note"},
+        ),
+    ],
+)
+def test_goattracker_mods(name, raw, shared):
+    c = codec(GT, GT_TYPES, name)
+    assert written(raw, c) == shared
+    assert {k: v for k, v in c.decode(shared).items() if k in raw or v} == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"cmd": 2, "arg": 1, "l": 0x85, "r": 20},
+        {"cmd": 2, "arg": 1, "l": 0, "r": 0},
+        {"cmd": 1, "arg": 0, "l": 4, "r": 4},
+    ],
+)
+def test_goattracker_slides_that_never_move_are_one_mod(raw):
+    c = codec(GT, GT_TYPES, "mod")
+    assert written(raw, c) == {"reg": "freq"}
+    assert c.decode({"reg": "freq", "step": 0}) == {"cmd": 1, "arg": 0}
+
+
+def test_goattracker_mod_reads_explicit_defaults():
+    c = codec(GT, GT_TYPES, "mod")
+    full = {"reg": "freq", "step": 32, "at": "wrap", "every": 1, "delay": 0, "lo": 0, "hi": 65535}
+    assert c.decode(full) == c.decode({"reg": "freq", "step": 32})
+    assert c.decode({"reg": "freq", "step": 9, "to": "note", "at": "hold"})["r"] == 9
+    p = codec(GT, GT_TYPES, "pulsetab")
+    assert p.decode({"reg": "pw", "step": 1, "for": 3, "hi": 4095}) == {"l": 3, "r": 1}
+
+
+@pytest.mark.parametrize(
+    "name,shared,match",
+    [
+        ("mod", {"reg": "freq", "step": 3, "rel": "note"}, "values of"),
+        ("mod", {"reg": "freq", "step": -5, "to": "note"}, "values of"),
+        ("mod", {"reg": "freq", "step": 0x8000}, "values of"),
+        ("mod", {"reg": "freq", "step": 1, "for": "note"}, "keys"),
+        ("mod", {"reg": "freq", "step": 1, "every": 2}, "keys"),
+        ("mod", {"reg": "freq", "step": 1, "at": "hold"}, "keys"),
+        ("mod", {"reg": "pw", "step": 1}, "values of"),
+        ("mod", {"reg": "wave", "step": 1}, "bad reg"),
+        ("mod", {"reg": "freq", "step": 1, "rel": 2}, "bad rel"),
+        ("pulsetab", {"step": 200, "for": 3}, "values of"),
+        ("pulsetab", {"step": 1, "for": 128}, "no shape"),
+        ("pulsetab", {"reg": "cut", "step": 1, "for": 3}, "keys"),
+        ("filttab", {"step": 4, "for": 5}, "values of"),
+    ],
+)
+def test_goattracker_refuses_mods_it_cannot_play(name, shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec(GT, GT_TYPES, name).decode(shared)
 
 
 @pytest.mark.parametrize(
@@ -143,7 +225,6 @@ def gt_commands():
         (13, 0x20, ("mark", 0x20)),
         (8, 3, ("run", ("ctrltab", 3))),
         (10, 2, ("run", ("filttab", 2))),
-        (1, 1, ("slideup", ("speedtab", 1))),
     ],
 )
 def test_goattracker_commands(code, arg, shared):
@@ -244,8 +325,8 @@ ROW_KEEP = {"defmon": DM_KEEP, "sidwizard": {"res"}}
 # Program types that may hold list rows, with the rows each allows.
 LIST_ROWS = {
     "ctrltab": lambda r: r[0] >= 0xF0,
-    "pulsetab": lambda r: r[0] < 0x80,
-    "filttab": lambda r: 0 < r[0] < 0x80,
+    "pulsetab": lambda r: r[0] == 0,
+    "filttab": lambda r: 0 < r[0] < 0x80 and len(r) > 2,
     "wftab": lambda r: r[0] < 0x10 or r[1:2] == [0x7F] or len(r) > 2,
     "pwtab": lambda r: r[0] < 0x80 or len(r) > 2,
     "flttab": lambda r: r[0] < 0x80 or len(r) > 3,
@@ -305,6 +386,8 @@ def _check_def(pr_name, tname, value):
         _check_program(pr_name, tname, value)
     elif tname == "chordtab":
         _check_rows(tname, value, set())
+    elif tname == "mod":
+        assert value and set(value) <= set(MOD_KEYS), value
     else:
         assert not set(value if isinstance(value, dict) else {}) & set(ROW_KEYS), (tname, value)
 
@@ -350,7 +433,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     ir = lift_gt(decompile_sid(metal_warrior.read_bytes(), subtune=0))
     gt_doc = yaml.safe_load(songio.dumps(ir))
     gt_cmds = vocabulary(gt_doc)
-    assert gt_cmds == {"run", "slideup", "porta", "vib", "tempo"}
+    assert gt_cmds == {"run", "mod", "vib", "tempo"}
     dm_doc = yaml.safe_load(songio.dumps(lift_defmon(crosseyed.read_bytes())))
     dm_cmds = vocabulary(dm_doc)
     assert dm_cmds == {"run2"}

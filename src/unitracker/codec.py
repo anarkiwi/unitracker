@@ -35,9 +35,6 @@ COMMAND_NAMES = (
     "vtempo",
     "funk",
     "mod",
-    "slideup",
-    "slidedown",
-    "porta",
     "vib",
     "mark",
     # Player-specific: SID-Wizard.
@@ -167,6 +164,8 @@ def mod_defaults(norm: dict, implies: dict) -> dict:
     """``norm`` without the mod keys that hold their default (see docs/format.md)."""
     reg = norm.get("reg", implies.get("reg"))
     defaults = {"every": 1, "delay": 0, "lo": 0, "at": "hold" if "to" in norm else "wrap"}
+    if "to" not in norm:
+        defaults["step"] = 0
     if reg in REG_WIDTH:
         defaults["hi"] = (1 << REG_WIDTH[reg]) - 1
     defaults.update(implies)

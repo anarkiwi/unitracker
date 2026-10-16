@@ -153,7 +153,7 @@ def pool(names) -> list:
 def items_fixture():
     return pool(
         {
-            "goattracker2": {"slideup", "slidedown", "ad", "sr", "mark"},
+            "goattracker2": {"mod", "ad", "sr", "mark"},
             "sidwizard": {"pitchup", "pitchdown", "attack", "iattack"},
         }
     )
@@ -166,7 +166,7 @@ def find(items, pr, label):
 def test_pitchup_is_slideup_decoded_differently(items):
     matches, v, reason = verdict(find(items, "sidwizard", "!pitchup"), items)
     assert v == "same effect, different argument decoding"
-    assert [m.label for m in matches] == ["!slideup"]
+    assert [(m.label, m.key[0]) for m in matches] == [("!mod", 1)]
     assert reason == "ACC+ note-relative vs ref speedtab"
 
 
@@ -186,7 +186,7 @@ def test_iattack_differs_from_attack_on_note_rows(items):
 def test_pitchdown_matches_slidedown(items):
     matches, v, _ = verdict(find(items, "sidwizard", "!pitchdown"), items)
     assert v == "same effect, different argument decoding"
-    assert [m.label for m in matches] == ["!slidedown"]
+    assert [(m.label, m.key[0]) for m in matches] == [("!mod", 2)]
 
 
 def test_no_effect(items):
