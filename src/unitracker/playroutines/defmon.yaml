@@ -1,0 +1,182 @@
+# defMON replay ($1000 build: SID band at $1022, cascade at $12DF, sidTAB walk at $16B0)
+# as a unitracker playroutine. One step is one play call; the lifter times every
+# pattern event and song step, so each voice fetches once per tick.
+# The lifter fills in the SID-model constants init probes from $D41B.
+name: defmon
+constants: {floor: 2, dbl: 0}
+functions:
+  nfreq:
+    args: [n]
+    expr: "note_lo[n] | (note_hi[n] << 8)"
+  rate:
+    args: [m]
+    expr: "rate_lo[(m & 0x3F) << 1] | (rate_hi[(m & 0x3F) << 1] << 8)"
+  por:
+    args: [y]
+    expr: "((por_lo[y + 1] | (por_hi[y + 1] << 8)) - (por_lo[y] | (por_hi[y] << 8))) & 0xFFFF"
+global:
+  res: {width: 8}
+  fv: {width: 8}
+  cp: {width: 8}
+  acc: {width: 16}
+  astep: {width: 16}
+  sub: {width: 1}
+  ac: {width: 1}
+  cf: {width: 8}
+  o16: {width: 8}
+  o17: {width: 8}
+  o18: {width: 8}
+  vi: {width: 8}
+voice:
+  pw: {width: 16}
+  flo: {width: 8}
+  fhi: {width: 8}
+  ad: {width: 8}
+  sr: {width: 8}
+  ctrl: {width: 8}
+  eor: {width: 8}
+  mode: {width: 8}
+  sacc: {width: 16}
+  ps: {width: 8}
+  note: {width: 8}
+  tbase: {width: 8}
+  rowA: {width: 8}
+  cntA: {width: 8}
+  rowB: {width: 8}
+  cntB: {width: 8}
+  row: {width: 8}
+  cnt: {width: 8}
+  cur: {width: 8}
+  fc: {width: 1}
+  pf: {}
+  detune: {width: 8}
+  rbit: {width: 8}
+  rmask: {width: 8}
+  o_flo: {width: 8}
+  o_fhi: {width: 8}
+  o_pw: {width: 16}
+  o_ctrl: {width: 8}
+  o_ad: {width: 8}
+  o_sr: {width: 8}
+
+procs:
+  # $1022 SID band: this call writes the state the previous call left.
+  latch:
+    - set: {o_flo: flo, o_fhi: fhi, o_pw: pw, o_ctrl: "ctrl ^ eor", o_ad: ad, o_sr: sr}
+  # $10B5 ACID cutoff: CLC then SBC subtracts step + 1; a negative high byte saturates.
+  acid:
+    - set: {ac: "(acc - astep - 1 >= 0) if sub else (acc + astep > 0xFFFF)"}
+    - accumulate: acc
+      step: "(0 - astep - 1) if sub else astep"
+      max: 0x7FFF
+      clamp: false
+      on_bound: [{set: {acc: "(floor << 8) | (acc & 0xFF)"}}]
+    - set: {cf: "(acc >> 8) + cp + ac"}
+    - set: {o16: "floor if (cf >= 0x80 or cf < floor) else cf"}
+    - {if: dbl, then: [{set: {o16: "o16 << 1"}}]}
+  # $117F pattern event: arm the sidcall layers, latch a note.
+  pattern:
+    - fetch: true
+    - {if: ev_instr, then: [{set: {rowA: "ev_instr - 1", cntA: 0}}]}
+    - {if: ev_cmd, then: [{set: {rowB: ev_arg, cntB: 0}}]}
+    - {if: "ev_kind == 1", then: [{set: {tbase: ev_note, note: ev_note, sacc: 0, mode: 0}}]}
+  # $12DF sidcall cascade: 0 fetches a row, $80+ is frozen, otherwise count down.
+  cascade:
+    - if: "cnt == 0"
+      then:
+        - set: {cur: row}
+        - set: {cnt: "sidtab[cur].dl", row: "sidtab[cur].next"}
+        - run: {record: sidtab, index: cur, field: do}
+      else:
+        - {if: "cnt < 0x80", then: [{set: {cnt: "cnt - 1"}}]}
+  layer_a:
+    - {call: cascade, with: {row: rowA, cnt: cntA}}
+    - set: {rowA: row, cntA: cnt}
+  layer_b:
+    - {call: cascade, with: {row: rowB, cnt: cntB}}
+    - set: {rowB: row, cntB: cnt}
+  # $1405 pitch: no slide adds detune to the low byte only; $80+ integrates a
+  # slide rate; $01-$7F adds one adjacent-semitone step. fc is the carry left
+  # for the pulse sweep.
+  pitch:
+    - if: "mode == 0"
+      then:
+        - set: {fc: "note_lo[note] + detune > 0xFF", flo: "note_lo[note] + detune", fhi: "note_hi[note]"}
+      else:
+        - if: "mode >= 0x80"
+          then:
+            - {accumulate: sacc, step: "(0 - rate(mode)) if mode & 0x40 else rate(mode)"}
+            - set: {pf: "sacc + nfreq(note)"}
+          else:
+            - set: {pf: "nfreq(note) + por((note + mode) & 0xFF)"}
+        - set: {fc: "pf > 0xFFFF", flo: pf, fhi: "pf >> 8"}
+  # $1495 pulse sweep: bit 7 adds, else subtracts with the pitch carry; at the
+  # $0F high-byte ceiling or a zero high byte it pins and reverses.
+  pulse:
+    - {if: "ps == 0", then: [{return: true}]}
+    - if: "ps >= 0x80"
+      then:
+        - accumulate: pw
+          step: "ps & 0x7F"
+          max: "0x0FFF if (pw >> 8) == 0x0F else 0xFFFF"
+          clamp: false
+          on_bound: [{set: {pw: 0x0FF8, ps: "ps ^ 0x80"}}]
+      else:
+        - accumulate: pw
+          step: "0 - ps - (1 - fc)"
+          max: "0x00FF if (pw >> 8) == 0 else 0xFFFF"
+          clamp: false
+          on_bound: [{set: {pw: 1, ps: "ps ^ 0x80"}}]
+  play:
+    - for_voices: [{call: latch}]
+    - set: {o17: res, o18: "fv | 0x0F"}
+    - call: acid
+    - for_voices: [{call: pattern}]
+    - for_voices: [{call: layer_a}]
+    - for_voices: [{call: layer_b}]
+    - for_voices: [{call: pitch}, {call: pulse}]
+
+init:
+  - set: {vi: 0}
+  - for_voices:
+      - set: {detune: vi, rbit: "1 << vi", rmask: "0xFF ^ (1 << vi)"}
+      - set:
+          pw: "vinit[vi].pw"
+          flo: "vinit[vi].flo"
+          fhi: "vinit[vi].fhi"
+          ad: "vinit[vi].ad"
+          sr: "vinit[vi].sr"
+          ctrl: "vinit[vi].ctrl"
+          eor: "vinit[vi].eor"
+          mode: "vinit[vi].mode"
+          sacc: "vinit[vi].sacc"
+          ps: "vinit[vi].ps"
+          note: "vinit[vi].note"
+          tbase: "vinit[vi].tbase"
+          rowA: "vinit[vi].rowA"
+          cntA: "vinit[vi].cntA"
+          rowB: "vinit[vi].rowB"
+          cntB: "vinit[vi].cntB"
+      - set: {vi: "vi + 1"}
+  - set:
+      res: "ginit[0].res"
+      fv: "ginit[0].fv"
+      cp: "ginit[0].cp"
+      acc: "ginit[0].acc"
+      astep: "ginit[0].astep"
+      sub: "ginit[0].sub"
+  - call: play
+
+tick:
+  - call: play
+
+ghost:
+  global: {0x16: o16, 0x17: o17, 0x18: o18}
+  voice:
+    0: o_flo
+    1: o_fhi
+    2: "o_pw & 0xFF"
+    3: "(o_pw >> 8) & 0x0F"
+    4: o_ctrl
+    5: o_ad
+    6: o_sr

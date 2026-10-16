@@ -1,4 +1,4 @@
-"""Shared fixtures: the HVSC tune the conformance tests lift."""
+"""Shared fixtures: the HVSC tunes the conformance tests lift."""
 
 from pathlib import Path
 
@@ -30,3 +30,15 @@ def mini_song(playroutine, tracks=None, phrases=None, **extra) -> dict:
     }
     song.update(extra)
     return song
+
+
+CROSSEYED = "MUSICIANS/I/Ilkke/Crosseyed.sid"
+
+
+@pytest.fixture(scope="session")
+def crosseyed() -> Path:
+    """Path to iLKke's Crosseyed .sid, a defMON replay."""
+    path = resolve_tune(CROSSEYED, cache_dir=CACHE)
+    if path is None:
+        pytest.skip("HVSC tune unavailable")
+    return Path(path)

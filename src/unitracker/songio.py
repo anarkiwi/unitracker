@@ -3,6 +3,18 @@
 import yaml
 
 FLOW_WIDTH = 96
+KEY_ORDER = (
+    "unitracker",
+    "meta",
+    "clock",
+    "voices",
+    "registers",
+    "tables",
+    "playroutine",
+    "records",
+    "tracks",
+    "phrases",
+)
 
 
 class _Dumper(yaml.SafeDumper):
@@ -30,9 +42,28 @@ _Dumper.add_representer(dict, _dict)
 _Dumper.add_representer(list, _list)
 
 
+def song_meta(header, source: str) -> dict:
+    """The ``meta`` mapping for a tune with PSID ``header``, lifted by ``source``."""
+    return {
+        "title": header.name,
+        "author": header.author,
+        "released": header.released,
+        "source": source,
+    }
+
+
+def ordered(song: dict) -> dict:
+    """``song`` with its top-level keys in :data:`KEY_ORDER`, any others after."""
+    out = {k: song[k] for k in KEY_ORDER if k in song}
+    out.update((k, v) for k, v in song.items() if k not in out)
+    return out
+
+
 def dumps(song: dict) -> str:
-    """YAML text for ``song``."""
-    return yaml.dump(song, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=FLOW_WIDTH)
+    """YAML text for ``song``: player build first, then the playroutine, then the song."""
+    return yaml.dump(
+        ordered(song), Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=FLOW_WIDTH
+    )
 
 
 def loads(text: str) -> dict:

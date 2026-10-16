@@ -7,8 +7,8 @@ functions:
     args: [i]
     expr: >-
       0 if i == 0 else
-      ((((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speed_r[i])
-       if speed_l[i] >= 0x80 else (speed_l[i] << 8 | speed_r[i]))
+      ((((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[i].right)
+       if speedtab[i].left >= 0x80 else (speedtab[i].left << 8 | speedtab[i].right))
 global:
   state: {width: 8}
   filtercutoff: {width: 8}
@@ -79,7 +79,7 @@ records:
     14:
       do:
         - if: newcmddata
-          then: [{set: {funk0: "speed_l[newcmddata] - 1", funk1: "speed_r[newcmddata] - 1"}}]
+          then: [{set: {funk0: "speedtab[newcmddata].left - 1", funk1: "speedtab[newcmddata].right - 1"}}]
         - for_voices: [{set: {tempo: 0}}]
     15:
       do:
@@ -136,12 +136,12 @@ procs:
       on_bound: [{call: porta_reached}]
   vibrato:
     - set: {vcmp: 0, vspd: 0}
-    - {if: arg, then: [{set: {vcmp: "speed_l[arg]", vspd: "speed_r[arg]"}}]}
+    - {if: arg, then: [{set: {vcmp: "speedtab[arg].left", vspd: "speedtab[arg].right"}}]}
     - if: "vcmp >= 0x80"
       then:
         - set:
             vcmp: "vcmp & 0x7F"
-            vspd: "((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speed_r[arg]"
+            vspd: "((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[arg].right"
     - {if: "vibtime < 0x80 and vibtime > vcmp", then: [{set: {vibtime: "vibtime ^ 0xFF"}}]}
     - {accumulate: vibtime, step: 2}
     - {accumulate: freq, step: "0 - vspd if vibtime & 1 else vspd"}
