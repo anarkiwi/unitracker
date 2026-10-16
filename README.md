@@ -10,6 +10,8 @@ and its register writes are flushed in one canonical order.
 
 Format specification: [docs/format.md](docs/format.md).
 
+Modulation-to-accumulator rewrites (`unitracker-modfit`): [docs/modfit.md](docs/modfit.md).
+
 ## Install
 
 ```sh
