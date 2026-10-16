@@ -52,11 +52,14 @@ class Slicer:
             out.add(n)
         return out & self.cells
 
-    def seq(self, actions, need: set, exit_need: set) -> tuple:
-        """``(kept actions, cells needed before)`` given those needed after and at a return."""
+    def seq(self, actions, need: set, exit_need: set, tail: bool = False) -> tuple:
+        """``(kept actions, cells needed before)`` given those needed after and at a return.
+
+        ``tail`` is true when kept actions of an enclosing list follow this one.
+        """
         out = []
         for a in reversed(actions or []):
-            kept, need = self.action(a, need, exit_need, bool(out))
+            kept, need = self.action(a, need, exit_need, bool(out) or tail)
             out = kept + out
         return out, need
 
@@ -89,14 +92,14 @@ class Slicer:
             kept, need = self.assigns(a["set"], need)
             return ([{"set": kept}] if kept else []), need
         if "if" in a:
-            (t, nt), (e, ne) = (self.seq(a.get(k), need, exit_need) for k in ("then", "else"))
+            (t, nt), (e, ne) = (self.seq(a.get(k), need, exit_need, rest) for k in ("then", "else"))
             if not rest and not any("return" not in x for x in t + e):
                 return [], need
             return [{"if": a["if"], "then": t, "else": e}], nt | ne | self.reads(a["if"])
         if "call" in a:
             return self.call(a, need)
         if "accumulate" in a:
-            ob, nob = self.seq(a.get("on_bound"), need, exit_need)
+            ob, nob = self.seq(a.get("on_bound"), need, exit_need, rest)
             cell = a["accumulate"]
             if cell not in need and not ob:
                 return [], need

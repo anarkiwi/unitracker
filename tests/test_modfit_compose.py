@@ -163,11 +163,11 @@ def find(items, pr, label):
     return next(x for x in items if x.pr == pr and x.label == label)
 
 
-def test_pitchup_is_slideup_decoded_differently_without_the_vibrato_reset(items):
+def test_pitchup_is_slideup_decoded_differently(items):
     matches, v, reason = verdict(find(items, "sidwizard", "!pitchup"), items)
-    assert v == "partial" and [m.label for m in matches] == ["!slideup"]
-    assert "ACC+ note-relative vs ref speedtab" in reason
-    assert "only goattracker2: FREQ RESET" in reason
+    assert v == "same effect, different argument decoding"
+    assert [m.label for m in matches] == ["!slideup"]
+    assert reason == "ACC+ note-relative vs ref speedtab"
 
 
 def test_attack_is_part_of_ad(items):
@@ -185,7 +185,8 @@ def test_iattack_differs_from_attack_on_note_rows(items):
 
 def test_pitchdown_matches_slidedown(items):
     matches, v, _ = verdict(find(items, "sidwizard", "!pitchdown"), items)
-    assert v == "partial" and [m.label for m in matches] == ["!slidedown"]
+    assert v == "same effect, different argument decoding"
+    assert [m.label for m in matches] == ["!slidedown"]
 
 
 def test_no_effect(items):
