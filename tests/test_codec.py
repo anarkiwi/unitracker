@@ -643,3 +643,60 @@ def test_defmon_mods_that_never_move_are_one_mod():
 def test_defmon_refuses_mods_it_cannot_play(shared, match):
     with pytest.raises(CodecError, match=match):
         codec(DM, DM_TYPES, "sidtab").decode(shared)
+
+
+@pytest.mark.parametrize(
+    "bad,match",
+    [
+        ({"raw": {"w": {"search": [0, 3]}, "n": {"search": [0, 3]}}}, "one field per shape"),
+        ({"raw": {"w": {"range": [0, 3]}}}, "one field per shape"),
+        ({"implies": {"ctrl": 1}}, "unwritten mod keys"),
+        ({"implies": {"reg": "pw"}, "keys": {"reg": 1}}, "unwritten mod keys"),
+        ({"implies": {"reg": "wave"}}, "bad reg"),
+    ],
+)
+def test_mod_shape_declarations_are_checked(bad, match):
+    with pytest.raises(CodecError, match=match):
+        RowCodec(GT_TYPES["ctrltab"], [bad], 0)
+
+
+@pytest.mark.parametrize(
+    "keys,match",
+    [
+        ({"reg": "w + 5"}, "has no name"),
+        ({"rel": "w"}, "has no name"),
+        ({"at": "0 - 1"}, "no name"),
+    ],
+)
+def test_mod_values_a_shape_cannot_name(keys, match):
+    c = RowCodec(GT_TYPES["ctrltab"], [{"keys": keys}], 0)
+    with pytest.raises(CodecError, match=match):
+        c.encode({"w": 1})
+
+
+def test_codec_expressions_read_only_declared_tables():
+    with pytest.raises(CodecError, match="unknown table"):
+        Evaluator()("t[0]", {})
+    assert Evaluator(None, {"t": [7]})("t[0] + t[5]", {}) == 7
+
+
+@pytest.mark.parametrize(
+    "spec,match",
+    [
+        ({1: {"name": "run", "mod": {"cmd": 1}}}, "the one 'mod'"),
+        ({1: [{"name": "mod", "mod": {}}, {"name": "mod", "mod": {}}]}, "the one 'mod'"),
+        ({1: {"name": "mod", "mod": {}, "from": "ctrltab"}}, None),
+        ({1: {"name": "mod", "mod": {}, "from": "nope"}}, "needs a none index"),
+    ],
+)
+def test_mod_command_declarations_are_checked(spec, match):
+    if match is None:
+        assert CommandCodec(spec, GT_TYPES).is_mod(1)
+        return
+    with pytest.raises(CodecError, match=match):
+        CommandCodec(spec, GT_TYPES)
+
+
+def test_a_mod_row_no_command_writes_is_refused():
+    with pytest.raises(CodecError, match="no command writes"):
+        gt_commands().mod_command({"cmd": 9})
