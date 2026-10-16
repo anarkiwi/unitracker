@@ -123,7 +123,11 @@ class Fitter:
 
         ``(unsat, None)`` means ``candidate`` agrees with the original ``paths``.
         """
-        for cconds, cfinal in self.form.paths([candidate]):
+        return self.check_paths(paths, guard, cell, self.form.paths([candidate]))
+
+    def check_paths(self, paths, guard, cell: str, cpaths) -> tuple:
+        """``check`` against the candidate's symbolic paths ``cpaths``."""
+        for cconds, cfinal in cpaths:
             for conds, final in paths:
                 a, b = final.get(cell, cell), cfinal.get(cell, cell)
                 if a == b or not self.form.feasible((*guard, *conds, *cconds)):

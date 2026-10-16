@@ -13,7 +13,8 @@ from tqdm import tqdm
 from unitracker.modfit import specs
 from unitracker.modfit.compose import ARG, can_differ, composer, keywords, leaves, tests
 from unitracker.modfit.fit import src
-from unitracker.modfit.flow import NAMED, REGISTERS, action_lists, names, parse, walk, walk_sets
+from unitracker.modfit.flow import NAMED, REGISTERS, Composed, Val, action_lists, names, parse
+from unitracker.modfit.flow import walk, walk_sets
 from unitracker.records import record_types
 
 FULL = {"FREQ": 16, "PW": 12, "CUT": 11}
@@ -88,6 +89,27 @@ def copy(rel: dict) -> bool:
     return all(mask & -mask == 1 << i for i, mask in rel.items())
 
 
+def use_text(role: dict, srcbits: dict) -> str:
+    """``[source bits]→role`` per quantity, in register order."""
+    use = " ".join(
+        f"[{span(srcbits[q])}]→{qtext(q, role[q])}" for q in sorted(role, key=ORDER.index)
+    )
+    return use or NONE
+
+
+def value_tests(doc) -> list:
+    """The test source of every ``a if c else b`` inside an assigned or accumulated expression."""
+    out = []
+    for d in walk(doc):
+        texts = [*(d.get("set") or {}).values(), *(d.get("with") or {}).values()]
+        if "accumulate" in d:
+            texts += [d[k] for k in ("step", "min", "max", "toward") if k in d]
+        for t in texts:
+            if isinstance(t, str):
+                out += [ast.unparse(n.test) for n in ast.walk(parse(t)) if isinstance(n, ast.IfExp)]
+    return out
+
+
 def runs(lists) -> list:
     """Every ``run`` action's spec under ``lists``."""
     return [d["run"] for d in walk(list(lists)) if "run" in d]
@@ -102,9 +124,10 @@ class Signer:
         self.name = name
         self.comp = composer(name)
         self.pr, self.form, self.flow = self.comp.pr, self.comp.form, self.comp.flow
+        self.roles, self.plain = Composed(self.pr), Composed(self.pr, plain=True)
         self.rtypes = record_types(self.pr)
         self.lists = list(action_lists(self.pr).values())
-        self.tests = [t for actions in self.lists for t in tests(actions)]
+        self.tests = [t for actions in self.lists for t in tests(actions) + value_tests(actions)]
         self.pointers = self.pointer_cells()
         self.notes = self.copies({"ev_note"})
         orbit = (specs().get("orbits") or {}).get(name)
@@ -160,12 +183,12 @@ class Signer:
         rt = self.rtypes.get(rtype)
         if rt is None:
             return {}
-        return union(self.flow.role(f"{rtype}.{f}") for f in rt.fields if f != rt.chain)
+        return union(self.roles.role(f"{rtype}.{f}") for f in rt.fields if f != rt.chain)
 
-    def through(self, rel: dict, cell: str) -> dict:
+    def through(self, rel: dict, cell: str, roles: Composed | None = None) -> dict:
         """``{(quantity, bit): source bits}`` of a relation ``{source bit: cell bits}``."""
         out = {}
-        for r, rb in self.flow.reach.get(cell, {}).items():
+        for r, rb in (roles or self.roles).reach.get(cell, {}).items():
             q, off, _ = REGISTERS.get(r, (f"${r:02X}", 0, 0xFF))
             for i, m in rel.items():
                 reg = 0
@@ -178,21 +201,28 @@ class Signer:
     def cell_role(self, cell: str) -> dict:
         """The role of a cell or fused pair; a pointer adds its record type's."""
         parts = self.form.pair[cell][:2] if cell in self.form.pair else (cell,)
-        own = [self.flow.role(p) for p in parts]
+        own = [self.roles.role(p) for p in parts]
         return union(own + [self.type_role(self.pointers[p]) for p in parts if p in self.pointers])
 
-    def mapping(self, rel: dict, cell: str) -> tuple:
-        """``(role, use)`` of source bits entering ``cell``: the role bits and their sources."""
+    def bitmap(self, rel: dict, cell: str) -> tuple:
+        """``(role, sources)``: the role bits source bits entering ``cell`` reach, by quantity."""
         role, srcbits = {}, {}
         for (q, b), ins in self.through(rel, cell).items():
             role.setdefault(q, set()).add(b)
             srcbits.setdefault(q, set()).update(ins)
         if cell in self.flow.timing and rel:
             role["TIMING"], srcbits["TIMING"] = {0}, set(rel)
-        use = " ".join(
-            f"[{span(srcbits[q])}]→{qtext(q, role[q])}" for q in sorted(role, key=ORDER.index)
-        )
-        return role, use or NONE
+        return role, srcbits
+
+    def mapping(self, rel: dict, cell: str) -> tuple:
+        """``(role, use)`` of source bits entering ``cell``: the role bits and their sources."""
+        role, srcbits = self.bitmap(rel, cell)
+        return role, use_text(role, srcbits)
+
+    def load(self, rel: dict, plain: dict, cell: str) -> str:
+        """``MASK`` when the bits reach the role only through a bitwise op with another value."""
+        masked = self.through(rel, cell) and not self.through(plain, cell, self.plain)
+        return "MASK" if masked else "LOAD"
 
     def arg_use(self, term) -> str:
         """How ``arg`` enters a term: a record reference, a note-relative table, or directly."""
@@ -246,12 +276,15 @@ class Signer:
 
     def setup_entry(self, cell: str, values: list) -> list:
         """Signature entries of one setup-updated cell the ticks do not read."""
+        values = [x for v in values for x in self.feasible(v)]
         loaded = [v for v in values if ARG in leaves(v)]
         if loaded:
-            rel = self.flow.expr(src(loaded[0]), {}).rel.get(ARG, {})
+            rel, plain = (
+                r.expr(src(loaded[0]), {}).rel.get(ARG, {}) for r in (self.roles, self.plain)
+            )
             role, use = self.mapping(rel, cell)
             if role:
-                return [(role_text(role), "LOAD", use, cell)]
+                return [(role_text(role), self.load(rel, plain, cell), use, cell)]
         elif all(isinstance(v, int) for v in values):
             role = self.cell_role(cell)
             if role:
@@ -261,6 +294,18 @@ class Signer:
         if any(cell in names(t) for t in self.setup_tests):
             return [(f"({cell})", "MODE", self.arg_use(loaded[0]) if loaded else NONE, cell)]
         return []
+
+    def feasible(self, t, conds=()) -> list:
+        """The ``ite`` branches of ``t`` that some state reaches."""
+        if not (isinstance(t, tuple) and t[0] == "ite"):
+            return [t]
+        f = self.form
+        return [
+            x
+            for c, branch in ((t[1], t[2]), (f.negate(t[1]), t[3]))
+            if f.feasible((*conds, c))
+            for x in self.feasible(branch, (*conds, c))
+        ]
 
     def tick_entry(self, cell: str, eff: dict, params: list, ptrs: set) -> list:
         """Signature entries of one cell the ticks move; a started table's own steps are not."""
@@ -300,7 +345,7 @@ class Signer:
 
     # fields -----------------------------------------------------------------
     def field(self, rtype: str, name: str) -> dict:
-        """``{"sig", "entries"}`` of a record field through every assignment reading it.
+        """``{"sig", "entries"}`` of a record field through each cell the composed lists give it.
 
         A declared reference is a program pointer (chained type) or a table reference.
         """
@@ -308,21 +353,34 @@ class Signer:
         entries = self.refs(rtype, name)
         if entries:
             return {"sig": frozenset(e[:3] for e in entries), "entries": entries}
-        for path, cell, val, step in self.flow.log:
-            rel = val.rel.get(node)
-            if not rel:
-                continue
-            if cell in self.pointers:
+        kinds = {}
+        for cell in sorted({c for env in self.roles.ends.values() for c in env}):
+            rel = given(self.roles, cell, node)
+            if rel and cell in self.pointers:
                 ref = f"ref {self.pointers[cell]}"
-                entries.append((role_text(self.cell_role(cell)), "PTR", ref, path))
-                continue
-            role, use = self.mapping(rel, cell)
-            if role:
-                entries.append((role_text(role), "ACC" if step else "LOAD", use, path))
+                entries.append((role_text(self.cell_role(cell)), "PTR", ref, cell))
+            elif rel:
+                self.gather(kinds, node, cell, rel)
+        entries += [
+            (role_text(role), k, use_text(role, srcbits), node)
+            for k, (role, srcbits) in sorted(kinds.items())
+        ]
         tested = self.copies({node}) & {n for t in self.tests for n in names(t)}
         if tested or any(self.reads_field(t, rtype, name) for t in self.tests):
             entries.append((NONE, "TEST", NONE, rtype))
         return {"sig": frozenset(e[:3] for e in entries), "entries": entries}
+
+    def gather(self, kinds: dict, node: str, cell: str, rel: dict) -> None:
+        """Add the role bits ``node`` gives ``cell`` to ``kinds[kind]``, ``ACC`` for a step."""
+        role, srcbits = self.bitmap(rel, cell)
+        if not role:
+            return
+        step = node in self.roles.steps.get(cell, Val()).rel
+        kind = "ACC" if step else self.load(rel, given(self.plain, cell, node), cell)
+        mine = kinds.setdefault(kind, ({}, {}))
+        for q, b in role.items():
+            mine[0].setdefault(q, set()).update(b)
+            mine[1].setdefault(q, set()).update(srcbits[q])
 
     def refs(self, rtype: str, name: str) -> list:
         """Entries of a field's declared references: ``PTR`` to a chained type, else ``REF``."""
@@ -345,7 +403,18 @@ class Signer:
     def in_template(self, text, rtype: str) -> bool:
         """True when a test source belongs to one of ``rtype``'s templates."""
         rt = self.rtypes.get(rtype)
-        return rt is not None and any(text in tests(t) for t in rt.templates.values())
+        return rt is not None and any(
+            text in tests(t) + value_tests(t) for t in rt.templates.values()
+        )
+
+
+def given(roles: Composed, cell: str, node: str) -> dict:
+    """``{node bit: cell bits}`` that the composed ``init`` and ``tick`` give ``cell``."""
+    out = {}
+    for env in roles.ends.values():
+        for i, m in env.get(cell, Val()).rel.get(node, {}).items():
+            out[i] = out.get(i, 0) | m
+    return out
 
 
 @functools.lru_cache(maxsize=None)

@@ -56,12 +56,19 @@ by what they do to the SID.
    - Temporaries come from def-before-use summaries: a widthless cell never read
      before its own list assigns it.
 
-   The relations are composed to a fixpoint into the ghost registers, giving each
-   cell, field and event cell its *role*: the SID quantity bits it can reach. Quantities
-   are `FREQ`, `PW` 12-bit, `CUT` 11-bit (`$D415` bits 0–2, `$D416` bits 3–10), `CTRL`
-   bits, `AD`/`SR` nibbles, `RESFILT` (`$D417`) and `MODEVOL` (`$D418`). A cell that can
-   steer a test guarding a `fetch`, through data or the branches the test guards, also
-   has the role `TIMING`.
+   The relations are composed to a fixpoint into the ghost registers, giving the byte
+   pairs below and the `TIMING` role: a cell that can steer a test guarding a `fetch`,
+   through data or the branches the test guards.
+
+   A cell's or field's *role* (the SID quantity bits its value reaches) comes from the
+   composed `init` and `tick` (`flow.Composed`): calls are inlined with their `with`
+   bindings and every cell is resolved along its path, so a parameter or scratch cell
+   carries only what each call site gives it. Tests steer nothing (a phase, carry or mode
+   cell only gates), and a pointer into a chained record selects control, not a value.
+   Quantities are `FREQ`, `PW` 12-bit, `CUT` 11-bit (`$D415` bits 0–2, `$D416` bits 3–10),
+   `CTRL` bits, `AD`/`SR` nibbles, `RESFILT` (`$D417`) and `MODEVOL` (`$D418`). Bits that
+   reach a register only through `&` with another cell, or `|`/`^` over bits both can set
+   (cell bit ranges from inductive invariants), are a `MASK`.
 6. **Inductive invariants** (`invariant`). When a fit is refuted by a witness, the
    candidates are comparisons `cell op T`. `T` is a bound or reload term of the cell's
    cases, a term compared with a wrapped expression of the cell, 0 or the width maximum.
@@ -91,7 +98,7 @@ by what they do to the SID.
    that read a routing cell and whose value the keyword changes.
 8. **Signatures** (`keywords.Signer`). A keyword's or field's signature is a set of
    `(role, kind, argument use)`:
-   - `LOAD` (the arg's bits reaching the role), `RESET` (a constant);
+   - `LOAD` (the arg's bits reaching the role), `MASK` (see step 5), `RESET` (a constant);
    - `ARM`: a constant the ticks read, armed for per-tick behaviour;
    - `MODE`: a cell the row procs test, a mode for later notes;
    - `PTR`: a pointer into a chained record type, a program start;
@@ -100,7 +107,9 @@ by what they do to the SID.
      the fits, `MOD` when no single accumulator holds, and `REFLECT` when the orbit spec's
      proc runs and the fitted step turns (several steps, or one reading a cell the tick
      moves);
-   - `TEST`: a field read by a test (not matched).
+   - `TEST`: a field read by a test or an `ite` test (not matched).
+
+   A field's entries are the cells the composed lists give it, merged by kind.
 
    Argument use is the arg's bit mapping into the role, `ref <type>`, `note-relative` (a
    table index that also reads the event note) or `table`. Per-tick effects steered by a
@@ -116,6 +125,39 @@ by what they do to the SID.
    Reasons name the differing entries, a *sticky override* and a *mode for later notes*. A
    sticky override is an arg load folded by a setup proc into another loaded cell, where
    that proc also runs outside the setup.
+
+9. **Generic accumulator** (`factor.Factorer`). Every effect on `x` is
+   `x' = respond(v0, v)` when `hit(v)`, else `v = v0 + step`, applied under `gate`. A
+   cell's guarded cases (cut to what can affect it, pairs fused, tests simplified on their
+   own and split into conjuncts) are split at the brackets reading `x` or a moved cell.
+   Conditions free of `x` are the gate, brackets reading it the hit; the change most cases
+   share is the step, the values under the hit the respond: `hold`, `clamp` (a bound the
+   hit compares with), `reflect` (`v0 − s`), `reload`, `bounce` (a constant and a flipped
+   mode cell) or `reads v`. Gates differing only in a test of bound cells join with a
+   selecting step. The lambdas are source over `v0`, `v` and `s`, re-read and proved equal
+   to the original over all path pairs (`Fitter.check_paths`). Otherwise the reason is
+   `step reads x`, `hit reads non-bound state` or `respond outside (v0, v, bounds)` (a cell
+   that changes on steady ticks), or a witness. The step's *basis* is `constant`,
+   `note-relative` tables (an index reading a note cell), `decoded` tables, fields and
+   the argument, or the cells it reads.
+10. **Timers** (`timer.Timers`). Every list writing a cell (except `init`) is analysed
+   on its own; calls, runs and fetches leave fresh values for what they write. A timer's
+   cases are proved `t ± c` (one `c`), a reload or reset free of `t`, or a flip `k − t`.
+   A reload reading a cell the same path flips is an alternating reload. An orbit steps the
+   timer through its counting list's cases with z3. A non-constant bound of its tests is
+   the parameter, starting from the reset; otherwise the start value is. A model of a
+   counting case fixes the other atoms, and a run stops at a firing case that reads any of
+   them. Durations to the first fire and each test's sequence are classified: `constant`,
+   `delay d`, `duration n`, `period p` (two equal runs per cycle: a sign flip), or `drift`
+   (the run lengths). Their numbers are fitted exactly as `(a·p + b)//k` over maximal
+   runs of the domain (least `k`, at most the point count), with more than three points;
+   otherwise a table. Orbit specs' per-tick steps give the vibrato signatures the same way.
+11. **Report** (`generic`). One row per keyword (its composed per-tick effect's gate
+   groups, or its setup) and per modulation gate group (a record row kind). Each row gives
+   role, step, basis, hit, respond, gate and status. The gate is the timers it reads with
+   their duration's closed form, else the lifetime: `until the next note` when a note row
+   resets an armed cell, `until replaced`, or `row duration`. Rows are grouped by
+   (role, respond kind, temporal kind).
 
 ## Assumptions
 
@@ -138,6 +180,8 @@ unitracker-modfit orbit [PLAYROUTINE ...] [--ticks N]
 unitracker-modfit command [PLAYROUTINE[:NAME] ...]   # keyword setup and per-tick effects
 unitracker-modfit keywords [PLAYROUTINE ...]         # signature table with matches and verdicts
 unitracker-modfit --out out/modfit/keywords.txt keywords
+unitracker-modfit generic [PLAYROUTINE ...] [--ticks N]  # factorised events, grouping, timers, vibrato
+unitracker-modfit --out out/modfit/generic.txt generic
 ```
 
 A pair cell is named `hi:lo` (`k = 8`) or `hi:lo:k`, e.g. `sidwizard:procs.tick_filt:vfhi:vflo:3`.
@@ -213,3 +257,49 @@ Not expressible yet:
 
 The keyword and field table is written by `unitracker-modfit keywords` (one row per keyword
 or field: signature, matches, verdict, reason).
+
+### Factorisation
+
+| Effect | Step, basis | Hit, respond | Status |
+| --- | --- | --- | --- |
+| GT slide (`tickn.1`, `!slideup`) | `spd(arg)`: note-relative `ftab`, decoded `speedtab` | none | proved |
+| GT porta (`toneporta`, arg ≠ 0) | `spd(arg)` | toward `ftab[note]`: hold, clamp, reflect | proved |
+| GT porta, arg = 0 | 0 | always: reload `ftab[note]` | proved |
+| GT pulse, filter table step | `s8(row.r)`, `row.r` | none | proved |
+| SW `!pitchup` / `!pitchdown` | `±fm(arg, note+oct)`: note-relative `exptab`, `freqlo`, `freqhi` | none | proved |
+| SW `!glide`, `tick_porta` | `F + 1` | overshoot to +1 from below, 0 from above: hold, clamp, reflect | proved |
+| SW pulse sweep `pwhi:pwlo` | `s8(pwtab.b)` (set rows: reload) | none | proved |
+| SW filter sweep `vfhi:vflo:3` | `s8(flttab.b)` (set rows: reload `8·b`) | none | proved |
+| defMON slide (`pitch` `sacc`) | `±rate(mode)`: decoded `rate_lo`, `rate_hi` | none | proved |
+| defMON pulse `ps` | `ps & 0x7F`, `−ps − (1 − fc)` | `v` past `0x0FFF`/`0xFFFF` by `pw >> 8`: bounce | proved |
+| defMON ACID | `astep` or `−astep − 1` | `v > 0x7FFF`: reads v, `512 + (v & 255)` | proved |
+
+### Timers
+
+A timer *counts n ticks* from its start (or reset, with a bound `p`) until a tick that does
+not count it.
+
+| Timer | Update | Counts n ticks |
+| --- | --- | --- |
+| GT `ptime`, `ftime` | −1, reload `l` | `p + 1` from start `p` |
+| GT `tick` | −1, reload `tempo`, or `funk1`/`funk0` alternating on `tempo` | `p + 1` for `p` ≤ 128 |
+| GT `vibtime` | +2, flip `1 − t` | `(p + 4)//2` for bound `l = p` in 0..125 |
+| GT `vibdelay` | −1 while > 1 | `(254·p + 255)//255` (`max(p, 1)`) |
+| GT `wtime` | +1, reset 0 | `p + 1` for `w = p` in 0..15 |
+| defMON `cnt` | −1, reload `dl` | `p + 1` for `p` in 0..127, 1 from `0x80` (frozen) |
+| SW `pwcnt`, `fsweep` | +1, reset 0 | `p + 1` for `a = p` in 0..127 |
+| SW `sc` | +1, reset 0 | `p` for tempo `p` ≥ 2 |
+| SW `arpcnt` | −1, reload `rw`, reset 255 | `p + 1` for `p` ≤ 128 |
+| SW `vdc` | −1 while ≥ 0 | `p + 2`; the vibrato's `vdc >= 0` lasts `p + 1` |
+| SW `vfc` | −1, reload `vper − 1` | `p + 1` |
+| SW `hr` | −1, reset 1 | `p + 1` |
+
+| Vibrato orbit | Signature |
+| --- | --- |
+| GT, `p` in 0..125 | period, bounds `[(−p − 2)//2, (p + 2)//2]` |
+| SW, even `p` | period, bounds `[(−p)//2, 0]` |
+| SW, odd `p` ≥ 3 | drift, runs `(p − 1)//2` down, `(p + 1)//2` up |
+
+The SID-Wizard header walk (before the first note `wf_row` reads instrument 1's header as
+WF rows) gives `ins.ad` a `CTRL` role and `ins.hrad`, `ins.hrsr`, `ins.sr` a `FREQ` role.
+

@@ -88,9 +88,9 @@ class Merge(Form):
         return self.rebuild(t, lits, {}) if lits else t
 
     def rebuild(self, t, lits: dict, memo: dict):
-        """``t`` rebuilt through the normalising constructors, conditions in ``lits`` decided."""
+        """``t`` rebuilt through the normalising constructors, subterms in ``lits`` replaced."""
         if not isinstance(t, tuple):
-            return t
+            return lits.get(t, t) if isinstance(t, str) else t
         if id(t) not in memo:
             memo[id(t)] = (t, self.reapply(t, lits, memo))
         return memo[id(t)][1]
@@ -130,6 +130,10 @@ class Merge(Form):
         if head in ops:
             return ops[head](*args)
         return self.junction(head, args) if head in ("land", "lor") else (head, *args)
+
+    def subst(self, t, lits: dict):
+        """``t`` with each cell or subterm in ``lits`` replaced, renormalised."""
+        return self.rebuild(t, lits, {})
 
     def put(self, state: dict, cell: str, value, live) -> None:
         """``cell := value`` where ``live`` holds."""
@@ -340,6 +344,14 @@ class Composer:
 
     def fit(self, cell: str, chosen: list, conds, begin: dict) -> list:
         """The per-tick fits of ``cell``, its cases split at the joins of the lists writing it."""
+        paths = self.tick_paths(cell, chosen, conds, begin)
+        key = (cell, tuple((cs, st.get(cell, cell)) for cs, st in paths))
+        if key not in self.fits:
+            self.fits[key] = self.fitter.fit_paths(paths, cell)
+        return self.fits[key]
+
+    def tick_paths(self, cell: str, chosen: list, conds, begin: dict) -> list:
+        """``[(conds, state)]`` of ``cell``'s per-tick cases, split at the joins, pairs fused."""
         f = self.form
         parts = f.pair[cell][:2] if cell in f.pair else (cell,)
         f.joins = set()
@@ -351,11 +363,7 @@ class Composer:
                 for prev, st in paths
                 for cs, v in cases(f, end.get(p, p), prev or conds)
             ]
-        paths = f.fused(paths) if cell in f.pair else paths
-        key = (cell, tuple((cs, st.get(cell, cell)) for cs, st in paths))
-        if key not in self.fits:
-            self.fits[key] = self.fitter.fit_paths(paths, cell)
-        return self.fits[key]
+        return f.fused(paths) if cell in f.pair else paths
 
     def changes(self, conds, state: dict, start: dict) -> list:
         """``[(conds, {cell: value})]``: each reported cell's changed cases."""
