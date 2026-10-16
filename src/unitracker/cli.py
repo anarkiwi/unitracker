@@ -1,4 +1,4 @@
-"""Command-line entry points: ``unitracker-gt`` (lift) and ``unitracker-play`` (play)."""
+"""Command-line entry points: ``unitracker-lift`` and ``unitracker-play``."""
 
 import argparse
 import sys
@@ -7,23 +7,18 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from unitracker import songio
+from unitracker import backends, songio
 from unitracker.vm import SongPlayer
 
 
-def gt_main(argv=None) -> int:
-    """Lift a GoatTracker 2 .sid to unitracker YAML."""
-    from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
-
-    from unitracker.goattracker import lift  # pylint: disable=import-outside-toplevel
-
-    parser = argparse.ArgumentParser(prog="unitracker-gt", description=gt_main.__doc__)
+def lift_main(argv=None) -> int:
+    """Lift a GoatTracker 2 or defMON .sid to unitracker YAML."""
+    parser = argparse.ArgumentParser(prog="unitracker-lift", description=lift_main.__doc__)
     parser.add_argument("sid", type=Path)
     parser.add_argument("-o", "--output", type=Path)
-    parser.add_argument("--subtune", type=int, default=0)
+    parser.add_argument("--subtune", type=int)
     args = parser.parse_args(argv)
-    song = lift(decompile_sid(args.sid.read_bytes(), subtune=args.subtune))
-    text = songio.dumps(song)
+    text = songio.dumps(backends.lift(args.sid.read_bytes(), args.subtune))
     if args.output:
         args.output.write_text(text, encoding="utf-8")
     else:
@@ -44,12 +39,10 @@ def _render(player, n: int, desc: str) -> np.ndarray:
     return grid
 
 
-def check(song: dict, sid: Path, n: int, subtune: int = 0) -> tuple[int, int | None, int | None]:
-    """Compare ``n`` ticks with the native GoatTracker player: (ticks, first bad tick, reg)."""
-    from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
-
+def check(song: dict, sid: Path, n: int, subtune=None) -> tuple[int, int | None, int | None]:
+    """Compare ``n`` ticks with the tune's native player: (ticks, first bad tick, reg)."""
     ours = _render(SongPlayer(song), n, "unitracker")
-    theirs = _render(decompile_sid(sid.read_bytes(), subtune=subtune).player(), n, "native")
+    theirs = _render(backends.native_player(sid.read_bytes(), subtune), n, "native")
     bad = np.argwhere(ours != theirs)
     if len(bad):
         return n, int(bad[0][0]), int(bad[0][1])
@@ -64,7 +57,7 @@ def play_main(argv=None) -> int:
     parser.add_argument("--seconds", type=float, default=60.0)
     parser.add_argument("--model", choices=("8580", "6581"), default="8580")
     parser.add_argument("--check", type=Path, metavar="SID")
-    parser.add_argument("--subtune", type=int, default=0)
+    parser.add_argument("--subtune", type=int)
     args = parser.parse_args(argv)
     song = songio.load(args.song)
     n = _ticks(song, args.seconds)

@@ -6,17 +6,19 @@ import yaml
 from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
+from unitracker.songio import song_meta
+
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
 
 
 class LiftError(ValueError):
-    """The tune uses something the GoatTracker 2 machine does not cover."""
+    """The tune uses something the GoatTracker 2 playroutine does not cover."""
 
 
-def load_machine() -> dict:
-    """The GoatTracker 2 machine definition."""
-    text = resources.files("unitracker").joinpath("machines/goattracker2.yaml").read_text()
+def load_playroutine() -> dict:
+    """The GoatTracker 2 playroutine definition."""
+    text = resources.files("unitracker").joinpath("playroutines/goattracker2.yaml").read_text()
     return yaml.safe_load(text)
 
 
@@ -123,6 +125,12 @@ def filter_records(table) -> dict:
                 "next": tab.fold(i + 1),
             }
     return out
+
+
+def speed_records(table) -> dict:
+    """Speedtable rows 1..n as ``left``/``right`` byte records."""
+    tab = _Table(table)
+    return {i: {"left": tab.lt(i), "right": tab.rt(i)} for i in range(1, len(tab) + 1)}
 
 
 _INS_FIELDS = (
@@ -242,15 +250,15 @@ def lift(dec) -> dict:
     }
     missing = [name for name, used in unsupported.items() if used]
     if missing:
-        raise LiftError("not covered by the goattracker2 machine yet: " + ", ".join(missing))
+        raise LiftError("not covered by the goattracker2 playroutine yet: " + ", ".join(missing))
     song = dec.typed.to_song()
     build = info.build
-    machine = load_machine()
+    playroutine = load_playroutine()
     adparam = C.DEFAULT_ADPARAM
     if build.adparam is not None:
         adparam = build.adparam << 8 | build.srparam
     deftempo = build.deftempo if build.deftempo is not None else _default_tempo(song)
-    machine["constants"] = {"adparam": adparam, "deftempo": deftempo}
+    playroutine["constants"] = {"adparam": adparam, "deftempo": deftempo}
     freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
     phrases = _phrases(song, tracks)
@@ -259,27 +267,21 @@ def lift(dec) -> dict:
     registers[0x18] = 0x0F
     return {
         "unitracker": 0,
-        "meta": {
-            "title": header.name,
-            "author": header.author,
-            "released": header.released,
-            "source": f"goattracker2 subtune {dec.subtune}",
-        },
+        "meta": song_meta(header, f"goattracker2 subtune {dec.subtune}"),
         "clock": NTSC_CLOCK if (header.flags >> 2) & 3 == 2 else PAL_CLOCK,
         "voices": 3,
         "registers": registers,
         "tables": {
             "ftab": [int(v) for v in freq],
-            "speed_l": [0] + [v & 0xFF for v in song.speedtable.left],
-            "speed_r": [0] + [v & 0xFF for v in song.speedtable.right],
         },
         "records": {
             "ins": instrument_records(song.instruments),
             "wavetab": wave_records(song.wavetable),
             "pulsetab": pulse_records(song.pulsetable),
             "filttab": filter_records(song.filtertable),
+            "speedtab": speed_records(song.speedtable),
         },
         "tracks": tracks,
         "phrases": phrases,
-        "machine": machine,
+        "playroutine": playroutine,
     }

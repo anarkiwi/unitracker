@@ -1,4 +1,4 @@
-"""Shared fixtures: the HVSC tune the conformance tests lift."""
+"""Shared fixtures: the HVSC tunes the conformance tests lift."""
 
 from pathlib import Path
 
@@ -18,15 +18,27 @@ def metal_warrior() -> Path:
     return Path(path)
 
 
-def mini_song(machine, tracks=None, phrases=None, **extra) -> dict:
-    """A one-voice song around ``machine``."""
+def mini_song(playroutine, tracks=None, phrases=None, **extra) -> dict:
+    """A one-voice song around ``playroutine``."""
     song = {
         "unitracker": 0,
         "clock": {"cycles_per_tick": 19656, "clock_hz": 985248},
         "voices": 1,
         "tracks": tracks or [{"plays": [{"phrase": "a"}], "loop": 0}],
         "phrases": phrases or {"a": [{}]},
-        "machine": machine,
+        "playroutine": playroutine,
     }
     song.update(extra)
     return song
+
+
+CROSSEYED = "MUSICIANS/I/Ilkke/Crosseyed.sid"
+
+
+@pytest.fixture(scope="session")
+def crosseyed() -> Path:
+    """Path to iLKke's Crosseyed .sid, a defMON replay."""
+    path = resolve_tune(CROSSEYED, cache_dir=CACHE)
+    if path is None:
+        pytest.skip("HVSC tune unavailable")
+    return Path(path)

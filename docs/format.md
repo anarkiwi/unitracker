@@ -1,9 +1,9 @@
 # unitracker song format (v0)
 
 A unitracker song is one YAML document. A backend writes it by lifting a native tune
-(`unitracker-gt` lifts GoatTracker 2), and the generic player (`unitracker-play`)
+(`unitracker-lift` lifts GoatTracker 2 and defMON), and the generic player (`unitracker-play`)
 plays it on an emulated SID. The player has no effects or player knowledge of its
-own. Everything a player does is described by the song's `machine`: integer cells,
+own. Everything a player does is described by the song's `playroutine`: integer cells,
 bounded accumulators, records of actions, and handlers.
 
 ## Top level
@@ -14,12 +14,23 @@ meta: {title: str, author: str, released: str, source: str}
 clock: {cycles_per_tick: 19656, clock_hz: 985248}
 voices: 3
 registers: [25 ints]          # SID register file before the first tick
-tables: {name: [ints]}        # integer arrays, indexed from 0; reads out of range give 0
+tables: {name: [ints]}        # player-build data, indexed from 0; reads out of range give 0
+playroutine: {...}
 records: {name: {index: {field: int | [actions]}}}
 tracks: [track, ...]          # one per voice
 phrases: {name: [event, ...]}
-machine: {...}
 ```
+
+The writer emits the top-level keys in this order. Readers must not depend on key order.
+
+The order follows ownership:
+
+- **`tables` holds the player build's data**: arrays read from the player's own image,
+  the same for every tune made with that build. Examples are GoatTracker's `ftab` note
+  table and defMON's `note_lo`/`note_hi` pitch tables.
+- **`playroutine`** comes next.
+- **The song starts at `records`.** Everything from there onward belongs to the tune:
+  instruments, its wave/pulse/filter/speed rows, sidTAB rows, and its initial state.
 
 A record's missing int field reads as 0, and a missing action-list field is empty.
 Instruments are just records, conventionally named `ins`.
@@ -37,7 +48,7 @@ index; the play's `transpose` is added when the event is fetched. A `repeat` of 
 plays the phrase n times.
 
 The player keeps one cursor per voice. It does not decide when events are read. The
-machine decides that with the `fetch` action, which reads the next step and sets
+playroutine decides that with the `fetch` action, which reads the next step and sets
 these voice pseudo-cells:
 
 | cell | value |
@@ -49,16 +60,16 @@ these voice pseudo-cells:
 | `at_phrase_start` | 1 when the next `fetch` reads step 0 of a phrase |
 | `ended` | 1 once a track with `loop: null` has run out |
 
-## Machine
+## Playroutine
 
 ```yaml
-machine:
+playroutine:
   name: str
   constants: {name: int}
   functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
   global: {cell: {width: 8, init: 0}}                # width omitted: unbounded
   voice:  {cell: {width: 8, init: 0}}                # one copy per voice
-  records: {name: {index: {field: ...}}}             # machine-owned, e.g. command dispatch
+  records: {name: {index: {field: ...}}}             # playroutine-owned, e.g. command dispatch
   procs: {name: [actions]}
   init: [actions]                                    # first tick only, global scope
   tick: [actions]                                    # every later tick, global scope
@@ -127,12 +138,37 @@ timers are all this one action, triggered from handlers.
 
 Each tick, the player runs `init` (first tick) or `tick` (every later tick). Then it
 evaluates the ghost, masks each value to 8 bits, and flushes the registers that
-changed since the last flush, in the canonical order. That order is GoatTracker 2's
+changed since the last flush, in the canonical order. A register with no ghost entry
+keeps its value. That order is GoatTracker 2's
 buffered order (`BUFFEREDWRITES`: filter step first, then `mt_loadregs`):
 
 ```
 $15 $16 $17 $18,  then for each voice v (base 7v): +2 +3 +6 +5 +0 +1 +4
 ```
 
-A machine never writes registers directly, so every song's output is canonical by
+A playroutine never writes registers directly, so every song's output is canonical by
 construction.
+
+## Backends
+
+| backend | tune | step | lifted from |
+|---|---|---|---|
+| `goattracker2` | packed GoatTracker 2 `.sid` (pygoattracker) | one pattern row | the decompiled song and the build's constants |
+| `defmon` | defMON `$1000` replay `.sid` (pydefmon) | one tick | the replay's memory after init |
+
+**GoatTracker 2.** The playroutine counts ticks per row itself, and `fetch` runs on its gate-timer lookahead.
+
+**defMON.** The arranger and pattern counters are lifted as timing. Each song step
+becomes one phrase per voice, all of the same length in ticks. Each event lands on the
+tick the replay applies it, and the arranger's jumps and repeats become each track's
+plays and `loop`. The playroutine fetches every tick and maps the event fields as
+follows:
+
+- `instrument` is sidcall layer A's sidTAB row plus 1;
+- `command: [1, row]` arms layer B;
+- `note` is a GATE_N note.
+
+The replay probes `$D41B` at init to tell the SID models apart. The result becomes
+the playroutine constants `floor` and `dbl`. The ghost masks pulse-width high to a
+nibble, as the reference grid does.
+

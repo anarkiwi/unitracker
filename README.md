@@ -1,8 +1,9 @@
 # unitracker
 
-A generic tracker song format for the C64 SID, a GoatTracker 2 lifter, and a generic
-player. A song is a YAML document holding the music (tracks, phrases, tables, records)
-and the machine that plays it (integer cells, bounded accumulators, event handlers). The
+A generic tracker song format for the C64 SID, GoatTracker 2 and defMON lifters, and a
+generic player. A song is a YAML document holding the player build's tables, the
+playroutine that plays it (integer cells, bounded accumulators, event handlers) and the
+music (records, tracks, phrases). The
 player has no player-specific knowledge, and its register writes are flushed in one
 canonical order.
 
@@ -17,7 +18,7 @@ pip install -e ".[dev]"
 ## Use
 
 ```sh
-unitracker-gt TUNE.sid -o song.yaml [--subtune N]          # lift a GoatTracker 2 .sid
+unitracker-lift TUNE.sid -o song.yaml [--subtune N]        # lift a GoatTracker 2 or defMON .sid
 unitracker-play song.yaml --wav out.wav [--seconds 60] [--model 8580|6581]
 unitracker-play song.yaml --check TUNE.sid                  # compare with the native player
 ```
@@ -33,5 +34,5 @@ grid = player.render_grid(3000)            # (ticks, 25) SID register grid
 ## Test
 
 ```sh
-HVSC=/path/to/C64Music pytest -n auto      # without $HVSC the tune is fetched into .tunecache/
+HVSC=/path/to/C64Music pytest -n auto      # without $HVSC the tunes are fetched into .tunecache/
 ```

@@ -5,7 +5,7 @@ from unitracker import cli, songio
 
 def test_lift_check_and_render(metal_warrior, tmp_path, capsys):
     out = tmp_path / "mw.yaml"
-    assert cli.gt_main([str(metal_warrior), "-o", str(out)]) == 0
+    assert cli.lift_main([str(metal_warrior), "-o", str(out)]) == 0
     wav = tmp_path / "mw.wav"
     assert (
         cli.play_main(
@@ -19,7 +19,7 @@ def test_lift_check_and_render(metal_warrior, tmp_path, capsys):
 
 def test_check_reports_mismatch(metal_warrior, tmp_path, capsys):
     out = tmp_path / "mw.yaml"
-    cli.gt_main([str(metal_warrior), "-o", str(out)])
+    cli.lift_main([str(metal_warrior), "-o", str(out)])
     song = songio.load(out)
     song["records"]["ins"][1]["sr"] = 0x77
     songio.dump(song, out)
@@ -28,5 +28,12 @@ def test_check_reports_mismatch(metal_warrior, tmp_path, capsys):
 
 
 def test_lift_to_stdout(metal_warrior, capsys):
-    assert cli.gt_main([str(metal_warrior)]) == 0
+    assert cli.lift_main([str(metal_warrior)]) == 0
     assert songio.loads(capsys.readouterr().out)["unitracker"] == 0
+
+
+def test_lift_and_check_defmon(crosseyed, tmp_path, capsys):
+    out = tmp_path / "ce.yaml"
+    assert cli.lift_main([str(crosseyed), "-o", str(out)]) == 0
+    assert cli.play_main([str(out), "--seconds", "3", "--check", str(crosseyed)]) == 0
+    assert "match: 150 ticks" in capsys.readouterr().out

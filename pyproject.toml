@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "unitracker"
 version = "0.1.0"
-description = "A generic C64 SID tracker song format, a GoatTracker 2 lifter and a generic player"
+description = "A generic C64 SID tracker song format, GoatTracker 2 and defMON lifters, and a generic player"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
@@ -16,20 +16,21 @@ dependencies = [
     "tqdm>=4",
     "pysidtracker @ git+https://github.com/anarkiwi/pysidtracker",
     "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker",
+    "pydefmon @ git+https://github.com/anarkiwi/pydefmon",
 ]
 
 [project.optional-dependencies]
 dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4"]
 
 [project.scripts]
-unitracker-gt = "unitracker.cli:gt_main"
+unitracker-lift = "unitracker.cli:lift_main"
 unitracker-play = "unitracker.cli:play_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-unitracker = ["machines/*.yaml"]
+unitracker = ["playroutines/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,9 +1,10 @@
-"""The lifted, YAML round-tripped song plays identically to the native GoatTracker player."""
+"""Lifted, YAML round-tripped songs play identically to their native players."""
 
 import numpy as np
+from pydefmon import DefmonPlayer
 from pygoattracker import decompile_sid
 
-from unitracker import songio
+from unitracker import defmon, songio
 from unitracker.goattracker import lift
 from unitracker.vm import SongPlayer
 
@@ -28,3 +29,13 @@ def test_flushes_rebuild_the_grid(metal_warrior):
         for reg, value in flush:
             regs[reg] = value
         assert regs == list(grid[tick])
+
+
+def test_crosseyed_intro_and_two_loops_exact(crosseyed):
+    raw = crosseyed.read_bytes()
+    song = songio.loads(songio.dumps(defmon.lift(raw)))
+    n = 95 + 2 * 1152 + 100
+    ours = SongPlayer(song).render_grid(n)
+    theirs = np.asarray(DefmonPlayer(raw).render_grid(n), dtype=np.uint8)
+    assert len(np.unique(theirs, axis=0)) > 500
+    np.testing.assert_array_equal(ours, theirs)

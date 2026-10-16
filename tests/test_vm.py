@@ -8,8 +8,8 @@ from unitracker.expr import ExprError
 from unitracker.vm import Cursor, SongError, SongPlayer, compile_phrase
 
 
-def run(machine, ticks=1, **kw):
-    player = SongPlayer(mini_song(machine, **kw))
+def run(playroutine, ticks=1, **kw):
+    player = SongPlayer(mini_song(playroutine, **kw))
     for _ in range(ticks):
         player.play_frame()
     return player
@@ -19,7 +19,7 @@ def ghost(*cells):
     return {"voice": dict(enumerate(cells))}
 
 
-def acc_machine(acc, width=8, init=0):
+def acc_playroutine(acc, width=8, init=0):
     return {
         "voice": {"x": {"width": width, "init": init}, "hits": {}},
         "tick": [{"for_voices": [dict(acc, accumulate="x")]}],
@@ -54,29 +54,29 @@ def regs(player):
     ],
 )
 def test_bounded_accumulator(acc, init, width, ticks, expected):
-    assert regs(run(acc_machine(acc, width, init), ticks + 1)) == expected
+    assert regs(run(acc_playroutine(acc, width, init), ticks + 1)) == expected
 
 
 def test_toward_wrapped_overshoot_is_not_a_hit():
-    machine = acc_machine(
+    playroutine = acc_playroutine(
         {"step": 0x20, "toward": 0xFF, "on_bound": [{"set": {"hits": 1}}]}, 8, 0xF0
     )
-    assert regs(run(machine, 2)) == (0x10, 0)
+    assert regs(run(playroutine, 2)) == (0x10, 0)
 
 
 def test_set_wraps_to_width_and_unbounded_cells_do_not():
-    machine = {
+    playroutine = {
         "global": {"g8": {"width": 8}, "big": {}},
         "voice": {"w4": {"width": 4}},
         "init": [{"set": {"g8": -1, "big": 0x1234}}, {"for_voices": [{"set": {"w4": "0x1F"}}]}],
         "ghost": {"global": {0x15: "g8", 0x16: "big >> 8"}, "voice": {0: "w4"}},
     }
-    player = run(machine)
+    player = run(playroutine)
     assert (player.regs[0x15], player.regs[0x16], player.regs[0]) == (0xFF, 0x12, 0x0F)
 
 
 def test_control_flow_procs_records_and_return():
-    machine = {
+    playroutine = {
         "constants": {"k": 7},
         "global": {"count": {}},
         "voice": {"a": {}, "b": {}, "arg": {}},
@@ -107,7 +107,7 @@ def test_control_flow_procs_records_and_return():
         ],
         "ghost": {"global": {0x15: "count"}, "voice": {0: "a", 1: "b"}},
     }
-    player = run(machine, 4)
+    player = run(playroutine, 4)
     assert (player.regs[0x15], player.regs[0], player.regs[1]) == (3, 14, 14)
 
 
@@ -137,7 +137,7 @@ def test_cursor_steps_transpose_repeat_loop():
 
 
 def test_cursor_end_and_fetch_pseudo_cells():
-    machine = {
+    playroutine = {
         "voice": {"k": {}, "n": {}, "e": {}},
         "tick": [
             {
@@ -150,19 +150,19 @@ def test_cursor_end_and_fetch_pseudo_cells():
         "ghost": ghost("k", "n", "e"),
     }
     tracks = [{"plays": [{"phrase": "a"}], "loop": None}]
-    player = run(machine, 2, tracks=tracks, phrases={"a": [{"note": True}]})
+    player = run(playroutine, 2, tracks=tracks, phrases={"a": [{"note": True}]})
     assert player.regs[:3] == [3, 0, 1]
     player.play_frame()
     assert player.regs[:3] == [0, 0, 1]
 
 
 def test_first_flush_is_full_then_changes_only_in_canonical_order():
-    machine = {
+    playroutine = {
         "voice": {"t": {}},
         "tick": [{"for_voices": [{"set": {"t": "t + 1"}}]}],
         "ghost": {"voice": {4: "t", 0: "t * 2", 6: "5"}},
     }
-    player = SongPlayer(mini_song(machine))
+    player = SongPlayer(mini_song(playroutine))
     assert len(player.play_frame()) == 25
     assert player.play_frame() == [(0, 2), (4, 1)]
     assert player.play_frame() == [(0, 4), (4, 2)]
@@ -170,13 +170,13 @@ def test_first_flush_is_full_then_changes_only_in_canonical_order():
 
 
 def test_render_wav(tmp_path):
-    machine = {"ghost": {"voice": {4: "0x11", 1: "0x20", 6: "0xF0"}}}
-    path = SongPlayer(mini_song(machine)).render_wav(tmp_path / "a.wav", 0.1)
+    playroutine = {"ghost": {"voice": {4: "0x11", 1: "0x20", 6: "0xF0"}}}
+    path = SongPlayer(mini_song(playroutine)).render_wav(tmp_path / "a.wav", 0.1)
     assert path.stat().st_size > 1000
 
 
 @pytest.mark.parametrize(
-    "machine,match",
+    "playroutine,match",
     [
         ({"tick": [{"set": {"nope": 1}}]}, "unknown cell"),
         ({"tick": [{"call": "nope"}]}, "unknown proc"),
@@ -191,9 +191,9 @@ def test_render_wav(tmp_path):
         ({"records": {"ins": {}}}, "twice"),
     ],
 )
-def test_machine_errors(machine, match):
+def test_playroutine_errors(playroutine, match):
     with pytest.raises(SongError, match=match):
-        SongPlayer(mini_song(machine, records={"ins": {}}))
+        SongPlayer(mini_song(playroutine, records={"ins": {}}))
 
 
 @pytest.mark.parametrize(
@@ -206,9 +206,9 @@ def test_machine_errors(machine, match):
     ],
 )
 def test_expression_scope_errors(text, match):
-    machine = {"voice": {"v_only": {}}, "global": {"g": {}}, "tick": [{"set": {"g": text}}]}
+    playroutine = {"voice": {"v_only": {}}, "global": {"g": {}}, "tick": [{"set": {"g": text}}]}
     with pytest.raises(ExprError, match=match):
-        SongPlayer(mini_song(machine))
+        SongPlayer(mini_song(playroutine))
 
 
 @pytest.mark.parametrize(
@@ -231,11 +231,11 @@ def test_song_errors(song_kw, match):
 
 
 def test_tables_read_zero_out_of_range():
-    machine = {
+    playroutine = {
         "global": {"a": {}, "b": {}},
         "init": [{"set": {"a": "t[1]", "b": "t[5] + t[-1]"}}],
         "ghost": {"global": {0x15: "a", 0x16: "b"}},
     }
-    player = run(machine, tables={"t": [4, 9]})
+    player = run(playroutine, tables={"t": [4, 9]})
     assert (player.regs[0x15], player.regs[0x16]) == (9, 0)
     assert np.array_equal(player.render_grid(1)[0], player.regs)
