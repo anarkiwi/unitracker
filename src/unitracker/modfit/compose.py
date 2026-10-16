@@ -285,6 +285,13 @@ class Composer:
             out += [(path, t) for t in tests(actions) if names_of(t) & self.routing]
         return out
 
+    def reapplied(self) -> set:
+        """Setup procs that also run from an action list outside the setup."""
+        outside = [
+            a for p, a in action_lists(self.pr).items() if p.split(".")[-1] not in self.chain_procs
+        ]
+        return {d["call"] for d in walk(outside) if d.get("call") in self.chain_procs}
+
     def start(self, row: str) -> dict:
         """The row template's state."""
         return dict(self.spec["rows"][row])

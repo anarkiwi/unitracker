@@ -273,7 +273,7 @@ class Signer:
         steer = {f"rec:{p}" for p in ptrs} | {c for c, t in self.pointers.items() if t in ptrs}
         if not role or any(leaves(t) & steer for t in terms + values):
             return []
-        kinds = {fit_kind(found) for found in fits}
+        kinds = {self.direction(found) for found in fits}
         steps = {str(found.get("step")) for found in fits if found and "accumulate" in found}
         turning = {c for t in terms for c in leaves(t)} & (set(eff["moved"]) - set(parts))
         procs = eff["called"] | {n.split(".")[-1] for n in eff["ticks"]}
@@ -287,6 +287,16 @@ class Signer:
         use = {self.arg_use(t) for t in terms} - {NONE}
         use = use or {self.arg_use(v) for v in params} - {NONE}
         return [(role_text(role), "|".join(sorted(kinds)), "+".join(sorted(use)) or NONE, cell)]
+
+    def direction(self, found) -> str:
+        """A fitted action's kind; an accumulator's step sign appended (``+``, ``-``, ``±``)."""
+        kind = fit_kind(found)
+        if kind != "ACC":
+            return kind
+        f = self.form
+        step = f.expr(found["step"], {})
+        signs = [s for s, c in (("+", f.gt(step, 0)), ("-", f.lt(step, 0))) if f.feasible((c,))]
+        return kind + ("".join(signs) if len(signs) == 1 else "±" if signs else "0")
 
     # fields -----------------------------------------------------------------
     def field(self, rtype: str, name: str) -> dict:
@@ -379,7 +389,7 @@ class Item:
             shared,
             key,
         )
-        self.core = {(coarse(r), k) for r, k, _ in sig}
+        self.match = frozenset(e for e in sig if e[0] != NONE)
 
 
 def codec_keys(rt) -> dict:
@@ -414,19 +424,26 @@ def items(names_=("goattracker2", "defmon", "sidwizard")) -> list:
 
 
 def classify(x: Item, y: Item) -> tuple:
-    """``(rank, overlap)``: 0 identical, 1 differing only in argument use, 2 partial, 3 none."""
-    if x.sig == y.sig:
-        return 0, len(x.sig)
-    if {e[:2] for e in x.sig} == {e[:2] for e in y.sig}:
-        return 1, len(x.sig)
-    common = len(x.core & y.core)
-    return (2, common / len(x.core | y.core)) if common else (3, 0)
+    """``(rank, overlap)``: 0 identical, 1 differing only in argument use, 2 partial, 3 none.
+
+    Entries without a role (tests) are not matched; partial counts the entries of either
+    side with a counterpart of the same kind over an intersecting quantity.
+    """
+    if x.match == y.match:
+        return 0, len(x.match)
+    if {e[:2] for e in x.match} == {e[:2] for e in y.match}:
+        return 1, len(x.match)
+    pairs = [
+        (a, b) for a in x.match for b in y.match if a[1] == b[1] and coarse(a[0]) & coarse(b[0])
+    ]
+    common = len({a for a, _ in pairs}) + len({b for _, b in pairs})
+    return (2, common / (len(x.match) + len(y.match))) if common else (3, 0)
 
 
 def best(x: Item, pool: list) -> tuple:
     """``(rank, matches)``: the best class of ``pool`` against ``x`` and its members."""
-    scored = [(classify(x, y), y) for y in pool if y is not x]
-    if not x.sig or not scored:
+    scored = [(classify(x, y), y) for y in pool if y is not x and y.match]
+    if not x.match or not scored:
         return 3, []
     top = min(scored, key=lambda s: (s[0][0], -s[0][1]))[0]
     return top[0], [y for s, y in scored if s == top] if top[0] < 3 else []
@@ -452,15 +469,20 @@ def diff_reason(x: Item, y: Item) -> str:
 
 
 def notes(x: Item) -> list:
-    """Reasons carried by the entries themselves: sticky overrides and modes for later rows."""
+    """Reasons carried by the entries: sticky overrides and modes for later rows.
+
+    A sticky override is an arg load into a cell that a setup proc folds into another loaded
+    cell, where that proc also runs outside the setup.
+    """
     s = signer(x.pr)
     out = [f"a mode for later notes ({e[3]})" for e in x.entries if e[1] == "MODE"]
-    loads = [e for e in x.entries if e[1] == "LOAD" and len(e) > 3]
-    for a in loads:
-        for b in loads:
-            if a is not b and b[3] in s.flow.edges.get(a[3], {}) and coarse(a[0]) & coarse(b[0]):
-                out.append(f"sticky override {a[3]} (re-applied to {b[3]})")
-    return out
+    loads = {e[3] for e in x.entries if e[1] == "LOAD"}
+    later = s.comp.reapplied()
+    for path, cell, val, _ in s.flow.log:
+        for a in loads & set(val.rel) - {cell}:
+            if cell in loads and path.split(".")[-1] in later:
+                out.append(f"sticky override {a} (re-applied to {cell} by {path.split('.')[-1]})")
+    return list(dict.fromkeys(out))
 
 
 def note_row(x: Item, y: Item) -> str | None:
@@ -478,7 +500,7 @@ def note_row(x: Item, y: Item) -> str | None:
         va = tests_a.get(key, f.truth(f.expr(key[1], a["start"])))
         vb = tests_b.get(key, f.truth(f.expr(key[1], b["start"])))
         if va != vb and can_differ(f, conds, va, vb):
-            return f"note row: {key[0]} test `{key[1]}` is {src(va)} vs {src(vb)}"
+            return f"note row: {key[0]} test `{key[1]}` differs"
     return None
 
 
@@ -490,8 +512,12 @@ def verdict(x: Item, pool: list) -> tuple:
     """
     if not x.sig:
         return [], "no effect", "no register, timing or table effect"
+    if not x.match:
+        return [], "different", "read only by tests"
     rank, matches = best(x, [y for y in pool if y.pr != x.pr])
-    same = [y for y in pool if y.pr == x.pr and y is not x and y.key and x.key and y.sig == x.sig]
+    same = [
+        y for y in pool if y.pr == x.pr and y is not x and y.key and x.key and y.match == x.match
+    ]
     reasons = [r for y in same if (r := note_row(x, y))]
     if matches and rank in (1, 2):
         reasons.append(diff_reason(x, matches[0]))

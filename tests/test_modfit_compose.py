@@ -154,7 +154,7 @@ def items_fixture():
     return pool(
         {
             "goattracker2": {"slideup", "slidedown", "ad", "sr", "mark"},
-            "sidwizard": {"pitchup", "attack", "iattack"},
+            "sidwizard": {"pitchup", "pitchdown", "attack", "iattack"},
         }
     )
 
@@ -165,8 +165,8 @@ def find(items, pr, label):
 
 def test_pitchup_is_slideup_decoded_differently_without_the_vibrato_reset(items):
     matches, v, reason = verdict(find(items, "sidwizard", "!pitchup"), items)
-    assert v == "partial" and [m.label for m in matches] == ["!slideup", "!slidedown"]
-    assert "ACC note-relative vs ref speedtab" in reason
+    assert v == "partial" and [m.label for m in matches] == ["!slideup"]
+    assert "ACC+ note-relative vs ref speedtab" in reason
     assert "only goattracker2: FREQ RESET" in reason
 
 
@@ -181,6 +181,11 @@ def test_iattack_differs_from_attack_on_note_rows(items):
     assert [m.label for m in matches] == ["!attack", "!ad"] and v == "partial"
     assert reason.startswith("note row: procs.note_setup test")
     assert "pifx != 0" in reason
+
+
+def test_pitchdown_matches_slidedown(items):
+    matches, v, _ = verdict(find(items, "sidwizard", "!pitchdown"), items)
+    assert v == "partial" and [m.label for m in matches] == ["!slidedown"]
 
 
 def test_no_effect(items):
