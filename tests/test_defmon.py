@@ -67,46 +67,36 @@ def body(mem, addr, *data):
     return addr
 
 
-def test_row_actions_every_column():
+def test_row_fields_every_column():
     mem = build_mem()
     addr = body(
         mem, 0x4000, 0xFE, 0x41, 0x01, 0x0A, 0xF8, 0x05, 0x83, 0x4C,
         0xF8, 0x91, 0x9F, 0x2F, 0x07, 0x10, 0x81,
     )  # fmt: skip
-    assert dm.row_actions(mem, addr) == [
-        {
-            "set": {
-                "ctrl": 0x41,
-                "eor": 0x01,
-                "ad": 0x0A,
-                "sr": 0xF8,
-                "note": "(tbase + 5) & 0x7F",
-                "mode": 0x83,
-                "pw": 0x4C40,
-                "ps": 0x91,
-                "res": "(res & 0x0F) | 159 | rbit",
-                "fv": 0x2F,
-                "cp": 0x07,
-                "astep": 0x0110,
-                "sub": 0,
-            }
-        }
-    ]
+    assert dm.row_fields(mem, addr) == {
+        "wgh": 0x41,
+        "wgl": 0x01,
+        "ad": 0x0A,
+        "sr": 0xF8,
+        "tr": 0x05,
+        "af": 0x83,
+        "pw": 0x4C,
+        "ps": 0x91,
+        "re": 0x9F,
+        "fv": 0x2F,
+        "cp": 0x07,
+        "acid": 0x8110,
+    }
 
 
-def test_row_actions_variants():
+def test_row_fields_variants():
     mem = build_mem()
-    assert not dm.row_actions(mem, body(mem, 0x4100, 0x00, 0x00))
-    assert dm.row_actions(mem, body(mem, 0x4110, 0x08, 0x85, 0x40, 0x00)) == [
-        {"set": {"note": 5, "res": "res & rmask"}}
-    ]
-    assert dm.row_actions(mem, body(mem, 0x4120, 0x00, 0x48, 0x51, 0x34, 0x12)) == [
-        {"set": {"res": 0x51, "acc": 0x1234, "astep": 0}}
-    ]
-    assert dm.row_actions(mem, body(mem, 0x4130, 0x00, 0x08, 0x02, 0xC1)) == [
-        {"set": {"astep": 0x0102, "sub": 1}}
-    ]
-    assert dm.row_actions(mem, body(mem, 0x4140, 0x00, 0x80, 0x03)) == [{"set": {"ps": 3}}]
+    assert not dm.row_fields(mem, body(mem, 0x4100, 0x00, 0x00))
+    assert dm.row_fields(mem, body(mem, 0x4110, 0x08, 0x85, 0x40, 0x00)) == {"tr": 0x85, "re": 0}
+    assert dm.row_fields(mem, body(mem, 0x4120, 0x00, 0x48, 0x51, 0x34, 0x12)) == {
+        "re": 0x51,
+        "acid": 0x1234,
+    }
 
 
 def test_sidtab_records_follow_rows_and_jumps():
@@ -118,7 +108,7 @@ def test_sidtab_records_follow_rows_and_jumps():
     mem[dm.SIDTAB_LO + 10] = 5
     recs = dm.sidtab_records(mem, {9})
     assert set(recs) == {6, 9, 10}
-    assert recs[10] == {"dl": 2, "next": 6, "do": [{"set": {"ctrl": 0x11}}]}
+    assert recs[10] == {"dl": 2, "next": 6, "wgh": 0x11}
     assert recs[6]["dl"] == 0x80 and 7 not in recs
     assert dm.resolve_row(mem, 10) == 5
     with pytest.raises(dm.LiftError, match="no body"):
