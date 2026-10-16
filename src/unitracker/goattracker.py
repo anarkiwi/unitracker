@@ -92,7 +92,7 @@ def speed_records(table) -> dict:
 _INS_FIELDS = (
     ("ad", "attack_decay"),
     ("sr", "sustain_release"),
-    ("wave", "wave_ptr"),
+    ("ctrl", "wave_ptr"),
     ("pulse", "pulse_ptr"),
     ("filter", "filter_ptr"),
     ("speed", "vibrato_param"),
@@ -267,7 +267,7 @@ def lift(dec) -> dict:
         },
         "records": {
             "ins": instrument_records(song.instruments),
-            "wavetab": wave_records(song.wavetable),
+            "ctrltab": wave_records(song.wavetable),
             "pulsetab": pulse_records(song.pulsetable),
             "filttab": filter_records(song.filtertable),
             "speedtab": speed_records(song.speedtable),

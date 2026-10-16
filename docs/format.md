@@ -1,4 +1,4 @@
-# unitracker song format (v1.1)
+# unitracker song format (v1.2)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2 and defMON), and the generic player
@@ -13,23 +13,23 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.1
+unitracker: 1.2
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
 song:
   - def:
       ins:
-        i1: {ad: 1, sr: 136, wave: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: =68},
+        i1: {ad: 1, sr: 136, ctrl: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: =68},
             {ctrl: 65, note: +0}, end], pulse: [{pw: 1024}, [32, 16], [64, 240], [32, 16], {loop: 1}],
           filter: [{cut: 1024, resfilt: 193, mode: 16}, end], gt: 4, fw: 9}
         ...
-      wavetab:
-        w1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0},
+      ctrltab:
+        c1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0},
           {wait: 1, note: +5}, {wait: 1, note: +8}, {wait: 1, note: +0}, {loop: 4}]
       phrase:
         p1: [C2.i1*3, C4.i2, off, C3.i1, C2*3, C4.i2*3, C2.i1*3, C4.i2, off, C3.i1, G2, A#2, ...]
-        p2: [off*3, G4.i3!run:@w1*3, off*3, G4!run:@w1*3, ...]
+        p2: [off*3, G4.i3!run:@c1*3, off*3, G4!run:@c1*3, ...]
         p3: [off!tempo:16*48]
     play: [p1, p2, p3]
   - def:
@@ -44,7 +44,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.1` |
+| `unitracker` | `1.2` |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -103,9 +103,12 @@ the type's `first` index, so a name stands for whatever index the playroutine ne
   in both, which is exact because rows are deterministic.
 - **References.** A field that references another record holds a name. A program that
   only one instrument uses is written inline in that instrument instead
-  (`wave: [[233], [65], end]`).
+  (`ctrl: [{ctrl: 9, note: +0}, {ctrl: 65, note: +0}, end]`).
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
-  are defined in the first row: `vinit: {0: {...}, 1: {...}}`.
+  are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
+  with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
+  `pw`, `wgl`, `af`, `ps`; `ginit` writes `resfilt`, `fv`, `cp`), and an omitted field
+  is 0.
 
 ## Events
 
@@ -119,7 +122,7 @@ note[.instrument][!command:arg][*steps]
   or `on` (gate on). Names are real pitch: `C2` is 65.4 Hz in every song, whatever
   index the player's frequency table gives it (see `note_offset`).
 - `.i3` names the instrument. For defMON it names a sidTAB program.
-- `!run:@w1` is a named command with an argument: a number, `@name` for a command that
+- `!run:@c1` is a named command with an argument: a number, `@name` for a command that
   references a record, or `none`. Command names are the shared ones below.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
 
@@ -150,8 +153,11 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!slideup:@s`, `!slidedown:@s`, `!porta:@s`, `!vib:@s` | pitch effects |
 | `!mark:n` | a timing mark that changes no sound |
 
-A row or command a player can't express is rejected on reading, naming the key or
-command and the player. Player-specific leftovers keep their v1 form:
+A shared key means the same wherever it appears: in program rows, in initial-state
+records, and in instruments, where `ctrl` names the program run on the control register
+(GoatTracker's `ctrl: [...]` or `ctrl: c1`). A row or command a player can't express is
+rejected on reading, naming the key or command and the player; the writer refuses to
+write a value that would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
 - **GoatTracker 2:** pulse and filter sweep rows and wavetable command rows (list rows),
   and the instrument keys.
@@ -181,7 +187,7 @@ defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3, registe
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
 note_offset: 0                            # frequency-table index of format note 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
-commands: {8: {name: run, ref: wavetab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
+commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
 global: {cell: {width: 8, init: 0}}       # width omitted: unbounded
@@ -215,11 +221,11 @@ ghost:
 
 A template reads the row it runs for as `row.<field>`. `run: {record: r, index: i,
 field: f}` runs record type `r`'s template `f` for row `i` when that row exists.
-GoatTracker's wave rows, for example, decode their bytes in the template:
+GoatTracker's control-program rows, for example, decode their bytes in the template:
 
 ```yaml
-wavetab:
-  prefix: w
+ctrltab:
+  prefix: c
   none: 0
   chain: next
   fields: [w, n, next]
@@ -234,9 +240,10 @@ wavetab:
 A codec shape has a `when` over the raw fields, `keys` (`{key: {value, omit, abs}}`:
 the shared key's value from the raw fields, when to leave it out, and for `note` whether
 it is absolute), `raw` (each raw field from the written keys, with `has_<key>` and
-`note_abs` defined) and `keep` (raw fields written under their own names). The writer
-uses the first shape whose `when` holds; the reader accepts a written row only if
-encoding its inverse gives the row again. A command entry has a `name`, an optional
+`note_abs` defined) and `keep` (raw fields written under their own names; a kept reference is written
+as a name). The writer uses the first shape whose `when` holds and refuses a row that
+would not read back; a `map` row no shape fits is an error. The reader accepts a
+written row only if encoding its inverse gives the row again. A command entry has a `name`, an optional
 `ref`, and for a plain argument optional `when`, `arg` (raw to written) and `raw`
 (written to raw), checked the same way.
 

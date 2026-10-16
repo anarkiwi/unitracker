@@ -44,7 +44,7 @@ GT_NOTE = {"note": 24, "wave": 0x21, "freq": 0x1234}
     ],
 )
 def test_goattracker_wave_rows(row, expect):
-    player = run_row("goattracker2", "wavetab", row, GT_NOTE)
+    player = run_row("goattracker2", "ctrltab", row, GT_NOTE)
     ftab = songio.library("goattracker2")["tables"]["ftab"]
     for cell, value in expect.items():
         if cell == "ftab":

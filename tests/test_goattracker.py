@@ -62,7 +62,7 @@ def test_speed_records():
 
 def test_instruments_and_default_tempo():
     recs = gt.instrument_records([Instrument(attack_decay=0x12, wave_ptr=3, gateoff_timer=0x82)])
-    assert recs == {1: {"ad": 0x12, "wave": 3, "gt": 0x82}}
+    assert recs == {1: {"ad": 0x12, "ctrl": 3, "gt": 0x82}}
     song = Song(instruments=[Instrument() for _ in range(63)])
     assert gt._default_tempo(song) == 5  # pylint: disable=protected-access
     song.instruments[62] = Instrument(attack_decay=7)
