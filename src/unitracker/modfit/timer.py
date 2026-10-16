@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.compose import can_differ
-from unitracker.modfit.factor import flipped
+from unitracker.modfit.factor import cells as reads, flipped
 from unitracker.modfit.fit import src
 from unitracker.modfit.flow import NESTED, Liveness, Writes, action_lists, cells_of, direct_writes
 from unitracker.modfit.form import BITS, Form, atoms, lin, show
@@ -144,7 +144,7 @@ class Timers:
         for path in sorted(lists):
             for conds, _ in self.paths(path, frozenset({cell})):
                 for c in conds:
-                    if cell in atoms(c) and c not in tests and self.form.negate(c) not in tests:
+                    if cell in reads(c) and c not in tests and self.form.negate(c) not in tests:
                         tests.append(c)
         return Timer(
             cell,
@@ -318,9 +318,13 @@ class Orbit:
         """``(truth per tick, cycle start or None)`` of ``cond`` along the run."""
         values, loop, _ = self.run(p)
         if cond not in self.memo:
-            self.memo[cond] = self.fold(self.smt.cond(cond))
-        c = self.memo[cond]
-        return [z3.is_true(self.eval(c, v, p)) for v in values], loop
+            self.memo[cond] = (self.fold(self.smt.cond(cond)), {})
+        c, seen = self.memo[cond]
+        q = p if self.bound is not None else 0
+        for v in values:
+            if (v, q) not in seen:
+                seen[v, q] = z3.is_true(self.eval(c, v, p))
+        return [seen[v, q] for v in values], loop
 
 
 def runs(bits) -> list:
@@ -363,12 +367,15 @@ def signature(bits, loop: int) -> tuple:
 def affine(xs, ys) -> tuple | None:
     """``(a, b, k)`` with ``y == (a*x + b) // k`` at every point, the least ``k`` first.
 
-    For a fixed ``k`` the pairs of neighbouring points bound ``a``; each integer ``a`` in the
-    bound fixes the interval of ``b`` every point allows. A strip of width one around a line
-    has a slope of denominator at most the number of points, which bounds ``k``.
+    Unit steps of such a floor take at most two neighbouring values. For a fixed ``k`` the
+    pairs of neighbouring points bound ``a``, and each integer ``a`` fixes the interval of ``b``;
+    a strip of width one around a line has a slope of denominator at most the point count.
     """
     pts = sorted(zip(xs, ys))
     if len(pts) < 2:
+        return None
+    unit = {y1 - y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:]) if x1 - x0 == 1}
+    if unit and max(unit) - min(unit) > 1:
         return None
     for k in range(1, len(pts) + 1):
         lo, hi = -math.inf, math.inf
@@ -392,18 +399,26 @@ def form_text(fit: tuple, var: str = "p") -> str:
 
 
 def closed(points: dict) -> str:
-    """Closed forms over maximal runs of the sorted points, the rest as a table.
+    """Closed forms over maximal runs of the sorted points (found by galloping), else a table.
 
     A run is reported as ``(a*p + b)//k`` only when it has more points than the form's three
     coefficients; ``p in lo..hi:`` names its domain when there is more than one piece.
     """
     xs, pieces, i = sorted(points), [], 0
+
+    def fits(lo: int, hi: int) -> bool:
+        return hi - lo < 2 or affine(xs[lo:hi], [points[x] for x in xs[lo:hi]]) is not None
+
     while i < len(xs):
-        j = i + 1
-        while j < len(xs) and affine(xs[i : j + 1], [points[x] for x in xs[i : j + 1]]):
-            j += 1
-        pieces.append(xs[i:j])
-        i = j
+        good, step = i + 1, 1
+        while good + step <= len(xs) and fits(i, good + step):
+            good, step = good + step, 2 * step
+        bad = min(good + step, len(xs) + 1)
+        while bad - good > 1:
+            mid = (good + bad) // 2
+            good, bad = (mid, bad) if fits(i, mid) else (good, mid)
+        pieces.append(xs[i:good])
+        i = good
     out = []
     for piece in pieces:
         fit = affine(piece, [points[x] for x in piece]) if len(piece) > 3 else None
@@ -496,10 +511,12 @@ def vibrato_signatures(name: str, spec: dict, ticks: int) -> dict:
     return out
 
 
-def vibrato_lines(ticks: int = 600) -> list:
-    """Report lines of every orbit spec: its period groups with closed-form bounds."""
+def vibrato_lines(names, ticks: int = 600) -> list:
+    """Report lines of the orbit specs of ``names``: period groups with closed-form bounds."""
     lines = []
     for name, spec in specs()["orbits"].items():
+        if name not in names:
+            continue
         lines.append(f"== {name}:{spec['path']} {spec['cell']} by {spec['period']} = p")
         for kind, where, forms in grouped(vibrato_signatures(name, spec, ticks)):
             lines.append(f"   p in {where}: {kind} {' '.join(forms)}")

@@ -6,13 +6,15 @@ the step and the other conditions the gate. The rebuilt accumulator is proved eq
 """
 
 import dataclasses
+import functools
 
 import z3
 
+from unitracker.modfit.compose import leaves
 from unitracker.modfit.fit import Fitter, model_text, src
 from unitracker.modfit.flow import Writes
 from unitracker.modfit.invariant import Slicer, compared
-from unitracker.modfit.form import CONDS, atoms, lin, mk, show
+from unitracker.modfit.form import CONDS, lin, mk, show
 
 V, V0, S = "v", "v0", "s"
 
@@ -60,6 +62,18 @@ def walk_terms(t):
             yield from walk_terms(x)
 
 
+def conjuncts(c) -> list:
+    """The conjuncts of a condition."""
+    return (
+        [x for y in c[1:] for x in conjuncts(y)] if isinstance(c, tuple) and c[0] == "land" else [c]
+    )
+
+
+def cells(t) -> set:
+    """The cells ``t`` reads, table, record and field names apart."""
+    return {x for x in leaves(t) if not x.startswith(("idx:", "rec:", "fld:"))}
+
+
 def direct(t) -> set:
     """The cells ``t`` reads other than as a table or record index."""
     if isinstance(t, str):
@@ -86,11 +100,13 @@ def flipped(t, cell: str) -> bool:
 class Factorer:
     """Factorisation of guarded cases into the generic accumulator, over one ``Merge`` form."""
 
+    # pylint: disable=too-many-instance-attributes
+
     def __init__(self, form):
         self.form = form
         self.fitter = Fitter(form.pr, form)
         form.procs = dict(form.procs)
-        self.xs, self.chosen = set(), set()
+        self.xs, self.chosen, self.moved, self.others, self.memo = set(), set(), set(), None, {}
         self.writes = Writes(form.pr)
         self.slicer = Slicer(form.pr, self.writes, form.procs)
         for name in (V, V0, S):
@@ -103,10 +119,13 @@ class Factorer:
 
     def paths(self, actions, cell: str, extra=()) -> list:
         """The paths of ``actions`` cut to what can affect ``cell`` and ``extra``, pairs fused."""
-        parts = self.parts(cell) | set(extra)
-        sliced, _ = self.slicer.seq(actions, parts, parts)
-        paths = self.form.paths(sliced)
-        return self.form.fused(paths) if cell in self.form.pair else paths
+        key = (id(actions), cell, frozenset(extra))
+        if key not in self.memo:
+            parts = self.parts(cell) | set(extra)
+            sliced, _ = self.slicer.seq(actions, parts, parts)
+            paths = self.form.paths(sliced)
+            self.memo[key] = (actions, self.form.fused(paths) if cell in self.form.pair else paths)
+        return self.memo[key][1]
 
     def unit(self, actions, cell: str, assume=()) -> list:
         """``factor`` of ``cell`` over an action list cut to it, every cell it writes split on.
@@ -115,15 +134,18 @@ class Factorer:
         is seen.
         """
         moved = self.writes.of(actions)
-        out = self.factor(self.paths(actions, cell), cell, moved, assume)
+        others = functools.partial(self.paths, actions)
+        out = self.factor(self.paths(actions, cell), cell, moved, assume, others)
         read = set().union(*(direct(g) for x in out for g in (*x.gate, x.step or 0)))
         extra = (read & moved) - self.parts(cell)
-        return self.factor(self.paths(actions, cell, extra), cell, moved, assume) if extra else out
+        if not extra:
+            return out
+        return self.factor(self.paths(actions, cell, extra), cell, moved, assume, others)
 
     def split(self, t, watched: set, conds) -> list:
         """``[(conds, value)]`` of ``t`` split at each bracket reading ``watched``."""
         f = self.form
-        c = next((b for b in self.splits(t) if atoms(b) & watched or b in self.chosen), None)
+        c = next((b for b in self.splits(t) if cells(b) & watched or b in self.chosen), None)
         if c is None:
             return [(conds, t)]
         out = []
@@ -149,27 +171,27 @@ class Factorer:
     def splits(self, t):
         """The brackets of ``t``; ``chosen`` holds the ``ite`` tests whose branches read x."""
         self.chosen = {
-            u[1] for u in walk_terms(t) if u[0] == "ite" and (atoms(u[2]) | atoms(u[3])) & self.xs
+            u[1] for u in walk_terms(t) if u[0] == "ite" and (cells(u[2]) | cells(u[3])) & self.xs
         }
         return brackets(t)
 
     def leaves(self, paths, cell: str, moved: set) -> dict:
-        """``{gate: [(hit conds, value, final state)]}``: the cases of ``cell`` by gate."""
+        """``{gate: [(hit conds, value, final state, conds)]}``: the cases of ``cell`` by gate.
+
+        Each test is simplified on its own, so equal tests group alike; values under the path.
+        """
         xs, groups = self.parts(cell), {}
         self.xs = xs
         for conds, final in paths:
-            ordered = [c for c in conds if not atoms(c) & xs] + [c for c in conds if atoms(c) & xs]
-            conds = ()
-            for c in ordered:
-                c = self.simplify(c, conds)
-                conds += () if c is True else (c,)
+            simple = (self.simplify(c, ()) for c in conds)
+            conds = tuple(dict.fromkeys(x for c in simple for x in conjuncts(c) if x is not True))
             if False in conds:
                 continue
             value = self.simplify(final.get(cell, cell), conds)
             for cs, value in self.split(value, xs | moved, conds):
-                gate = frozenset(c for c in cs if not atoms(c) & xs)
-                dyn = tuple(c for c in cs if atoms(c) & xs)
-                groups.setdefault(gate, []).append((dyn, value, final))
+                gate = frozenset(c for c in cs if not cells(c) & xs)
+                dyn = tuple(c for c in cs if cells(c) & xs)
+                groups.setdefault(gate, []).append((dyn, value, final, cs))
         return groups
 
     def delta(self, cell: str, value):
@@ -184,23 +206,24 @@ class Factorer:
         if lin(inner)[1].get(cell) != 1:
             return None
         d = f.sub(inner, cell)
-        if atoms(d) & self.parts(cell):
+        if cells(d) & self.parts(cell):
             return None
         if w and f.rng(f.modular(d, 1 << w))[0] >= 1 << (w - 1):
             return f.sub(f.modular(d, 1 << w), 1 << w)
         return d
 
-    def factor(self, paths, cell: str, moved, assume=()) -> list:
+    def factor(self, paths, cell: str, moved, assume=(), others=None) -> list:
         """``[Factor]`` per gate group of ``cell``'s changed cases; ``moved`` cells are split on.
 
         Groups whose gates differ in one test of bound cells, with the same hit and respond, are
         one group whose step selects on that test.
         """
         moved = set(moved) - self.parts(cell)
+        self.moved, self.others = moved, others
         groups = {
             gate: cases
             for gate, cases in self.leaves(paths, cell, moved).items()
-            if any(v != cell for _, v, _ in cases)
+            if any(c[1] != cell for c in cases)
         }
         out = {
             g: self.group(paths, cell, tuple(sorted(g, key=show)), c, assume)
@@ -233,7 +256,7 @@ class Factorer:
         if len(a - b) != 1 or len(b - a) != 1:
             return None
         (c,), (d,) = a - b, b - a
-        if self.form.relation(c, d) != "complement" or direct(c) & fa.evolving:
+        if self.form.relation(c, d) != "complement" or direct(c) & self.moved:
             return None
         step = self.form.ite(c, fa.step, fb.step)
         joined = dataclasses.replace(fa, gate=tuple(sorted(a & b, key=show)), step=step)
@@ -243,7 +266,7 @@ class Factorer:
 
     def choose(self, cell: str, cases) -> tuple:
         """``(step, stepped value)``: the change shared by most cases, nonzero before zero."""
-        steps = [d for _, v, _ in cases if (d := self.delta(cell, v)) is not None]
+        steps = [d for _, v, *_ in cases if (d := self.delta(cell, v)) is not None]
         rank = {s: (-steps.count(s), s == 0, show(s)) for s in steps}
         step = min(rank, key=rank.get) if steps else 0
         return step, self.form.wrap(cell, self.form.add(cell, step))
@@ -253,11 +276,12 @@ class Factorer:
         # pylint: disable=too-many-arguments,too-many-positional-arguments
         xs = self.parts(cell)
         step, v = self.choose(cell, cases)
-        hits = [(dyn, u, fin) for dyn, u, fin in cases if u != v]
+        hits = [(dyn, u, fin) for dyn, u, fin, _ in cases if u != v]
         out = Factor(gate, step)
-        out.evolving = {c for _, u, fin in cases if u == v for c, t in fin.items() if t != c} - xs
         hit = self.form.junction("lor", [self.form.junction("land", list(d)) for d, _, _ in hits])
-        reads = any(atoms(u) & xs for _, u, _ in hits)
+        read = (direct(hit) | set().union(*(direct(u) for _, u, _ in hits))) - xs
+        out.evolving = self.evolving(read & self.moved, [c for c in cases if c[1] == v])
+        reads = any(cells(u) & xs for _, u, _ in hits)
         if reads and len(hits) == len(cases) or any(not d for d, _, _ in hits) and len(cases) > 1:
             out.status = "step reads x"
         elif direct(hit) - xs & out.evolving:
@@ -268,6 +292,25 @@ class Factorer:
             out.texts = self.texts(cell, step, gate, hits)
             out.hit, out.respond, out.kinds = (out.texts[k] for k in ("hit", "respond", "kinds"))
             out.status = self.prove(paths, cell, gate, assume, out.texts)
+        return out
+
+    def evolving(self, candidates: set, steady: list) -> set:
+        """The ``candidates`` some case changes while ``cell`` steps (the ``steady`` leaves)."""
+        out = set()
+        for m in candidates:
+            for _, _, final, conds in steady:
+                if m in final:
+                    changed = final[m] != m
+                elif self.others is not None:
+                    changed = any(
+                        st.get(m, m) != m and self.form.feasible((*conds, *cs))
+                        for cs, st in self.others(m)
+                    )
+                else:
+                    changed = True
+                if changed:
+                    out.add(m)
+                    break
         return out
 
     def views(self, cell: str, step, t) -> str:
@@ -317,7 +360,7 @@ class Factorer:
         f, xs = self.form, self.parts(cell)
         if u == cell:
             return "hold"
-        if not atoms(u) & xs:
+        if not cells(u) & xs:
             bounds = {b for c in dyn if (b := self.bound(c, cell)) is not None}
             if bounds & {f.add(u, k) for k in (-1, 0, 1)}:
                 return "clamp"
@@ -375,9 +418,13 @@ def keyword_factors(comp, code: int, when) -> list:
     eff = comp.compose(code, when, "plain", fits=False)
     fz = factorer(comp.form)
     out = []
+
+    @functools.lru_cache(maxsize=None)
+    def others(cell):
+        return comp.tick_paths(cell, eff["chosen"], eff["conds"], eff["begin"])
+
     for cell in sorted(fused_moved(comp.form, eff["moved"])):
-        paths = comp.tick_paths(cell, eff["chosen"], eff["conds"], eff["begin"])
-        out += [(cell, x) for x in fz.factor(paths, cell, eff["moved"])]
+        out += [(cell, x) for x in fz.factor(others(cell), cell, eff["moved"], (), others)]
     return out
 
 
@@ -389,3 +436,34 @@ def factorer(form) -> Factorer:
     if id(form) not in FACTORERS:
         FACTORERS[id(form)] = (form, Factorer(form))
     return FACTORERS[id(form)][1]
+
+
+def lookups(t):
+    """``(kind, name, index)`` of every table, record and field read in ``t``."""
+    for u in walk_terms(t):
+        if u[0] in ("idx", "rec"):
+            yield u[0], u[1], u[2]
+        elif u[0] == "fld":
+            rec = u[2]
+            yield "fld", f"{rec[1]}.{u[1]}" if isinstance(rec, tuple) else f"row.{u[1]}", rec
+
+
+def basis(step, notes: set, arg: str = "arg") -> str:
+    """How a step is made: ``constant``, ``note-relative`` and ``decoded`` reads, or cells.
+
+    A table read whose index reads a note cell is note-relative; other tables, record fields
+    and the keyword argument decode the step; with neither, the step is the cells it reads.
+    """
+    if isinstance(step, int):
+        return "constant"
+    found = list(lookups(step))
+    relative = {n for k, n, i in found if k == "idx" and cells(i) & notes}
+    decoded = {n for k, n, _ in found if k != "rec"} - relative | ({arg} & cells(step))
+    parts = [
+        f"{k} {', '.join(sorted(v))}"
+        for k, v in (("note-relative", relative), ("decoded", decoded))
+        if v
+    ]
+    return "; ".join(parts) or "cells " + ", ".join(
+        sorted(a for a in direct(step) if isinstance(a, str))
+    )
