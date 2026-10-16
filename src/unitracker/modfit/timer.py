@@ -364,6 +364,15 @@ def signature(bits, loop: int) -> tuple:
     return "drift", lengths
 
 
+def slopes(pts, k: int) -> tuple:
+    """``(lo, hi)``: the integer ``a`` neighbouring points allow for ``(a*x + b) // k``."""
+    lo, hi = -math.inf, math.inf
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        dx, dy = x1 - x0, k * (y1 - y0)
+        lo, hi = max(lo, math.ceil((dy - k + 1) / dx)), min(hi, math.floor((dy + k - 1) / dx))
+    return lo, hi
+
+
 def affine(xs, ys) -> tuple | None:
     """``(a, b, k)`` with ``y == (a*x + b) // k`` at every point, the least ``k`` first.
 
@@ -378,10 +387,7 @@ def affine(xs, ys) -> tuple | None:
     if unit and max(unit) - min(unit) > 1:
         return None
     for k in range(1, len(pts) + 1):
-        lo, hi = -math.inf, math.inf
-        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-            dx, dy = x1 - x0, k * (y1 - y0)
-            lo, hi = max(lo, math.ceil((dy - k + 1) / dx)), min(hi, math.floor((dy + k - 1) / dx))
+        lo, hi = slopes(pts, k)
         for a in range(int(lo), int(hi) + 1) if lo <= hi else ():
             b_lo = max(k * y - a * x for x, y in pts)
             b_hi = min(k * y - a * x + k - 1 for x, y in pts)
