@@ -117,20 +117,24 @@ class Run:
     error: str = ""
 
 
+def record_data(song: dict, rtypes: dict) -> dict:
+    """``{record type: Rows}`` of a song, every record type present."""
+    data = {
+        name: Rows(rows, defaults(rtypes.get(name) or {}))
+        for name, rows in (song.get("records") or {}).items()
+    }
+    for name, rtype in rtypes.items():
+        data.setdefault(name, Rows({}, defaults(rtype)))
+    return data
+
+
 class Stepper:
     """Exact per-tick ops of one sweep spec's action list over a song's records."""
 
     def __init__(self, song: dict, spec: dict):
         pr = dict(song["playroutine"])
         pr["tables"] = {**(pr.get("tables") or {}), **(song.get("tables") or {})}
-        rtypes = pr.get("record_types") or {}
-        data = {
-            name: Rows(rows, defaults(rtypes.get(name) or {}))
-            for name, rows in (song.get("records") or {}).items()
-        }
-        for name, rtype in rtypes.items():
-            data.setdefault(name, Rows({}, defaults(rtype)))
-        self.form = Programs(pr, data)
+        self.form = Programs(pr, record_data(song, pr.get("record_types") or {}))
         self.spec, self.cell = spec, spec["cell"]
         self.parts = (
             set(self.form.pair[self.cell][:2]) if self.cell in self.form.pair else {self.cell}
