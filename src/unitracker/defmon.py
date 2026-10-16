@@ -5,6 +5,7 @@ pydefmon's DefmonPlayer and tables and state are read from that memory. Song tim
 comes from simulating the replay's arranger and pattern counters.
 """
 
+from fractions import Fraction
 from importlib import resources
 
 import yaml
@@ -75,6 +76,7 @@ ANCHORS = (
     ),
 )
 
+RATE_LO, RATE_HI = 0x1578, 0x1614
 # Replay tables: (name, address, length).
 TABLES = (
     ("note_lo", 0x159C, 256),
@@ -134,8 +136,67 @@ def _word(mem, lo, hi):
     return mem[lo] | (mem[hi] << 8)
 
 
+def _note(tr: int) -> dict:
+    """A TR column (or a latched note) as a relative or absolute note."""
+    if tr & 0x80:
+        return {"noteabs": tr & 0x7F}
+    return {"note": tr if tr < 0x40 else tr - 0x80}
+
+
+def rate(mem, mode: int) -> int:
+    """The slide rate LUT entry a slide mode ($80-$FF) indexes."""
+    k = (mode & 0x3F) << 1
+    return mem[RATE_LO + k] | (mem[RATE_HI + k] << 8)
+
+
+def bend(mem, mode: int):
+    """The bend lane value for a slide mode: off, a live semitone step, or a slide spec."""
+    if mode == 0:
+        return "off"
+    if mode < 0x80:
+        return {"live": f"semi({mode})"}
+    step = rate(mem, mode)
+    return {"step": -step if mode & 0x40 else step}
+
+
+def sweep(ps: int) -> dict:
+    """The pulse sweep for a PS byte: bit 7 adds, otherwise subtracts with the pitch carry;
+    the $0F high-byte ceiling and the zero floor pin the width and reverse it."""
+    depth = ps & 0x7F
+    return {
+        "up": depth,
+        "down": {"step": -(depth + 1), "carry_from": "freq"},
+        "dir": "up" if ps & 0x80 else "down",
+        "lo": 0,
+        "at_lo": {"clamp": 1, "reverse": 1},
+        "hi": 0x0FFF,
+        "at_hi": {"clamp": 0x0FF8, "reverse": 1},
+    }
+
+
+def pulse(width, ps):
+    """The pw lane value for a width set and/or a PS byte (either may be None)."""
+    if ps is None:
+        return width
+    if ps == 0:
+        return "off" if width is None else {"from": width}
+    spec = sweep(ps)
+    return spec if width is None else {"from": width, **spec}
+
+
+def acid(word: int, floor: int):
+    """The cut lane spec for an ACID command: a slide, or an absolute reset that keeps the
+    slide direction with a zero step (the replay's CLC/SBC still subtracts 1)."""
+    spec = {"width": 8, "hi": Fraction(0x7FFF, 256), "at_hi": {"clamp": f"{floor} + v % 1"}}
+    if word & 0x8000:
+        if word & 0x4000:
+            return {"step": Fraction(-((word & 0x3FFF) + 1), 256), **spec}
+        return {"step": Fraction(word & 0x7FFF, 256), **spec}
+    return {"from": Fraction(word, 256), "up": 0, "down": Fraction(-1, 256), **spec}
+
+
 def voice_init(mem) -> dict:
-    """Each voice's state as init leaves it, as ``vinit`` records."""
+    """Each voice's state as init leaves it, as ``voiceinit`` records."""
     out = {}
     for v, off in enumerate(VOICE_OFFSETS):
         if (mem[0x101F + off], mem[0x1020 + off], mem[0x1021 + off]) != (
@@ -144,26 +205,77 @@ def voice_init(mem) -> dict:
             0xFF ^ (1 << v),
         ):
             raise LiftError(f"voice {v} detune/routing constants are not the standard ones")
-        rec = {}
+        raw = {}
         for cell, lo, hi in VOICE_STATE:
-            rec[cell] = mem[lo + off] if hi is None else _word(mem, lo + off, hi + off)
-        out[v] = rec
+            raw[cell] = mem[lo + off] if hi is None else _word(mem, lo + off, hi + off)
+        out[v] = _voice_record(mem, raw, v)
     return out
 
 
-def global_init(mem) -> dict:
-    """The filter, volume and ACID state as init leaves it, as the ``ginit`` record."""
+def _voice_record(mem, raw, v) -> dict:
+    """One voice's init state in shared keys."""
+    if raw["pw"] >= 0x1000:
+        raise LiftError(f"voice {v}: pulse width cell ${raw['pw']:04X} keeps unused bits")
+    rec = {}
+    pw = pulse(raw["pw"] or None, raw["ps"] or None)
+    if pw is not None:
+        rec["pw"] = pw
+    freq = raw["flo"] | raw["fhi"] << 8
+    for key, value in (("freq", freq), ("ad", raw["ad"]), ("sr", raw["sr"])):
+        if value:
+            rec[key] = value
+    for key, cell in (("ctrl", "ctrl"), ("ctrlxor", "eor")):
+        if raw[cell]:
+            rec[key] = raw[cell]
+    init_bend = _init_bend(mem, raw["mode"], raw["sacc"], v)
+    if init_bend is not None:
+        rec["bend"] = init_bend
+    if raw["note"]:
+        rec["note"] = raw["note"]
+    if raw["tbase"]:
+        rec["notebase"] = raw["tbase"]
+    for layer, row, cnt in ((1, "rowA", "cntA"), (2, "rowB", "cntB")):
+        if raw[cnt] < 0x80:
+            rec[f"layer{layer}"] = raw[row]
+            if raw[cnt]:
+                rec[f"layer{layer}wait"] = raw[cnt]
+    return rec
+
+
+def _init_bend(mem, mode, acc, v):
+    """The bend lane value for a voice's slide mode and stored slide, or None."""
+    if mode >= 0x80:
+        return {"from": acc, **bend(mem, mode)} if acc else bend(mem, mode)
+    if mode:
+        if acc:
+            raise LiftError(f"voice {v}: a semitone-step bend over a stored slide")
+        return bend(mem, mode)
+    return {"from": acc} if acc else None
+
+
+def global_init(mem, floor) -> dict:
+    """The filter, volume and ACID state as init leaves it, as the ``globalinit`` record."""
     ops = {mem[0x10B8], mem[0x10BF]}
     if len(ops) != 1 or not ops <= {0xE9, 0x69}:
         raise LiftError("ACID opcodes are not a matching SBC/ADC pair")
-    return {
-        "res": mem[0x10AA],
-        "fv": mem[0x10AF],
-        "cp": mem[0x10CA],
-        "acc": _word(mem, 0x10B6, 0x10BE),
-        "astep": _word(mem, 0x10B9, 0x10C0),
-        "sub": int(mem[0x10B8] == 0xE9),
-    }
+    acc, astep = _word(mem, 0x10B6, 0x10BE), _word(mem, 0x10B9, 0x10C0)
+    if acc > 0x7FFF:
+        raise LiftError(f"ACID accumulator ${acc:04X} starts past the saturation bound")
+    cut = acid(0, floor)
+    cut.update(
+        {
+            "from": Fraction(acc, 256),
+            "up": Fraction(astep, 256),
+            "down": Fraction(-(astep + 1), 256),
+            "dir": "down" if mem[0x10B8] == 0xE9 else "up",
+        }
+    )
+    rec = {"modevol": mem[0x10AF] | 0x0F, "cut": cut}
+    if mem[0x10AA]:
+        rec["resfilt"] = mem[0x10AA]
+    if mem[0x10CA]:
+        rec["cutbias"] = mem[0x10CA]
+    return rec
 
 
 def model_constants(mem) -> dict:
@@ -208,8 +320,36 @@ def row_fields(mem, addr) -> dict:
     return out
 
 
-def sidtab_records(mem, seeds) -> dict:
-    """Records for every sidTAB row a cascade can fetch from ``seeds``."""
+def program_row(mem, fields: dict, floor: int) -> dict:
+    """A sidTAB row's columns in shared keys, in the replay's bitmap-walk order."""
+    row = {}
+    for key, col in (("ctrl", "wgh"), ("ctrlxor", "wgl"), ("ad", "ad"), ("sr", "sr")):
+        if col in fields:
+            row[key] = fields[col]
+    if "tr" in fields:
+        row.update(_note(fields["tr"]))
+    if "af" in fields:
+        row["bend"] = bend(mem, fields["af"])
+    width = fields.get("pw")
+    if width is not None and width >= 0x10:
+        raise LiftError(f"PW column ${width:02X} keeps bits the SID does not use")
+    pw = pulse(None if width is None else width << 8, fields.get("ps"))
+    if pw is not None:
+        row["pw"] = pw
+    if "re" in fields:
+        res = fields["re"]
+        row["filtvoice" if res == 0 or res & 0x08 else "resfilt"] = res
+    if "fv" in fields:
+        row["modevol"] = fields["fv"] | 0x0F
+    if "cp" in fields:
+        row["cutbias"] = fields["cp"]
+    if "acid" in fields:
+        row["cut"] = acid(fields["acid"], floor)
+    return row
+
+
+def sidtab_records(mem, seeds, floor) -> dict:
+    """Program rows for every sidTAB row a cascade can fetch from ``seeds``."""
     out, todo = {}, sorted(set(seeds))
     while todo:
         row = todo.pop()
@@ -219,11 +359,15 @@ def sidtab_records(mem, seeds) -> dict:
         if not mem[SIDTAB_HI + eff]:
             raise LiftError(f"sidTAB row {row} resolves to row {eff}, which has no body")
         dl = mem[SIDTAB_DL + eff]
-        rec = {"dl": dl, "next": (eff + 1) & 0xFF}
-        rec.update(row_fields(mem, _word(mem, SIDTAB_LO + eff, SIDTAB_HI + eff)))
-        out[row] = rec
+        rec = program_row(mem, row_fields(mem, _word(mem, SIDTAB_LO + eff, SIDTAB_HI + eff)), floor)
         if dl < 0x80:
+            if dl:
+                rec["hold"] = dl + 1
+            rec["next"] = (eff + 1) & 0xFF
             todo.append(rec["next"])
+        else:
+            rec["next"] = -1
+        out[row] = rec
     return dict(sorted(out.items()))
 
 
@@ -290,7 +434,7 @@ def phrase_events(applied, length) -> list:
         if a is not None:
             event["instrument"] = a + 1
         if b is not None:
-            event["command"] = [1, b]
+            event["command"] = ["layer2", b]
         marks.append((tick, event))
     for i, (tick, event) in enumerate(marks):
         end = marks[i + 1][0] if i + 1 < len(marks) else length
@@ -359,10 +503,12 @@ def structure(mem, subtune):
     return tracks, phrases, seeds
 
 
-def _seeds(vinit, seeds) -> set:
+def _seeds(mem, seeds) -> set:
     """Pattern-armed rows plus each voice's initial rows whose counters run."""
-    for rec in vinit.values():
-        seeds.update(rec[r] for r, c in (("rowA", "cntA"), ("rowB", "cntB")) if rec[c] < 0x80)
+    for off in VOICE_OFFSETS:
+        for row, cnt in ((0x12EF, 0x12E0), (0x1382, 0x1373)):
+            if mem[cnt + off] < 0x80:
+                seeds.add(mem[row + off])
     return seeds
 
 
@@ -380,6 +526,7 @@ def lift(raw: bytes, subtune=None) -> dict:
     tracks, phrases, seeds = structure(mem, subtune)
     playroutine = load_playroutine()
     playroutine["constants"] = model_constants(mem)
+    floor = playroutine["constants"]["floor"]
     return {
         "unitracker": "ir",
         "hints": {"ticks_per_step": 1},
@@ -393,9 +540,9 @@ def lift(raw: bytes, subtune=None) -> dict:
         "tables": {name: list(mem[addr : addr + n]) for name, addr, n in TABLES},
         "playroutine": playroutine,
         "records": {
-            "vinit": vinit,
-            "ginit": {0: global_init(mem)},
-            "sidtab": sidtab_records(mem, _seeds(vinit, seeds)),
+            "voiceinit": vinit,
+            "globalinit": {0: global_init(mem, floor)},
+            "prog": sidtab_records(mem, _seeds(mem, seeds), floor),
         },
         "tracks": tracks,
         "phrases": phrases,

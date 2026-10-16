@@ -66,14 +66,17 @@ def _validate(node, text):
 class _Inline(ast.NodeTransformer):
     """Substitute function calls by their bodies, with arguments bound."""
 
-    def __init__(self, functions, depth=0):
+    def __init__(self, functions, depth=0, builtins=()):
         self.functions = functions
         self.depth = depth
+        self.builtins = builtins
 
     def visit_Call(self, node):  # pylint: disable=invalid-name
-        """Inline one call."""
+        """Inline one call; builtins stay calls."""
         node = self.generic_visit(node)
         name = node.func.id
+        if name in self.builtins:
+            return node
         if name not in self.functions:
             raise ExprError(f"unknown function {name!r}")
         args, body = self.functions[name]
@@ -83,7 +86,7 @@ class _Inline(ast.NodeTransformer):
             raise ExprError(f"function {name!r} recurses")
         bound = dict(zip(args, node.args))
         out = _Bind(bound).visit(ast.parse(ast.unparse(body), mode="eval").body)
-        return _Inline(self.functions, self.depth + 1).visit(out)
+        return _Inline(self.functions, self.depth + 1, self.builtins).visit(out)
 
 
 class _Bind(ast.NodeTransformer):
@@ -96,7 +99,12 @@ class _Bind(ast.NodeTransformer):
 
 
 class Resolver:
-    """Maps the names an expression uses to Python source for the generated code."""
+    """Maps the names an expression uses to Python source for the generated code.
+
+    Calls to names in ``builtins`` are not inlined; :meth:`builtin` emits them.
+    """
+
+    builtins: tuple = ()
 
     def __init__(self, functions=None):
         self.functions = {
@@ -120,10 +128,21 @@ class Resolver:
         """Source for ``row.field``, the current row in a record template."""
         raise ExprError(f"row.{field} is only defined in a record template")
 
+    def builtin(self, name: str, args: list) -> str:
+        """Source for a call to builtin ``name`` with argument nodes ``args``."""
+        raise ExprError(f"unknown function {name!r}")
+
+    def rewrite(self, tree):
+        """Hook to transform a parsed expression before functions are inlined."""
+        return tree
+
     def compile(self, text) -> str:
         """Python source for expression ``text``."""
-        tree = _Inline(self.functions).visit(parse(text))
+        tree = _Inline(self.functions, builtins=self.builtins).visit(self.rewrite(parse(text)))
         return self._emit(tree)
+
+    def _emit_Call(self, node):  # pylint: disable=invalid-name
+        return self.builtin(node.func.id, node.args)
 
     def _emit(self, node) -> str:
         return getattr(self, f"_emit_{type(node).__name__}")(node)

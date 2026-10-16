@@ -1,53 +1,79 @@
-"""The generic unitracker player: compiles a song's playroutine to Python and runs it."""
+"""The generic unitracker player: compiles a song's playroutine to Python and runs it.
 
+Effects run here, in :mod:`unitracker.spec` lanes; a playroutine only sequences them.
+"""
+
+import ast
+import json
 from collections.abc import Iterator
 
 import numpy as np
 from tqdm import tqdm
 
 from unitracker.canonical import CANONICAL_ORDER, REG_COUNT
-from unitracker.expr import ExprError, Resolver
+from unitracker.expr import ExprError, Resolver, parse
 from unitracker.records import record_types
+from unitracker.spec import Compiled, Lane, SpecError, scale_number, spec_key
+from unitracker.spec import parse as parse_spec
 
 IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
-PSEUDO = ("ev_kind", "ev_note", "ev_instr", "ev_cmd", "ev_arg", "at_phrase_start", "ended")
+PSEUDO = (
+    "ev_kind",
+    "ev_note",
+    "ev_instr",
+    "ev_cmd",
+    "ev_arg",
+    "ev_arg2",
+    "ev_argn",
+    "at_phrase_start",
+    "ended",
+)
+LANE_TESTS = ("running", "on", "hit")
+OFF = "off"
 
 
 class SongError(ValueError):
     """The song document is malformed or uses something the format does not define."""
 
 
-def _event_row(event) -> tuple[int, int, int, int, int]:
+def event_note(event) -> tuple[int, int]:
+    """``(kind, pitch)`` of an event's note: kind 0 empty, 1 note, 2 off, 3 on."""
     note = event.get("note")
     if isinstance(note, bool):
         note = "on" if note else "off"
     if isinstance(note, int):
-        kind, pitch = 1, note
-    elif note in NOTE_KINDS:
-        kind, pitch = NOTE_KINDS[note], 0
-    else:
-        raise SongError(f"bad note {note!r}")
-    cmd, arg = event.get("command") or (0, 0)
-    return kind, pitch, int(event.get("instrument") or 0), int(cmd), int(arg)
+        return 1, note
+    if note in NOTE_KINDS:
+        return NOTE_KINDS[note], 0
+    raise SongError(f"bad note {note!r}")
 
 
-def compile_phrase(events) -> np.ndarray:
-    """A phrase as an ``(steps, 5)`` array of (kind, note, instrument, cmd, arg)."""
-    rows = []
+def phrase_steps(events) -> list:
+    """A phrase's steps: each event, then ``steps - 1`` empty steps (None)."""
+    out = []
     for event in events:
         steps = int(event.get("steps", 1))
         if steps < 1:
             raise SongError(f"event steps must be >= 1: {event!r}")
-        rows.append(_event_row(event))
-        rows.extend([(0, 0, 0, 0, 0)] * (steps - 1))
-    if not rows:
+        out.append(event)
+        out.extend([None] * (steps - 1))
+    if not out:
         raise SongError("empty phrase")
-    return np.asarray(rows, dtype=np.int64)
+    return out
+
+
+def phrase_key(event) -> tuple:
+    """A hashable form of one step, for comparing phrases."""
+    if event is None:
+        return (0, 0, 0, None)
+    kind, pitch = event_note(event)
+    cmd = event.get("command")
+    return kind, pitch, int(event.get("instrument") or 0), json.dumps(cmd, default=str)
 
 
 class Cursor:
-    """One voice's position in its track."""
+    """One voice's position in its track; phrases are lists of int step rows."""
 
     def __init__(self, track, phrases):
         self.plays = []
@@ -55,11 +81,7 @@ class Cursor:
             if play["phrase"] not in phrases:
                 raise SongError(f"unknown phrase {play['phrase']!r}")
             self.plays.append(
-                (
-                    phrases[play["phrase"]],
-                    int(play.get("transpose", 0)),
-                    int(play.get("repeat", 1)),
-                )
+                (phrases[play["phrase"]], int(play.get("transpose", 0)), int(play.get("repeat", 1)))
             )
         if not self.plays:
             raise SongError("track has no plays")
@@ -71,12 +93,12 @@ class Cursor:
         self.step = 0
         self.ended = False
 
-    def fetch(self) -> tuple[int, int, int, int, int]:
-        """Read the next step: (kind, note + transpose, instrument, cmd, arg)."""
+    def fetch(self) -> tuple:
+        """The next step: (kind, note + transpose, instrument, cmd, arg, arg2, argn)."""
         if self.ended:
-            return 0, 0, 0, 0, 0
+            return (0,) * 7
         rows, transpose, _ = self.plays[self.index]
-        kind, note, instr, cmd, arg = (int(x) for x in rows[self.step])
+        row = rows[self.step]
         self.step += 1
         if self.step == len(rows):
             self.step = 0
@@ -90,7 +112,7 @@ class Cursor:
                     else:
                         self.index = self.loop
                 self.repeat = self.plays[self.index][2]
-        return kind, note + transpose if kind == 1 else note, instr, cmd, arg
+        return (row[0], row[1] + transpose if row[0] == 1 else row[1], *row[2:])
 
     @property
     def at_phrase_start(self) -> int:
@@ -109,6 +131,8 @@ def _cells(spec) -> dict:
 
 class _Scope(Resolver):
     """Name resolution for code running in global or voice scope."""
+
+    builtins = LANE_TESTS + ("has", "towards")
 
     def __init__(self, gen, voice: bool):
         super().__init__()
@@ -134,25 +158,120 @@ class _Scope(Resolver):
     def field(self, record, index, field):
         if record not in self.gen.records:
             raise ExprError(f"unknown record {record!r}")
-        default = self.gen.need_field(record, field)
-        return f"F[{(record, field)!r}].get({index}, {default})"
+        self.gen.need_field(record, field)
+        return f"F[{(record, field)!r}].get({index}, {self.gen.default(record, field)})"
 
     def row_field(self, field):
         record = self.gen.row_ctx
         if record is None:
             return super().row_field(field)
-        default = self.gen.need_field(record, field)
-        return f"F[{(record, field)!r}].get(_r, {default})"
+        self.gen.need_field(record, field)
+        return f"F[{(record, field)!r}].get(_r, {self.gen.default(record, field)})"
+
+    def builtin(self, name, args):
+        if len(args) != 1:
+            raise ExprError(f"{name} takes one argument")
+        arg = args[0]
+        if name == "towards":
+            return f"_towards({self._emit(arg)})"
+        if name == "has":
+            record, index, field = self._place(arg)
+            self.gen.need_field(record, field)
+            return f"int(({index}) in P[{(record, field)!r}])"
+        if not isinstance(arg, ast.Name):
+            raise ExprError(f"{name} takes a lane name")
+        lane = self.gen.lane_ref(arg.id, self.voice)
+        attr = {"running": "driver == 2", "on": "driver != 0", "hit": "hit"}[name]
+        return f"int({lane}.{attr})"
+
+    def _place(self, node):
+        """``(record, index source, field)`` of ``row.field`` or ``record[index].field``."""
+        if not isinstance(node, ast.Attribute):
+            raise ExprError("has() takes row.field or record[index].field")
+        sub = node.value
+        if isinstance(sub, ast.Name):
+            if self.gen.row_ctx is None:
+                raise ExprError("row.field is only defined in a record template")
+            return self.gen.row_ctx, "_r", node.attr
+        if sub.value.id not in self.gen.records:
+            raise ExprError(f"unknown record {sub.value.id!r}")
+        return sub.value.id, self._emit(sub.slice), node.attr
+
+
+class _SpecScope(_Scope):
+    """Expressions inside specs and live values: ``semi``, ``note`` and ``v`` resolve."""
+
+    def __init__(self, gen, voice):
+        super().__init__(gen, voice)
+        self.functions = dict(self.functions)
+        pitch = gen.playroutine.get("pitch") or {}
+        if "semi" in pitch:
+            semi = pitch["semi"]
+            self.functions["semi"] = (list(semi.get("args", [])), parse(semi["expr"]))
+        self.note = parse(pitch["note"]) if "note" in pitch else None
+
+    def rewrite(self, tree):
+        scope = self
+
+        class _Names(ast.NodeTransformer):
+            def visit_Name(self, node):  # pylint: disable=invalid-name
+                """Bind the spec names."""
+                if node.id == "semi":
+                    return ast.Call(ast.Name("semi", ast.Load()), [ast.Constant(0)], [])
+                if node.id == "note":
+                    if scope.note is None:
+                        raise ExprError("the playroutine defines no pitch.note")
+                    return scope.note
+                return node
+
+            def visit_Call(self, node):  # pylint: disable=invalid-name
+                """Leave the called name alone."""
+                node.args = [self.visit(a) for a in node.args]
+                return node
+
+        return _Names().visit(tree)
+
+    def name(self, name):
+        if name == "v":
+            return "_x"
+        return super().name(name)
 
 
 def _tg(table, index):
     return table[index] if 0 <= index < len(table) else 0
 
 
+class _Obj:
+    """A record value a lane can take: set, off, live or a spec."""
+
+    # pylint: disable=too-few-public-methods
+
+    __slots__ = ("kind", "value")
+
+    def __init__(self, kind, value):
+        self.kind = kind
+        self.value = value
+
+
+def _apply(lane, obj, cells, by, once):
+    """Give ``lane`` the value ``obj``; the lane's new value, or None when unchanged."""
+    if obj.kind == "set":
+        return lane.set(obj.value)
+    if obj.kind == "off":
+        lane.stop()
+        return None
+    if obj.kind == "live":
+        lane.set_live(obj.value)
+        return None
+    if once:
+        return lane.once(obj.value, cells)
+    return lane.start(obj.value, by)
+
+
 class _Codegen:
     """Generates one Python module of functions from a song's playroutine."""
 
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes,too-many-public-methods
 
     def __init__(self, song):
         playroutine = song["playroutine"]
@@ -178,9 +297,16 @@ class _Codegen:
         self.gindex = {n: i for i, n in enumerate(self.gcells)}
         self.vindex = {n: i for i, n in enumerate(vcells)}
         self.cursor_slot = len(vcells)
+        self.lanes = self._lanes(playroutine.get("lanes") or {})
+        self.carry = dict(playroutine.get("carry") or {})
         self.resolver_functions = Resolver(playroutine.get("functions")).functions
         self.procs = playroutine.get("procs") or {}
+        self.specs = {}
+        self.spec_ids = {}
+        self.compiled = {}
         self.fields = {}
+        self.present = {}
+        self.objs = {}
         self.lines = []
         self.tail = []
         self.done = set()
@@ -188,18 +314,137 @@ class _Codegen:
         self.counter = 0
         self.row_ctx = None
 
-    def need_field(self, record, field) -> int:
-        """Register an int field of a record for lookup tables; return its default."""
-        rtype = self.rtypes.get(record)
-        default = rtype.default(field) if rtype is not None else 0
-        key = (record, field)
-        if key not in self.fields:
-            self.fields[key] = {
-                i: int(row.get(field, default))
+    # -- lanes and specs --
+
+    def _lanes(self, spec):
+        """``{(voice, name): (slot, mask, scale)}`` for the declared lanes."""
+        out = {}
+        for scope, voice in (("voice", True), ("global", False)):
+            cells = self.vcells if voice else self.gcells
+            base = len(cells) + (1 if voice else 0)
+            for k, (name, opts) in enumerate((spec.get(scope) or {}).items()):
+                if name not in cells:
+                    raise SongError(f"lane {name!r} is not a {scope} cell")
+                scale = int((opts or {}).get("scale", 1))
+                if scale < 1 or scale & (scale - 1):
+                    raise SongError(f"lane {name!r}: scale must be a power of two")
+                out[(voice, name)] = (base + k, cells[name][0], scale)
+        return out
+
+    def lane_info(self, name, voice):
+        """``(voice scope, slot, mask, scale)`` of lane ``name`` as seen from ``voice`` scope."""
+        if voice and (True, name) in self.lanes:
+            return (True, *self.lanes[(True, name)])
+        if (False, name) in self.lanes:
+            return (False, *self.lanes[(False, name)])
+        raise SongError(f"unknown lane {name!r}")
+
+    def lane_ref(self, name, voice) -> str:
+        """Source for the Lane object of ``name``."""
+        lane_voice, slot, _, _ = self.lane_info(name, voice)
+        return f"{'v' if lane_voice else 'g'}[{slot}]"
+
+    def spec_id(self, spec) -> int:
+        """The id of a spec dict (1-based)."""
+        k = spec_key(spec)
+        if k not in self.spec_ids:
+            self.spec_ids[k] = len(self.spec_ids) + 1
+            self.specs[self.spec_ids[k]] = spec
+        return self.spec_ids[k]
+
+    def expr_fn(self, text, voice, what):
+        """A callable ``(cells, value)`` for a spec or live expression in shared units."""
+        try:
+            src = _SpecScope(self, voice).compile(text)
+        except ExprError as exc:
+            raise SongError(f"{what}: {exc}") from exc
+        code = f"lambda {'v' if voice else '_c'}, _x: {src}"
+        return eval(code, self.namespace)  # pylint: disable=eval-used
+
+    def carry_fn(self, lane, voice):
+        """A callable of cells reading the carry cell declared for ``lane``."""
+        cell = self.carry.get(lane)
+        if cell is None:
+            raise SongError(f"no carry declared for {lane!r}")
+        if voice and cell in self.vindex:
+            idx = self.vindex[cell]
+            return lambda c: c[idx]
+        if cell in self.gindex:
+            idx = self.gindex[cell]
+            return lambda c: self.namespace["g"][idx]
+        raise SongError(f"carry cell {cell!r} is not a cell")
+
+    def compiled_spec(self, sid, lane, voice):
+        """The spec ``sid`` compiled for ``lane``."""
+        lane_voice, _, _, scale = self.lane_info(lane, voice)
+        k = (sid, lane, lane_voice)
+        if k not in self.compiled:
+            try:
+                self.compiled[k] = Compiled(
+                    parse_spec(self.specs[sid], lane),
+                    scale,
+                    lambda t, w: self.expr_fn(t, lane_voice, f"{lane}.{w}"),
+                    lambda name: self.carry_fn(name, lane_voice),
+                )
+            except SpecError as exc:
+                raise SongError(f"{lane}: {exc}") from exc
+        return self.compiled[k]
+
+    def value_obj(self, value, lane, voice):
+        """The :class:`_Obj` for a record value given to ``lane``."""
+        lane_voice, _, _, scale = self.lane_info(lane, voice)
+        if value == OFF:
+            return _Obj("off", None)
+        if isinstance(value, dict) and set(value) == {"live"}:
+            return _Obj("live", self.expr_fn(value["live"], lane_voice, f"{lane} live"))
+        if isinstance(value, dict):
+            return _Obj("spec", self.compiled_spec(self.spec_id(value), lane, voice))
+        try:
+            return _Obj("set", scale_number(value, scale, lane))
+        except (SpecError, TypeError, ValueError) as exc:
+            raise SongError(f"{lane}: bad value {value!r}") from exc
+
+    def obj_table(self, record, field, lane, voice) -> str:
+        """Name of the table mapping row index to the lane value of ``record.field``."""
+        name = f"O_{record}_{field}_{lane}_{'v' if voice else 'g'}"
+        if name not in self.objs:
+            if record not in self.records:
+                raise SongError(f"unknown record {record!r}")
+            self.objs[name] = {
+                i: self.value_obj(row[field], lane, voice)
                 for i, row in self.records[record].items()
-                if not isinstance(row.get(field, default), list)
+                if field in row
             }
-        return default
+        return name
+
+    def int_value(self, value) -> int:
+        """A record value as an int for expressions: a spec's id, 0 for off or live."""
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, dict) and set(value) != {"live"}:
+            return self.spec_id(value)
+        return 0
+
+    def default(self, record, field) -> int:
+        """The int a missing field reads as."""
+        rtype = self.rtypes.get(record)
+        return rtype.default(field) if rtype is not None else 0
+
+    def need_field(self, record, field):
+        """Register an int field of a record for lookup tables."""
+        k = (record, field)
+        if k not in self.fields:
+            rows = self.records[record]
+            self.fields[k] = {
+                i: self.int_value(row[field])
+                for i, row in rows.items()
+                if field in row and not isinstance(row[field], list)
+            }
+            self.present[k] = frozenset(i for i, row in rows.items() if field in row)
+
+    # -- generation --
 
     def fname(self, kind, voice, *parts):
         """Function name for a proc, record list or entry point in a scope."""
@@ -220,18 +465,15 @@ class _Codegen:
         return self.request(self.fname("proc", voice, name), self.procs[name], voice)
 
     def record_lists(self, record, field, voice):
-        """Dict source mapping record index to its generated action-list function.
-
-        A record type's template serves every row: rows map to ``(fn, index)``.
-        """
+        """Dict source mapping record index to its generated action-list function."""
         if record not in self.records:
             raise SongError(f"unknown record {record!r}")
         rtype = self.rtypes.get(record)
+        name = f"D_{'v' if voice else 'g'}_{record}_{field}"
         if rtype is not None and field in rtype.templates:
             fn = self.request(
                 self.fname("tpl", voice, record, field), rtype.templates[field], voice, record
             )
-            name = f"D_{'v' if voice else 'g'}_{record}_{field}"
             if name not in self.done:
                 self.done.add(name)
                 rows = tuple(sorted(self.records[record]))
@@ -243,14 +485,14 @@ class _Codegen:
             if actions:
                 fn = self.request(self.fname("rec", voice, record, field, index), actions, voice)
                 items.append(f"{index}: ({fn}, None)")
-        name = f"D_{'v' if voice else 'g'}_{record}_{field}"
         if name not in self.done:
             self.done.add(name)
             self.tail.append(f"{name} = {{{', '.join(items)}}}")
         return name
 
-    def build(self):
-        """Python source for the whole playroutine."""
+    def build(self, namespace):
+        """Python source for the whole playroutine; ``namespace`` holds the runtime."""
+        self.namespace = namespace  # pylint: disable=attribute-defined-outside-init
         self.request("f_init", self.playroutine.get("init") or [], False)
         self.request("f_tick", self.playroutine.get("tick") or [], False)
         while self.pending:
@@ -290,10 +532,32 @@ class _Codegen:
             return f"g[{self.gindex[cell]}]", self.gcells[cell][0]
         raise SongError(f"unknown cell {cell!r}")
 
+    def is_lane(self, cell, voice):
+        """Whether assigning ``cell`` from this scope assigns a lane."""
+        in_voice = voice and cell in self.vindex
+        return (in_voice, cell) in self.lanes
+
     def assign(self, cell, src, voice, out, pad):
-        """Append a width-wrapped assignment."""
+        """Append a width-wrapped assignment; a lane's stored value follows its cell."""
         store, mask = self.target(cell, voice)
-        out.append(f"{pad}{store} = {src}" if mask is None else f"{pad}{store} = ({src}) & {mask}")
+        if self.is_lane(cell, voice):
+            out.append(f"{pad}{store} = {self.lane_ref(cell, voice)}.set({src})")
+        else:
+            wrap = src if mask is None else f"({src}) & {mask}"
+            out.append(f"{pad}{store} = {wrap}")
+
+    def lane_store(self, lane, voice, src, out, pad):
+        """Append: run ``src`` (a lane call), store a changed value and the lane's carry."""
+        lane_voice, slot, _, _ = self.lane_info(lane, voice)
+        store, _ = self.target(lane, lane_voice)
+        tmp = self.tmp()
+        out.append(f"{pad}{tmp} = {src}")
+        out.append(f"{pad}if {tmp} is not None:")
+        out.append(f"{pad}    {store} = {tmp}")
+        cell = self.carry.get(lane)
+        if cell is not None:
+            cstore, _ = self.target(cell, lane_voice)
+            out.append(f"{pad}{cstore} = {'v' if lane_voice else 'g'}[{slot}].carry")
 
     def block(self, actions, voice, out, depth):
         """Append source for an action list."""
@@ -340,79 +604,94 @@ class _Codegen:
             out.append(f"{pad}_fetch(v)")
         elif "return" in action:
             out.append(f"{pad}return")
-        elif "accumulate" in action:
-            self.accumulate(action, scope, voice, out, pad, depth)
+        elif "apply" in action or "start" in action:
+            self.lane_action(action, scope, voice, out, pad)
+        elif any(k in action for k in ("advance", "stop", "restart")):
+            self.lane_simple(action, voice, out, pad)
         else:
             raise SongError(f"unknown action {action!r}")
+
+    def lane_action(self, action, scope, voice, out, pad):
+        """``apply`` (a record value or an int) and ``start`` (a spec id) on lanes."""
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
+        verb = "apply" if "apply" in action else "start"
+        opts = (
+            bool(action.get("once")),
+            action.get("by", "row" if verb == "apply" else "command"),
+            "v" if voice else "None",
+        )
+        for lane, src in action[verb].items():
+            if verb == "start":
+                self._lane_start(lane, src, opts, scope, (voice, out, pad))
+            else:
+                self._lane_apply(lane, src, opts, scope, (voice, out, pad))
+
+    def _lane_start(self, lane, src, opts, scope, where):
+        """Start (or run once) the spec whose id ``src`` gives on ``lane``."""
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        voice, out, pad = where
+        once, by, cells = opts
+        ref = self.lane_ref(lane, voice)
+        sid = self.tmp()
+        out.append(f"{pad}{sid} = {scope.compile(src)}")
+        spec = f"_spec({sid}, {lane!r}, {voice})"
+        call = f"_once({ref}, {spec}, {cells})" if once else f"_start({ref}, {spec}, {by!r})"
+        self.lane_store(lane, voice, call, out, pad)
+
+    def _lane_apply(self, lane, src, opts, scope, where):
+        """Give ``lane`` a record value (set, off, live or spec), or an int expression."""
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        voice, out, pad = where
+        once, by, cells = opts
+        ref = self.lane_ref(lane, voice)
+        place = self._source(src)
+        if place is None:
+            scale = self.lane_info(lane, voice)[3]
+            self.lane_store(lane, voice, f"{ref}.set(({scope.compile(src)}) * {scale})", out, pad)
+            return
+        record, index, field = place
+        table = self.obj_table(record, field, lane, voice)
+        obj = self.tmp()
+        out.append(f"{pad}{obj} = {table}.get({scope.compile(index) if index else '_r'})")
+        out.append(f"{pad}if {obj} is not None:")
+        call = f"_apply({ref}, {obj}, {cells}, {by!r}, {once})"
+        self.lane_store(lane, voice, call, out, pad + "    ")
+
+    def _source(self, src):
+        """``(record, index expression or None, field)`` for a row or record source."""
+        if not isinstance(src, str):
+            return None
+        tree = parse(src)
+        if not isinstance(tree, ast.Attribute):
+            return None
+        sub = tree.value
+        if isinstance(sub, ast.Name) and sub.id == "row":
+            if self.row_ctx is None:
+                raise SongError("row.field is only defined in a record template")
+            return self.row_ctx, None, tree.attr
+        if isinstance(sub, ast.Subscript) and sub.value.id in self.records:
+            return sub.value.id, ast.unparse(sub.slice), tree.attr
+        return None
+
+    def lane_simple(self, action, voice, out, pad):
+        """``advance``, ``stop`` and ``restart`` of lanes."""
+        for verb in ("advance", "stop", "restart"):
+            if verb not in action:
+                continue
+            lanes = action[verb]
+            for lane in lanes if isinstance(lanes, list) else [lanes]:
+                ref = self.lane_ref(lane, voice)
+                if verb == "advance":
+                    self.lane_store(
+                        lane, voice, f"{ref}.advance({'v' if voice else 'None'})", out, pad
+                    )
+                else:
+                    out.append(f"{pad}{ref}.{verb}()")
 
     def tmp(self):
         """A fresh local name."""
         self.counter += 1
         return f"_t{self.counter}"
-
-    def accumulate(self, action, scope, voice, out, pad, depth):
-        """Append the bounded accumulator, a call to the ``_acc`` runtime helper."""
-        # pylint: disable=too-many-arguments,too-many-positional-arguments
-        store, mask = self.target(action["accumulate"], voice)
-        args = [store, scope.compile(action.get("step", 0)), str(mask)]
-        for key in ("min", "max", "toward"):
-            args.append(scope.compile(action[key]) if key in action else "None")
-        args.append(str(bool(action.get("clamp", True))))
-        val, hit = self.tmp(), self.tmp()
-        out.append(f"{pad}{val}, {hit} = _acc({', '.join(args)})")
-        out.append(f"{pad}{store} = {val}")
-        if action.get("on_bound"):
-            out.append(f"{pad}if {hit}:")
-            self.block(action["on_bound"], voice, out, depth + 1)
-            out.append(f"{pad}    pass")
-
-
-def _acc(v0, step, mask, lo, hi, toward, clamp):
-    """One bounded accumulation: ``(value, hit)``, bounds tested after wrapping."""
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
-    if toward is not None:
-        if v0 == toward:
-            return v0, False
-        if v0 < toward:
-            hi = toward
-        else:
-            step, lo = -step, toward
-    value = v0 + step
-    if mask is not None:
-        value &= mask
-    if hi is not None and value > hi:
-        return (hi if clamp else value), True
-    if lo is not None and value < lo:
-        return (lo if clamp else value), True
-    return value, False
-
-
-def _voice_cells(song, gen) -> list[list]:
-    """Initial cells for each voice, its cursor in the last slot."""
-    phrases = {name: compile_phrase(ev) for name, ev in (song.get("phrases") or {}).items()}
-    out = []
-    for track in song["tracks"]:
-        cells = [init for _, init in gen.vcells.values()]
-        cursor = Cursor(track, phrases)
-        cells[gen.vindex["at_phrase_start"]] = cursor.at_phrase_start
-        cells.append(cursor)
-        out.append(cells)
-    return out
-
-
-def _fetcher(gen):
-    """The ``fetch`` action: advance a voice's cursor into its pseudo-cells."""
-    slot = gen.cursor_slot
-    idx = [gen.vindex[name] for name in PSEUDO]
-
-    def fetch(v):
-        cursor = v[slot]
-        for i, value in zip(idx, cursor.fetch()):
-            v[i] = value
-        v[idx[5]] = cursor.at_phrase_start
-        v[idx[6]] = int(cursor.ended)
-
-    return fetch
 
 
 class SongPlayer:
@@ -428,19 +707,32 @@ class SongPlayer:
         self.song = song
         gen = _Codegen(song)
         self.globals = [init for _, init in gen.gcells.values()]
+        self.globals += [Lane(mask) for (voice, _), (_, mask, _) in gen.lanes.items() if not voice]
         self._index = (gen.gindex, gen.vindex)
-        self.voice_cells = _voice_cells(song, gen)
         self.table_reads: dict[str, set[int]] | None = None
         namespace = {
             "g": self.globals,
-            "VS": self.voice_cells,
             "T": gen.tables,
             "F": gen.fields,
+            "P": gen.present,
             "_tg": self._reader(gen.tables) if record_reads else _tg,
-            "_acc": _acc,
-            "_fetch": _fetcher(gen),
+            "_apply": _apply,
+            "_start": lambda lane, spec, by: lane.start(spec, by),
+            "_once": lambda lane, spec, cells: lane.once(spec, cells),
+            "_towards": lambda sid: int("toward" in gen.specs.get(sid, {})),
+            "_spec": lambda sid, lane, voice: (
+                gen.compiled_spec(sid, lane, voice) if sid else _STOP
+            ),
         }
-        code = compile(gen.build(), f"<playroutine {song['playroutine'].get('name', '')}>", "exec")
+        commands = self._commands(gen)
+        self.voice_cells = self._voices(gen, commands)
+        namespace["VS"] = self.voice_cells
+        namespace["_fetch"] = _fetcher(gen)
+        code = compile(
+            gen.build(namespace), f"<playroutine {song['playroutine'].get('name', '')}>", "exec"
+        )
+        for name, table in gen.objs.items():
+            namespace[name] = table
         exec(code, namespace)  # pylint: disable=exec-used
         self._entry = (namespace["f_init"], namespace["f_tick"], namespace["f_ghost"])
         regs = song.get("registers") or [0] * REG_COUNT
@@ -448,6 +740,52 @@ class SongPlayer:
             raise SongError(f"registers must have {REG_COUNT} values")
         self.regs = [int(r) & 0xFF for r in regs]
         self.ticks = 0
+
+    def _commands(self, gen):
+        """A function turning an event's ``command`` into ``(cmd, arg, arg2, argn)``."""
+        table = gen.playroutine.get("commands") or {}
+
+        def convert(command):
+            if not command:
+                return 0, 0, 0, 0
+            name, arg = command
+            if name not in table:
+                raise SongError(f"the playroutine has no command {name!r}")
+            code = int(table[name]["code"])
+            if arg is None:
+                return code, 0, 0, 0
+            if isinstance(arg, list):
+                return code, int(arg[0]), int(arg[1]), 2
+            if isinstance(arg, dict):
+                return code, gen.spec_id(arg), 0, 1
+            return code, int(arg), 0, 1
+
+        return convert
+
+    def _voices(self, gen, convert):
+        """Each voice's cells: the declared cells, its cursor, then its lanes."""
+        phrases = {}
+        for name, events in (self.song.get("phrases") or {}).items():
+            rows = []
+            for event in phrase_steps(events):
+                if event is None:
+                    rows.append((0, 0, 0, 0, 0, 0, 0))
+                    continue
+                kind, pitch = event_note(event)
+                rows.append(
+                    (kind, pitch, int(event.get("instrument") or 0), *convert(event.get("command")))
+                )
+            phrases[name] = rows
+        lanes = [mask for (voice, _), (_, mask, _) in gen.lanes.items() if voice]
+        out = []
+        for track in self.song["tracks"]:
+            cells = [init for _, init in gen.vcells.values()]
+            cursor = Cursor(track, phrases)
+            cells[gen.vindex["at_phrase_start"]] = cursor.at_phrase_start
+            cells.append(cursor)
+            cells.extend(Lane(mask) for mask in lanes)
+            out.append(cells)
+        return out
 
     def _reader(self, tables):
         """A table read that records each in-range index it reads, per table."""
@@ -463,12 +801,17 @@ class SongPlayer:
         return tg
 
     def state(self) -> tuple:
-        """The complete playback state: every cell, cursor position and register."""
-        voices = tuple(
-            (*cells[:-1], c.index, c.repeat, c.step, c.ended)
-            for cells, c in ((cells, cells[-1]) for cells in self.voice_cells)
-        )
-        return (tuple(self.globals), voices, tuple(self.regs))
+        """The complete playback state: every cell, cursor position, lane and register."""
+
+        def part(value):
+            if isinstance(value, Lane):
+                return value.state()
+            if isinstance(value, Cursor):
+                return (value.index, value.repeat, value.step, value.ended)
+            return value
+
+        voices = tuple(tuple(part(c) for c in cells) for cells in self.voice_cells)
+        return (tuple(part(c) for c in self.globals), voices, tuple(self.regs))
 
     def cell(self, name: str, voice: int | None = None) -> int:
         """The current value of a global cell, or of ``voice``'s cell ``name``."""
@@ -517,3 +860,30 @@ class SongPlayer:
             self.iter_flushes(n), total=n, desc="render", unit="tick", disable=not progress
         )
         return render_wav(flushes, path, model=model, cycles_per_frame=cycles, clock_frequency=hz)
+
+
+class _Stop:
+    """The spec of id 0: starting it stops the lane."""
+
+    # pylint: disable=too-few-public-methods
+
+    start = None
+    moves = False
+
+
+_STOP = _Stop()
+
+
+def _fetcher(gen):
+    """The ``fetch`` action: advance a voice's cursor into its pseudo-cells."""
+    slot = gen.cursor_slot
+    idx = [gen.vindex[name] for name in PSEUDO]
+
+    def fetch(v):
+        cursor = v[slot]
+        for i, value in zip(idx, cursor.fetch()):
+            v[i] = value
+        v[idx[7]] = cursor.at_phrase_start
+        v[idx[8]] = int(cursor.ended)
+
+    return fetch

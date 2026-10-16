@@ -1,6 +1,8 @@
 # GoatTracker 2 playroutine (player.s, buffered writes) as a unitracker playroutine.
-# The lifter fills in the build constants.
+# It sequences only: tempo, note fetch and lookahead, hard restart and program stepping.
+# Effects are lane specs the generic player runs. The lifter fills in the build constants.
 name: goattracker2
+note_offset: 0
 constants: {adparam: 0x0F00, deftempo: 5}
 defaults:
   clock: {cycles_per_tick: 19656, clock_hz: 985248}
@@ -9,80 +11,145 @@ defaults:
 tables:
   ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 instrument: {type: ins, base: 0}
-commands: {1: speedtab, 2: speedtab, 3: speedtab, 4: speedtab, 8: wavetab, 9: pulsetab, 10: filttab, 14: speedtab}
+lanes:
+  voice: {freq: {}, pw: {}}
+  global: {cut: {}}
+pitch:
+  note: "ftab[note & 0x7F]"
+  semi: {args: [k], expr: "(ftab[(lastnote + k + 1) & 0x7F] - ftab[(lastnote + k) & 0x7F]) & 0xFFFF"}
+specs:
+  freq: [step, flip, toward, width, reset, for]
+  pw: [step, for]
+  cut: [step, for]
+spec_rules:
+  - check: "not has(flip) or (count(flip) == 2 and flip[0] <= 63 and (flip[1] == 2 * flip[0] or flip[1] == 2 * flip[0] + 1))"
+    error: "a vibrato's flip periods are [m, 2m] or [m, 2m + 1], m <= 63"
+  - check: "not has(width) or width == 16"
+    error: "frequency arithmetic wraps at 16 bits"
+commands:
+  freq: {code: 1, arg: spec}
+  ad: {code: 5, arg: int}
+  sr: {code: 6, arg: int}
+  ctrl: {code: 7, arg: int}
+  ctrlprog: {code: 8, arg: ref ctrlprog}
+  pwprog: {code: 9, arg: ref pwprog}
+  filtprog: {code: 10, arg: ref filtprog}
+  resfilt: {code: 11, arg: int}
+  cut: {code: 12, arg: int}
+  vol: {code: 13, arg: int}
+  funk: {code: 14, arg: "pair?"}
+  tempo: {code: 15, arg: int}
+  vtempo: {code: 16, arg: int}
 record_types:
   ins:
     prefix: i
     none: 0
     pin: [1]
-    form: map
-    fields: {ad: 0, sr: 0, wave: 0, pulse: 0, filter: 0, speed: 0, vd: 0, gt: 0, fw: 0}
-    refs: {wave: wavetab, pulse: pulsetab, filter: filttab, speed: speedtab}
-  speedtab:
-    prefix: s
-    none: 0
-    fields: [l, r]
-  # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
-  # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
-  wavetab:
-    prefix: w
+    keys:
+      ad: int
+      sr: int
+      ctrlprog: ref ctrlprog
+      pwprog: ref pwprog
+      filtprog: ref filtprog
+      freq: value spec
+      delay: int
+      gateoff: int
+      keepgate: flag
+      nohr: flag
+      firstctrl: int
+      firstgate: flag
+    rules:
+      - {check: "gateoff <= 63", error: "gateoff is 0-63 ticks"}
+      - {check: "firstctrl <= 0xFD", error: "firstctrl is 0-253"}
+      - {check: "not (has(firstctrl) and has(firstgate))", error: "use firstctrl or firstgate"}
+  # A row of the control program: an optional wait, a ctrl value and a note, or one
+  # command-style key that runs instead of a note.
+  ctrlprog:
+    prefix: c
     none: 0
     chain: next
-    fields: [w, n, next]
-    refs:
-      n:
-        - {type: speedtab, when: "w >= 0xF1 and w <= 0xF4"}
-        - {type: pulsetab, when: "w == 0xF9"}
-        - {type: filttab, when: "w == 0xFA"}
+    keys:
+      wait: int
+      ctrl: int
+      note: note
+      freq: value spec
+      ad: int
+      sr: int
+      resfilt: int
+      cut: int
+      vol: int
+      pwprog: ref pwprog
+      filtprog: ref filtprog
+    rules:
+      - {check: "wait <= 15", error: "wait is 0-15 ticks"}
+      - {check: "not (has(wait) and (has(ctrl) or has(freq) or has(ad) or has(sr) or has(resfilt) or has(cut) or has(vol) or has(pwprog) or has(filtprog)))", error: "a waiting row sets only a note"}
+      - {check: "not (has(freq) or has(ad) or has(sr) or has(resfilt) or has(cut) or has(vol) or has(pwprog) or has(filtprog)) or count() == 1", error: "a command row holds that one key"}
+      - {check: "not has(ctrl) or ctrl < 0xE0 or count() == 1", error: "ctrl $E0-$FF stands alone"}
+      - {check: "not has(note) or (note >= -64 and note <= 63)", error: "relative notes are -64..63"}
+      - {check: "not has(freq) or freq.for_ == 1", error: "a row's freq spec lasts one tick (for: 1)"}
+      - {check: "not has(vol) or vol < 16", error: "vol is 0-15"}
     do:
-      - if: "row.w >= 0xF0"
+      - if: "has(row.freq)"
         then:
-          - set: {arg: row.n}
-          - run: {record: wavecmd, index: "row.w & 0x0F", field: do}
-          - set: {skip: 1}
-          - return: true
-      - if: "row.w >= 0xE0"
-        then: [{set: {wave: "row.w & 0x0F"}}]
-        else: [{if: "row.w >= 0x10", then: [{set: {wave: row.w}}]}]
-      - if: "row.n != 0x80"
-        then: [{call: wnote, with: {n: "(row.n & 0x7F) if row.n >= 0x80 else ((note + row.n) & 0x7F)"}}]
-  # Pulsetable row: l $80+ sets the width from (l & $0F, r); otherwise l ticks of a signed r sweep.
-  pulsetab:
+          - {apply: {freq: row.freq}, once: true}
+          - {if: "hit(freq)", then: [{call: porta_reached}]}
+          - {set: {skip: 1}}
+          - {return: true}
+      - {if: "has(row.ad)", then: [{set: {ad: row.ad, skip: 1}}, {return: true}]}
+      - {if: "has(row.sr)", then: [{set: {sr: row.sr, skip: 1}}, {return: true}]}
+      - if: "has(row.resfilt)"
+        then:
+          - set: {filterctrl: row.resfilt, skip: 1}
+          - {if: "row.resfilt == 0", then: [{set: {fptr: 0}}]}
+          - {return: true}
+      - {if: "has(row.cut)", then: [{apply: {cut: row.cut}}, {set: {skip: 1}}, {return: true}]}
+      - {if: "has(row.vol)", then: [{set: {masterfader: row.vol, skip: 1}}, {return: true}]}
+      - if: "has(row.pwprog)"
+        then: [{set: {pptr: row.pwprog, skip: 1}}, {stop: pw}, {return: true}]
+      - if: "has(row.filtprog)"
+        then: [{set: {fptr: row.filtprog, skip: 1}}, {stop: cut}, {return: true}]
+      - if: "has(row.ctrl) and row.ctrl >= 0xE0"
+        then: [{set: {wave: row.ctrl, skip: 1}}, {return: true}]
+      - {if: "has(row.ctrl)", then: [{set: {wave: row.ctrl}}]}
+      - {if: "has(row.note)", then: [{call: wnote, with: {n: "(note + row.note) & 0x7F"}}]}
+      - {if: "has(row.noteabs)", then: [{call: wnote, with: {n: "row.noteabs & 0x7F"}}]}
+  pwprog:
     prefix: pw
     none: 0
     chain: next
-    fields: [l, r, next]
-    do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
-    each: [{accumulate: pulse, step: "row.r - 0x100 if row.r >= 0x80 else row.r"}]
-  # Filtertable row: l $80+ sets type and routing (and cut, a cutoff the player reads from the
-  # following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
-  filttab:
+    keys: {pw: "value set,spec"}
+    rules:
+      - {check: "has(pw)", error: "a pulse row sets pw or starts a spec on it"}
+      - {check: "not isspec(pw) or (pw.for_ >= 0 and pw.for_ <= 127)", error: "a pulse spec lasts 0-127 ticks (for)"}
+    do: [{apply: {pw: row.pw}}]
+  filtprog:
     prefix: f
     none: 0
     chain: next
-    fields: {l: 0, r: 0, cut: -1, next: 0}
+    keys: {filtmode: int, resfilt: int, cut: "value set,spec"}
+    rules:
+      - {check: "has(filtmode) == has(resfilt)", error: "filtmode and resfilt go together"}
+      - {check: "has(filtmode) or has(cut)", error: "a filter row sets filtmode and resfilt, or cut"}
+      - {check: "not isspec(cut) or count() == 1", error: "a cutoff spec stands alone"}
+      - {check: "not isspec(cut) or (cut.for_ >= 1 and cut.for_ <= 127)", error: "a cutoff spec lasts 1-127 ticks (for)"}
+      - {check: "not has(filtmode) or (filtmode & 0x8F) == 0", error: "filtmode is the $D418 mode bits $10-$70"}
     do:
-      - if: "row.l >= 0x80"
-        then:
-          - set: {filtertype: "row.l & 0x70", filterctrl: row.r}
-          - {if: "row.cut >= 0", then: [{set: {filtercutoff: row.cut}}]}
-        else: [{set: {filtercutoff: row.r}}]
-    each: [{accumulate: filtercutoff, step: row.r}]
+      - {if: "has(row.filtmode)", then: [{set: {filtertype: row.filtmode, filterctrl: row.resfilt}}]}
+      - {if: "has(row.cut)", then: [{apply: {cut: row.cut}}]}
 functions:
-  spd:
+  cmdrow:
     args: [i]
     expr: >-
-      0 if i == 0 else
-      ((((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[i].r)
-       if speedtab[i].l >= 0x80 else (speedtab[i].l << 8 | speedtab[i].r))
+      has(ctrlprog[i].freq) or has(ctrlprog[i].ad) or has(ctrlprog[i].sr)
+      or has(ctrlprog[i].resfilt) or has(ctrlprog[i].cut) or has(ctrlprog[i].vol)
+      or has(ctrlprog[i].pwprog) or has(ctrlprog[i].filtprog)
 global:
   state: {width: 8}
-  filtercutoff: {width: 8}
+  cut: {width: 8}
   filterctrl: {width: 8}
   filtertype: {width: 8}
   masterfader: {width: 8, init: 0x0F}
   fptr: {width: 8}
-  ftime: {width: 8}
   funk0: {width: 8, init: 8}
   funk1: {width: 8, init: 5}
   nt: {width: 8}
@@ -96,18 +163,18 @@ voice:
   freq: {width: 16}
   gate: {width: 8}
   wave: {width: 8}
-  pulse: {width: 12}
+  pw: {width: 12}
   wptr: {width: 8}
   wtime: {width: 8}
   wcur: {width: 8}
   pptr: {width: 8}
-  ptime: {width: 8}
-  vibtime: {width: 8}
   vibdelay: {width: 8}
-  command: {width: 8}
-  cmddata: {width: 8}
-  newcommand: {width: 8}
-  newcmddata: {width: 8}
+  insfx: {width: 1}
+  legato: {width: 1}
+  newcommand: {}
+  newcmddata: {}
+  newcmddata2: {}
+  newargn: {}
   tick: {width: 8}
   tempo: {width: 8}
   gatetimer: {width: 8}
@@ -115,174 +182,119 @@ voice:
   sr: {width: 8}
   skip: {width: 1}
   fetchtick: {width: 1}
-  fw: {width: 8}
-  arg: {width: 8}
   n: {width: 8}
-  T: {width: 16}
-  vcmp: {width: 8}
-  vspd: {width: 16}
 
 records:
-  # Pattern command at tick 0 (gplay.c / player.s mt_tick0_*), argument newcmddata.
+  # Pattern command at tick 0, by command code; argument newcmddata.
   tick0:
-    0: {do: [{set: {command: 0, cmddata: "ins[ii].speed"}}]}
-    1: {do: [{set: {vibtime: 0, command: 1, cmddata: newcmddata}}]}
-    2: {do: [{set: {vibtime: 0, command: 2, cmddata: newcmddata}}]}
-    3: {do: [{set: {command: 3, cmddata: newcmddata}}]}
-    4: {do: [{set: {command: 4, cmddata: newcmddata}}]}
+    0: {do: [{set: {insfx: 1}}, {start: {freq: "ins[ii].freq"}}]}
+    1: {do: [{set: {insfx: 0}}, {start: {freq: newcmddata}}]}
     5: {do: [{set: {ad: newcmddata}}]}
     6: {do: [{set: {sr: newcmddata}}]}
     7: {do: [{set: {wave: newcmddata}}]}
     8: {do: [{set: {wptr: newcmddata, wtime: 0}}]}
-    9: {do: [{set: {pptr: newcmddata, ptime: 0}}]}
-    10: {do: [{set: {fptr: newcmddata, ftime: 0}}]}
+    9: {do: [{set: {pptr: newcmddata}}, {stop: pw}]}
+    10: {do: [{set: {fptr: newcmddata}}, {stop: cut}]}
     11:
       do:
         - set: {filterctrl: newcmddata}
         - {if: "newcmddata == 0", then: [{set: {fptr: 0}}]}
-    12: {do: [{set: {filtercutoff: newcmddata}}]}
+    12: {do: [{apply: {cut: newcmddata}}]}
     13: {do: [{if: "newcmddata < 0x10", then: [{set: {masterfader: newcmddata}}]}]}
     14:
       do:
-        - if: newcmddata
-          then: [{set: {funk0: "speedtab[newcmddata].l - 1", funk1: "speedtab[newcmddata].r - 1"}}]
+        - if: "newargn == 2"
+          then: [{set: {funk0: "newcmddata - 1", funk1: "newcmddata2 - 1"}}]
         - for_voices: [{set: {tempo: 0}}]
     15:
       do:
-        - set: {nt: "newcmddata & 0x7F"}
-        - {if: "nt >= 3", then: [{set: {nt: "nt - 1"}}]}
-        - if: "newcmddata >= 0x80"
-          then: [{set: {tempo: nt}}]
-          else: [{for_voices: [{set: {tempo: nt}}]}]
-  # Continuous command on ticks other than 0, argument cmddata.
-  tickn:
-    0:
-      do:
-        - {if: "cmddata == 0", then: [{return: true}]}
-        - if: "vibdelay > 1"
-          then: [{set: {vibdelay: "vibdelay - 1"}}, {return: true}]
-        - {call: vibrato, with: {arg: cmddata}}
-    1: {do: [{accumulate: freq, step: "spd(cmddata)"}]}
-    2: {do: [{accumulate: freq, step: "0 - spd(cmddata)"}]}
-    3: {do: [{call: toneporta, with: {arg: cmddata}}]}
-    4: {do: [{call: vibrato, with: {arg: cmddata}}]}
-  # Command run from a wavetable row ($F0-$FE), argument arg.
-  wavecmd:
-    0: {do: [{set: {state: 1}}]}
-    1: {do: [{accumulate: freq, step: "spd(arg)"}]}
-    2: {do: [{accumulate: freq, step: "0 - spd(arg)"}]}
-    3: {do: [{call: toneporta}]}
-    4: {do: [{call: vibrato}]}
-    5: {do: [{set: {ad: arg}}]}
-    6: {do: [{set: {sr: arg}}]}
-    7: {do: [{set: {wave: arg}}]}
-    8: {do: [{set: {state: 1}}]}
-    9: {do: [{set: {pptr: arg, ptime: 0}}]}
-    10: {do: [{set: {fptr: arg, ftime: 0}}]}
-    11:
-      do:
-        - set: {filterctrl: arg}
-        - {if: "arg == 0", then: [{set: {fptr: 0}}]}
-    12: {do: [{set: {filtercutoff: arg}}]}
-    13: {do: [{if: "arg < 0x10", then: [{set: {masterfader: arg}}]}]}
-    14: {do: [{set: {state: 1}}]}
+        - set: {nt: "newcmddata - 1 if newcmddata >= 3 else newcmddata"}
+        - for_voices: [{set: {tempo: nt}}]
+    16: {do: [{set: {tempo: "newcmddata - 1 if newcmddata >= 3 else newcmddata"}}]}
 
 procs:
   wnote:
-    - set: {freq: "ftab[n]", vibtime: 0, lastnote: n, skip: 1}
+    - set: {freq: "ftab[n]", lastnote: n, skip: 1}
+    - restart: freq
   porta_reached:
-    - set: {freq: "ftab[note & 0x7F]", vibtime: 0, lastnote: note}
-  toneporta:
-    - set: {T: "ftab[note & 0x7F]"}
-    - if: "arg == 0"
-      then: [{call: porta_reached}, {return: true}]
-    - accumulate: freq
-      step: "spd(arg)"
-      toward: T
-      on_bound: [{call: porta_reached}]
-  vibrato:
-    - set: {vcmp: 0, vspd: 0}
-    - {if: arg, then: [{set: {vcmp: "speedtab[arg].l", vspd: "speedtab[arg].r"}}]}
-    - if: "vcmp >= 0x80"
+    - set: {lastnote: note}
+    - restart: freq
+  effect:
+    - if: insfx
       then:
-        - set:
-            vcmp: "vcmp & 0x7F"
-            vspd: "((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[arg].r"
-    - {if: "vibtime < 0x80 and vibtime > vcmp", then: [{set: {vibtime: "vibtime ^ 0xFF"}}]}
-    - {accumulate: vibtime, step: 2}
-    - {accumulate: freq, step: "0 - vspd if vibtime & 1 else vspd"}
+        - {if: "not running(freq)", then: [{return: true}]}
+        - if: "vibdelay > 1"
+          then: [{set: {vibdelay: "vibdelay - 1"}}, {return: true}]
+    - advance: freq
+    - {if: "hit(freq)", then: [{call: porta_reached}]}
   wave_exec:
     - {if: "wptr == 0", then: [{return: true}]}
-    - if: "wavetab[wptr].w <= 0x0F and wtime != wavetab[wptr].w"
+    - if: "not (has(ctrlprog[wptr].ctrl) or cmdrow(wptr)) and wtime != ctrlprog[wptr].wait"
       then: [{set: {wtime: "wtime + 1"}}, {return: true}]
     - set: {wtime: 0, wcur: wptr}
-    - set: {wptr: "wavetab[wcur].next"}
-    - run: {record: wavetab, index: wcur, field: do}
+    - set: {wptr: "ctrlprog[wcur].next"}
+    - run: {record: ctrlprog, index: wcur, field: do}
   pulse_exec:
-    - if: "ptime == 0"
+    - if: "not running(pw)"
       then:
-        - if: "pulsetab[pptr].l >= 0x80"
-          then:
-            - run: {record: pulsetab, index: pptr, field: do}
-            - set: {pptr: "pulsetab[pptr].next"}
-          else: [{set: {ptime: "pulsetab[pptr].l"}}]
-    - if: "ptime != 0"
+        - run: {record: pwprog, index: pptr, field: do}
+        - {if: "not running(pw)", then: [{set: {pptr: "pwprog[pptr].next"}}]}
+    - if: "running(pw)"
       then:
-        - run: {record: pulsetab, index: pptr, field: each}
-        - set: {ptime: "ptime - 1"}
-        - {if: "ptime == 0", then: [{set: {pptr: "pulsetab[pptr].next"}}]}
+        - advance: pw
+        - {if: "not running(pw)", then: [{set: {pptr: "pwprog[pptr].next"}}]}
   filter_exec:
     - {if: "fptr == 0", then: [{return: true}]}
-    - if: "ftime == 0"
+    - if: "not running(cut)"
       then:
-        - if: "filttab[fptr].l >= 0x80 or filttab[fptr].l == 0"
-          then:
-            - run: {record: filttab, index: fptr, field: do}
-            - set: {fptr: "filttab[fptr].next"}
-          else: [{set: {ftime: "filttab[fptr].l"}}]
-    - if: "ftime != 0"
+        - run: {record: filtprog, index: fptr, field: do}
+        - {if: "not running(cut)", then: [{set: {fptr: "filtprog[fptr].next"}}]}
+    - if: "running(cut)"
       then:
-        - run: {record: filttab, index: fptr, field: each}
-        - set: {ftime: "ftime - 1"}
-        - {if: "ftime == 0", then: [{set: {fptr: "filttab[fptr].next"}}]}
+        - advance: cut
+        - {if: "not running(cut)", then: [{set: {fptr: "filtprog[fptr].next"}}]}
   new_note_init:
-    - set: {note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "ins[ii].speed"}
-    - {if: "newcommand == 3", then: [{return: true}]}
-    - set: {fw: "ins[ii].fw"}
-    - if: fw
-      then:
-        - if: "fw >= 0xFE"
-          then: [{set: {gate: fw}}]
-          else: [{set: {wave: fw, gate: 0xFF}}]
-    - set: {wptr: "ins[ii].wave"}
-    - {if: "ins[ii].pulse", then: [{set: {pptr: "ins[ii].pulse", ptime: 0}}]}
-    - {if: "ins[ii].filter", then: [{set: {fptr: "ins[ii].filter", ftime: 0}}]}
+    - set: {note: newnote, vibdelay: "ins[ii].delay", insfx: 1}
+    - start: {freq: "ins[ii].freq"}
+    - {if: legato, then: [{return: true}]}
+    - if: "has(ins[ii].firstctrl)"
+      then: [{set: {wave: "ins[ii].firstctrl", gate: 0xFF}}]
+    - if: "has(ins[ii].firstgate)"
+      then: [{set: {gate: "0xFE | ins[ii].firstgate"}}]
+    - set: {wptr: "ins[ii].ctrlprog"}
+    - {if: "ins[ii].pwprog", then: [{set: {pptr: "ins[ii].pwprog"}}, {stop: pw}]}
+    - {if: "ins[ii].filtprog", then: [{set: {fptr: "ins[ii].filtprog"}}, {stop: cut}]}
     - set: {ad: "ins[ii].ad", sr: "ins[ii].sr"}
   get_new_notes:
     - fetch: true
     - {if: ev_instr, then: [{set: {instr: ev_instr}}]}
-    - set: {newcommand: ev_cmd, newcmddata: ev_arg}
+    - set:
+        newcommand: ev_cmd
+        newcmddata: ev_arg
+        newcmddata2: ev_arg2
+        newargn: ev_argn
+        legato: "ev_cmd == 1 and towards(ev_arg)"
     - {if: "ev_kind == 2", then: [{set: {gate: 0xFE}}]}
     - {if: "ev_kind == 3", then: [{set: {gate: 0xFF}}]}
     - if: "ev_kind == 1"
       then:
         - set: {newnote: ev_note, hasnew: 1}
-        - if: "newcommand != 3 and not (ins[instr & 0x3F].gt & 0x40)"
+        - if: "not legato and not ins[instr & 0x3F].keepgate"
           then:
             - set: {gate: 0xFE}
-            - if: "not (ins[instr & 0x3F].gt & 0x80)"
+            - if: "not ins[instr & 0x3F].nohr"
               then: [{set: {ad: "adparam >> 8", sr: "adparam & 0xFF"}}]
   play_channel:
     - set: {ii: "instr & 0x3F", tick: "tick - 1", skip: 0}
     - if: "tick == 0"
       then:
-        - set: {gatetimer: "ins[ii].gt & 0x3F"}
+        - set: {gatetimer: "ins[ii].gateoff"}
         - {if: hasnew, then: [{call: new_note_init}]}
         - run: {record: tick0, index: newcommand, field: do}
         - if: hasnew
           then:
             - set: {hasnew: 0}
-            - {if: "newcommand != 3", then: [{return: true}]}
+            - {if: "not legato", then: [{return: true}]}
         - call: wave_exec
       else:
         - if: "tick >= 0x80"
@@ -292,8 +304,7 @@ procs:
               else: [{set: {tick: "funk1 if tempo else funk0", tempo: "tempo ^ 1"}}]
             - {if: "gatetimer > tick", then: [{set: {state: 1}}]}
         - call: wave_exec
-    - if: "not skip and tick != 0"
-      then: [{run: {record: tickn, index: command, field: do}}]
+    - {if: "not skip and tick != 0", then: [{call: effect}]}
     - set: {fetchtick: "tick == gatetimer"}
     - if: "not fetchtick and pptr != 0"
       then:
@@ -305,17 +316,16 @@ init:
   - set: {filterctrl: 0, fptr: 0, state: 0}
   - for_voices:
       - set:
-          command: 0
-          cmddata: 0
           newcommand: 0
           newcmddata: 0
           wave: 0
           wptr: 0
           hasnew: 0
+          insfx: 1
           tick: 1
           tempo: deftempo
           instr: 1
-          gatetimer: "ins[1].gt & 0x3F"
+          gatetimer: "ins[1].gateoff"
 
 tick:
   - {if: "state == 2", then: [{return: true}]}
@@ -325,12 +335,12 @@ tick:
   - for_voices: [{call: play_channel}]
 
 ghost:
-  global: {0x15: "0", 0x16: filtercutoff, 0x17: filterctrl, 0x18: "filtertype | masterfader"}
+  global: {0x15: "0", 0x16: cut, 0x17: filterctrl, 0x18: "filtertype | masterfader"}
   voice:
     0: "freq & 0xFF"
     1: "freq >> 8"
-    2: "pulse & 0xFF"
-    3: "pulse >> 8"
+    2: "pw & 0xFF"
+    3: "pw >> 8"
     4: "wave & gate"
     5: ad
     6: sr
