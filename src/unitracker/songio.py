@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.1 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.2 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -15,13 +15,13 @@ import yaml
 
 from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
-from unitracker.codec import NONE, CodecError, CommandCodec, RowCodec, note_text
+from unitracker.codec import NONE, ROW_KEYS, CodecError, CommandCodec, RowCodec, note_text
 from unitracker.expr import ExprError, Resolver
 from unitracker.reach import ReachabilityError, table_reads
 from unitracker.records import record_types
 from unitracker.vm import IR_VERSION, compile_phrase
 
-VERSION = 1.1
+VERSION = 1.2
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -29,7 +29,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.1 format."""
+    """A document does not follow the unitracker v1.2 format."""
 
 
 @functools.cache
@@ -138,7 +138,7 @@ _Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.or
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.1 document."""
+    """Turns the internal representation into a canonical v1.2 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -263,11 +263,14 @@ class _Writer:
         """A row in its type's form, references resolved; shared keys where the codec fits."""
         codec = self.codecs.get(rtype.name)
         shared = codec.encode(row) if codec is not None else None
-        if shared is not None:
-            return FlowMap(
-                {k: Atom(note_text(*v)) if k == "note" else v for k, v in shared.items()}
-            )
         refs = dict(self._refs(rtype, row))
+        if shared is not None:
+            written = {k: Atom(note_text(*v)) if k == "note" else v for k, v in shared.items()}
+            self._reads_back(codec, written)
+            written.update((field, self.ref_value(key)) for field, key in refs.items())
+            return FlowMap(written)
+        if codec is not None and rtype.form == "map":
+            raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
         values = {}
         for field in rtype.fields:
             if field == rtype.chain:
@@ -287,6 +290,13 @@ class _Writer:
         while out and fields[len(out) - 1] not in values:
             out.pop()
         return Flow(out)
+
+    def _reads_back(self, codec, written):
+        """Raise, naming the key, unless the player can read ``written`` back."""
+        try:
+            codec.decode(written)
+        except CodecError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
     def program_value(self, key):
         """A program as rows followed by ``end`` or ``{loop: k}``."""
@@ -521,7 +531,7 @@ def _unread_dropped(diff: dict, ir: dict) -> dict:
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.1 document for internal-representation song ``ir``.
+    """A canonical v1.2 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -545,7 +555,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.1 document to the internal representation."""
+    """Expands a v1.2 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -598,11 +608,17 @@ class _Reader:
         """A row's fields; references stay ``("name", str)`` or allocate inline programs."""
         codec = self.codecs.get(rtype.name)
         if codec is not None and isinstance(value, dict):
+            named = {
+                k: v
+                for k, v in value.items()
+                if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
+            }
             try:
-                return codec.decode(value)
+                row = codec.decode({k: v for k, v in value.items() if k not in named})
             except CodecError as exc:
                 raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        if rtype.form == "map":
+            row.update(named)
+        elif rtype.form == "map":
             if not isinstance(value, dict):
                 raise SongFormatError(f"{rtype.name}: a row must be a mapping")
             row = dict(value)
@@ -786,7 +802,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.1 document."""
+    """The internal representation of a v1.2 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
@@ -794,13 +810,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.1 document at ``path``."""
+    """The internal representation of the v1.2 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.1 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.2 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

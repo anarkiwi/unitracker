@@ -18,7 +18,7 @@ commands:
   5: {name: ad}
   6: {name: sr}
   7: {name: ctrl}
-  8: {name: run, ref: wavetab}
+  8: {name: run, ref: ctrltab}
   9: {name: run, ref: pulsetab}
   10: {name: run, ref: filttab}
   11: {name: resfilt}
@@ -35,16 +35,16 @@ record_types:
     none: 0
     pin: [1]
     form: map
-    fields: {ad: 0, sr: 0, wave: 0, pulse: 0, filter: 0, speed: 0, vd: 0, gt: 0, fw: 0}
-    refs: {wave: wavetab, pulse: pulsetab, filter: filttab, speed: speedtab}
+    fields: {ad: 0, sr: 0, ctrl: 0, pulse: 0, filter: 0, speed: 0, vd: 0, gt: 0, fw: 0}
+    refs: {ctrl: ctrltab, pulse: pulsetab, filter: filttab, speed: speedtab}
   speedtab:
     prefix: s
     none: 0
     fields: [l, r]
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
   # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
-  wavetab:
-    prefix: w
+  ctrltab:
+    prefix: c
     none: 0
     chain: next
     fields: [w, n, next]
@@ -255,11 +255,11 @@ procs:
     - {accumulate: freq, step: "0 - vspd if vibtime & 1 else vspd"}
   wave_exec:
     - {if: "wptr == 0", then: [{return: true}]}
-    - if: "wavetab[wptr].w <= 0x0F and wtime != wavetab[wptr].w"
+    - if: "ctrltab[wptr].w <= 0x0F and wtime != ctrltab[wptr].w"
       then: [{set: {wtime: "wtime + 1"}}, {return: true}]
     - set: {wtime: 0, wcur: wptr}
-    - set: {wptr: "wavetab[wcur].next"}
-    - run: {record: wavetab, index: wcur, field: do}
+    - set: {wptr: "ctrltab[wcur].next"}
+    - run: {record: ctrltab, index: wcur, field: do}
   pulse_exec:
     - if: "ptime == 0"
       then:
@@ -296,7 +296,7 @@ procs:
         - if: "fw >= 0xFE"
           then: [{set: {gate: fw}}]
           else: [{set: {wave: fw, gate: 0xFF}}]
-    - set: {wptr: "ins[ii].wave"}
+    - set: {wptr: "ins[ii].ctrl"}
     - {if: "ins[ii].pulse", then: [{set: {pptr: "ins[ii].pulse", ptime: 0}}]}
     - {if: "ins[ii].filter", then: [{set: {fptr: "ins[ii].filter", ftime: 0}}]}
     - set: {ad: "ins[ii].ad", sr: "ins[ii].sr"}

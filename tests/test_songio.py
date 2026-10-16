@@ -1,4 +1,4 @@
-"""The v1.1 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.2 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 

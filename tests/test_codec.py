@@ -20,6 +20,7 @@ from unitracker.codec import (
 from unitracker.defmon import lift as lift_defmon
 from unitracker.goattracker import lift as lift_gt
 from unitracker.records import record_types
+from unitracker.vm import SongPlayer
 
 GT = songio.library("goattracker2")
 DM = songio.library("defmon")
@@ -47,7 +48,7 @@ def written(raw_row, c):
     ],
 )
 def test_goattracker_wave_rows(raw, shared):
-    c = codec(GT, GT_TYPES, "wavetab")
+    c = codec(GT, GT_TYPES, "ctrltab")
     assert written(raw, c) == shared
     assert c.decode(shared) == raw
 
@@ -69,7 +70,7 @@ def test_goattracker_pulse_and_filter_rows(name, raw, shared):
 
 @pytest.mark.parametrize(
     "name,raw",
-    [("wavetab", {"w": 0xF1, "n": 1}), ("pulsetab", {"l": 32, "r": 16}), ("filttab", {"l": 5})],
+    [("ctrltab", {"w": 0xF1, "n": 1}), ("pulsetab", {"l": 32, "r": 16}), ("filttab", {"l": 5})],
 )
 def test_goattracker_leftover_rows_have_no_shape(name, raw):
     assert codec(GT, GT_TYPES, name).encode(raw) is None
@@ -80,10 +81,10 @@ def test_goattracker_leftover_rows_have_no_shape(name, raw):
     [
         ("filttab", {"cut": 1025}, "values of"),
         ("filttab", {"mode": 16, "resfilt": 1, "cut": 4}, "values of"),
-        ("wavetab", {"ctrl": 0xE5}, "values of"),
-        ("wavetab", {"ctrl": 9, "wait": 1}, "values of"),
-        ("wavetab", {"note": "=0"}, "values of"),
-        ("wavetab", {"hold": 2}, "keys"),
+        ("ctrltab", {"ctrl": 0xE5}, "values of"),
+        ("ctrltab", {"ctrl": 9, "wait": 1}, "values of"),
+        ("ctrltab", {"note": "=0"}, "values of"),
+        ("ctrltab", {"hold": 2}, "keys"),
         ("pulsetab", {"pw": 4097}, "values of"),
     ],
 )
@@ -114,7 +115,7 @@ def test_defmon_pw_and_note_columns_round_trip_every_byte():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": 1.1,
+        "unitracker": 1.2,
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -137,7 +138,7 @@ def gt_commands():
         (12, 128, ("cut", 1024)),
         (13, 15, ("vol", 15)),
         (13, 0x20, ("mark", 0x20)),
-        (8, 3, ("run", ("wavetab", 3))),
+        (8, 3, ("run", ("ctrltab", 3))),
         (10, 2, ("run", ("filttab", 2))),
         (1, 1, ("slideup", ("speedtab", 1))),
     ],
@@ -155,7 +156,7 @@ def test_command_rejections():
         cmds.encode(15, 0)
     with pytest.raises(CodecError, match="can't say which"):
         cmds.encode(8, 0)
-    for name, value in [("cut", 1025), ("tempo", 2), ("run", 5), ("vib", ("wavetab", 1))]:
+    for name, value in [("cut", 1025), ("tempo", 2), ("run", 5), ("vib", ("ctrltab", 1))]:
         with pytest.raises(CodecError, match="can't express"):
             cmds.decode(name, value)
     dm = CommandCodec(DM["commands"], DM_TYPES)
@@ -173,7 +174,7 @@ def test_command_rejections():
 )
 def test_codec_declarations_are_checked(bad):
     with pytest.raises(CodecError):
-        RowCodec(GT_TYPES["wavetab"], [bad], 0)
+        RowCodec(GT_TYPES["ctrltab"], [bad], 0)
     with pytest.raises(CodecError, match="shared command"):
         CommandCodec({1: {"name": "wave"}}, GT_TYPES)
     with pytest.raises(CodecError, match="unknown type"):
@@ -207,9 +208,21 @@ def test_note_offsets_follow_the_frequency_tables():
         assert midi(word) == index - DM["note_offset"] + 12
 
 
-PROGRAM_TYPES = {"wave": "wavetab", "pulse": "pulsetab", "filter": "filttab"}
-GT_INS = {"ad", "sr", "wave", "pulse", "filter", "speed", "vd", "gt", "fw"}
+PROGRAM_TYPES = {"ctrl": "ctrltab", "pulse": "pulsetab", "filter": "filttab"}
+GT_INS = {"ad", "sr", "ctrl", "pulse", "filter", "speed", "vd", "gt", "fw"}
 DM_KEEP = {"wgl", "af", "ps", "re", "fv", "cp", "acid"}
+# Outside program rows, a shared key may appear only where it keeps its shared meaning:
+# envelope and control-register values in init records, the $D417 value as resfilt, and in a
+# GoatTracker instrument ctrl names the program its voice runs on the control register.
+SHARED_OUTSIDE_ROWS = {
+    ("goattracker2", "ins"): {"ad", "sr", "ctrl"},
+    ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
+    ("defmon", "ginit"): {"resfilt"},
+}
+INIT_KEYS = {
+    "vinit": {"flo", "fhi", "sacc", "tbase", "rowA", "cntA", "rowB", "cntB"} | DM_KEEP,
+    "ginit": {"fv", "cp", "acc", "astep", "sub"},
+}
 
 
 def _check_rows(name, rows, keep):
@@ -217,9 +230,9 @@ def _check_rows(name, rows, keep):
         if isinstance(row, dict) and set(row) != {"loop"}:
             assert set(row) <= set(ROW_KEYS) | keep, (name, row)
         elif isinstance(row, list):
-            assert name in ("wavetab", "pulsetab", "filttab"), (name, row)
+            assert name in ("ctrltab", "pulsetab", "filttab"), (name, row)
             first = row[0]
-            assert {"wavetab": first >= 0xF0, "pulsetab": first < 0x80}.get(
+            assert {"ctrltab": first >= 0xF0, "pulsetab": first < 0x80}.get(
                 name, 0 < first < 0x80
             ), (name, row)
 
@@ -233,18 +246,34 @@ def _commands(atoms):
     return {a.split("!")[1].split(":")[0] for a in atoms if isinstance(a, str) and "!" in a}
 
 
+def _check_shared_outside_rows(pr_name, tname, value):
+    used = set(value) & set(ROW_KEYS)
+    assert used <= SHARED_OUTSIDE_ROWS.get((pr_name, tname), set()), (pr_name, tname, value)
+    for key in used:
+        if (pr_name, tname, key) == ("goattracker2", "ins", "ctrl"):
+            assert isinstance(value[key], (list, str)), value
+        else:
+            assert isinstance(value[key], int) or key == "note", (tname, key, value)
+
+
 def _check_def(pr_name, tname, value):
     if tname == "ins":
         assert set(value) <= GT_INS
+        _check_shared_outside_rows(pr_name, tname, value)
         for key, rtype in PROGRAM_TYPES.items():
             if isinstance(value.get(key), list):
                 _check_program(pr_name, rtype, value[key])
-    elif tname in ("wavetab", "pulsetab", "filttab", "sidtab"):
+    elif tname in INIT_KEYS:
+        assert set(value) <= INIT_KEYS[tname] | SHARED_OUTSIDE_ROWS[(pr_name, tname)], value
+        _check_shared_outside_rows(pr_name, tname, value)
+    elif tname in ("ctrltab", "pulsetab", "filttab", "sidtab"):
         _check_program(pr_name, tname, value)
+    else:
+        assert not set(value if isinstance(value, dict) else {}) & set(ROW_KEYS), (tname, value)
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.1 vocabulary; the commands it uses."""
+    """Assert a song uses only the fixed v1.2 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -264,3 +293,62 @@ def test_both_songs_use_only_the_shared_vocabulary(metal_warrior, crosseyed):
     assert gt_cmds == {"run", "slideup", "porta", "vib", "tempo"}
     dm_cmds = vocabulary(yaml.safe_load(songio.dumps(lift_defmon(crosseyed.read_bytes()))))
     assert dm_cmds == {"run2"}
+
+
+def defmon_doc(vinit, ginit):
+    return songio.loads(
+        yaml.safe_dump(
+            {
+                "unitracker": 1.2,
+                "playroutine": {"ref": "defmon"},
+                "song": [
+                    {
+                        "def": {
+                            "vinit": {0: vinit},
+                            "ginit": {0: ginit},
+                            "phrase": {"p1": ["-*4"]},
+                        },
+                        "play": ["p1"] * 3,
+                    }
+                ],
+                "loop": 0,
+            }
+        )
+    )
+
+
+def test_defmon_init_keys_mean_what_they_mean_in_rows():
+    ir = defmon_doc(
+        {"pw": 0x0567, "ctrl": 0x41, "ad": 0x12, "sr": 0x34, "wgl": 1, "note": "=36"},
+        {"resfilt": 0xF1},
+    )
+    voice = ir["records"]["vinit"][0]
+    assert (voice["pw"], voice["ctrl"], voice["wgl"], voice["note"]) == (0x0567, 0x41, 1, 60)
+    grid = SongPlayer(ir).render_grid(2)
+    assert list(grid[0][2:7]) == [0x67, 0x05, 0x41 ^ 1, 0x12, 0x34]
+    assert grid[0][0x17] == 0xF1
+    word = DM["tables"]["note_lo"][60] | DM["tables"]["note_hi"][60] << 8
+    assert int(grid[1][0]) | int(grid[1][1]) << 8 == word
+
+
+@pytest.mark.parametrize(
+    "vinit,match",
+    [({"pw": 0x1100}, r"values of \['pw'\]"), ({"note": "+3"}, r"values of \['note'\]")],
+)
+def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
+    with pytest.raises(songio.SongFormatError, match=match):
+        defmon_doc(vinit, {})
+
+
+def test_writer_refuses_an_init_cell_with_no_written_form(crosseyed):
+    ir = lift_defmon(crosseyed.read_bytes())
+    ir["records"]["vinit"][0]["pw"] = 0x1100
+    with pytest.raises(songio.SongFormatError, match=r"vinit.*values of \['pw'\]"):
+        songio.dumps(ir)
+
+
+def test_writer_refuses_a_map_row_no_shape_fits(crosseyed):
+    ir = lift_defmon(crosseyed.read_bytes())
+    ir["playroutine"]["record_types"]["vinit"]["codec"][0]["when"] = "0"
+    with pytest.raises(songio.SongFormatError, match="no shared-vocabulary form"):
+        songio.dumps(ir, embed=True)

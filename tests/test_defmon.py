@@ -41,7 +41,7 @@ def test_global_init_and_model():
     mem = build_mem()
     mem[0x10B6], mem[0x10BE], mem[0x10B9], mem[0x10C0] = 0x34, 0x12, 0x02, 0x01
     assert dm.global_init(mem) == {
-        "res": 0,
+        "resfilt": 0,
         "fv": 0,
         "cp": 0,
         "acc": 0x1234,

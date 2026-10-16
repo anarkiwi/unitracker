@@ -97,9 +97,9 @@ VOICE_STATE = (
     ("sr", 0x1037, None),
     ("ad", 0x1039, None),
     ("ctrl", 0x103B, None),
-    ("eor", 0x103D, None),
+    ("wgl", 0x103D, None),
     ("sacc", 0x1019, 0x101A),
-    ("mode", 0x101B, None),
+    ("af", 0x101B, None),
     ("ps", 0x101E, None),
     ("note", 0x137F, None),
     ("tbase", 0x12ED, None),
@@ -157,7 +157,7 @@ def global_init(mem) -> dict:
     if len(ops) != 1 or not ops <= {0xE9, 0x69}:
         raise LiftError("ACID opcodes are not a matching SBC/ADC pair")
     return {
-        "res": mem[0x10AA],
+        "resfilt": mem[0x10AA],
         "fv": mem[0x10AF],
         "cp": mem[0x10CA],
         "acc": _word(mem, 0x10B6, 0x10BE),
