@@ -154,17 +154,17 @@ def items_fixture():
     return pool(
         {
             "goattracker2": {"mod", "ad", "sr", "mark"},
-            "sidwizard": {"pitchup", "pitchdown", "attack", "iattack"},
+            "sidwizard": {"mod", "attack", "iattack"},
         }
     )
 
 
-def find(items, pr, label):
-    return next(x for x in items if x.pr == pr and x.label == label)
+def find(items, pr, label, code=None):
+    return next(x for x in items if x.pr == pr and x.label == label and code in (None, x.key[0]))
 
 
-def test_pitchup_is_slideup_decoded_differently(items):
-    matches, v, reason = verdict(find(items, "sidwizard", "!pitchup"), items)
+def test_slide_up_mods_are_one_effect_decoded_differently(items):
+    matches, v, reason = verdict(find(items, "sidwizard", "!mod", 1), items)
     assert v == "same effect, different argument decoding"
     assert [(m.label, m.key[0]) for m in matches] == [("!mod", 1)]
     assert reason == "ACC+ note-relative vs ref speedtab"
@@ -183,8 +183,8 @@ def test_iattack_differs_from_attack_on_note_rows(items):
     assert "pifx != 0" in reason
 
 
-def test_pitchdown_matches_slidedown(items):
-    matches, v, _ = verdict(find(items, "sidwizard", "!pitchdown"), items)
+def test_slide_down_mods_match(items):
+    matches, v, _ = verdict(find(items, "sidwizard", "!mod", 2), items)
     assert v == "same effect, different argument decoding"
     assert [(m.label, m.key[0]) for m in matches] == [("!mod", 2)]
 

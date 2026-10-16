@@ -13,6 +13,7 @@ from unitracker.codec import (
     ROW_KEYS,
     CodecError,
     CommandCodec,
+    Evaluator,
     RowCodec,
     evaluate,
     note_text,
@@ -33,7 +34,8 @@ SW_TYPES = record_types(SW)
 
 
 def codec(pr, types, name):
-    return RowCodec(types[name], types[name].codec, int(pr.get("note_offset", 0)))
+    ev = Evaluator(pr.get("functions"), pr.get("tables"))
+    return RowCodec(types[name], types[name].codec, int(pr.get("note_offset", 0)), ev)
 
 
 def written(raw_row, c):
@@ -328,8 +330,8 @@ LIST_ROWS = {
     "pulsetab": lambda r: r[0] == 0,
     "filttab": lambda r: 0 < r[0] < 0x80 and len(r) > 2,
     "wftab": lambda r: r[0] < 0x10 or r[1:2] == [0x7F] or len(r) > 2,
-    "pwtab": lambda r: r[0] < 0x80 or len(r) > 2,
-    "flttab": lambda r: r[0] < 0x80 or len(r) > 3,
+    "pwtab": lambda r: len(r) > 2,
+    "flttab": lambda r: len(r) > 2,
 }
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
 # envelope and control-register values in init records, the $D417 value as resfilt, and in a
@@ -440,9 +442,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     sw_doc = yaml.safe_load(songio.dumps(lift_sw(csillag.read_bytes())))
     sw_cmds = vocabulary(sw_doc)
     assert sw_cmds == {
-        "pitchup",
-        "pitchdown",
-        "glide",
+        "mod",
         "attack",
         "sustain",
         "chord",
@@ -519,3 +519,58 @@ def test_writer_refuses_a_map_row_no_shape_fits(crosseyed):
     ir["playroutine"]["record_types"]["vinit"]["codec"][0]["when"] = "0"
     with pytest.raises(songio.SongFormatError, match="no shared-vocabulary form"):
         songio.dumps(ir, embed=True)
+
+
+@pytest.mark.parametrize(
+    "name,raw,shared",
+    [
+        ("mod", {"cmd": 1, "arg": 47}, {"reg": "freq", "step": 24, "rel": "note", "for": "note"}),
+        (
+            "mod",
+            {"cmd": 2, "arg": 255},
+            {"reg": "freq", "step": -128, "rel": "note", "for": "note"},
+        ),
+        ("mod", {"cmd": 1, "arg": 0}, {"reg": "freq", "for": "note"}),
+        (
+            "mod",
+            {"cmd": 3, "arg": 0},
+            {"reg": "freq", "step": 0, "rel": "note", "to": "note", "for": "note"},
+        ),
+        (
+            "mod",
+            {"cmd": 3, "arg": 63},
+            {"reg": "freq", "step": 32, "rel": "note", "to": "note", "for": "note"},
+        ),
+        ("pwtab", {"a": 64, "b": 248}, {"hold": 2, "step": -8, "for": 64}),
+        ("pwtab", {"a": 0, "b": 0}, {"hold": 2, "for": 0}),
+        ("flttab", {"a": 32, "b": 8}, {"hold": 2, "step": 8, "for": 32}),
+    ],
+)
+def test_sidwizard_mods(name, raw, shared):
+    c = codec(SW, SW_TYPES, name)
+    assert written(raw, c) == shared
+    assert {k: v for k, v in c.decode(shared).items() if k in raw or v} == raw
+
+
+def test_sidwizard_speed_bytes_of_one_table_offset_write_alike():
+    c = codec(SW, SW_TYPES, "mod")
+    assert written({"cmd": 1, "arg": 47}, c) == written({"cmd": 1, "arg": 48}, c)
+    assert written({"cmd": 2, "arg": 0}, c) == written({"cmd": 1, "arg": 0}, c)
+
+
+@pytest.mark.parametrize(
+    "name,shared,match",
+    [
+        ("mod", {"reg": "freq", "step": 129, "rel": "note", "for": "note"}, "no shape"),
+        ("mod", {"reg": "freq", "step": 0, "rel": "note", "for": "note"}, "no shape"),
+        ("mod", {"reg": "freq", "step": -1, "rel": "note", "to": "note", "for": "note"}, "values"),
+        ("mod", {"reg": "freq", "step": 3, "rel": "note"}, "values of"),
+        ("mod", {"reg": "freq", "step": 300, "for": "note"}, "no shape"),
+        ("pwtab", {"step": 1, "for": 3}, "values of"),
+        ("pwtab", {"hold": 2, "step": 1, "for": 128}, "no shape"),
+        ("flttab", {"hold": 2, "step": 1, "for": 3, "res": 2}, "keys"),
+    ],
+)
+def test_sidwizard_refuses_mods_it_cannot_play(name, shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec(SW, SW_TYPES, name).decode(shared)

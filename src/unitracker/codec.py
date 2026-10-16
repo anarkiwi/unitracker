@@ -38,9 +38,6 @@ COMMAND_NAMES = (
     "vib",
     "mark",
     # Player-specific: SID-Wizard.
-    "pitchup",
-    "pitchdown",
-    "glide",
     "attack",
     "decay",
     "sustain",
