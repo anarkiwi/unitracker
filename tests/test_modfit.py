@@ -1,14 +1,18 @@
 """Modulation fitting: normaliser identities, byte pairs, proved fits, rejections and orbits."""
 
+import itertools
+
 import pytest
 import sympy
 
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.arith import Arith
-from unitracker.modfit.cli import main
+from unitracker.modfit.cli import check_lines, main
 from unitracker.modfit.fit import Fitter, model_text, src
 from unitracker.modfit.form import Form, atoms
-from unitracker.modfit.orbit import deltas, orbits, pingpong, report, start
+from unitracker.modfit import orbit as orbit_mod
+from unitracker.modfit.orbit import deltas, orbits, pingpong, reflector, report, start
+from unitracker.vm import CLAMPS, SongError, _acc
 
 TOY = {"voice": {"x": {"width": 8}, "a": {"width": 8}, "b": {"width": 8}, "e": None}}
 
@@ -156,6 +160,28 @@ def test_sidwizard_porta_has_witness(fitters):
     assert "fmh:fml=" in model_text(model) and "voff=" in model_text(model)
 
 
+def test_sidwizard_porta_signed_toward_overshoots_by_one(fitters):
+    fitter = fitters["sidwizard"]
+    f = fitter.form
+    actions = resolve(f.pr, "procs.tick_porta")
+    cand = specs()["checks"][0]["candidate"]
+    depth = f.expr("(fmh << 8) | fml", {})
+    small = f.lt(depth, 1 << 15)
+    meets = f.eq(f.add(f.signed("voff")("voff"), depth), 0)
+    assert not fitter.agrees(actions, (), "voff", cand)
+    assert not fitter.agrees(actions, (f.negate(small),), "voff", cand)
+    assert not fitter.agrees(actions, (small, meets), "voff", cand)
+    assert fitter.agrees(actions, (small, f.negate(meets)), "voff", cand)
+    state = {"voff": 0x10000 - 5, "fmh": 0, "fml": 5}
+    assert [st["voff"] for _, st in f.paths(actions, (), state)] == [1]
+    assert [st["voff"] for _, st in f.paths([cand], (), state)] == [0]
+
+
+def test_check_lines_report_a_witness():
+    lines = check_lines(*specs()["checks"][0].values())
+    assert lines[1].endswith(": refuted") and lines[2].startswith("      witness fmh:fml=")
+
+
 @pytest.mark.parametrize(
     "steps, expected",
     [
@@ -180,20 +206,10 @@ def orbit(name: str, period: int, ticks: int = 600):
     return deltas(Form(pr, data), resolve(pr, spec["path"]), state, spec["cell"], ticks)
 
 
-@pytest.mark.parametrize("p", [0, 1, 7, 64, 125])
-def test_goattracker_vibrato_closed_form(p):
-    assert pingpong(orbit("goattracker2", p)) == (-((p + 1) // 2 + 1), p // 2 + 1, 1)
-
-
 @pytest.mark.parametrize("p", [126, 127])
 def test_goattracker_vibrato_slides(p):
     steps = orbit("goattracker2", p)
     assert set(steps.tolist()) == {1} and pingpong(steps) is None
-
-
-@pytest.mark.parametrize("p", [2, 4, 10, 64])
-def test_sidwizard_even_period_pingpong(p):
-    assert pingpong(orbit("sidwizard", p)) == (-p // 2, 0, -1)
 
 
 def test_sidwizard_odd_period_drifts():
@@ -201,11 +217,52 @@ def test_sidwizard_odd_period_drifts():
     assert steps[:3].tolist() == [-1, 1, 1] and pingpong(steps) is None
 
 
+def one_orbit(name: str, p: int, ticks: int = 600):
+    return orbits(name, {**specs()["orbits"][name], "periods": [p, p]}, ticks)[p]
+
+
+@pytest.mark.parametrize("p", [0, 1, 64, 125])
+def test_goattracker_vibrato_is_one_reflect_accumulator(p):
+    lo, hi, first, acc = one_orbit("goattracker2", p)
+    assert (lo, hi, first) == (-((p + 1) // 2 + 1), p // 2 + 1, 1)
+    assert (acc["min"], acc["max"], acc["clamp"]) == (20000 + lo, 20000 + hi, "reflect")
+    assert "signed" not in acc
+
+
+@pytest.mark.parametrize("p", [2, 64])
+def test_sidwizard_even_vibrato_is_one_signed_reflect_accumulator(p):
+    lo, hi, first, acc = one_orbit("sidwizard", p)
+    assert (lo, hi, first) == (-p // 2, 0, -1)
+    assert (acc["min"], acc["max"], acc["signed"]) == (-p // 2, 0, True)
+
+
+@pytest.mark.parametrize("name,p", [("sidwizard", 1), ("sidwizard", 3), ("goattracker2", 126)])
+def test_drifts_and_slides_have_no_reflect_accumulator(name, p):
+    assert one_orbit(name, p) is None
+
+
+def test_reflector_takes_a_fresh_direction_cell():
+    pr = {"voice": {"vd": {"width": 1}, "x": {"width": 8}}}
+    rpr, acc, state = reflector(pr, "x", 10, (-1, 2, 1))
+    assert state == {"x": 10, "vd_": 0} and rpr["voice"]["vd_"] == {"width": 1}
+    steps = deltas(Form(rpr), [acc], state, "x", 12)
+    assert pingpong(steps) == (-1, 2, 1)
+    assert steps[:6].tolist() == [1, 1, -1, -1, -1, 1]
+
+
 def test_orbit_report_lists_failures():
     spec = {**specs()["orbits"]["goattracker2"], "periods": [125, 126]}
-    assert orbits("goattracker2", spec, 300) == {125: (-64, 63, 1), 126: None}
     lines = report("goattracker2", spec, 300)
-    assert lines[1].endswith("first step +1") and lines[-1].endswith("fails: [126]")
+    assert "first step +1, reflect {'accumulate': 'freq'" in lines[1]
+    assert lines[2].endswith("no ping-pong") and lines[-1].endswith("fails: [126]")
+
+
+def test_wrong_bounds_are_rejected_by_the_reflect_run(monkeypatch):
+    spec = {**specs()["orbits"]["goattracker2"], "periods": [4, 4]}
+    widen = pingpong
+    monkeypatch.setattr(orbit_mod, "pingpong", lambda steps: (widen(steps)[0], 9, 1))
+    assert orbits("goattracker2", spec, 100) == {4: (-3, 9, 1, None)}
+    assert report("goattracker2", spec, 100)[1].endswith("first step +1, reflect differs")
 
 
 def test_symbolic_state_is_not_concrete():
@@ -237,4 +294,33 @@ def test_cli_poly(tmp_path):
 
 def test_cli_orbit(capsys):
     main(["orbit", "goattracker2", "--ticks", "300"])
-    assert "ping-pong for 126 of 128; fails: [126, 127]" in capsys.readouterr().out
+    assert "reflect for 126 of 128; fails: [126, 127]" in capsys.readouterr().out
+
+
+BOUNDS = (-129, -1, 0, 5, 127, 128, 255)
+STEPS = (-128, -1, 0, 1, 3, 127, 128)
+KINDS = {
+    "min": [{"min": b} for b in BOUNDS],
+    "max": [{"max": b} for b in BOUNDS],
+    "toward": [{"toward": b} for b in BOUNDS],
+    **{f"min{a}-max": [{"min": a, "max": b} for b in BOUNDS] for a in BOUNDS},
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("signed", [False, True])
+@pytest.mark.parametrize("clamp", [False, True, "reflect"])
+def test_form_accumulate_is_vm_acc_on_bytes(clamp, signed, kind):
+    form = Form({"voice": {"x": {"width": 8}, "h": {"width": 1}}})
+    on_bound = [{"set": {"h": 1}}]
+    for bounds, step in itertools.product(KINDS[kind], STEPS):
+        acc = {"accumulate": "x", "step": step, **bounds, "clamp": clamp, "signed": signed}
+        if clamp == "reflect" and kind == "toward":
+            with pytest.raises(SongError):
+                form.paths([acc], (), {"x": 0})
+            return
+        lo, hi, toward = (bounds.get(k) for k in ("min", "max", "toward"))
+        for v0 in range(256):
+            [(_, st)] = form.paths([{**acc, "on_bound": on_bound}], (), {"x": v0, "h": 0})
+            expected = _acc(v0, step, 255, lo, hi, toward, CLAMPS[clamp], signed)
+            assert (st["x"], st["h"] == 1) == expected, (acc, v0)

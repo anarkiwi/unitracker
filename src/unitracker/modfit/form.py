@@ -9,6 +9,8 @@ import functools
 
 import z3
 
+from unitracker.vm import acc_mode
+
 INF = float("inf")
 BITS = 48
 CONDS = {"lt", "eq", "not", "land", "lor"}
@@ -819,29 +821,46 @@ class Form(Algebra):
         cell = a["accumulate"]
         v0, step = state.get(cell, cell), self.expr(a.get("step", 0), state)
         lo, hi = (self.expr(a[k], state) if k in a else None for k in ("min", "max"))
-        clamp = bool(a.get("clamp", True))
+        mode, signed = acc_mode(a, self.width.get(cell) is not None)
+        view = self.signed(cell) if signed else lambda x: x
         if "toward" not in a:
-            return self.bounds(self.wrap(cell, self.add(v0, step)), lo, hi, clamp)
+            return self.bounds(cell, v0, step, lo, hi, mode, view)
         t = self.expr(a["toward"], state)
-        moving, below = self.ne(v0, t), self.lt(v0, t)
-        up = self.bounds(self.wrap(cell, self.add(v0, step)), lo, t, clamp)
-        down = self.bounds(self.wrap(cell, self.sub(v0, step)), t, hi, clamp)
+        moving, below = self.ne(view(v0), view(t)), self.lt(view(v0), view(t))
         return [
-            ((self.eq(v0, t),), v0, False),
-            *(((moving, below, *g), v, h) for g, v, h in up),
-            *(((moving, self.negate(below), *g), v, h) for g, v, h in down),
+            ((self.negate(moving),), v0, False),
+            *(
+                ((moving, side, *g), v, h)
+                for side, args in (
+                    (below, (step, lo, t)),
+                    (self.negate(below), (self.neg(step), t, hi)),
+                )
+                for g, v, h in self.bounds(cell, v0, *args, mode, view)
+            ),
         ]
 
-    def bounds(self, value, lo, hi, clamp) -> list:
-        """``[(guard, value, hit)]`` of testing ``value`` against the bounds, as ``_acc``."""
-        hhit = False if hi is None else self.gt(value, hi)
-        lhit = False if lo is None else self.lt(value, lo)
-        nh, nl = self.negate(hhit), self.negate(lhit)
+    def signed(self, cell):
+        """The two's complement view ``x - 2**w * [x >= 2**(w-1)]`` at ``cell``'s width."""
+        w = self.width[cell]
+        return lambda x: self.sub(x, self.scale(1 << w, self.iv(self.ge(x, 1 << (w - 1)))))
+
+    def bounds(self, cell, v0, s, lo, hi, mode, view) -> list:
+        """``[(guard, value, hit)]`` of ``v0 + s`` tested against the bounds, as ``_acc``."""
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
+        value = self.wrap(cell, self.add(v0, s))
+        test = view(value)
+        hhit = False if hi is None else self.gt(test, view(hi))
+        lhit = False if lo is None else self.lt(test, view(lo))
+        nh = self.negate(hhit)
         return [
-            ((hhit,), hi if clamp else value, True),
-            ((nh, lhit), lo if clamp else value, True),
-            ((nh, nl), value, False),
-        ]
+            (
+                guard,
+                self.wrap(cell, bound if mode == 1 else self.sub(v0, s)) if mode else value,
+                True,
+            )
+            for bound, guard in ((hi, (hhit,)), (lo, (nh, lhit)))
+            if bound is not None
+        ] + [((nh, self.negate(lhit)), value, False)]
 
     # byte pairs -------------------------------------------------------------
     def unwrap(self, conds, t, modulus: int) -> tuple:

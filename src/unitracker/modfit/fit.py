@@ -107,6 +107,8 @@ class Fitter:
                         }
                         for v in values
                     ]
+        if self.form.width.get(cell):
+            out += [{**a, "signed": True} for a in out if a.keys() & {"min", "max", "toward"}]
         return sorted(out, key=lambda a: len(str(a)))
 
     def check(self, paths, guard, cell: str, candidate) -> tuple:

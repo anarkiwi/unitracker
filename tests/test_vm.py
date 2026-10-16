@@ -27,6 +27,9 @@ def acc_playroutine(acc, width=8, init=0):
     }
 
 
+HIT = [{"set": {"hits": "hits + 1"}}]
+
+
 def regs(player):
     return player.regs[0], player.regs[1]
 
@@ -51,10 +54,40 @@ def regs(player):
         ({"step": 4, "toward": 12, "on_bound": [{"set": {"hits": 1}}]}, 0, 8, 5, (12, 0)),
         ({"step": 5, "toward": 2, "on_bound": [{"set": {"hits": 1}}]}, 20, 8, 5, (2, 1)),
         ({"step": 0x30, "toward": 0x20}, 0x30, 8, 1, (0x20, 0)),
+        ({"step": 4, "max": 10, "clamp": "reflect", "on_bound": HIT}, 0, 8, 3, (4, 1)),
+        ({"step": -4, "min": 3, "clamp": "reflect", "on_bound": HIT}, 12, 8, 3, (8, 1)),
+        ({"step": 3, "max": 3, "clamp": "reflect", "on_bound": HIT}, 2, 8, 1, (0xFF, 1)),
+        ({"step": 1, "min": -3, "max": 1, "signed": True, "on_bound": HIT}, 0xFE, 8, 4, (1, 1)),
+        ({"step": 1, "min": -3, "max": 1, "on_bound": HIT}, 0xFE, 8, 1, (1, 1)),
+        ({"step": -1, "min": -2, "signed": True, "on_bound": HIT}, 0, 8, 3, (0xFE, 1)),
+        ({"step": 5, "toward": 0, "signed": True, "on_bound": HIT}, 0xF0, 8, 4, (0, 1)),
+        ({"step": 5, "toward": 0, "on_bound": HIT}, 0xF0, 8, 2, (0xE6, 0)),
+        ({"step": 5, "toward": -1, "signed": True, "on_bound": HIT}, 0xFF, 8, 2, (0xFF, 0)),
+        (
+            {"step": 1, "min": 0, "signed": True, "clamp": "reflect", "on_bound": HIT},
+            0x7E,
+            8,
+            2,
+            (0x7E, 1),
+        ),
+        ({"step": 0x804, "max": 0x7FFF, "signed": True, "on_bound": HIT}, 0x7C00, 16, 1, (4, 0)),
     ],
 )
 def test_bounded_accumulator(acc, init, width, ticks, expected):
     assert regs(run(acc_playroutine(acc, width, init), ticks + 1)) == expected
+
+
+@pytest.mark.parametrize(
+    "acc,width",
+    [
+        ({"step": 1, "toward": 3, "clamp": "reflect"}, 8),
+        ({"step": 1, "max": 3, "signed": True}, None),
+        ({"step": 1, "max": 3, "clamp": "bounce"}, 8),
+    ],
+)
+def test_bad_accumulator_is_a_compile_error(acc, width):
+    with pytest.raises(SongError):
+        SongPlayer(mini_song(acc_playroutine(acc, width)))
 
 
 def test_toward_wrapped_overshoot_is_not_a_hit():
