@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.3 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.4 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -15,13 +15,22 @@ import yaml
 
 from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
-from unitracker.codec import NONE, ROW_KEYS, CodecError, CommandCodec, RowCodec, note_text
+from unitracker.codec import (
+    MOD,
+    NONE,
+    ROW_KEYS,
+    CodecError,
+    CommandCodec,
+    Evaluator,
+    RowCodec,
+    note_text,
+)
 from unitracker.expr import ExprError, Resolver
 from unitracker.reach import ReachabilityError, table_reads
 from unitracker.records import record_types
 from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
 
-VERSION = 1.3
+VERSION = 1.4
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -29,7 +38,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.3 format."""
+    """A document does not follow the unitracker v1.4 format."""
 
 
 @functools.cache
@@ -73,11 +82,12 @@ class _RowEval(Resolver):
             raise SongFormatError(f"{self.rtype.name}: {exc}") from exc
 
 
-def _codecs(pr, rtypes):
-    """``(note offset, {type: RowCodec}, CommandCodec)`` for a playroutine."""
+def _codecs(pr, rtypes, tables):
+    """``(note offset, {type: RowCodec}, CommandCodec)`` for a playroutine and a song's tables."""
     offset = int(pr.get("note_offset", 0))
+    ev = Evaluator(pr.get("functions"), tables)
     try:
-        codecs = {n: RowCodec(rt, rt.codec, offset) for n, rt in rtypes.items() if rt.codec}
+        codecs = {n: RowCodec(rt, rt.codec, offset, ev) for n, rt in rtypes.items() if rt.codec}
         return offset, codecs, CommandCodec(pr.get("commands"), rtypes)
     except CodecError as exc:
         raise SongFormatError(f"{pr.get('name')}: {exc}") from exc
@@ -138,7 +148,7 @@ _Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.or
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.3 document."""
+    """Turns the internal representation into a canonical v1.4 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -153,7 +163,8 @@ class _Writer:
         inst = self.pr.get("instrument") or {}
         self.ins_type = inst.get("type")
         self.ins_base = int(inst.get("base", 0))
-        self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes)
+        self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
+        self.mods = ({}, {})
         self.first_row = {}
         self.order = []
         self.post = []
@@ -232,6 +243,17 @@ class _Writer:
         for field, child in self._children(key):
             self.visit(child, (key, field))
         self.post.append(key)
+
+    def mod_key(self, code, arg):
+        """The ``mod`` object command ``code`` with ``arg`` writes as; equal mods are one."""
+        by_command, by_text = self.mods
+        if (code, arg) not in by_command:
+            row = self.commands.mod_row(code, arg, lambda t, i: self._row(self.rtypes[t], i))
+            text = tuple(self.row_value(self.rtypes[MOD], row).items())
+            index = by_text.setdefault(text, len(by_text) + 1)
+            self.records.setdefault(MOD, {})[index] = row
+            by_command[(code, arg)] = index
+        return (MOD, by_command[(code, arg)])
 
     # -- phrases --
 
@@ -335,6 +357,8 @@ class _Writer:
         """A command as ``name:arg``, or None for no command."""
         if not (cmd or raw):
             return None
+        if self.commands.is_mod(cmd):
+            return f"{MOD}:@{self.names[self.mod_key(cmd, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
@@ -350,6 +374,9 @@ class _Writer:
             if row[2]:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             for cmd, arg in zip(row[3::2], row[4::2]):
+                if self.commands.is_mod(int(cmd)):
+                    yield self.mod_key(int(cmd), int(arg)), "command"
+                    continue
                 target = self.commands.ref(int(cmd))
                 if target is not None:
                     none = self.rtypes[target].none
@@ -532,7 +559,7 @@ def _unread_dropped(diff: dict, ir: dict) -> dict:
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.3 document for internal-representation song ``ir``.
+    """A canonical v1.4 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -556,7 +583,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.3 document to the internal representation."""
+    """Expands a v1.4 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -567,7 +594,8 @@ class _Reader:
         inst = self.pr.get("instrument") or {}
         self.ins_type = inst.get("type")
         self.ins_base = int(inst.get("base", 0))
-        self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes)
+        self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
+        self.mods = []
         self.next_index = {name: rt.first for name, rt in self.rtypes.items()}
         self.names = {}
         self.pending = []
@@ -624,10 +652,7 @@ class _Reader:
                 raise SongFormatError(f"{rtype.name}: a row must be a mapping")
             row = dict(value)
         else:
-            fields = [f for f in rtype.fields if f != rtype.chain]
-            if not isinstance(value, list) or len(value) > len(fields):
-                raise SongFormatError(f"{rtype.name}: bad row {value!r}")
-            row = dict(zip(fields, value))
+            row = self._list_row(rtype, codec, value)
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
@@ -641,6 +666,17 @@ class _Reader:
                 row[field] = self._program(self.rtypes[target], val)
             elif not isinstance(val, int) or isinstance(val, bool):
                 raise SongFormatError(f"{rtype.name}.{field}: bad value {val!r}")
+        return row
+
+    @staticmethod
+    def _list_row(rtype, codec, value) -> dict:
+        """A list row's fields; a row the codec writes with shared keys has no list form."""
+        fields = [f for f in rtype.fields if f != rtype.chain]
+        if not isinstance(value, list) or len(value) > len(fields):
+            raise SongFormatError(f"{rtype.name}: bad row {value!r}")
+        row = dict(zip(fields, value))
+        if codec is not None and codec.encode(row) is not None:
+            raise SongFormatError(f"{rtype.name}: write row {value!r} with shared keys")
         return row
 
     def _program(self, rtype, value) -> int:
@@ -690,12 +726,32 @@ class _Reader:
             raise SongFormatError(f"{tname}: bad name {name!r}")
         if name in self.names:
             raise SongFormatError(f"name {name!r} defined twice")
+        if tname == MOD:
+            self.names[name] = (MOD, self._mod(self._proto(rtype, value)))
+            return
         if rtype.chain is not None:
             index = self._program(rtype, value)
         else:
             index = self._alloc(rtype, 1)
             self.pending.append((rtype, index, self._proto(rtype, value)))
         self.names[name] = (tname, index)
+
+    def _mod(self, row) -> int:
+        """Index of the ``(code, arg)`` a raw ``mod`` row is, allocating its argument row."""
+        try:
+            code, src = self.commands.mod_command(row)
+        except CodecError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+        arg = row.get("arg", 0)
+        if src is not None:
+            rtype = self.rtypes[src]
+            arg = rtype.none
+            if row.get("arg"):
+                arg = self._alloc(rtype, 1)
+                fields = {f: row.get(f, rtype.default(f)) for f in rtype.fields if f != rtype.chain}
+                self.pending.append((rtype, arg, fields))
+        self.mods.append((code, int(arg)))
+        return len(self.mods) - 1
 
     def lookup(self, name, tname) -> int:
         """The index of object ``name``, which must be a ``tname``."""
@@ -733,16 +789,7 @@ class _Reader:
             event["instrument"] = self.lookup(parsed["ins"], self.ins_type) + self.ins_base
         if len(parsed["commands"]) > MAX_COMMANDS:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
-        commands = []
-        for cmd, arg in parsed["commands"]:
-            if isinstance(arg, str) and arg != NONE:
-                if arg[1:] not in self.names:
-                    raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
-                arg = self.names[arg[1:]]
-            try:
-                commands.append(list(self.commands.decode(cmd, arg)))
-            except CodecError as exc:
-                raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
+        commands = [self.command(cmd, arg, atom) for cmd, arg in parsed["commands"]]
         if len(commands) == 1:
             event["command"] = commands[0]
         elif commands:
@@ -750,6 +797,21 @@ class _Reader:
         if parsed["steps"] > 1:
             event["steps"] = parsed["steps"]
         return event
+
+    def command(self, cmd, arg, atom) -> list[int]:
+        """``[code, arg]`` for one written command of ``atom``."""
+        if isinstance(arg, str) and arg != NONE:
+            if arg[1:] not in self.names:
+                raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
+            arg = self.names[arg[1:]]
+        if (cmd == MOD) != (isinstance(arg, tuple) and arg[0] == MOD):
+            raise SongFormatError(f"!{MOD} takes a {MOD} record and only it does, in {atom!r}")
+        if cmd == MOD:
+            return list(self.mods[arg[1]])
+        try:
+            return list(self.commands.decode(cmd, arg))
+        except CodecError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
 
     def _collect(self, song):
         """Define every record and phrase; ``(phrase atoms, play rows)``."""
@@ -809,7 +871,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.3 document."""
+    """The internal representation of a v1.4 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
@@ -817,13 +879,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.3 document at ``path``."""
+    """The internal representation of the v1.4 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.3 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.4 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")
