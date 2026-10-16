@@ -51,10 +51,11 @@ class Fitter:
     def __init__(self, pr: dict):
         self.form = Form(pr)
 
-    def cases(self, actions, cell: str) -> list:
-        """``[(dispatch guard, dynamic guard, value)]`` of ``cell`` over the symbolic paths."""
+    @staticmethod
+    def cases(paths, cell: str) -> list:
+        """``[(dispatch guard, dynamic guard, value)]`` of ``cell`` over symbolic ``paths``."""
         out = []
-        for conds, final in self.form.paths(actions):
+        for conds, final in paths:
             if final.get(cell, cell) != cell:
                 dyn = tuple(c for c in conds if cell in atoms(c))
                 out.append((tuple(c for c in conds if c not in dyn), dyn, final[cell]))
@@ -109,8 +110,10 @@ class Fitter:
         return sorted(out, key=lambda a: len(str(a)))
 
     def check(self, paths, guard, cell: str, candidate) -> tuple:
-        """``(z3 result, model or None)`` of the first original and candidate path pair that
-        can give ``cell`` different values under ``guard``; ``unsat`` when none can."""
+        """``(z3 result, model)`` of the first path pair where ``cell`` can differ under ``guard``.
+
+        ``(unsat, None)`` means ``candidate`` agrees with the original ``paths``.
+        """
         for cconds, cfinal in self.form.paths([candidate]):
             for conds, final in paths:
                 smt = self.form.solver()
@@ -134,7 +137,7 @@ class Fitter:
     def fit(self, actions, cell: str) -> list:
         """``[(dispatch guard, proved accumulator or None)]`` per dispatch group of ``cell``."""
         groups, paths = {}, self.form.paths(actions)
-        for case in self.cases(actions, cell):
+        for case in self.cases(paths, cell):
             groups.setdefault(case[0], []).append(case)
         out = []
         for guard, cases in groups.items():
@@ -148,7 +151,7 @@ class Fitter:
 
     def rejection(self, actions, guard, cell: str) -> tuple:
         """``(shortest candidate, witness model)`` under ``guard``, or ``(None, None)``."""
-        cases = [c for c in self.cases(actions, cell) if c[0] == guard]
+        cases = [c for c in self.cases(self.form.paths(actions), cell) if c[0] == guard]
         cands = self.candidates(cell, cases)
         if not cands:
             return None, None
