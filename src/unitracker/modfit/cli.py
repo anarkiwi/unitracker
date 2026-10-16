@@ -10,6 +10,7 @@ from tqdm import tqdm
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.arith import Arith
 from unitracker.modfit.compose import command_lines
+from unitracker.modfit.generic import PLAYERS, report as generic_report
 from unitracker.modfit.keywords import table as keyword_table
 from unitracker.modfit.fit import Fitter, model_text, src
 from unitracker.modfit.invariant import fit_under, invariants
@@ -72,6 +73,7 @@ def poly_lines(name: str, path: str) -> list:
 
 def run(args) -> list:
     """Report lines of the chosen subcommand."""
+    # pylint: disable=too-many-return-statements
     if args.command == "fit":
         if args.units:
             units = [u.split(":", 2) for u in args.units]
@@ -89,6 +91,8 @@ def run(args) -> list:
         return [x for name, kw in units for x in command_lines(name, kw)]
     if args.command == "keywords":
         return keyword_table(tuple(args.units) or ("goattracker2", "defmon", "sidwizard"))
+    if args.command == "generic":
+        return generic_report(tuple(args.units) or PLAYERS, args.ticks)
     if args.command == "poly":
         units = [u.split(":") for u in args.units]
         return [x for u in tqdm(units, desc="poly", unit="op") for x in poly_lines(*u)]
@@ -115,6 +119,9 @@ def main(argv=None) -> None:
     sub.add_parser("keywords", help="match keyword and field signatures").add_argument(
         "units", nargs="*", metavar="PLAYROUTINE"
     )
+    generic = sub.add_parser("generic", help="factorise every effect as a generic accumulator")
+    generic.add_argument("units", nargs="*", metavar="PLAYROUTINE")
+    generic.add_argument("--ticks", type=int, default=600)
     orbit = sub.add_parser("orbit", help="test vibrato orbits as reflect accumulators")
     orbit.add_argument("units", nargs="*", metavar="PLAYROUTINE")
     orbit.add_argument("--ticks", type=int, default=600)
