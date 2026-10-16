@@ -78,7 +78,7 @@ class Report:
             fired = {p: d for p in orbit.domain() if (d := orbit.duration(p)) is not None}
             what = src(orbit.bound) if orbit.bound is not None else f"start {cell}"
             if fired:
-                text = f"fires after {closed(fired)} for {what} = p in {spans(fired)}"
+                text = f"counts {closed(fired)} ticks for {what} = p in {spans(fired)}"
             else:
                 sigs = {p: signature(*orbit.truths(t.tests[0], p)) for p in orbit.domain()}
                 text = "; ".join(

@@ -38,7 +38,10 @@ def test_defmon_rows_and_timer_gates():
     assert [r.kind for r in rows] == ["bounce", "bounce"] and all(
         r.status == "proved" for r in rows
     )
-    assert rep.summary("cnt") == "timer cnt (-1): fires after p + 1 for start cnt = p in 0..127"
+    assert (
+        rep.summary("cnt")
+        == "timer cnt (-1): counts [0..127: p + 1] [128..255: 1] ticks for start cnt = p in 0..255"
+    )
     [acid] = rep.record_rows("procs.acid", "acc")
     assert acid.role == "CUT[3:10]" and acid.kind == "reads v" and acid.basis == "cells astep, sub"
 

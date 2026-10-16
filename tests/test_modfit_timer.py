@@ -64,7 +64,7 @@ def test_row_duration_and_delay_closed_forms(gt, sw):
     [test] = vdc.tests
     sigs = {p: signature(*orbit.truths(test, p)) for p in orbit.domain()}
     assert list(grouped(sigs)) == [("duration", "0..127", ["p + 1"])]
-    assert orbit.duration(5) is None
+    assert orbit.duration(5) == 7
 
 
 def test_vibrato_orbits_reproduce_the_reflect_bounds():

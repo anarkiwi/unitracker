@@ -235,7 +235,7 @@ class Orbit:
 
     A non-constant bound the counting tests compare the timer with is the parameter, and the
     run starts at the timer's reset; otherwise the start value is. Other atoms take a z3 model
-    of a counting case, so a run stops at a firing case that reads any of them.
+    of a counting case, so a run stops at a case that does not count and reads any of them.
     """
 
     # pylint: disable=too-many-instance-attributes
@@ -258,7 +258,7 @@ class Orbit:
             value = final.get(t.cell, t.cell)
             kind = "count" if owner.count(t.cell, conds, value) else "fire"
             kind = "hold" if value == t.cell else kind
-            stop = kind == "fire" and bool((set(atoms(conds)) | set(atoms(value))) - free)
+            stop = kind != "count" and bool((set(atoms(conds)) | set(atoms(value))) - free)
             folded = [self.fold(smt.cond(c)) for c in conds]
             self.cases.append((folded, self.fold(smt.term(value)), kind, stop))
 
@@ -294,7 +294,7 @@ class Orbit:
                 if all(z3.is_true(self.eval(c, value, p)) for c in conds):
                     nxt = self.eval(term, value, p).as_signed_long()
                     nxt = nxt & ((1 << self.width) - 1) if self.width else nxt
-                    self.succ[key] = (None if stop else nxt, kind == "fire")
+                    self.succ[key] = (None if stop else nxt, kind != "count")
                     break
         return self.succ[key]
 
@@ -310,7 +310,7 @@ class Orbit:
         return values, None if value is None else seen[value], fired
 
     def duration(self, p: int):
-        """Ticks until the timer first fires, or None when it holds."""
+        """Ticks until the timer stops counting (fires or holds), or None when it never does."""
         _, _, fired = self.run(p)
         return next((i + 1 for i, f in enumerate(fired) if f), None)
 
@@ -473,11 +473,9 @@ def orbit_lines(orbit: "Orbit") -> list:
     what = f"bound {src(orbit.bound)} = p" if orbit.bound is not None else "start p"
     durations = {p: orbit.duration(p) for p in tqdm(dom, desc=orbit.timer.cell, leave=False)}
     fired = {p: d for p, d in durations.items() if d is not None}
-    lines = (
-        [f"      {what} in {spans(fired)}: fires after n = {closed(fired)} ticks"] if fired else []
-    )
+    lines = [f"      {what} in {spans(fired)}: counts n = {closed(fired)} ticks"] if fired else []
     held = [p for p, d in durations.items() if d is None]
-    lines += [f"      {what} in {spans(held)}: holds"] if held else []
+    lines += [f"      {what} in {spans(held)}: counts forever"] if held else []
     for cond in orbit.timer.tests:
         sigs = {p: signature(*orbit.truths(cond, p)) for p in dom}
         for kind, where, forms in grouped(sigs):
