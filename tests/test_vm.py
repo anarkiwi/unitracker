@@ -222,7 +222,7 @@ def test_expression_scope_errors(text, match):
         ({"tracks": [{"plays": [{"phrase": "a"}], "loop": 3}]}, "loop index"),
         ({"voices": 2}, "one track"),
         ({"registers": [0]}, "registers"),
-        ({"unitracker": 1}, "v0"),
+        ({"unitracker": 1}, "expanded"),
     ],
 )
 def test_song_errors(song_kw, match):

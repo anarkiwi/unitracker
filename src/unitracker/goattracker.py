@@ -46,103 +46,59 @@ class _Table:
         return self.rt(ptr) if self.lt(ptr) == C.TABLEJUMP else ptr
 
 
-def _note_actions(right):
-    if right == 0x80:
-        return []
-    if right >= 0x80:
-        n = right & 0x7F
-    else:
-        n = f"(note + {right}) & 0x7F" if right else "note & 0x7F"
-    return [{"call": "wnote", "with": {"n": n}}]
-
-
 def wave_records(table) -> dict:
-    """Wavetable rows as records: delay rows wait, then each row's actions run."""
+    """Wavetable rows as ``w``/``n`` records, jump rows folded into ``next``."""
+    tab = _Table(table)
+    return {
+        i: {"w": tab.lt(i), "n": tab.rt(i), "next": tab.fold(i + 1)}
+        for i in range(1, len(tab) + 1)
+        if tab.lt(i) != C.TABLEJUMP
+    }
+
+
+def pulse_records(table) -> dict:
+    """Pulsetable rows as ``l``/``r`` records, jump rows folded into ``next``."""
+    tab = _Table(table)
+    return {
+        i: {"l": tab.lt(i), "r": tab.rt(i), "next": tab.fold(i + 1)}
+        for i in range(1, len(tab) + 1)
+        if tab.lt(i) != C.TABLEJUMP
+    }
+
+
+def filter_records(table) -> dict:
+    """Filtertable rows as ``l``/``r`` records; a parameter row takes a following cutoff row's
+    value as ``cut`` and continues after it, as the player reads them in one tick."""
     tab, out = _Table(table), {}
     for i in range(1, len(tab) + 1):
-        left, right = tab.lt(i), tab.rt(i)
+        left = tab.lt(i)
         if left == C.TABLEJUMP:
             continue
-        rec = {"next": tab.fold(i + 1)}
-        if left <= C.WAVELASTDELAY:
-            rec.update(delay=1, wait=left, do=_note_actions(right))
-        elif left < C.WAVESILENT:
-            rec["do"] = [{"set": {"wave": left}}] + _note_actions(right)
-        elif left <= C.WAVELASTSILENT:
-            rec["do"] = [{"set": {"wave": left & 0x0F}}] + _note_actions(right)
-        else:
-            rec["do"] = [
-                {"set": {"arg": right}},
-                {"run": {"record": "wavecmd", "index": left & 0x0F, "field": "do"}},
-                {"set": {"skip": 1}},
-            ]
-        if not rec["do"]:
-            del rec["do"]
+        rec, nxt = {"l": left, "r": tab.rt(i)}, i + 1
+        if left >= 0x80 and tab.lt(nxt) == 0x00:
+            rec["cut"] = tab.rt(nxt)
+            nxt += 1
+        rec["next"] = tab.fold(nxt)
         out[i] = rec
     return out
 
 
-def pulse_records(table) -> dict:
-    """Pulsetable rows: set rows and timed signed sweeps of the pulse accumulator."""
-    tab, out = _Table(table), {}
-    for i in range(1, len(tab) + 1):
-        left, right = tab.lt(i), tab.rt(i)
-        if left == C.TABLEJUMP:
-            continue
-        if left >= 0x80:
-            value = ((left & 0x0F) << 8) | right
-            out[i] = {"set": 1, "do": [{"set": {"pulse": value}}], "next": tab.fold(i + 1)}
-        else:
-            step = right - 0x100 if right >= 0x80 else right
-            out[i] = {
-                "time": left,
-                "each": [{"accumulate": "pulse", "step": step}],
-                "next": tab.fold(i + 1),
-            }
-    return out
-
-
-def filter_records(table) -> dict:
-    """Filtertable rows: parameter rows (absorbing a following cutoff row), cutoffs, sweeps."""
-    tab, out = _Table(table), {}
-    for i in range(1, len(tab) + 1):
-        left, right = tab.lt(i), tab.rt(i)
-        if left == C.TABLEJUMP:
-            continue
-        if left >= 0x80:
-            do = [{"set": {"filtertype": left & 0x70, "filterctrl": right}}]
-            nxt = i + 1
-            if tab.lt(nxt) == 0x00:
-                do.append({"set": {"filtercutoff": tab.rt(nxt)}})
-                nxt += 1
-            out[i] = {"set": 1, "do": do, "next": tab.fold(nxt)}
-        elif left == 0:
-            out[i] = {"set": 1, "do": [{"set": {"filtercutoff": right}}], "next": tab.fold(i + 1)}
-        else:
-            out[i] = {
-                "time": left,
-                "each": [{"accumulate": "filtercutoff", "step": right}],
-                "next": tab.fold(i + 1),
-            }
-    return out
-
-
 def speed_records(table) -> dict:
-    """Speedtable rows 1..n as ``left``/``right`` byte records."""
+    """Speedtable rows 1..n as ``l``/``r`` byte records."""
     tab = _Table(table)
-    return {i: {"left": tab.lt(i), "right": tab.rt(i)} for i in range(1, len(tab) + 1)}
+    return {i: {"l": tab.lt(i), "r": tab.rt(i)} for i in range(1, len(tab) + 1)}
 
 
 _INS_FIELDS = (
     ("ad", "attack_decay"),
     ("sr", "sustain_release"),
-    ("wave_ptr", "wave_ptr"),
-    ("pulse_ptr", "pulse_ptr"),
-    ("filter_ptr", "filter_ptr"),
+    ("wave", "wave_ptr"),
+    ("pulse", "pulse_ptr"),
+    ("filter", "filter_ptr"),
     ("speed", "vibrato_param"),
-    ("vibdelay", "vibrato_delay"),
-    ("gatetimer", "gateoff_timer"),
-    ("firstwave", "first_wave"),
+    ("vd", "vibrato_delay"),
+    ("gt", "gateoff_timer"),
+    ("fw", "first_wave"),
 )
 
 
@@ -239,9 +195,33 @@ def _phrases(song, tracks) -> dict:
     return out
 
 
-def lift(dec) -> dict:
-    """A unitracker song dict for a ``pygoattracker.decompile_sid`` result."""
-    info = dec.info
+def ticks_per_step(phrases, tracks, deftempo):
+    """Ticks per row when the whole song runs at one global tempo, else None.
+
+    That holds without funk tempo or per-voice tempo, with every tempo command naming
+    the same tempo, and with one on a first row unless it equals the default tempo.
+    """
+    tempos, first = set(), False
+    starts = {t["plays"][0]["phrase"] for t in tracks}
+    for name, events in phrases.items():
+        for k, event in enumerate(events):
+            cmd, arg = event.get("command") or (0, 0)
+            if cmd == C.CMD_FUNKTEMPO or (cmd == C.CMD_SETTEMPO and arg >= 0x80):
+                return None
+            if cmd == C.CMD_SETTEMPO:
+                tempo = arg & 0x7F
+                tempos.add(tempo - 1 if tempo >= 3 else tempo)
+                first = first or (k == 0 and name in starts)
+    if not tempos:
+        tempos, first = {deftempo}, True
+    if len(tempos) != 1 or not (first or tempos == {deftempo}):
+        return None
+    tempo = tempos.pop()
+    return tempo + 1 if tempo >= 2 else None
+
+
+def _check_build(info) -> None:
+    """Raise for player builds the goattracker2 playroutine does not cover yet."""
     unsupported = {
         "SIMPLEPULSE pulse tables": info.simplepulse,
         "full-ghosting builds": info.state is not None,
@@ -251,6 +231,12 @@ def lift(dec) -> dict:
     missing = [name for name, used in unsupported.items() if used]
     if missing:
         raise LiftError("not covered by the goattracker2 playroutine yet: " + ", ".join(missing))
+
+
+def lift(dec) -> dict:
+    """A unitracker song dict for a ``pygoattracker.decompile_sid`` result."""
+    info = dec.info
+    _check_build(info)
     song = dec.typed.to_song()
     build = info.build
     playroutine = load_playroutine()
@@ -265,8 +251,13 @@ def lift(dec) -> dict:
     header = dec.header
     registers = [0] * 25
     registers[0x18] = 0x0F
+    hints = {}
+    tps = ticks_per_step(phrases, tracks, deftempo)
+    if tps is not None:
+        hints["ticks_per_step"] = tps
     return {
-        "unitracker": 0,
+        "unitracker": "ir",
+        "hints": hints,
         "meta": song_meta(header, f"goattracker2 subtune {dec.subtune}"),
         "clock": NTSC_CLOCK if (header.flags >> 2) & 3 == 2 else PAL_CLOCK,
         "voices": 3,

@@ -48,7 +48,8 @@ _CHECKS = {
     ast.Compare: lambda n: all(isinstance(op, _CMPOPS) for op in n.ops),
     ast.IfExp: lambda n: True,
     ast.Subscript: lambda n: isinstance(n.value, ast.Name),
-    ast.Attribute: lambda n: isinstance(n.value, ast.Subscript),
+    ast.Attribute: lambda n: isinstance(n.value, ast.Subscript)
+    or (isinstance(n.value, ast.Name) and n.value.id == "row"),
     ast.Call: lambda n: isinstance(n.func, ast.Name) and not n.keywords,
 }
 _PASSIVE = (ast.expr_context, ast.operator, ast.unaryop, ast.cmpop, ast.boolop)
@@ -115,6 +116,10 @@ class Resolver:
         """Source for ``record[index].field``."""
         raise ExprError(f"unknown record {record!r}")
 
+    def row_field(self, field: str) -> str:
+        """Source for ``row.field``, the current row in a record template."""
+        raise ExprError(f"row.{field} is only defined in a record template")
+
     def compile(self, text) -> str:
         """Python source for expression ``text``."""
         tree = _Inline(self.functions).visit(parse(text))
@@ -134,6 +139,8 @@ class Resolver:
 
     def _emit_Attribute(self, node):  # pylint: disable=invalid-name
         sub = node.value
+        if isinstance(sub, ast.Name):
+            return self.row_field(node.attr)
         if not isinstance(sub.value, ast.Name):
             raise ExprError("record access must be name[index].field")
         return self.field(sub.value.id, self._emit(sub.slice), node.attr)

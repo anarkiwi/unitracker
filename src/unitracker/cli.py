@@ -17,11 +17,15 @@ def lift_main(argv=None) -> int:
     parser.add_argument("sid", type=Path)
     parser.add_argument("-o", "--output", type=Path)
     parser.add_argument("--subtune", type=int)
+    parser.add_argument(
+        "--embed", action="store_true", help="write the playroutine in full, not by reference"
+    )
     args = parser.parse_args(argv)
-    text = songio.dumps(backends.lift(args.sid.read_bytes(), args.subtune))
+    song = backends.lift(args.sid.read_bytes(), args.subtune)
     if args.output:
-        args.output.write_text(text, encoding="utf-8")
+        songio.dump(song, args.output, embed=args.embed)
     else:
+        text = songio.dumps(song, embed=args.embed)
         sys.stdout.write(text)
     return 0
 

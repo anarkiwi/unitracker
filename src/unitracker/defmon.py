@@ -178,57 +178,34 @@ def resolve_row(mem, row):
     return row if mem[SIDTAB_HI + row] else mem[SIDTAB_LO + row]
 
 
-def _set(acts, cell, value):
-    if acts and "set" in acts[-1] and cell not in acts[-1]["set"]:
-        acts[-1]["set"][cell] = value
-    else:
-        acts.append({"set": {cell: value}})
-
-
-def _re(v):
-    if v == 0:
-        return {"res": "res & rmask"}
-    return {"res": f"(res & 0x0F) | {v} | rbit" if v & 0x08 else v}
-
-
-def _acid(lo, hi):
-    if not hi & 0x80:
-        return {"acc": (hi << 8) | lo, "astep": 0}
-    if hi & 0x40:
-        return {"astep": ((hi & 0x3F) << 8) | lo, "sub": 1}
-    return {"astep": ((hi & 0x7F) << 8) | lo, "sub": 0}
-
-
-# sidTAB columns in the walk's read order: (bitmap, bit, value bytes, cells set).
+# sidTAB columns in the walk's read order: (bitmap, bit, value bytes, field).
 COLUMNS = (
-    (0, 0x40, 1, lambda v: {"ctrl": v}),
-    (0, 0x80, 1, lambda v: {"eor": v}),
-    (0, 0x20, 1, lambda v: {"ad": v}),
-    (0, 0x10, 1, lambda v: {"sr": v}),
-    (0, 0x08, 1, lambda v: {"note": v & 0x7F if v & 0x80 else f"(tbase + {v}) & 0x7F"}),
-    (0, 0x04, 1, lambda v: {"mode": v}),
-    (0, 0x02, 1, lambda v: {"pw": (v << 8) | (v & 0xF0)}),
-    (1, 0x80, 1, lambda v: {"ps": v}),
-    (1, 0x40, 1, _re),
-    (1, 0x20, 1, lambda v: {"fv": v}),
-    (1, 0x10, 1, lambda v: {"cp": v}),
-    (1, 0x08, 2, _acid),
+    (0, 0x40, 1, "wgh"),
+    (0, 0x80, 1, "wgl"),
+    (0, 0x20, 1, "ad"),
+    (0, 0x10, 1, "sr"),
+    (0, 0x08, 1, "tr"),
+    (0, 0x04, 1, "af"),
+    (0, 0x02, 1, "pw"),
+    (1, 0x80, 1, "ps"),
+    (1, 0x40, 1, "re"),
+    (1, 0x20, 1, "fv"),
+    (1, 0x10, 1, "cp"),
+    (1, 0x08, 2, "acid"),
 )
 
 
-def row_actions(mem, addr) -> list:
-    """The sidTAB bitmap walk of the row body at ``addr`` ($16B0), as actions."""
-    pos, acts, bitmap, half = addr, [], mem[addr], 0
-    for col_half, bit, size, cells in COLUMNS:
+def row_fields(mem, addr) -> dict:
+    """The present columns of the sidTAB row body at ``addr`` ($16B0 bitmap walk)."""
+    pos, out, bitmap, half = addr, {}, mem[addr], 0
+    for col_half, bit, size, field in COLUMNS:
         if col_half != half:
             pos += 1
             bitmap, half = mem[pos], col_half
         if bitmap & bit:
-            values = mem[pos + 1 : pos + 1 + size]
+            out[field] = int.from_bytes(bytes(mem[pos + 1 : pos + 1 + size]), "little")
             pos += size
-            for cell, value in cells(*values).items():
-                _set(acts, cell, value)
-    return acts
+    return out
 
 
 def sidtab_records(mem, seeds) -> dict:
@@ -243,9 +220,7 @@ def sidtab_records(mem, seeds) -> dict:
             raise LiftError(f"sidTAB row {row} resolves to row {eff}, which has no body")
         dl = mem[SIDTAB_DL + eff]
         rec = {"dl": dl, "next": (eff + 1) & 0xFF}
-        acts = row_actions(mem, _word(mem, SIDTAB_LO + eff, SIDTAB_HI + eff))
-        if acts:
-            rec["do"] = acts
+        rec.update(row_fields(mem, _word(mem, SIDTAB_LO + eff, SIDTAB_HI + eff)))
         out[row] = rec
         if dl < 0x80:
             todo.append(rec["next"])
@@ -406,7 +381,8 @@ def lift(raw: bytes, subtune=None) -> dict:
     playroutine = load_playroutine()
     playroutine["constants"] = model_constants(mem)
     return {
-        "unitracker": 0,
+        "unitracker": "ir",
+        "hints": {"ticks_per_step": 1},
         "meta": song_meta(header, f"defmon subtune {subtune}"),
         "clock": {
             "cycles_per_tick": int(player.cycles_per_frame),

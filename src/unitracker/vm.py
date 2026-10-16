@@ -7,7 +7,9 @@ from tqdm import tqdm
 
 from unitracker.canonical import CANONICAL_ORDER, REG_COUNT
 from unitracker.expr import ExprError, Resolver
+from unitracker.records import record_types
 
+IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
 PSEUDO = ("ev_kind", "ev_note", "ev_instr", "ev_cmd", "ev_arg", "at_phrase_start", "ended")
 
@@ -132,8 +134,15 @@ class _Scope(Resolver):
     def field(self, record, index, field):
         if record not in self.gen.records:
             raise ExprError(f"unknown record {record!r}")
-        self.gen.need_field(record, field)
-        return f"F[{(record, field)!r}].get({index}, 0)"
+        default = self.gen.need_field(record, field)
+        return f"F[{(record, field)!r}].get({index}, {default})"
+
+    def row_field(self, field):
+        record = self.gen.row_ctx
+        if record is None:
+            return super().row_field(field)
+        default = self.gen.need_field(record, field)
+        return f"F[{(record, field)!r}].get(_r, {default})"
 
 
 def _tg(table, index):
@@ -150,12 +159,15 @@ class _Codegen:
         self.playroutine = playroutine
         self.constants = {k: int(v) for k, v in (playroutine.get("constants") or {}).items()}
         self.tables = {k: [int(x) for x in v] for k, v in (song.get("tables") or {}).items()}
+        self.rtypes = record_types(playroutine)
         self.records = {}
         for source in (song.get("records") or {}, playroutine.get("records") or {}):
             for name, rows in source.items():
                 if name in self.records:
                     raise SongError(f"record {name!r} defined twice")
                 self.records[name] = {int(k): (v or {}) for k, v in (rows or {}).items()}
+        for name in self.rtypes:
+            self.records.setdefault(name, {})
         self.gcells = _cells(playroutine.get("global"))
         vcells = _cells(playroutine.get("voice"))
         for name in PSEUDO:
@@ -174,27 +186,31 @@ class _Codegen:
         self.done = set()
         self.pending = []
         self.counter = 0
+        self.row_ctx = None
 
-    def need_field(self, record, field):
-        """Register an int field of a record for lookup tables."""
+    def need_field(self, record, field) -> int:
+        """Register an int field of a record for lookup tables; return its default."""
+        rtype = self.rtypes.get(record)
+        default = rtype.default(field) if rtype is not None else 0
         key = (record, field)
         if key not in self.fields:
             self.fields[key] = {
-                i: int(row.get(field, 0))
+                i: int(row.get(field, default))
                 for i, row in self.records[record].items()
-                if not isinstance(row.get(field, 0), list)
+                if not isinstance(row.get(field, default), list)
             }
+        return default
 
     def fname(self, kind, voice, *parts):
         """Function name for a proc, record list or entry point in a scope."""
         tag = "v" if voice else "g"
         return "_".join(["f", tag, kind] + [str(p) for p in parts])
 
-    def request(self, name, actions, voice):
-        """Queue generation of ``actions`` as function ``name``."""
+    def request(self, name, actions, voice, row=None):
+        """Queue generation of ``actions`` as function ``name``, a template if ``row``."""
         if name not in self.done:
             self.done.add(name)
-            self.pending.append((name, actions, voice))
+            self.pending.append((name, actions, voice, row))
         return name
 
     def proc(self, name, voice):
@@ -204,15 +220,29 @@ class _Codegen:
         return self.request(self.fname("proc", voice, name), self.procs[name], voice)
 
     def record_lists(self, record, field, voice):
-        """Dict source mapping record index to its generated action-list function."""
+        """Dict source mapping record index to its generated action-list function.
+
+        A record type's template serves every row: rows map to ``(fn, index)``.
+        """
         if record not in self.records:
             raise SongError(f"unknown record {record!r}")
+        rtype = self.rtypes.get(record)
+        if rtype is not None and field in rtype.templates:
+            fn = self.request(
+                self.fname("tpl", voice, record, field), rtype.templates[field], voice, record
+            )
+            name = f"D_{'v' if voice else 'g'}_{record}_{field}"
+            if name not in self.done:
+                self.done.add(name)
+                rows = tuple(sorted(self.records[record]))
+                self.tail.append(f"{name} = {{i: ({fn}, i) for i in {rows!r}}}")
+            return name
         items = []
         for index, row in sorted(self.records[record].items()):
             actions = row.get(field)
             if actions:
                 fn = self.request(self.fname("rec", voice, record, field, index), actions, voice)
-                items.append(f"{index}: {fn}")
+                items.append(f"{index}: ({fn}, None)")
         name = f"D_{'v' if voice else 'g'}_{record}_{field}"
         if name not in self.done:
             self.done.add(name)
@@ -224,11 +254,13 @@ class _Codegen:
         self.request("f_init", self.playroutine.get("init") or [], False)
         self.request("f_tick", self.playroutine.get("tick") or [], False)
         while self.pending:
-            name, actions, voice = self.pending.pop()
+            name, actions, voice, row = self.pending.pop()
             body = []
+            self.row_ctx = row
             self.block(actions, voice, body, 1)
-            arg = "v" if voice else ""
-            self.lines.append(f"def {name}({arg}):")
+            self.row_ctx = None
+            args = (["v"] if voice else []) + (["_r=None"] if row is None else ["_r"])
+            self.lines.append(f"def {name}({', '.join(args)}):")
             self.lines.extend(body or ["    pass"])
         self.lines.append(self.ghost())
         return "\n".join(self.lines + self.tail)
@@ -297,7 +329,7 @@ class _Codegen:
             fn = self.tmp()
             out.append(f"{pad}{fn} = {table}.get({scope.compile(run['index'])})")
             out.append(f"{pad}if {fn} is not None:")
-            out.append(f"{pad}    {fn}({'v' if voice else ''})")
+            out.append(f"{pad}    {fn}[0]({'v, ' if voice else ''}{fn}[1])")
         elif "for_voices" in action:
             fn = self.request(self.fname("each", True, self.tmp()), action["for_voices"], True)
             out.append(f"{pad}for _v in VS:")
@@ -387,13 +419,14 @@ class SongPlayer:
     """Plays a unitracker song dict, one tick per call."""
 
     def __init__(self, song: dict):
-        if song.get("unitracker") != 0:
-            raise SongError("not a unitracker v0 song")
+        if song.get("unitracker") != IR_VERSION:
+            raise SongError("not an expanded unitracker song; read files with unitracker.songio")
         if len(song["tracks"]) != int(song.get("voices", 3)):
             raise SongError("one track per voice is required")
         self.song = song
         gen = _Codegen(song)
         self.globals = [init for _, init in gen.gcells.values()]
+        self._index = (gen.gindex, gen.vindex)
         self.voice_cells = _voice_cells(song, gen)
         namespace = {
             "g": self.globals,
@@ -412,6 +445,13 @@ class SongPlayer:
             raise SongError(f"registers must have {REG_COUNT} values")
         self.regs = [int(r) & 0xFF for r in regs]
         self.ticks = 0
+
+    def cell(self, name: str, voice: int | None = None) -> int:
+        """The current value of a global cell, or of ``voice``'s cell ``name``."""
+        gindex, vindex = self._index
+        if voice is None:
+            return self.globals[gindex[name]]
+        return self.voice_cells[voice][vindex[name]]
 
     def play_frame(self) -> list[tuple[int, int]]:
         """Run one tick; return its flush, changed registers in canonical order.

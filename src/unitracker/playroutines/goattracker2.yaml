@@ -2,13 +2,79 @@
 # The lifter fills in the build constants.
 name: goattracker2
 constants: {adparam: 0x0F00, deftempo: 5}
+defaults:
+  clock: {cycles_per_tick: 19656, clock_hz: 985248}
+  voices: 3
+  registers: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15]
+tables:
+  ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+instrument: {type: ins, base: 0}
+commands: {1: speedtab, 2: speedtab, 3: speedtab, 4: speedtab, 8: wavetab, 9: pulsetab, 10: filttab, 14: speedtab}
+record_types:
+  ins:
+    prefix: i
+    none: 0
+    pin: [1]
+    form: map
+    fields: {ad: 0, sr: 0, wave: 0, pulse: 0, filter: 0, speed: 0, vd: 0, gt: 0, fw: 0}
+    refs: {wave: wavetab, pulse: pulsetab, filter: filttab, speed: speedtab}
+  speedtab:
+    prefix: s
+    none: 0
+    fields: [l, r]
+  # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
+  # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
+  wavetab:
+    prefix: w
+    none: 0
+    chain: next
+    fields: [w, n, next]
+    refs:
+      n:
+        - {type: speedtab, when: "w >= 0xF1 and w <= 0xF4"}
+        - {type: pulsetab, when: "w == 0xF9"}
+        - {type: filttab, when: "w == 0xFA"}
+    do:
+      - if: "row.w >= 0xF0"
+        then:
+          - set: {arg: row.n}
+          - run: {record: wavecmd, index: "row.w & 0x0F", field: do}
+          - set: {skip: 1}
+          - return: true
+      - if: "row.w >= 0xE0"
+        then: [{set: {wave: "row.w & 0x0F"}}]
+        else: [{if: "row.w >= 0x10", then: [{set: {wave: row.w}}]}]
+      - if: "row.n != 0x80"
+        then: [{call: wnote, with: {n: "(row.n & 0x7F) if row.n >= 0x80 else ((note + row.n) & 0x7F)"}}]
+  # Pulsetable row: l $80+ sets the width from (l & $0F, r); otherwise l ticks of a signed r sweep.
+  pulsetab:
+    prefix: pw
+    none: 0
+    chain: next
+    fields: [l, r, next]
+    do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
+    each: [{accumulate: pulse, step: "row.r - 0x100 if row.r >= 0x80 else row.r"}]
+  # Filtertable row: l $80+ sets type and routing (and cut, a cutoff the player reads from the
+  # following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
+  filttab:
+    prefix: f
+    none: 0
+    chain: next
+    fields: {l: 0, r: 0, cut: -1, next: 0}
+    do:
+      - if: "row.l >= 0x80"
+        then:
+          - set: {filtertype: "row.l & 0x70", filterctrl: row.r}
+          - {if: "row.cut >= 0", then: [{set: {filtercutoff: row.cut}}]}
+        else: [{set: {filtercutoff: row.r}}]
+    each: [{accumulate: filtercutoff, step: row.r}]
 functions:
   spd:
     args: [i]
     expr: >-
       0 if i == 0 else
-      ((((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[i].right)
-       if speedtab[i].left >= 0x80 else (speedtab[i].left << 8 | speedtab[i].right))
+      ((((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[i].r)
+       if speedtab[i].l >= 0x80 else (speedtab[i].l << 8 | speedtab[i].r))
 global:
   state: {width: 8}
   filtercutoff: {width: 8}
@@ -79,7 +145,7 @@ records:
     14:
       do:
         - if: newcmddata
-          then: [{set: {funk0: "speedtab[newcmddata].left - 1", funk1: "speedtab[newcmddata].right - 1"}}]
+          then: [{set: {funk0: "speedtab[newcmddata].l - 1", funk1: "speedtab[newcmddata].r - 1"}}]
         - for_voices: [{set: {tempo: 0}}]
     15:
       do:
@@ -136,18 +202,18 @@ procs:
       on_bound: [{call: porta_reached}]
   vibrato:
     - set: {vcmp: 0, vspd: 0}
-    - {if: arg, then: [{set: {vcmp: "speedtab[arg].left", vspd: "speedtab[arg].right"}}]}
+    - {if: arg, then: [{set: {vcmp: "speedtab[arg].l", vspd: "speedtab[arg].r"}}]}
     - if: "vcmp >= 0x80"
       then:
         - set:
             vcmp: "vcmp & 0x7F"
-            vspd: "((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[arg].right"
+            vspd: "((ftab[(lastnote + 1) & 0x7F] - ftab[lastnote & 0x7F]) & 0xFFFF) >> speedtab[arg].r"
     - {if: "vibtime < 0x80 and vibtime > vcmp", then: [{set: {vibtime: "vibtime ^ 0xFF"}}]}
     - {accumulate: vibtime, step: 2}
     - {accumulate: freq, step: "0 - vspd if vibtime & 1 else vspd"}
   wave_exec:
     - {if: "wptr == 0", then: [{return: true}]}
-    - if: "wavetab[wptr].delay and wtime != wavetab[wptr].wait"
+    - if: "wavetab[wptr].w <= 0x0F and wtime != wavetab[wptr].w"
       then: [{set: {wtime: "wtime + 1"}}, {return: true}]
     - set: {wtime: 0, wcur: wptr}
     - set: {wptr: "wavetab[wcur].next"}
@@ -155,11 +221,11 @@ procs:
   pulse_exec:
     - if: "ptime == 0"
       then:
-        - if: "pulsetab[pptr].set"
+        - if: "pulsetab[pptr].l >= 0x80"
           then:
             - run: {record: pulsetab, index: pptr, field: do}
             - set: {pptr: "pulsetab[pptr].next"}
-          else: [{set: {ptime: "pulsetab[pptr].time"}}]
+          else: [{set: {ptime: "pulsetab[pptr].l"}}]
     - if: "ptime != 0"
       then:
         - run: {record: pulsetab, index: pptr, field: each}
@@ -169,28 +235,28 @@ procs:
     - {if: "fptr == 0", then: [{return: true}]}
     - if: "ftime == 0"
       then:
-        - if: "filttab[fptr].set"
+        - if: "filttab[fptr].l >= 0x80 or filttab[fptr].l == 0"
           then:
             - run: {record: filttab, index: fptr, field: do}
             - set: {fptr: "filttab[fptr].next"}
-          else: [{set: {ftime: "filttab[fptr].time"}}]
+          else: [{set: {ftime: "filttab[fptr].l"}}]
     - if: "ftime != 0"
       then:
         - run: {record: filttab, index: fptr, field: each}
         - set: {ftime: "ftime - 1"}
         - {if: "ftime == 0", then: [{set: {fptr: "filttab[fptr].next"}}]}
   new_note_init:
-    - set: {note: newnote, command: 0, vibdelay: "ins[ii].vibdelay", cmddata: "ins[ii].speed"}
+    - set: {note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "ins[ii].speed"}
     - {if: "newcommand == 3", then: [{return: true}]}
-    - set: {fw: "ins[ii].firstwave"}
+    - set: {fw: "ins[ii].fw"}
     - if: fw
       then:
         - if: "fw >= 0xFE"
           then: [{set: {gate: fw}}]
           else: [{set: {wave: fw, gate: 0xFF}}]
-    - set: {wptr: "ins[ii].wave_ptr"}
-    - {if: "ins[ii].pulse_ptr", then: [{set: {pptr: "ins[ii].pulse_ptr", ptime: 0}}]}
-    - {if: "ins[ii].filter_ptr", then: [{set: {fptr: "ins[ii].filter_ptr", ftime: 0}}]}
+    - set: {wptr: "ins[ii].wave"}
+    - {if: "ins[ii].pulse", then: [{set: {pptr: "ins[ii].pulse", ptime: 0}}]}
+    - {if: "ins[ii].filter", then: [{set: {fptr: "ins[ii].filter", ftime: 0}}]}
     - set: {ad: "ins[ii].ad", sr: "ins[ii].sr"}
   get_new_notes:
     - fetch: true
@@ -201,16 +267,16 @@ procs:
     - if: "ev_kind == 1"
       then:
         - set: {newnote: ev_note, hasnew: 1}
-        - if: "newcommand != 3 and not (ins[instr & 0x3F].gatetimer & 0x40)"
+        - if: "newcommand != 3 and not (ins[instr & 0x3F].gt & 0x40)"
           then:
             - set: {gate: 0xFE}
-            - if: "not (ins[instr & 0x3F].gatetimer & 0x80)"
+            - if: "not (ins[instr & 0x3F].gt & 0x80)"
               then: [{set: {ad: "adparam >> 8", sr: "adparam & 0xFF"}}]
   play_channel:
     - set: {ii: "instr & 0x3F", tick: "tick - 1", skip: 0}
     - if: "tick == 0"
       then:
-        - set: {gatetimer: "ins[ii].gatetimer & 0x3F"}
+        - set: {gatetimer: "ins[ii].gt & 0x3F"}
         - {if: hasnew, then: [{call: new_note_init}]}
         - run: {record: tick0, index: newcommand, field: do}
         - if: hasnew
@@ -249,7 +315,7 @@ init:
           tick: 1
           tempo: deftempo
           instr: 1
-          gatetimer: "ins[1].gatetimer & 0x3F"
+          gatetimer: "ins[1].gt & 0x3F"
 
 tick:
   - {if: "state == 2", then: [{return: true}]}

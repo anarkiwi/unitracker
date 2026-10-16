@@ -26,7 +26,7 @@ jobs:
           path: .tunecache
           key: tunecache-${{ hashFiles('tests/conftest.py') }}
       - run: pip install -e ".[dev]"
-      - run: black --check src tests
-      - run: pylint src
+      - run: black --check src tests tools
+      - run: pylint src tools
       - run: pylint --disable=missing-function-docstring tests
       - run: pytest -n auto --cov=unitracker --cov-fail-under=85

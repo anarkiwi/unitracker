@@ -29,7 +29,7 @@ def test_check_reports_mismatch(metal_warrior, tmp_path, capsys):
 
 def test_lift_to_stdout(metal_warrior, capsys):
     assert cli.lift_main([str(metal_warrior)]) == 0
-    assert songio.loads(capsys.readouterr().out)["unitracker"] == 0
+    assert songio.loads(capsys.readouterr().out)["unitracker"] == "ir"
 
 
 def test_lift_and_check_defmon(crosseyed, tmp_path, capsys):

@@ -21,7 +21,7 @@ def metal_warrior() -> Path:
 def mini_song(playroutine, tracks=None, phrases=None, **extra) -> dict:
     """A one-voice song around ``playroutine``."""
     song = {
-        "unitracker": 0,
+        "unitracker": "ir",
         "clock": {"cycles_per_tick": 19656, "clock_hz": 985248},
         "voices": 1,
         "tracks": tracks or [{"plays": [{"phrase": "a"}], "loop": 0}],
