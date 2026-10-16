@@ -298,7 +298,8 @@ step: expr             # signed; with toward, a magnitude
 min: expr              # optional bounds
 max: expr
 toward: expr           # optional target: approach it from either side
-clamp: true
+signed: false          # compare as two's complement at the cell's width
+clamp: true | false | reflect
 on_bound: [actions]
 ```
 
@@ -307,11 +308,28 @@ v0 = cell
 if toward given:
     if v0 == T: done
     if v0 < T: s = step, max = T  else: s = -step, min = T
+else: s = step
 v  = wrap(v0 + s, width(cell))           # bounds are tested after wrapping, as players do
-hit = v > max (if max given) or v < min (if min given)
-if hit and clamp: v = the bound crossed
+hit = v > max (if max given) or v < min (if min given)   # signed: compared as two's complement
+if hit and clamp is true: v = the bound crossed
+if hit and clamp is reflect: v = wrap(v0 - s, width(cell))
 cell = v
 if hit: run on_bound
+```
+
+With `signed`, `v0`, `v`, `min`, `max` and `T` are read as two's complement at the cell's
+width (`x - 2**w` when `x >= 2**(w-1)`), including the `toward` comparisons `v0 == T` and
+`v0 < T`; the stored value still wraps to the width. `signed` needs a cell with a width, and
+`clamp: reflect` cannot be combined with `toward`. A reflecting direction is an ordinary
+cell inside `step`, flipped in `on_bound`:
+
+```yaml
+accumulate: freq
+step: "vspd if vd == 0 else 0 - vspd"
+min: lo
+max: hi
+clamp: reflect
+on_bound: [{set: {vd: "vd ^ 1"}}]
 ```
 
 ### The cursor

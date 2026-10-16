@@ -1,4 +1,4 @@
-"""Multi-tick analysis: a modulation's exact orbit tested as one ping-pong accumulator."""
+"""Multi-tick analysis: a modulation's exact orbit tested against one reflect accumulator."""
 
 import copy
 
@@ -52,28 +52,68 @@ def start(spec: dict, period: int) -> tuple:
     return state, data
 
 
+def reflector(pr: dict, cell: str, origin: int, pp: tuple) -> tuple:
+    """``(playroutine, accumulate action, state)`` of the reflect accumulator of a ping-pong.
+
+    A fresh 1-bit cell holds the direction; the cell is signed when its bounds need it.
+    """
+    lo, hi, first = pp
+    section = "voice" if cell in (pr.get("voice") or {}) else "global"
+    cells = {**(pr.get("global") or {}), **(pr.get("voice") or {})}
+    vd = "vd"
+    while vd in cells:
+        vd += "_"
+    d, w = abs(first), (cells[cell] or {}).get("width")
+    acc = {
+        "accumulate": cell,
+        "step": f"{d} if {vd} == 0 else 0 - {d}",
+        "min": origin + lo,
+        "max": origin + hi,
+        "clamp": "reflect",
+        "on_bound": [{"set": {vd: f"{vd} ^ 1"}}],
+    }
+    if w and not (0 <= acc["min"] and acc["max"] < 1 << w):
+        acc["signed"] = True
+    pr = {**pr, section: {**(pr.get(section) or {}), vd: {"width": 1}}}
+    return pr, acc, {cell: origin, vd: int(first < 0)}
+
+
 def orbits(name: str, spec: dict, ticks: int) -> dict:
-    """``{period: (lo, hi, first step) or None}`` over the spec's inclusive period range."""
+    """``{period: None or (lo, hi, first step, matching accumulate action or None)}``.
+
+    The ping-pong of each period's orbit gives the bounds of a reflect accumulator, which is
+    accepted only when its per-tick deltas equal the original's over the whole run.
+    """
     pr = playroutine(name)
-    actions = resolve(pr, spec["path"])
+    actions, cell = resolve(pr, spec["path"]), spec["cell"]
     first, last = spec["periods"]
     out = {}
     for p in tqdm(range(first, last + 1), desc=f"{name} orbits", unit="period"):
         state, data = start(spec, p)
-        out[p] = pingpong(deltas(Form(pr, data), actions, state, spec["cell"], ticks))
+        out[p] = reflect_match(pr, deltas(Form(pr, data), actions, state, cell, ticks), cell, state)
     return out
 
 
+def reflect_match(pr: dict, steps, cell: str, state: dict) -> tuple | None:
+    """``(lo, hi, first step, accumulate action or None)`` of an orbit's ping-pong, or None."""
+    pp = pingpong(steps)
+    if pp is None:
+        return None
+    rpr, acc, rstate = reflector(pr, cell, state[cell], pp)
+    same = np.array_equal(deltas(Form(rpr), [acc], rstate, cell, len(steps)), steps)
+    return (*pp, acc if same else None)
+
+
 def report(name: str, spec: dict, ticks: int) -> list:
-    """Report lines of ``orbits``: one per period, then the periods with no ping-pong."""
+    """Report lines of ``orbits``: one per period, then the periods with no reflect accumulator."""
     found = orbits(name, spec, ticks)
     lines = [f"== {name}:{spec['path']} {spec['cell']} over {ticks} ticks, by {spec['period']}"]
-    for p, pp in found.items():
-        lines.append(
-            f"   {p}: ping-pong [{pp[0]}, {pp[1]}], first step {pp[2]:+d}"
-            if pp
-            else f"   {p}: no ping-pong"
-        )
-    fails = [p for p, pp in found.items() if pp is None]
-    lines.append(f"   ping-pong for {len(found) - len(fails)} of {len(found)}; fails: {fails}")
+    for p, r in found.items():
+        if r is None:
+            lines.append(f"   {p}: no ping-pong")
+            continue
+        head = f"   {p}: ping-pong [{r[0]}, {r[1]}], first step {r[2]:+d}"
+        lines.append(f"{head}, reflect {r[3]}" if r[3] else f"{head}, reflect differs")
+    fails = [p for p, r in found.items() if r is None or r[3] is None]
+    lines.append(f"   reflect for {len(found) - len(fails)} of {len(found)}; fails: {fails}")
     return lines

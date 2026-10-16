@@ -26,6 +26,9 @@ PSEUDO = (
 EVENT_COLUMNS = 3 + 2 * MAX_COMMANDS
 
 
+CLAMPS = {False: 0, True: 1, "reflect": 2}
+
+
 class SongError(ValueError):
     """The song document is malformed or uses something the format does not define."""
 
@@ -393,7 +396,7 @@ class _Codegen:
         args = [store, scope.compile(action.get("step", 0)), str(mask)]
         for key in ("min", "max", "toward"):
             args.append(scope.compile(action[key]) if key in action else "None")
-        args.append(str(bool(action.get("clamp", True))))
+        args += map(str, acc_mode(action, mask is not None))
         val, hit = self.tmp(), self.tmp()
         out.append(f"{pad}{val}, {hit} = _acc({', '.join(args)})")
         out.append(f"{pad}{store} = {val}")
@@ -403,12 +406,32 @@ class _Codegen:
             out.append(f"{pad}    pass")
 
 
-def _acc(v0, step, mask, lo, hi, toward, clamp):
-    """One bounded accumulation: ``(value, hit)``, bounds tested after wrapping."""
+def acc_mode(action: dict, has_width: bool) -> tuple:
+    """``(clamp code, signed)`` of an ``accumulate`` action, checked."""
+    clamp, signed = action.get("clamp", True), bool(action.get("signed", False))
+    if clamp not in CLAMPS:
+        raise SongError(f"clamp is true, false or reflect, not {clamp!r}")
+    if clamp == "reflect" and "toward" in action:
+        raise SongError("clamp: reflect with toward")
+    if signed and not has_width:
+        raise SongError(f"signed accumulate on {action['accumulate']!r}, a cell with no width")
+    return CLAMPS[clamp], signed
+
+
+def _acc(v0, step, mask, lo, hi, toward, clamp, signed):
+    """One bounded accumulation: ``(value, hit)``, bounds tested after wrapping.
+
+    ``clamp`` is 0 (wrap), 1 (clamp) or 2 (reflect); ``signed`` reads values as two's complement.
+    """
     # pylint: disable=too-many-arguments,too-many-positional-arguments
+    if signed:
+        half = mask >> 1
+        v0, lo, hi, toward = (
+            x if x is None or x <= half else x - mask - 1 for x in (v0, lo, hi, toward)
+        )
     if toward is not None:
         if v0 == toward:
-            return v0, False
+            return v0 & mask if signed else v0, False
         if v0 < toward:
             hi = toward
         else:
@@ -416,11 +439,15 @@ def _acc(v0, step, mask, lo, hi, toward, clamp):
     value = v0 + step
     if mask is not None:
         value &= mask
-    if hi is not None and value > hi:
-        return (hi if clamp else value), True
-    if lo is not None and value < lo:
-        return (lo if clamp else value), True
-    return value, False
+    test = value - mask - 1 if signed and value > half else value
+    if hi is not None and test > hi:
+        bound = hi
+    elif lo is not None and test < lo:
+        bound = lo
+    else:
+        return value, False
+    value = (value, bound, v0 - step)[clamp]
+    return (value if mask is None else value & mask), True
 
 
 def _voice_cells(song, gen) -> list[list]:

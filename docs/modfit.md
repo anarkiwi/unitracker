@@ -27,15 +27,19 @@ every rewrite it reports, or shows where none holds.
    atom, and each atom's polarity is chosen to give fewer monomials.
 3. **One-tick fits** (`fit.Fitter`). For each modulated cell and dispatch guard, candidate
    `set`/`accumulate` actions are built from the cell's own cases: steps, thresholds and
-   reload values. The forms are plain, `min`/`max` clamp, `on_bound` reload and `toward`.
+   reload values. The forms are plain, `min`/`max` clamp, `on_bound` reload and `toward`,
+   each also `signed` when the cell has a width.
    A candidate is accepted only when z3 shows that every pair of original and candidate
    paths gives the cell identical values under the guard. Otherwise `witness` returns a
    counterexample.
 4. **Orbits** (`orbit`). For multi-tick rewrites such as vibrato, the proc is run
    concretely, once per period value, with record data and constant tables folded in.
-   Each per-tick delta is wrapped to the cell's width as a signed value. The cumulative
-   offsets are then compared with an idealised ping-pong: one step size, reversing only
-   at the bounds, and turning at both bounds.
+   Each per-tick delta is wrapped to the cell's width as a signed value. A ping-pong of
+   the cumulative offsets (one step size, reversing only at both bounds) gives the bounds
+   and first step of a candidate `clamp: reflect` accumulator, its direction a fresh 1-bit
+   cell flipped in `on_bound` (and `signed` when the bounds leave the unsigned range). The
+   candidate is run concretely and accepted only when its per-tick deltas equal the
+   original's over the whole run.
 
 ## Assumptions
 
@@ -49,13 +53,14 @@ every rewrite it reports, or shows where none holds.
 ## Run
 
 ```sh
-unitracker-modfit fit [PLAYROUTINE:PATH:CELL ...]    # default: every fit in modfit/specs.yaml
+unitracker-modfit fit [PLAYROUTINE:PATH:CELL ...]    # default: every fit and check in modfit/specs.yaml
 unitracker-modfit poly PLAYROUTINE:PATH ...          # arithmetic form by bracket monomial
 unitracker-modfit orbit [PLAYROUTINE ...] [--ticks N]
 unitracker-modfit --out report.txt fit               # write the report to a file
 ```
 
-`src/unitracker/modfit/specs.yaml` lists the modulations to fit and the orbit specs. An
+`src/unitracker/modfit/specs.yaml` lists the modulations to fit, the given candidates to
+check (proved, or refuted with a witness) and the orbit specs. An
 orbit spec gives the period cell or `record.index.field`, the period range, the initial
 state and the record rows.
 
@@ -68,23 +73,37 @@ state and the record rows.
 | GT `procs.toneporta` → `freq` | `toward ftab[note]` when `arg≠0`; `set ftab[note]` when `arg=0` |
 | defMON `procs.pitch` → `sacc` | `accumulate`, signed `rate(mode)` |
 | defMON `procs.pulse` → `pw` | no single accumulator |
-| SID-Wizard `procs.tick_porta` → `voff` | no single accumulator |
+| SID-Wizard `procs.tick_porta` → `voff` | no single accumulator; see below |
 | SID-Wizard `procs.tick_vibrato` → `vfc` | no single accumulator |
 
-| Vibrato orbit | Ping-pong |
+Each vibrato below is a single reflect accumulator, verified against the original over
+the full orbit (`D` is the spec's unit depth, `vd` a fresh 1-bit direction cell):
+
+```yaml
+accumulate: CELL
+step: "D if vd == 0 else 0 - D"
+min: start + lo
+max: start + hi
+clamp: reflect
+on_bound: [{set: {vd: "vd ^ 1"}}]
+```
+
+| Vibrato orbit | Reflect accumulator |
 | --- | --- |
 | GoatTracker, period `p` in 0..125 | bounds `[−((p+1)//2+1), p//2+1]`, first step +1 |
 | GoatTracker, periods 126, 127 | none: a constant slide |
-| SID-Wizard, even period `p` | bounds `[−p/2, 0]`, first step −1 |
+| SID-Wizard, even period `p` | bounds `[−p/2, 0]`, first step −1, `signed` |
 | SID-Wizard, odd period ≥ 3 | none: drifts (runs −1, +1, +1 for period 3) |
 | SID-Wizard, period 1 | none: a constant slide |
 
+SID-Wizard's porta against `accumulate voff, step ((fmh << 8) | fml) + 1, toward 0,
+signed: true` is refuted. With a depth `F = (fmh << 8) | fml` below `0x8000` it is proved
+everywhere except `s16(voff) + F == 0`: approaching 0 from below, the original
+overshoots to `+1` where the accumulator clamps to 0. With `F ≥ 0x8000` the step wraps
+past the signed range and the two also differ.
+
 Not expressible yet:
 
-- The accumulator has no reflect bound mode, so a vibrato ping-pong has no
-  single-action form.
-- SID-Wizard's porta compares a signed 16-bit view (`s16(voff)`), and the accumulator
-  has no signed compare.
 - defMON's pulse bounds depend on the high byte (`(pw >> 8) == 0x0F`).
 - SID-Wizard's `vfc` counter rewrite holds only on reachable states (`vfc ≤ vper`). The
   witnesses fall outside them.

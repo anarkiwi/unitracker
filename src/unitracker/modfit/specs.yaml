@@ -8,6 +8,13 @@ fits:
   - {playroutine: sidwizard, path: procs.tick_porta, cell: voff}
   - {playroutine: sidwizard, path: procs.tick_vibrato, cell: vfc}
 
+# Candidates proved or refuted as given.
+checks:
+  - playroutine: sidwizard
+    path: procs.tick_porta
+    cell: voff
+    candidate: {accumulate: voff, step: "((fmh << 8) | fml) + 1", toward: 0, signed: true}
+
 # Multi-tick orbits: ``period`` is a cell or a ``record.index.field``, swept over the
 # inclusive ``periods`` range from ``state`` with record rows ``data``.
 orbits:
