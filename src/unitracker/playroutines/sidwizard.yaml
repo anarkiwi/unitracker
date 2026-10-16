@@ -16,9 +16,9 @@ tables:
 instrument: {type: ins, base: 0}
 note_offset: 1
 commands:
-  1: {name: pitchup}
-  2: {name: pitchdown}
-  3: {name: glide}
+  1: {name: mod, mod: {cmd: 1}}
+  2: {name: mod, mod: {cmd: 2}}
+  3: {name: mod, mod: {cmd: 3}}
   32: {name: attack}
   48: {name: decay}
   80: {name: sustain}
@@ -67,6 +67,13 @@ record_types:
       - when: "a >= 0x80 and (a & 0x70) == 0 and k == 0"
         keys: {pw: "((a & 0x0F) << 8) | b"}
         raw: {a: "0x80 | (pw >> 8)", b: "pw & 0xFF"}
+      - when: "a < 0x80 and k == 0"
+        implies: {reg: pw}
+        keys:
+          hold: 2
+          step: {value: s8(b), omit: "b == 0"}
+          for: a
+        raw: {a: for_, b: "step & 0xFF"}
   # Filter row: a $80+ sets the filter-mode bits (a & $70), resonance res and cutoff b;
   # otherwise a ticks of a signed b cutoff sweep. k is the keyboard-track amount.
   flttab:
@@ -79,6 +86,28 @@ record_types:
         keys: {mode: "a & 0x70", cut: "b << 3"}
         keep: [res]
         raw: {a: "0x80 | mode", b: "cut >> 3"}
+      - when: "a < 0x80 and k == 0 and res == 0"
+        implies: {reg: cut}
+        keys:
+          hold: 2
+          step: {value: s8(b), omit: "b == 0"}
+          for: a
+        raw: {a: for_, b: "step & 0xFF"}
+  # Slide up (cmd 1), slide down (2) or glide to the note (3) at FX speed byte arg.
+  mod:
+    prefix: m
+    form: map
+    fields: [cmd, arg]
+    codec:
+      - when: "cmd <= 2 and arg == 0"
+        keys: {reg: FREQ, for: NOTE}
+        raw: {cmd: 1, arg: 0}
+      - when: "cmd <= 2 and 0 < arg < 0x100"
+        keys: {reg: FREQ, step: "((arg + 1) >> 1) * (3 - 2 * cmd)", rel: NOTE, for: NOTE}
+        raw: {cmd: "2 if step < 0 else 1", arg: "2 * (step if step > 0 else 0 - step) - 1"}
+      - when: "cmd == 3 and 0 <= arg < 0x100"
+        keys: {reg: FREQ, step: "(arg + 1) >> 1", rel: NOTE, to: NOTE, for: NOTE}
+        raw: {cmd: 3, arg: "2 * step - 1 if step > 0 else 0"}
   # Chord row: a note offset; a chord loops or ends back to the WF table.
   chordtab:
     prefix: ch

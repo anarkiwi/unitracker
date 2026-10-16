@@ -1,4 +1,4 @@
-# unitracker song format (v1.3)
+# unitracker song format (v1.4)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.3
+unitracker: 1.4
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -21,8 +21,9 @@ song:
   - def:
       ins:
         i1: {ad: 1, sr: 136, ctrl: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: =68},
-            {ctrl: 65, note: +0}, end], pulse: [{pw: 1024}, [32, 16], [64, 240], [32, 16], {loop: 1}],
-          filter: [{cut: 1024, resfilt: 193, mode: 16}, end], gt: 4, fw: 9}
+            {ctrl: 65, note: +0}, end], pulse: [{pw: 1024}, {step: 16, for: 32}, {step: -16, for: 64},
+            {step: 16, for: 32}, {loop: 1}], filter: [{cut: 1024, resfilt: 193, mode: 16}, end], gt: 4,
+          fw: 9}
         ...
       ctrltab:
         c1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0},
@@ -33,7 +34,13 @@ song:
         p3: [off!tempo:16*48]
     play: [p1, p2, p3]
   - def:
+      mod:
+        m1: {reg: freq, step: 32}
+        m2: {reg: freq, step: 32, to: note}
       ...
+      phrase:
+        ...
+        p6: [off*3, A#3.i4!mod:@m1, C4!mod:@m2, D4, D#4*2, C4, G4*2, C5, G#4!mod:@m1, A#4!mod:@m2, ...]
     play: [p4, p5, p6]
 loop: 0
 ```
@@ -44,7 +51,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.3` |
+| `unitracker` | `1.4` |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -104,6 +111,8 @@ the type's `first` index, so a name stands for whatever index the playroutine ne
 - **References.** A field that references another record holds a name. A program that
   only one instrument uses is written inline in that instrument instead
   (`ctrl: [{ctrl: 9, note: +0}, {ctrl: 65, note: +0}, end]`).
+- **Mods** (`mod`, prefix `m`) are the bounded accumulators of Modulations below. A
+  command that starts one references it (`!mod:@m1`); a program row carries one as row keys.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
   are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
   with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
@@ -152,14 +161,14 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!cut:n` | set the 11-bit cutoff |
 | `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice |
 | `!funk:@s` | swing tempo pair |
-| `!slideup:@s`, `!slidedown:@s`, `!porta:@s`, `!vib:@s` | pitch effects |
+| `!mod:@m` | start mod `m` (see Modulations) |
+| `!vib:@s` | GoatTracker vibrato at the speed of `speedtab` row `s` |
 | `!mark:n` | a timing mark that changes no sound |
 
 SID-Wizard's commands are its own: the effects have no identical shared form.
 
 | command | meaning |
 |---|---|
-| `!pitchup:n`, `!pitchdown:n`, `!glide:n` | big FX $01-$03: slide, or slide to the note, at speed byte n |
 | `!attack:n`, `!decay:n`, `!sustain:n`, `!release:n` | small FX $2x/$3x/$5x/$6x: one ADSR nibble |
 | `!chord:@ch` | small FX $7x: select a chord |
 | `!iattack`, `!idecay`, `!isustain`, `!irelease`, `!ichord` | the same small FX in the instrument column, which the player times differently |
@@ -173,12 +182,118 @@ records, and in instruments, where `ctrl` names the program run on the control r
 rejected on reading, naming the key or command and the player; the writer refuses to
 write a value that would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
-- **GoatTracker 2:** pulse and filter sweep rows and wavetable command rows (list rows),
-  and the instrument keys.
-- **defMON:** the sidTAB columns `wgl`, `af`, `ps`, `re`, `fv`, `cp`, `acid`.
+- **GoatTracker 2:** pulse rows that stall (`[0, r]`), filter sweep rows that carry a
+  cutoff, wavetable command rows (list rows), the vibrato command `!vib:@s` and the
+  instrument keys.
+- **defMON:** the sidTAB columns `wgl`, `re`, `fv`, `cp`, `acid`; `af` below $80; `ps` in a
+  row whose `af` is a slide.
 - **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
-  detune (list rows `[w, a, d]`), pulse and filter sweeps and keyboard-tracked rows (list
-  rows), a filter row's resonance `res`, and the instrument keys.
+  detune (list rows `[w, a, d]`), keyboard-tracked pulse and filter rows and filter sweep
+  rows with a resonance (list rows), a filter row's resonance `res`, `!notevib`,
+  `!noteglide` and the instrument keys.
+
+## Modulations
+
+Every pitch, pulse and filter modulation the players have is one bounded accumulator,
+written with the same keys as a `mod` record (`!mod:@m1`) or as a program row. Each firing
+computes
+
+```
+u   = v + step                        (with to: v moved toward to by step)
+hit = u outside [lo, hi]              (with to: u reached or passed to)
+v   = u if not hit else respond(at)
+```
+
+where `v` is the modulated value in register units. A key that is omitted holds its
+default; the writer omits it, and the reader accepts it either way.
+
+| key | value | meaning | omitted |
+|---|---|---|---|
+| `reg` | `freq`, `pw`, `cut` | the register: the 16-bit voice frequency, the 12-bit pulse width, the 11-bit cutoff | implied by a pulse or filter program |
+| `step` | integer | the signed change per firing in register units; with `to`, a magnitude | 0; with `to`, the whole distance: the first firing reaches `to` |
+| `rel` | `note` | `step` is the argument of the player's note-relative basis `b(step)`, whose sign is the direction, so a transposed phrase writes the same mod | `step` is in register units |
+| `to` | integer or `note` | a target value; `note` is the frequency of the voice's note (the event's note when it has one) | no target |
+| `lo`, `hi` | integer | the bounds | the register's range, 0 and 2^w - 1 |
+| `at` | `hold`, `wrap`, `reflect`, `reload` | the response to a hit | `hold` with `to`, else `wrap` |
+| `every` | integer | ticks between firings | 1 |
+| `delay` | integer | ticks before the first firing, counted from the player's first firing tick | 0 |
+| `for` | integer or `note` | the lifetime: ticks (in a program row, the ticks the program runs on), or `note`, until the voice's next note | until replaced |
+
+| `at` | the value after a hit |
+|---|---|
+| `hold` | the bound crossed (`to`, `lo` or `hi`); with `to` the mod then holds there |
+| `wrap` | `lo + (u - lo) mod (hi - lo + 1)` |
+| `reflect` | the step reverses, and `v` takes the player's reflect value |
+| `reload` | `to` when given, else the value `v` had when the mod started |
+
+A mod on a register replaces the one running there. In a program, a row's `hold` counts
+the ticks the row lasts from its last firing, that tick included, so a mod row lasts
+`for + hold - 1` ticks; a row that sets a value lasts `hold`. Each player produces only
+the mods listed below; the reader refuses any other, naming the keys and the player, and
+the writer refuses a command or row whose mod would not read back.
+
+### GoatTracker 2
+
+- **Commands** (`!mod`, from commands 1-3 and their `speedtab` row): `{reg: freq, step: s}`
+  slides by `s` (1 to $7FFF up or down); `{reg: freq, step: d, rel: note}` slides by
+  `b(d) = ((ftab[n + 1] - ftab[n]) & $FFFF) >> log2 d` for `d` a power of two up to 2^15, `n`
+  being the note the voice's wavetable last played or a toneporta last reached;
+  `{reg: freq}` does not move. `{reg: freq, step: s, to: note}` (s 0 to $7FFF, or `d` with
+  `rel: note`) is a toneporta: a firing moves `v` toward `ftab[note]`, comparing after the
+  sum wraps at 16 bits, and a hit sets `v` to the target and `n` to the note;
+  `{reg: freq, to: note}` reaches the note at its first firing. `v` is the frequency
+  register. A command fires on every tick of its step except the first and the ticks on
+  which a wavetable row plays a note or runs a command, and lasts until the next step,
+  which replaces it (a step without a command runs the instrument's vibrato).
+- **Pulse rows** `{step: s, for: t}`: `s` from -128 to 127, `t` from 1 to 127; `v` is the
+  12-bit pulse width. The pulse program does not run on the tick the voice reads its next
+  step, nor on a step's tick 0 when the voice's next step starts a phrase.
+- **Filter rows** `{step: s, for: t}`: `s` a multiple of 8 from -1024 to 1016, `t` from 1 to
+  127; `v` is the cutoff, whose low three bits stay 0.
+
+### SID-Wizard
+
+- **Commands** (`!mod`, from big FX $01-$03 with speed byte `x`, written `k = (x + 1) >> 1`):
+  `{reg: freq, step: ±k, rel: note, for: note}` (k 1 to 128) slides; `{reg: freq, for: note}`
+  (x 0) does not move; `{reg: freq, step: k, rel: note, to: note, for: note}` (k 0 to 128)
+  glides to the note. The basis is `b(k) = W[min((k + n + octave) & $FF, 203)]`, where
+  `W[i]` is `exptab[i]` below 107 and the frequency word of note index `i - 107` above, and
+  `n` is the voice's note index (the event's note). `v` is an offset added to the voice's
+  note frequency, zeroed by a WF arpeggio row. A glide's firing moves `v` toward 0 by
+  `b(k) + 1`; it reaches the note when the distance above it is at most `b(k)`, or below
+  it less than `b(k)`. A mod fires every tick from the one its row applies on (after the
+  hard restart on a note row), and lasts until the next note.
+- **Pulse and filter rows** `{hold: 2, step: s, for: t}`: `s` from -128 to 127, `t` from 0 to
+  127; the second tick of `hold` is the one the player spends leaving the row. `v` is the
+  pulse width or the cutoff. The programs do not run on the tick a note starts, a note
+  that restarts a program at a sweep row keeps that row's tick count, and the filter
+  program runs for the voice that controls the filter.
+
+### defMON
+
+A sidTAB row carries at most one mod; an `af` slide takes it, and a `ps` column beside it
+stays a column.
+
+- **Slides** (`af` $80-$FF): `{reg: freq, step: ±r, for: note}`, `r` the replay's rate table
+  value `rate_lo[2m] | rate_hi[2m] << 8` for some `m` from 0 to 63 (`{reg: freq, for: note}`
+  for `r` 0). `v` is an offset added to the note's frequency, zeroed by each note; while it
+  runs the voice's detune is not added. It lasts until the next note or another `af`.
+- **Pulse sweeps** (`ps`): `{reg: pw, step: s, at: reflect}`, `s` from 1 to 127 up or -2 to
+  -128 down; `{reg: pw}` stops the sweep. `v` is a 16-bit cell whose low 12 bits are the
+  register; a `pw` column sets its bits 12-15 to the written value's bits 4-7. An up
+  firing adds `s`, a down firing adds `s + c`, `c` the voice's pitch carry that tick. The
+  top hit is tested only with the cell in $0F00-$0FFF (the sum passes $0FFF) and sets `v`
+  to 4088, the bottom hit only with the cell in $0000-$00FF (the sum passes below 0) and
+  sets `v` to 1; either reflects the step to `-1 - s`. Elsewhere the sum wraps at 16 bits.
+  The sweep runs every tick until another `ps` replaces it.
+
+The modulations that stay in their own form are not one accumulator with these keys:
+GoatTracker's vibrato and SID-Wizard's `!notevib` reverse on a timer, around the note's
+frequency, rather than at a bound; `!noteglide` starts at the next note with a speed taken
+from the current one; a GoatTracker wavetable command fires for one tick and suspends the
+step's command rather than replacing it; defMON's `acid` steps the cutoff in 1/32 units,
+less one per firing when it falls, and writes an offset, saturated, high byte; `af` 1-$7F
+is a fixed offset, not an accumulator.
 
 ## Canonical form
 
@@ -263,6 +378,21 @@ would not read back; a `map` row no shape fits is an error. The reader accepts a
 written row only if encoding its inverse gives the row again. A command entry has a `name`, an optional
 `ref`, and for a plain argument optional `when`, `arg` (raw to written) and `raw`
 (written to raw), checked the same way.
+
+Mod keys are written by name. In `value` expressions `FREQ`, `PW`, `CUT`, `HOLD`, `WRAP`,
+`REFLECT` and `RELOAD` give their values and `NOTE` (-1) gives `note`; `raw` expressions
+read written values the same way, with `for` read as `for_`. A raw field given as
+`{search: [lo, hi]}` is the first value in that range whose row writes back as the written
+one (defMON finds `af` from a rate this way). `implies` names mod keys a shape fixes
+(`{reg: pw}` in a pulse program). Codec expressions may read the song's tables and the
+playroutine's functions, and the reader drops written mod keys that hold their default
+before matching. A list row a shape covers is rejected: it has a shared-key form.
+
+A command variant `{name: mod, mod: {field: value}, from: type}` writes its command as a
+`mod` record whose raw fields are the `mod` constants and the argument: `arg` for a plain
+one, or for one indexing `from`, `arg` 1 and that row's fields (`arg` 0 for none). Commands
+that write the same mod share one record; the reader turns each record back into its
+command, allocating a `from` row for it.
 
 ### Cells and expressions
 
@@ -390,7 +520,8 @@ fields as follows:
 
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk
 order: `dl` is `hold` (a frozen row ends its program), `wgh` is `ctrl`, `tr` is
-`note`, and the other columns keep their names. Note names are offset by 24 indices:
+`note`, an `af` slide or a `ps` sweep is the row's mod, and the other columns keep their
+names. Note names are offset by 24 indices:
 defMON index 48 is `C2`. The replay probes `$D41B` at init to tell the SID models apart; the result
 becomes the playroutine constants `floor` and `dbl`. The ghost masks pulse-width high
 to a nibble, as the reference grid does.
@@ -401,7 +532,7 @@ between, ticking the voices in the player's reverse order. An instrument is its 
 (`flags`, `hrad`, `hrsr`, `ad`, `sr`, `vibrato`, `vibdelay`, `arpspeed`, `chord`,
 `octave`, `firstctrl`) and its WF/arp, pulse and filter programs (`ctrl`, `pulse`,
 `filter`). WF rows use `ctrl` and `note`; pulse set rows `pw`; filter set rows `mode`,
-`cut` and `res`; chords are programs of `note` offsets that loop or end. Note names are
+`cut` and `res`; pulse and filter sweep rows are mod rows; chords are programs of `note` offsets that loop or end. Note names are
 offset by one index: SID-Wizard index 49 is `C4`. Before a voice's first note the player
 walks instrument 1's header as WF rows; the lifter requires each voice's first note to
 select an instrument, so the walk reads only its first two rows. Table jumps, orderlist

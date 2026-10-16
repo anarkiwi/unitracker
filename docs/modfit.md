@@ -279,12 +279,12 @@ Not expressible yet:
 
 | Keyword composition | Effect |
 | --- | --- |
-| SID-Wizard `!pitchup` / `!pitchdown` | `svib := $81`/`$82`; per tick `voff ± fm(arg, note+oct)` when `ci ≠ 0`, 0 when `arg = 0` |
+| SID-Wizard big FX $01 / $02 (`!mod`) | `svib := $81`/`$82`; per tick `voff ± fm(arg, note+oct)` when `ci ≠ 0`, 0 when `arg = 0` |
 | SID-Wizard `!attack` | `aov := arg`, `dov := −1`, `sad := (arg << 4) \| (ins[ci].ad & 15)` when `ci ≠ 0` |
 | SID-Wizard `!iattack` … `!irelease` | setup and ticks equal the plain small FX on a row without a note |
 | SID-Wizard `!iattack` on a note row | `note_setup` test `… and pifx != 0` sets `carry` |
 | GoatTracker `!ad` | `ad := arg` |
-| GoatTracker `!porta` | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
+| GoatTracker command 3 (`!mod`) | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
 | defMON `!run2` | `rowB := arg`, `cntB := 0`; per tick `layer_b` runs the sidTAB row |
 
 The keyword and field table is written by `unitracker-modfit keywords` (one row per keyword
@@ -294,12 +294,12 @@ or field: signature, matches, verdict, reason).
 
 | Effect | Step, basis | Hit, respond | Status |
 | --- | --- | --- | --- |
-| GT slide (`tickn.1`, `!slideup`) | `spd(arg)`: note-relative `ftab`, decoded `speedtab` | none | proved |
+| GT slide (`tickn.1`, command 1) | `spd(arg)`: note-relative `ftab`, decoded `speedtab` | none | proved |
 | GT porta (`toneporta`, arg ≠ 0) | `spd(arg)` | toward `ftab[note]`: hold, clamp, reflect | proved |
 | GT porta, arg = 0 | 0 | always: reload `ftab[note]` | proved |
 | GT pulse, filter table step | `s8(row.r)`, `row.r` | none | proved |
-| SW `!pitchup` / `!pitchdown` | `±fm(arg, note+oct)`: note-relative `exptab`, `freqlo`, `freqhi` | none | proved |
-| SW `!glide`, `tick_porta` | `F + 1` | overshoot to +1 from below, 0 from above: hold, clamp, reflect | proved |
+| SW big FX $01 / $02 | `±fm(arg, note+oct)`: note-relative `exptab`, `freqlo`, `freqhi` | none | proved |
+| SW big FX $03, `tick_porta` | `F + 1` | overshoot to +1 from below, 0 from above: hold, clamp, reflect | proved |
 | SW pulse sweep `pwhi:pwlo` | `s8(pwtab.b)` (set rows: reload) | none | proved |
 | SW filter sweep `vfhi:vflo:3` | `s8(flttab.b)` (set rows: reload `8·b`) | none | proved |
 | defMON slide (`pitch` `sacc`) | `±rate(mode)`: decoded `rate_lo`, `rate_hi` | none | proved |

@@ -9,9 +9,11 @@ from pygoattracker import decompile_sid
 from unitracker import songio
 from unitracker.codec import (
     COMMAND_NAMES,
+    MOD_KEYS,
     ROW_KEYS,
     CodecError,
     CommandCodec,
+    Evaluator,
     RowCodec,
     evaluate,
     note_text,
@@ -32,7 +34,8 @@ SW_TYPES = record_types(SW)
 
 
 def codec(pr, types, name):
-    return RowCodec(types[name], types[name].codec, int(pr.get("note_offset", 0)))
+    ev = Evaluator(pr.get("functions"), pr.get("tables"))
+    return RowCodec(types[name], types[name].codec, int(pr.get("note_offset", 0)), ev)
 
 
 def written(raw_row, c):
@@ -73,10 +76,91 @@ def test_goattracker_pulse_and_filter_rows(name, raw, shared):
 
 @pytest.mark.parametrize(
     "name,raw",
-    [("ctrltab", {"w": 0xF1, "n": 1}), ("pulsetab", {"l": 32, "r": 16}), ("filttab", {"l": 5})],
+    [
+        ("ctrltab", {"w": 0xF1, "n": 1}),
+        ("pulsetab", {"l": 0, "r": 16}),
+        ("filttab", {"l": 5, "r": 1, "cut": 3}),
+    ],
 )
 def test_goattracker_leftover_rows_have_no_shape(name, raw):
     assert codec(GT, GT_TYPES, name).encode(raw) is None
+
+
+@pytest.mark.parametrize(
+    "name,raw,shared",
+    [
+        ("pulsetab", {"l": 32, "r": 16}, {"step": 16, "for": 32}),
+        ("pulsetab", {"l": 64, "r": 240}, {"step": -16, "for": 64}),
+        ("pulsetab", {"l": 5, "r": 0}, {"for": 5}),
+        ("filttab", {"l": 5, "r": 1}, {"step": 8, "for": 5}),
+        ("filttab", {"l": 127, "r": 0x80}, {"step": -1024, "for": 127}),
+        ("mod", {"cmd": 1, "arg": 1, "l": 0, "r": 32}, {"reg": "freq", "step": 32}),
+        ("mod", {"cmd": 2, "arg": 1, "l": 1, "r": 2}, {"reg": "freq", "step": -258}),
+        (
+            "mod",
+            {"cmd": 2, "arg": 1, "l": 0x80, "r": 3},
+            {"reg": "freq", "step": -8, "rel": "note"},
+        ),
+        ("mod", {"cmd": 1, "arg": 0}, {"reg": "freq"}),
+        ("mod", {"cmd": 3, "arg": 0}, {"reg": "freq", "to": "note"}),
+        ("mod", {"cmd": 3, "arg": 1, "l": 0, "r": 0}, {"reg": "freq", "step": 0, "to": "note"}),
+        (
+            "mod",
+            {"cmd": 3, "arg": 1, "l": 0x80, "r": 0},
+            {"reg": "freq", "step": 1, "rel": "note", "to": "note"},
+        ),
+    ],
+)
+def test_goattracker_mods(name, raw, shared):
+    c = codec(GT, GT_TYPES, name)
+    assert written(raw, c) == shared
+    assert {k: v for k, v in c.decode(shared).items() if k in raw or v} == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"cmd": 2, "arg": 1, "l": 0x85, "r": 20},
+        {"cmd": 2, "arg": 1, "l": 0, "r": 0},
+        {"cmd": 1, "arg": 0, "l": 4, "r": 4},
+    ],
+)
+def test_goattracker_slides_that_never_move_are_one_mod(raw):
+    c = codec(GT, GT_TYPES, "mod")
+    assert written(raw, c) == {"reg": "freq"}
+    assert c.decode({"reg": "freq", "step": 0}) == {"cmd": 1, "arg": 0}
+
+
+def test_goattracker_mod_reads_explicit_defaults():
+    c = codec(GT, GT_TYPES, "mod")
+    full = {"reg": "freq", "step": 32, "at": "wrap", "every": 1, "delay": 0, "lo": 0, "hi": 65535}
+    assert c.decode(full) == c.decode({"reg": "freq", "step": 32})
+    assert c.decode({"reg": "freq", "step": 9, "to": "note", "at": "hold"})["r"] == 9
+    p = codec(GT, GT_TYPES, "pulsetab")
+    assert p.decode({"reg": "pw", "step": 1, "for": 3, "hi": 4095}) == {"l": 3, "r": 1}
+
+
+@pytest.mark.parametrize(
+    "name,shared,match",
+    [
+        ("mod", {"reg": "freq", "step": 3, "rel": "note"}, "values of"),
+        ("mod", {"reg": "freq", "step": -5, "to": "note"}, "values of"),
+        ("mod", {"reg": "freq", "step": 0x8000}, "values of"),
+        ("mod", {"reg": "freq", "step": 1, "for": "note"}, "keys"),
+        ("mod", {"reg": "freq", "step": 1, "every": 2}, "keys"),
+        ("mod", {"reg": "freq", "step": 1, "at": "hold"}, "keys"),
+        ("mod", {"reg": "pw", "step": 1}, "values of"),
+        ("mod", {"reg": "wave", "step": 1}, "bad reg"),
+        ("mod", {"reg": "freq", "step": 1, "rel": 2}, "bad rel"),
+        ("pulsetab", {"step": 200, "for": 3}, "values of"),
+        ("pulsetab", {"step": 1, "for": 128}, "no shape"),
+        ("pulsetab", {"reg": "cut", "step": 1, "for": 3}, "keys"),
+        ("filttab", {"step": 4, "for": 5}, "values of"),
+    ],
+)
+def test_goattracker_refuses_mods_it_cannot_play(name, shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec(GT, GT_TYPES, name).decode(shared)
 
 
 @pytest.mark.parametrize(
@@ -99,7 +183,16 @@ def test_goattracker_rejects_what_it_cannot_express(name, shared, match):
 def test_defmon_row_and_freeze():
     c = codec(DM, DM_TYPES, "sidtab")
     raw = {"dl": 1, "wgh": 80, "wgl": 5, "ad": 0, "sr": 68, "tr": 12, "pw": 1, "ps": 0}
-    shared = {"hold": 2, "ctrl": 80, "note": "+12", "ad": 0, "sr": 68, "pw": 256, "wgl": 5, "ps": 0}
+    shared = {
+        "hold": 2,
+        "ctrl": 80,
+        "note": "+12",
+        "ad": 0,
+        "sr": 68,
+        "pw": 256,
+        "reg": "pw",
+        "wgl": 5,
+    }
     assert written(raw, c) == shared
     assert c.decode(shared) == {**{f: -1 for f in ("re", "fv", "cp", "acid", "af")}, **raw}
     assert written({"dl": 242, "tr": 180}, c) == {"note": "=28"}
@@ -118,7 +211,7 @@ def test_defmon_pw_and_note_columns_round_trip_every_byte():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": 1.3,
+        "unitracker": 1.4,
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -143,7 +236,6 @@ def gt_commands():
         (13, 0x20, ("mark", 0x20)),
         (8, 3, ("run", ("ctrltab", 3))),
         (10, 2, ("run", ("filttab", 2))),
-        (1, 1, ("slideup", ("speedtab", 1))),
     ],
 )
 def test_goattracker_commands(code, arg, shared):
@@ -244,11 +336,11 @@ ROW_KEEP = {"defmon": DM_KEEP, "sidwizard": {"res"}}
 # Program types that may hold list rows, with the rows each allows.
 LIST_ROWS = {
     "ctrltab": lambda r: r[0] >= 0xF0,
-    "pulsetab": lambda r: r[0] < 0x80,
-    "filttab": lambda r: 0 < r[0] < 0x80,
+    "pulsetab": lambda r: r[0] == 0,
+    "filttab": lambda r: 0 < r[0] < 0x80 and len(r) > 2,
     "wftab": lambda r: r[0] < 0x10 or r[1:2] == [0x7F] or len(r) > 2,
-    "pwtab": lambda r: r[0] < 0x80 or len(r) > 2,
-    "flttab": lambda r: r[0] < 0x80 or len(r) > 3,
+    "pwtab": lambda r: len(r) > 2,
+    "flttab": lambda r: len(r) > 2,
 }
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
 # envelope and control-register values in init records, the $D417 value as resfilt, and in a
@@ -305,12 +397,14 @@ def _check_def(pr_name, tname, value):
         _check_program(pr_name, tname, value)
     elif tname == "chordtab":
         _check_rows(tname, value, set())
+    elif tname == "mod":
+        assert value and set(value) <= set(MOD_KEYS), value
     else:
         assert not set(value if isinstance(value, dict) else {}) & set(ROW_KEYS), (tname, value)
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.3 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.4 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -350,16 +444,14 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     ir = lift_gt(decompile_sid(metal_warrior.read_bytes(), subtune=0))
     gt_doc = yaml.safe_load(songio.dumps(ir))
     gt_cmds = vocabulary(gt_doc)
-    assert gt_cmds == {"run", "slideup", "porta", "vib", "tempo"}
+    assert gt_cmds == {"run", "mod", "vib", "tempo"}
     dm_doc = yaml.safe_load(songio.dumps(lift_defmon(crosseyed.read_bytes())))
     dm_cmds = vocabulary(dm_doc)
     assert dm_cmds == {"run2"}
     sw_doc = yaml.safe_load(songio.dumps(lift_sw(csillag.read_bytes())))
     sw_cmds = vocabulary(sw_doc)
     assert sw_cmds == {
-        "pitchup",
-        "pitchdown",
-        "glide",
+        "mod",
         "attack",
         "sustain",
         "chord",
@@ -383,7 +475,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": 1.3,
+                "unitracker": 1.4,
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -436,3 +528,175 @@ def test_writer_refuses_a_map_row_no_shape_fits(crosseyed):
     ir["playroutine"]["record_types"]["vinit"]["codec"][0]["when"] = "0"
     with pytest.raises(songio.SongFormatError, match="no shared-vocabulary form"):
         songio.dumps(ir, embed=True)
+
+
+@pytest.mark.parametrize(
+    "name,raw,shared",
+    [
+        ("mod", {"cmd": 1, "arg": 47}, {"reg": "freq", "step": 24, "rel": "note", "for": "note"}),
+        (
+            "mod",
+            {"cmd": 2, "arg": 255},
+            {"reg": "freq", "step": -128, "rel": "note", "for": "note"},
+        ),
+        ("mod", {"cmd": 1, "arg": 0}, {"reg": "freq", "for": "note"}),
+        (
+            "mod",
+            {"cmd": 3, "arg": 0},
+            {"reg": "freq", "step": 0, "rel": "note", "to": "note", "for": "note"},
+        ),
+        (
+            "mod",
+            {"cmd": 3, "arg": 63},
+            {"reg": "freq", "step": 32, "rel": "note", "to": "note", "for": "note"},
+        ),
+        ("pwtab", {"a": 64, "b": 248}, {"hold": 2, "step": -8, "for": 64}),
+        ("pwtab", {"a": 0, "b": 0}, {"hold": 2, "for": 0}),
+        ("flttab", {"a": 32, "b": 8}, {"hold": 2, "step": 8, "for": 32}),
+    ],
+)
+def test_sidwizard_mods(name, raw, shared):
+    c = codec(SW, SW_TYPES, name)
+    assert written(raw, c) == shared
+    assert {k: v for k, v in c.decode(shared).items() if k in raw or v} == raw
+
+
+def test_sidwizard_speed_bytes_of_one_table_offset_write_alike():
+    c = codec(SW, SW_TYPES, "mod")
+    assert written({"cmd": 1, "arg": 47}, c) == written({"cmd": 1, "arg": 48}, c)
+    assert written({"cmd": 2, "arg": 0}, c) == written({"cmd": 1, "arg": 0}, c)
+
+
+@pytest.mark.parametrize(
+    "name,shared,match",
+    [
+        ("mod", {"reg": "freq", "step": 129, "rel": "note", "for": "note"}, "no shape"),
+        ("mod", {"reg": "freq", "step": 0, "rel": "note", "for": "note"}, "no shape"),
+        ("mod", {"reg": "freq", "step": -1, "rel": "note", "to": "note", "for": "note"}, "values"),
+        ("mod", {"reg": "freq", "step": 3, "rel": "note"}, "values of"),
+        ("mod", {"reg": "freq", "step": 300, "for": "note"}, "no shape"),
+        ("pwtab", {"step": 1, "for": 3}, "values of"),
+        ("pwtab", {"hold": 2, "step": 1, "for": 128}, "no shape"),
+        ("flttab", {"hold": 2, "step": 1, "for": 3, "res": 2}, "keys"),
+    ],
+)
+def test_sidwizard_refuses_mods_it_cannot_play(name, shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec(SW, SW_TYPES, name).decode(shared)
+
+
+def dm_mod(**cols):
+    return {f: -1 for f in ("wgh", "wgl", "ad", "sr", "tr", "pw", "re", "fv", "cp", "acid")} | {
+        "dl": 0,
+        "af": -1,
+        "ps": -1,
+        **cols,
+    }
+
+
+def dm_rate(m):
+    return DM["tables"]["rate_lo"][2 * m] | DM["tables"]["rate_hi"][2 * m] << 8
+
+
+@pytest.mark.parametrize(
+    "cols,shared",
+    [
+        ({"af": 0xD8}, {"reg": "freq", "step": -dm_rate(0x18), "for": "note"}),
+        ({"af": 0xBF}, {"reg": "freq", "step": dm_rate(0x3F), "for": "note"}),
+        ({"af": 0x80}, {"reg": "freq", "for": "note"}),
+        ({"af": 0x80, "ps": 0x85}, {"reg": "freq", "for": "note", "ps": 0x85}),
+        ({"ps": 0x85}, {"reg": "pw", "step": 5, "at": "reflect"}),
+        ({"ps": 0x05}, {"reg": "pw", "step": -6, "at": "reflect"}),
+        ({"ps": 0x7F}, {"reg": "pw", "step": -128, "at": "reflect"}),
+        ({"ps": 0}, {"reg": "pw"}),
+        ({"ps": 0x81, "af": 0x10}, {"reg": "pw", "step": 1, "at": "reflect", "af": 0x10}),
+    ],
+)
+def test_defmon_slide_and_pulse_columns_are_mods(cols, shared):
+    c = codec(DM, DM_TYPES, "sidtab")
+    assert written(cols, c) == shared
+    assert c.decode(shared) == dm_mod(**cols)
+
+
+def test_defmon_mods_that_never_move_are_one_mod():
+    c = codec(DM, DM_TYPES, "sidtab")
+    assert written({"af": 0xC0}, c) == written({"af": 0x80}, c)
+    assert written({"ps": 0x80}, c) == written({"ps": 0}, c)
+    assert len({dm_rate(m) for m in range(64)}) == 64
+    for af in range(0x80, 0x100):
+        assert c.decode(written({"af": af}, c))["af"] == (af if af & 0x3F else 0x80)
+
+
+@pytest.mark.parametrize(
+    "shared,match",
+    [
+        ({"reg": "freq", "step": 5, "for": "note"}, "values of"),
+        ({"reg": "freq", "step": -dm_rate(3)}, "keys"),
+        ({"reg": "pw", "step": -1, "at": "reflect"}, "values of"),
+        ({"reg": "pw", "step": 128, "at": "reflect"}, "values of"),
+        ({"reg": "pw", "step": 5}, "values of"),
+        ({"reg": "cut", "step": 5}, "values of"),
+        ({"ps": 0x85}, "can't express"),
+        ({"af": 0xD8}, "keys"),
+    ],
+)
+def test_defmon_refuses_mods_it_cannot_play(shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec(DM, DM_TYPES, "sidtab").decode(shared)
+
+
+@pytest.mark.parametrize(
+    "bad,match",
+    [
+        ({"raw": {"w": {"search": [0, 3]}, "n": {"search": [0, 3]}}}, "one field per shape"),
+        ({"raw": {"w": {"range": [0, 3]}}}, "one field per shape"),
+        ({"implies": {"ctrl": 1}}, "unwritten mod keys"),
+        ({"implies": {"reg": "pw"}, "keys": {"reg": 1}}, "unwritten mod keys"),
+        ({"implies": {"reg": "wave"}}, "bad reg"),
+    ],
+)
+def test_mod_shape_declarations_are_checked(bad, match):
+    with pytest.raises(CodecError, match=match):
+        RowCodec(GT_TYPES["ctrltab"], [bad], 0)
+
+
+@pytest.mark.parametrize(
+    "keys,match",
+    [
+        ({"reg": "w + 5"}, "has no name"),
+        ({"rel": "w"}, "has no name"),
+        ({"at": "0 - 1"}, "no name"),
+    ],
+)
+def test_mod_values_a_shape_cannot_name(keys, match):
+    c = RowCodec(GT_TYPES["ctrltab"], [{"keys": keys}], 0)
+    with pytest.raises(CodecError, match=match):
+        c.encode({"w": 1})
+
+
+def test_codec_expressions_read_only_declared_tables():
+    with pytest.raises(CodecError, match="unknown table"):
+        Evaluator()("t[0]", {})
+    assert Evaluator(None, {"t": [7]})("t[0] + t[5]", {}) == 7
+
+
+@pytest.mark.parametrize(
+    "spec,match",
+    [
+        ({1: {"name": "run", "mod": {"cmd": 1}}}, "the one 'mod'"),
+        ({1: [{"name": "mod", "mod": {}}, {"name": "mod", "mod": {}}]}, "the one 'mod'"),
+        ({1: {"name": "mod", "mod": {}, "from": "ctrltab"}}, None),
+        ({1: {"name": "mod", "mod": {}, "from": "nope"}}, "needs a none index"),
+    ],
+)
+def test_mod_command_declarations_are_checked(spec, match):
+    if match is None:
+        assert CommandCodec(spec, GT_TYPES).is_mod(1)
+        return
+    with pytest.raises(CodecError, match=match):
+        CommandCodec(spec, GT_TYPES)
+
+
+def test_a_mod_row_no_command_writes_is_refused():
+    with pytest.raises(CodecError, match="no command writes"):
+        gt_commands().mod_command({"cmd": 9})

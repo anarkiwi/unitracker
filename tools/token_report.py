@@ -27,7 +27,7 @@ def report(path: str, enc) -> str:
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
     total = len(enc.encode(text))
-    if yaml.safe_load(text).get("unitracker") not in (1, 1.1, 1.2, 1.3):
+    if yaml.safe_load(text).get("unitracker") not in (1, 1.1, 1.2, 1.3, 1.4):
         return f"{path}: {total} tokens"
     head, _, song = text.partition("\nsong:")
     counts, current = {}, "structure"

@@ -11,9 +11,9 @@ tables:
 instrument: {type: ins, base: 0}
 note_offset: 0
 commands:
-  1: {name: slideup, ref: speedtab}
-  2: {name: slidedown, ref: speedtab}
-  3: {name: porta, ref: speedtab}
+  1: {name: mod, mod: {cmd: 1}, from: speedtab}
+  2: {name: mod, mod: {cmd: 2}, from: speedtab}
+  3: {name: mod, mod: {cmd: 3}, from: speedtab}
   4: {name: vib, ref: speedtab}
   5: {name: ad}
   6: {name: sr}
@@ -41,6 +41,35 @@ record_types:
     prefix: s
     none: 0
     fields: [l, r]
+  # Slide up (cmd 1), slide down (2) or toneporta (3) at the speed of speedtab row l, r
+  # (arg 0: none): l $80+ is a note-relative speed, the semitone interval shifted right r.
+  mod:
+    prefix: m
+    form: map
+    fields: [cmd, arg, l, r]
+    codec:
+      - when: "cmd <= 2 and (arg == 0 or (l < 0x80 and (l | r) == 0) or (l >= 0x80 and r >= 16))"
+        keys: {reg: FREQ}
+        raw: {cmd: 1, arg: 0}
+      - when: "cmd <= 2 and arg != 0 and l < 0x80 and (l | r) != 0"
+        keys: {reg: FREQ, step: "((l << 8) | r) * (3 - 2 * cmd)"}
+        raw:
+          cmd: "2 if step < 0 else 1"
+          arg: 1
+          l: "(step if step > 0 else 0 - step) >> 8"
+          r: "(step if step > 0 else 0 - step) & 0xFF"
+      - when: "cmd <= 2 and arg != 0 and l >= 0x80 and r < 16"
+        keys: {reg: FREQ, step: "(1 << r) * (3 - 2 * cmd)", rel: NOTE}
+        raw: {cmd: "2 if step < 0 else 1", arg: 1, l: 0x80, r: {search: [0, 15]}}
+      - when: "cmd == 3 and arg == 0"
+        keys: {reg: FREQ, to: NOTE}
+        raw: {cmd: 3, arg: 0}
+      - when: "cmd == 3 and arg != 0 and (0 <= l < 0x80 or (l >= 0x80 and r >= 16))"
+        keys: {reg: FREQ, step: "0 if l >= 0x80 else (l << 8) | r", to: NOTE}
+        raw: {cmd: 3, arg: 1, l: "step >> 8", r: "step & 0xFF"}
+      - when: "cmd == 3 and arg != 0 and l >= 0x80 and r < 16"
+        keys: {reg: FREQ, step: "1 << r", rel: NOTE, to: NOTE}
+        raw: {cmd: 3, arg: 1, l: 0x80, r: {search: [0, 15]}}
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
   # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
   ctrltab:
@@ -84,6 +113,12 @@ record_types:
       - when: "l >= 0x80"
         keys: {pw: "((l & 0x0F) << 8) | r"}
         raw: {l: "0x80 | (pw >> 8)", r: "pw & 0xFF"}
+      - when: "0 < l < 0x80"
+        implies: {reg: pw}
+        keys:
+          step: {value: "r - 0x100 if r >= 0x80 else r", omit: "r == 0"}
+          for: l
+        raw: {l: for_, r: "step & 0xFF"}
     do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
     each: [{accumulate: pulse, step: "row.r - 0x100 if row.r >= 0x80 else row.r"}]
   # Filtertable row: l $80+ sets type and routing (and cut, a cutoff the player reads from the
@@ -103,6 +138,12 @@ record_types:
       - when: "l == 0"
         keys: {cut: "r << 3"}
         raw: {l: 0, r: "cut >> 3"}
+      - when: "0 < l < 0x80 and cut < 0"
+        implies: {reg: cut}
+        keys:
+          step: {value: "(r - 0x100 if r >= 0x80 else r) << 3", omit: "r == 0"}
+          for: l
+        raw: {l: for_, r: "(step >> 3) & 0xFF"}
     do:
       - if: "row.l >= 0x80"
         then:
