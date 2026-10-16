@@ -1,0 +1,569 @@
+# SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame, as a
+# unitracker playroutine: a transcription of pysidwizard's SWMPlayer. One step is one
+# pattern row; the playroutine counts each voice's tempo, reads a row at TICK_0, applies it
+# at TICK_2 and writes the hard-restart ADSR on the ticks between. The lifter fills in the
+# subtune's tempo pair.
+name: sidwizard
+constants: {tempol: 6, tempor: 6}
+defaults:
+  clock: {cycles_per_tick: 19656, clock_hz: 985248}
+  voices: 3
+  registers: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15]
+tables:
+  freqlo: [7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
+  freqhi: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255, 7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
+  exptab: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255]
+instrument: {type: ins, base: 0}
+note_offset: 1
+commands:
+  1: {name: pitchup}
+  2: {name: pitchdown}
+  3: {name: glide}
+  32: {name: attack}
+  48: {name: decay}
+  80: {name: sustain}
+  96: {name: release}
+  112: {name: chord, ref: chordtab}
+  63: {name: legato}
+  288: {name: iattack}
+  304: {name: idecay}
+  336: {name: isustain}
+  352: {name: irelease}
+  368: {name: ichord, ref: chordtab}
+  608: {name: notevib}
+  632: {name: noteglide}
+record_types:
+  # An instrument's 16-byte header as fields, its WF/arp, pulse and filter tables as programs.
+  ins:
+    prefix: i
+    none: 0
+    pin: [1]
+    form: map
+    fields: {flags: 26, hrad: 15, hrsr: 0, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, arpspeed: 0, chord: 0, octave: 0, firstctrl: 9, ctrl: 0, pulse: 0, filter: 0}
+    refs: {ctrl: wftab, pulse: pwtab, filter: flttab, chord: chordtab}
+  # WF/arp row: w a waveform ($10+) or a row-hold count; a the arp byte (relative up $00-$7E,
+  # chord $7F, none $80, absolute $81-$DF, relative down $E0-$FF); d the detune ($FF: none).
+  wftab:
+    prefix: w
+    none: 0
+    chain: next
+    fields: {w: 0, a: 128, d: 0, next: 0}
+    codec:
+      - when: "w >= 0x10 and a != 0x7F and d == 0"
+        keys:
+          ctrl: w
+          note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
+        raw:
+          w: ctrl
+          a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
+  # Pulse row: a $80+ sets the width from (a & $7F, b); otherwise a ticks of a signed b sweep.
+  # k is the keyboard-track amount.
+  pwtab:
+    prefix: pw
+    none: 0
+    chain: next
+    fields: {a: 0, b: 0, k: 0, next: 0}
+    codec:
+      - when: "a >= 0x80 and (a & 0x70) == 0 and k == 0"
+        keys: {pw: "((a & 0x0F) << 8) | b"}
+        raw: {a: "0x80 | (pw >> 8)", b: "pw & 0xFF"}
+  # Filter row: a $80+ sets the filter-mode bits (a & $70), resonance res and cutoff b;
+  # otherwise a ticks of a signed b cutoff sweep. k is the keyboard-track amount.
+  flttab:
+    prefix: f
+    none: 0
+    chain: next
+    fields: {a: 0, b: 0, res: 0, k: 0, next: 0}
+    codec:
+      - when: "a >= 0x80 and k == 0"
+        keys: {mode: "a & 0x70", cut: "b << 3"}
+        keep: [res]
+        raw: {a: "0x80 | mode", b: "cut >> 3"}
+  # Chord row: a note offset; a chord loops or ends back to the WF table.
+  chordtab:
+    prefix: ch
+    none: 0
+    chain: next
+    fields: [n, next]
+    codec:
+      - when: "n < 0x7E"
+        keys: {note: n}
+        raw: {n: note}
+functions:
+  dfreq:
+    args: [d]
+    expr: "(freqhi[d & 0xFF] << 8) | freqlo[d & 0xFF]"
+  fy:
+    args: [a, d]
+    expr: "(((a + 1) >> 1) + (d & 0xFF)) & 0xFF"
+  fyc:
+    args: [a, d]
+    expr: "fy(a, d) if fy(a, d) < 203 else 203"
+  fmlo:
+    args: [a, d]
+    expr: "exptab[fyc(a, d)] if fyc(a, d) < 107 else freqlo[fyc(a, d) - 107]"
+  fmhi:
+    args: [a, d]
+    expr: "0 if fyc(a, d) < 107 else freqhi[fyc(a, d) - 107]"
+  s8:
+    args: [x]
+    expr: "(x - 0x100) if x & 0x80 else x"
+  s16:
+    args: [x]
+    expr: "(x - 0x10000) if x & 0x8000 else x"
+global:
+  fctl: {width: 8, init: 255}
+  fswitch: {width: 8}
+  fres: {width: 8}
+  fmv: {width: 8, init: 15}
+  seqvolu: {width: 8, init: 15}
+  fcuthi: {width: 8}
+  fcutlo: {width: 8}
+  fshift: {width: 8}
+  fsweep: {width: 8}
+  target: {width: 8}
+  nv: {width: 8}
+voice:
+  vi: {width: 8}
+  seqend: {width: 1}
+  trig: {width: 1}
+  haspend: {width: 1}
+  pk: {width: 8}
+  pn: {width: 8}
+  pins: {width: 8}
+  pleg: {width: 1}
+  pifx: {width: 16}
+  pia: {width: 8}
+  pfx: {width: 16}
+  pfv: {width: 8}
+  pnfx: {width: 8}
+  rc: {width: 16}
+  ra: {width: 16}
+  tl: {width: 8}
+  tr: {width: 8}
+  tog: {width: 1}
+  sc: {width: 8}
+  cur: {width: 8}
+  pre: {width: 8}
+  portrow: {width: 1}
+  sel: {width: 1}
+  papplied: {width: 1}
+  startn: {width: 1}
+  note: {width: 8}
+  ci: {width: 8}
+  oct: {}
+  hr: {width: 8}
+  started: {width: 1}
+  hpos: {width: 8}
+  wpos: {width: 8}
+  arpcnt: {width: 8}
+  arpre: {width: 8}
+  wfarp: {}
+  wfabs: {width: 1}
+  vdc: {}
+  vfc: {width: 8}
+  vper: {width: 8}
+  fml: {width: 8}
+  fmh: {width: 8}
+  svib: {width: 8}
+  voff: {width: 16}
+  carry: {width: 1}
+  skipw: {width: 1}
+  inhr: {width: 1}
+  leg2: {width: 1}
+  adsrw: {width: 1}
+  zpd: {width: 1}
+  innew: {width: 1}
+  pwhi: {width: 8}
+  pwlo: {width: 8}
+  pwcnt: {width: 8}
+  pwkt: {width: 8}
+  ppos: {width: 8}
+  fpos: {width: 8}
+  vfhi: {width: 8}
+  vflo: {width: 8}
+  vif: {width: 1}
+  zpl: {width: 8}
+  zph: {width: 8}
+  sfl: {width: 8}
+  sfh: {width: 8}
+  spl: {width: 8}
+  sph: {width: 8}
+  sad: {width: 8}
+  ssr: {width: 8}
+  sctl: {width: 8}
+  gate: {width: 8}
+  det: {}
+  dfx: {width: 1}
+  difx: {width: 16}
+  dia: {width: 8}
+  dfc: {width: 16}
+  dfv: {width: 8}
+  dpa: {width: 1}
+  xifx: {width: 16}
+  xia: {width: 8}
+  xfc: {width: 16}
+  xfv: {width: 8}
+  xpa: {width: 1}
+  sfc: {width: 16}
+  sa: {width: 8}
+  aov: {init: -1}
+  dov: {init: -1}
+  sov: {init: -1}
+  rov: {init: -1}
+  chord: {width: 8}
+  cpos: {width: 8}
+  cstart: {width: 8}
+  cret: {width: 1}
+  cont: {width: 1}
+  upi: {width: 8}
+  vb: {width: 8}
+  rw: {width: 8}
+  rx: {width: 8}
+  rd: {width: 8}
+  r0: {width: 8}
+  r1: {width: 8}
+  r2: {width: 8}
+  r3: {width: 8}
+  r4: {width: 8}
+  r5: {width: 8}
+  r6: {width: 8}
+  t1: {}
+  t2: {}
+  t3: {}
+  t4: {}
+  t5: {}
+  t6: {}
+procs:
+  # A row's command into its column: fx column big ($01-$1F) or small (class $20-$70),
+  # legato ($3F), instrument-column small FX ($100 + class), note-column FX ($200 + note).
+  route:
+    - {if: "rc == 0", then: [{return: true}]}
+    - {if: "rc == 0x3F", then: [{set: {pleg: 1}}, {return: true}]}
+    - {if: "rc < 0x100", then: [{set: {pfx: rc, pfv: ra}}, {return: true}]}
+    - {if: "rc < 0x200", then: [{set: {pifx: "rc & 0xFF", pia: ra}}, {return: true}]}
+    - set: {pnfx: "(0x60 | ra) if rc == 0x260 else 0x78"}
+  # TICK_0: read the next row, or stop at the end of the orderlist.
+  advance_row:
+    - {if: ended, then: [{set: {seqend: 1, haspend: 0}}, {return: true}]}
+    - set: {fmv: "(fmv & 0xF0) | (seqvolu & 0x0F)"}
+    - fetch: true
+    - set: {haspend: 1, pk: ev_kind, pn: ev_note, pins: ev_instr, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}
+    - {call: route, with: {rc: ev_cmd, ra: ev_arg}}
+    - {call: route, with: {rc: ev_cmd2, ra: ev_arg2}}
+    - {if: "pk or pins or pleg or pifx or pfx or pnfx", then: [{set: {trig: 1}}]}
+  # The instrument whose hard restart this pre-trigger tick fires, in upi (0: none).
+  pre_hr_ins:
+    - set: {upi: 0}
+    - if: "haspend and pk == 1 and pfx != 3 and not pleg and svib != 0xFF"
+      then: [{set: {upi: "pins if pins else ci"}}]
+    - if: "upi != 0 and not ((pre == 0 and (ins[upi].flags & 2)) or (pre == 1 and (ins[upi].flags & 1)))"
+      then: [{set: {upi: 0}}]
+  emit_pre_hr:
+    - call: pre_hr_ins
+    - {if: "upi == 0", then: [{return: true}]}
+    - set: {gate: 0xFE, sad: "ins[upi].hrad", ssr: "ins[upi].hrsr", adsrw: 1}
+    - if: "ins[upi].flags & 0x04"
+      then: [{set: {sctl: 0x18}}]
+      else: [{set: {sctl: "sctl & 0xFE"}}]
+  write_adsr:
+    - set:
+        sad: "(((aov if aov >= 0 else ins[ci].ad >> 4) & 0x0F) << 4) | ((dov if dov >= 0 else ins[ci].ad) & 0x0F)"
+        ssr: "(((sov if sov >= 0 else ins[ci].sr >> 4) & 0x0F) << 4) | ((rov if rov >= 0 else ins[ci].sr) & 0x0F)"
+        adsrw: 1
+  set_routing:
+    - if: vif
+      then: [{set: {fswitch: "fswitch | (1 << vi)"}}]
+      else: [{set: {fswitch: "fswitch & (0xFF ^ (1 << vi))"}}]
+  setup_vibrato:
+    - set:
+        svib: "ins[ci].flags & 0x30"
+        voff: 0
+        vdc: "ins[ci].vibdelay & 0x7F"
+        vper: "(ins[ci].vibrato & 0x0F) * 2"
+        vfc: "(ins[ci].vibrato & 0x0F) >> 1"
+    - if: "(ins[ci].vibrato >> 4) == 0"
+      then: [{set: {fml: 0, fmh: 0}}]
+      else:
+        - set:
+            fml: "fmlo((ins[ci].vibrato >> 4) << 3, note + oct)"
+            fmh: "fmhi((ins[ci].vibrato >> 4) << 3, note + oct)"
+  vib_byte:
+    - set: {svib: "(ins[ci].flags & 0x30) if ci != 0 else 0", vper: "(vb & 0x0F) * 2"}
+    - set: {vfc: "0 if svib == 0x30 else ((vb & 0x0F) if svib >= 0x20 else ((vb & 0x0F) >> 1))"}
+    - if: "((vb >> 4) & 0x0F) == 0"
+      then: [{set: {fml: 0, fmh: 0}}]
+      else:
+        - set:
+            fml: "fmlo(((vb >> 4) & 0x0F) << 3, note + oct)"
+            fmh: "fmhi(((vb >> 4) & 0x0F) << 3, note + oct)"
+  select_chord:
+    - {if: "sa != 0", then: [{set: {chord: sa, cpos: sa, cstart: sa}}]}
+  small_fx:
+    - {if: "sfc == 0x20", then: [{set: {aov: sa, dov: -1}}]}
+    - {if: "sfc == 0x30", then: [{set: {aov: -1, dov: sa}}]}
+    - {if: "sfc == 0x50", then: [{set: {sov: sa, rov: -1}}]}
+    - {if: "sfc == 0x60", then: [{set: {sov: -1, rov: sa}}]}
+    - {if: "sfc != 0x70 and ci != 0", then: [{call: write_adsr}]}
+    - {if: "sfc == 0x70", then: [{call: select_chord}]}
+  slide_speed:
+    - if: "xfv == 0"
+      then: [{set: {fml: 0, fmh: 0}}]
+      else: [{set: {fml: "fmlo(xfv, note + oct)", fmh: "fmhi(xfv, note + oct)"}}]
+  # INSPTFX: the instrument-column small FX, then the FX column.
+  fx_columns:
+    - {if: xifx, then: [{call: small_fx, with: {sfc: xifx, sa: xia}}]}
+    - {if: "xfc >= 0x20", then: [{call: small_fx, with: {sfc: xfc, sa: xfv}}, {return: true}]}
+    - {if: "xfc == 1", then: [{set: {svib: 0x81}}, {call: slide_speed}]}
+    - {if: "xfc == 2", then: [{set: {svib: 0x82}}, {call: slide_speed}]}
+    - if: "xfc == 3 and not xpa"
+      then: [{set: {svib: 0x83, fml: "fmlo(xfv, note + oct)", fmh: "fmhi(xfv, note + oct)"}}]
+  run_deferred:
+    - {if: "dfx == 0", then: [{return: true}]}
+    - set: {dfx: 0}
+    - {call: fx_columns, with: {xifx: difx, xia: dia, xfc: dfc, xfv: dfv, xpa: dpa}}
+  # STRTSND: a new note restarts the instrument's tables and the hard restart.
+  start_note:
+    - set: {gate: 0xFF, hr: 1, trig: 1, aov: -1, dov: -1, sov: -1, rov: -1}
+    - {if: "ci == 0", then: [{return: true}]}
+    - set: {started: 1, wpos: "ins[ci].ctrl"}
+    - {if: "sel or not (ins[ci].flags & 0x40)", then: [{set: {ppos: "ins[ci].pulse"}}]}
+    - {if: "sel or not (ins[ci].flags & 0x80)", then: [{set: {fpos: "ins[ci].filter"}}]}
+    - set: {wfarp: 0, wfabs: 0, arpcnt: 0xFF, arpre: "ins[ci].arpspeed", det: 0, vif: "ins[ci].filter != 0"}
+    - call: set_routing
+    - if: "ins[ci].filter != 0 and flttab[ins[ci].filter].a != 0"
+      then: [{set: {fctl: vi}}]
+    - set: {chord: "ins[ci].chord", cpos: "ins[ci].chord", cstart: "ins[ci].chord"}
+    - call: setup_vibrato
+  # TICK_2: apply the row read at TICK_0.
+  apply_row:
+    - {if: "pk or pins or pleg or pifx or pfx or pnfx", then: [{set: {trig: 1}}]}
+    - set: {sel: "pins != 0", papplied: 0, startn: 0}
+    - {if: sel, then: [{set: {ci: pins, oct: "ins[pins].octave"}}]}
+    - if: "pk == 1"
+      then:
+        - if: "pfx == 3"
+          then:
+            - set: {note: pn, t2: "(pn + oct) & 0xFF"}
+            - set:
+                voff: "((zph << 8) | zpl) - dfreq(t2)"
+                svib: 0x83
+                fml: "fmlo(pfv, t2)"
+                fmh: "fmhi(pfv, t2)"
+                papplied: 1
+          else:
+            - if: "svib == 0xFF or pleg"
+              then:
+                - set: {voff: "((zph << 8) | zpl) - dfreq(pn + oct)", fmh: "0x7F if svib != 0xFF else fmh"}
+                - set: {svib: 0x83, note: pn}
+              else: [{set: {note: pn}}, {call: start_note}, {set: {startn: 1}}]
+      else:
+        - {if: "pk == 2", then: [{set: {gate: 0xFE, sctl: "sctl & 0xFE"}}]}
+        - {if: "pk == 3", then: [{set: {gate: 0xFF, sctl: "sctl | 1"}}]}
+        - if: "pnfx == 0x78"
+          then: [{set: {svib: 0xFF, fml: "fmlo(110, note + oct)", fmh: "fmhi(110, note + oct)"}}]
+        - if: "pnfx >= 0x60 and pnfx < 0x78 and ci != 0"
+          then:
+            - {call: vib_byte, with: {vb: "((pnfx & 0x0F) << 4) | (ins[ci].vibrato & 0x0F)"}}
+            - set: {voff: 0}
+    - if: startn
+      then: [{set: {dfx: 1, difx: pifx, dia: pia, dfc: pfx, dfv: pfv, dpa: papplied}}]
+      else:
+        - set: {dfx: 0}
+        - {call: fx_columns, with: {xifx: pifx, xia: pia, xfc: pfx, xfv: pfv, xpa: papplied}}
+  tick_porta:
+    - set: {t4: "s16(voff)", t5: "(fmh << 8) | fml"}
+    - {if: "t4 == 0", then: [{return: true}]}
+    - if: "t4 > 0"
+      then:
+        - {if: "t4 <= t5", then: [{set: {voff: 0}}, {return: true}]}
+        - set: {voff: "t4 - t5 - 1"}
+      else:
+        - {if: "t4 + t5 > 0", then: [{set: {voff: 0}}, {return: true}]}
+        - set: {voff: "t4 + t5 + 1"}
+  tick_vibrato:
+    - {if: "ci == 0", then: [{return: true}]}
+    - {if: "svib == 0x83", then: [{call: tick_porta}, {return: true}]}
+    - {if: "svib == 0x81", then: [{set: {voff: "voff + ((fmh << 8) | fml)"}}, {return: true}]}
+    - {if: "svib == 0x82", then: [{set: {voff: "voff - ((fmh << 8) | fml)"}}, {return: true}]}
+    - if: "svib == 0"
+      then:
+        - set: {t3: "((fmh << 8) | fml) + vdc"}
+        - set: {fml: t3, fmh: "t3 >> 8"}
+      else:
+        - {if: "svib != 0x10", then: [{return: true}]}
+        - {if: "vdc >= 0", then: [{set: {vdc: "vdc - 1"}}, {return: true}]}
+    - {if: "vfc == 0", then: [{set: {vfc: vper}}]}
+    - set: {vfc: "vfc - 1"}
+    - if: "((vfc << 1) & 0xFF) < vper"
+      then: [{set: {voff: "voff + ((fmh << 8) | fml)"}}]
+      else: [{set: {voff: "voff - ((fmh << 8) | fml)"}}]
+  # A chord step: the next offset (cret 0), or the end of a returning chord (cret 1).
+  tick_chord:
+    - set: {cret: 0}
+    - {if: "chord == 0", then: [{return: true}]}
+    - {if: "cpos == 0", then: [{set: {cpos: cstart, cret: 1}}, {return: true}]}
+    - set: {wfarp: "chordtab[cpos].n", wfabs: 0, voff: 0, cpos: "chordtab[cpos].next"}
+  wf_advance:
+    - if: started
+      then: [{set: {wpos: "wftab[wpos].next"}}]
+      else: [{set: {hpos: "hpos + 1"}}]
+  # One WF/arp row: rw, rx, rd. cont 1 when a chord ended and the next row plays now.
+  wf_apply:
+    - if: "rw < 0x10"
+      then: [{set: {arpcnt: rw}}]
+      else: [{set: {sctl: "rw & gate"}}]
+    - if: "rx == 0x7F"
+      then:
+        - call: tick_chord
+        - {if: cret, then: [{call: wf_advance}, {set: {cont: 1}}]}
+        - return: true
+    - if: "rx == 0x80"
+      then: [{set: {carry: 1}}]
+      else:
+        - if: "rx >= 0xE0"
+          then:
+            - set: {wfarp: "rx - 0x100", wfabs: 0, voff: 0}
+            - {if: "rx + ((note + oct) & 0xFF) > 0xFF", then: [{set: {carry: 1}}]}
+          else:
+            - if: "rx >= 0x80"
+              then: [{set: {wfarp: "rx & 0x7F", wfabs: 1, voff: 0}}]
+              else: [{set: {wfarp: rx, wfabs: 0, voff: 0}}]
+    - {if: "rd != 0xFF", then: [{set: {det: "s8(rd)"}}]}
+    - call: wf_advance
+  # Before the first note the player walks instrument 1's header as WF rows.
+  wf_row:
+    - set: {cont: 0}
+    - if: "not started"
+      then:
+        - if: "hpos == 0"
+          then: [{set: {rw: "ins[ci].flags", rx: "ins[ci].hrad", rd: "ins[ci].hrsr"}}]
+          else: [{set: {rw: "ins[ci].ad", rx: "ins[ci].sr", rd: "ins[ci].vibrato"}}]
+        - {if: "rw == 0xFF", then: [{set: {carry: 1}}, {return: true}]}
+        - call: wf_apply
+        - return: true
+    - {if: "wpos == 0", then: [{set: {carry: 1}}, {return: true}]}
+    - set: {rw: "wftab[wpos].w", rx: "wftab[wpos].a", rd: "wftab[wpos].d"}
+    - call: wf_apply
+  tick_wf:
+    - {if: "ci == 0", then: [{return: true}]}
+    - {if: "started and ins[ci].ctrl == 0", then: [{set: {carry: 1, skipw: 0}}, {return: true}]}
+    - set: {carry: 0, skipw: 0, arpcnt: "arpcnt - 1"}
+    - {if: "arpcnt < 0x80", then: [{set: {skipw: 1}}, {return: true}]}
+    - set: {arpcnt: "arpre & 0x3F"}
+    - call: wf_row
+    - {if: cont, then: [{call: wf_row}]}
+    - {if: cont, then: [{call: wf_row}]}
+    - {if: cont, then: [{call: wf_row}]}
+  tick_pw:
+    - {if: "ci == 0 or ppos == 0", then: [{return: true}]}
+    - set: {t1: "pwtab[ppos].a", t2: "pwtab[ppos].b"}
+    - if: "t1 & 0x80"
+      then:
+        - set: {pwhi: "t1 & 0x7F", pwlo: t2, pwkt: "pwtab[ppos].k", ppos: "pwtab[ppos].next", pwcnt: 0}
+        - return: true
+    - {if: "pwcnt >= t1", then: [{set: {pwkt: "pwtab[ppos].k", ppos: "pwtab[ppos].next", pwcnt: 0}}, {return: true}]}
+    - set: {pwcnt: "pwcnt + 1"}
+    - {if: "t2 & 0x80", then: [{set: {pwhi: "pwhi - 1"}}]}
+    - set: {t6: "pwlo + t2"}
+    - set: {pwlo: t6}
+    - {if: "t6 > 0xFF", then: [{set: {pwhi: "pwhi + 1"}}]}
+  # The filter table runs for the one voice that controls the filter.
+  tick_filt:
+    - {if: "fctl != vi or ci == 0 or ins[ci].filter == 0 or fpos == 0", then: [{return: true}]}
+    - set: {t1: "flttab[fpos].a", t2: "flttab[fpos].b"}
+    - if: "t1 & 0x80"
+      then:
+        - set:
+            vfhi: t2
+            fcuthi: t2
+            vflo: 0
+            fcutlo: 0
+            fres: "(flttab[fpos].res & 0x0F) << 4"
+            fmv: "(fmv & 0x0F) | (t1 & 0x70)"
+            fpos: "flttab[fpos].next"
+            fsweep: 0
+        - return: true
+    - {if: "fsweep >= t1", then: [{set: {fpos: "flttab[fpos].next", fsweep: 0}}, {return: true}]}
+    - set: {fsweep: "fsweep + 1", t3: "(((vfhi << 3) | (vflo & 7)) + s8(t2)) & 0x7FF"}
+    - set: {vflo: "t3 & 7", vfhi: "t3 >> 3", fcutlo: "t3 & 7", fcuthi: "t3 >> 3"}
+  # The voice's register values for this tick.
+  compose:
+    - {if: "ci == 0", then: [{set: {sad: 0, ssr: 0}}, {return: true}]}
+    - set: {inhr: "hr > 0"}
+    - if: "hr > 0"
+      then:
+        - call: write_adsr
+        - if: "ins[ci].flags & 0x08"
+          then: [{set: {sctl: "ins[ci].firstctrl & gate", sfh: "freqhi[(note + oct) & 0xFF]"}}]
+        - return: true
+    - if: "ins[ci].ctrl != 0 or zpd"
+      then:
+        - set: {t1: "dfreq((wfarp if wfabs else note + wfarp + oct) & 0x7F) + voff"}
+        - set: {zpl: t1, zph: "t1 >> 8"}
+    - set: {t2: "zpl + (det & 0xFF) + carry"}
+    - set: {sfl: t2, sfh: "zph + (t2 > 0xFF)", t3: "pwhi & 0x7F"}
+    - if: "pwkt != 0"
+      then:
+        - set: {t4: "(((note + oct) & 0x7F) + pwkt) & 0xFF"}
+        - set: {t3: "((exptab[t4] - exptab[t4 - 1] - 1) + t3 + (exptab[t4] >= exptab[t4 - 1] + 1))"}
+    - set: {sph: t3, spl: pwlo}
+  note_setup:
+    - if: "hr > 0"
+      then: [{call: compose}, {call: run_deferred}, {set: {hr: "hr - 1"}}, {return: true}]
+    - call: pre_hr_ins
+    - {if: "pre < 2 and upi != 0 and (ins[upi].flags & 0x04)", then: [{call: emit_pre_hr}, {return: true}]}
+    - set: {innew: "haspend and pk == 1 and pfx != 3 and not pleg and svib != 0xFF"}
+    - {if: "pre < 2 and upi != 0", then: [{set: {gate: 0xFE}}]}
+    - {if: "not innew", then: [{call: tick_vibrato}]}
+    - call: tick_wf
+    - if: "skipw and pre < 2 and haspend and pk == 1 and pfx != 3 and svib != 0xFF and pifx != 0"
+      then: [{set: {carry: 1}}]
+    - {if: "not innew", then: [{call: tick_pw}, {call: tick_filt}]}
+    - call: compose
+    - {if: "pre < 2 and haspend", then: [{call: emit_pre_hr}]}
+  tick_voice:
+    - set: {leg2: 0, adsrw: 0, zpd: 0}
+    - {if: "seqend and not trig", then: [{return: true}]}
+    - set: {cur: "tl if tog == 0 else tr"}
+    - {if: "cur == 0", then: [{set: {cur: 6}}]}
+    - set: {pre: sc}
+    - {if: "sc == 0 and not seqend", then: [{call: advance_row}]}
+    - set: {sc: "sc + 1"}
+    - {if: "sc >= cur", then: [{set: {sc: 0, tog: "tog ^ 1"}}]}
+    - set: {portrow: 0}
+    - if: "pre == 2 and haspend"
+      then:
+        - set: {portrow: "pk == 1 and (pfx == 3 or pleg or svib == 0xFF)"}
+        - call: apply_row
+        - set: {haspend: 0}
+    - {if: portrow, then: [{set: {leg2: 1}}, {call: compose}, {return: true}]}
+    - if: "ci == 0 and pre < 2 and haspend and pk == 1 and pfx != 3 and not pleg and svib != 0xFF"
+      then: [{set: {ci: 1, zpd: 1}}, {call: note_setup}, {set: {ci: 0}}, {return: true}]
+    - call: note_setup
+  write_regs:
+    - {if: "not (trig or zpd)", then: [{return: true}]}
+    - {if: "(ci == 0 and not zpd) or leg2", then: [{set: {r4: sctl}}, {return: true}]}
+    - {if: inhr, then: [{set: {r1: sfh, r5: sad, r6: ssr, r4: sctl}}, {return: true}]}
+    - set: {r0: sfl, r1: sfh, r2: spl, r3: sph}
+    - {if: adsrw, then: [{set: {r5: sad, r6: ssr}}]}
+    - set: {r4: sctl}
+  # The player ticks the voices in reverse order, then writes every voice's registers.
+  frame:
+    - set: {target: 2}
+    - for_voices: [{if: "vi == target", then: [{call: tick_voice}]}]
+    - set: {target: 1}
+    - for_voices: [{if: "vi == target", then: [{call: tick_voice}]}]
+    - set: {target: 0}
+    - for_voices: [{if: "vi == target", then: [{call: tick_voice}]}]
+    - for_voices: [{call: write_regs}]
+init:
+  - for_voices:
+      - set: {vi: nv, tl: tempol, tr: tempor}
+      - set: {nv: "nv + 1"}
+  - call: frame
+tick:
+  - call: frame
+ghost:
+  global: {0x15: fcutlo, 0x16: "fcuthi + fshift", 0x17: "(fres & 0xF0) | (fswitch & 0x0F)", 0x18: fmv}
+  voice: {0: r0, 1: r1, 2: r2, 3: "r3 & 0x0F", 4: r4, 5: r5, 6: r6}

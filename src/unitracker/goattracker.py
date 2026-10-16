@@ -7,6 +7,7 @@ from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
 from unitracker.songio import song_meta
+from unitracker.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
@@ -113,28 +114,27 @@ def instrument_records(instruments) -> dict:
 
 def phrase(rows) -> list:
     """Raw pattern rows as events, folding fully empty rows into ``steps``."""
-    events = []
-    for row in rows:
-        event = {}
-        if C.FIRSTNOTE <= row.note <= C.LASTNOTE:
-            event["note"] = row.note - C.FIRSTNOTE
-        elif row.note == C.KEYOFF:
-            event["note"] = "off"
-        elif row.note == C.KEYON:
-            event["note"] = "on"
-        elif row.note != C.REST:
-            raise LiftError(f"bad note byte {row.note:#04x}")
-        if row.instrument:
-            event["instrument"] = row.instrument
-        if row.command:
-            event["command"] = [row.command, row.data]
-        if not event and events:
-            events[-1]["steps"] = events[-1].get("steps", 1) + 1
-        else:
-            events.append(event)
+    events = fold_empty(_row_event(row) for row in rows)
     if not events:
         raise LiftError("empty pattern")
     return events
+
+
+def _row_event(row) -> dict:
+    event = {}
+    if C.FIRSTNOTE <= row.note <= C.LASTNOTE:
+        event["note"] = row.note - C.FIRSTNOTE
+    elif row.note == C.KEYOFF:
+        event["note"] = "off"
+    elif row.note == C.KEYON:
+        event["note"] = "on"
+    elif row.note != C.REST:
+        raise LiftError(f"bad note byte {row.note:#04x}")
+    if row.instrument:
+        event["instrument"] = row.instrument
+    if row.command:
+        event["command"] = [row.command, row.data]
+    return event
 
 
 def track(orderlist) -> dict:

@@ -37,3 +37,10 @@ def test_lift_and_check_defmon(crosseyed, tmp_path, capsys):
     assert cli.lift_main([str(crosseyed), "-o", str(out)]) == 0
     assert cli.play_main([str(out), "--seconds", "3", "--check", str(crosseyed)]) == 0
     assert "match: 150 ticks" in capsys.readouterr().out
+
+
+def test_lift_and_check_sidwizard(csillag, tmp_path, capsys):
+    out = tmp_path / "cs.yaml"
+    assert cli.lift_main([str(csillag), "-o", str(out)]) == 0
+    assert cli.play_main([str(out), "--seconds", "3", "--check", str(csillag)]) == 0
+    assert "match: 150 ticks" in capsys.readouterr().out

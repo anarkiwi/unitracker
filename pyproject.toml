@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "unitracker"
 version = "0.1.0"
-description = "A generic C64 SID tracker song format, GoatTracker 2 and defMON lifters, and a generic player"
+description = "A generic C64 SID tracker song format, GoatTracker 2, defMON and SID-Wizard lifters, and a generic player"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
@@ -17,6 +17,7 @@ dependencies = [
     "pysidtracker @ git+https://github.com/anarkiwi/pysidtracker",
     "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker",
     "pydefmon @ git+https://github.com/anarkiwi/pydefmon",
+    "pysidwizard @ git+https://github.com/anarkiwi/pysidwizard",
 ]
 
 [project.optional-dependencies]

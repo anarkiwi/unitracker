@@ -27,6 +27,23 @@ COMMAND_NAMES = (
     "porta",
     "vib",
     "mark",
+    # Player-specific: SID-Wizard.
+    "pitchup",
+    "pitchdown",
+    "glide",
+    "attack",
+    "decay",
+    "sustain",
+    "release",
+    "chord",
+    "legato",
+    "iattack",
+    "idecay",
+    "isustain",
+    "irelease",
+    "ichord",
+    "notevib",
+    "noteglide",
 )
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")

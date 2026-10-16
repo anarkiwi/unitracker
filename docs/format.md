@@ -1,7 +1,7 @@
-# unitracker song format (v1.2)
+# unitracker song format (v1.3)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
-(`unitracker-lift` reads GoatTracker 2 and defMON), and the generic player
+(`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
 (`unitracker-play`) plays it on an emulated SID. The document is laid out so that any
 prefix of it is a playable partial song: a short header comes first, then one
 timeline in which every instrument, program and phrase is defined in the row where it
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.2
+unitracker: 1.3
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -44,7 +44,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.2` |
+| `unitracker` | `1.3` |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -115,7 +115,7 @@ the type's `first` index, so a name stands for whatever index the playroutine ne
 A phrase is a list of event atoms:
 
 ```
-note[.instrument][!command:arg][*steps]
+note[.instrument][!command:arg[!command:arg]][*steps]
 ```
 
 - `note` is a note name such as `C2`, `A#3` or `C10`, `-` for no note, `off` (gate off)
@@ -123,7 +123,9 @@ note[.instrument][!command:arg][*steps]
   index the player's frequency table gives it (see `note_offset`).
 - `.i3` names the instrument. For defMON it names a sidTAB program.
 - `!run:@c1` is a named command with an argument: a number, `@name` for a command that
-  references a record, or `none`. Command names are the shared ones below.
+  references a record, or `none`. An event carries at most two commands, in the order the
+  player reads them (for SID-Wizard: instrument column, note column, FX column). Command
+  names are the ones below.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
 
 ## Shared vocabulary
@@ -153,6 +155,18 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!slideup:@s`, `!slidedown:@s`, `!porta:@s`, `!vib:@s` | pitch effects |
 | `!mark:n` | a timing mark that changes no sound |
 
+SID-Wizard's commands are its own: the effects have no identical shared form.
+
+| command | meaning |
+|---|---|
+| `!pitchup:n`, `!pitchdown:n`, `!glide:n` | big FX $01-$03: slide, or slide to the note, at speed byte n |
+| `!attack:n`, `!decay:n`, `!sustain:n`, `!release:n` | small FX $2x/$3x/$5x/$6x: one ADSR nibble |
+| `!chord:@ch` | small FX $7x: select a chord |
+| `!iattack`, `!idecay`, `!isustain`, `!irelease`, `!ichord` | the same small FX in the instrument column, which the player times differently |
+| `!legato:0` | instrument column $3F: the note slides there without a new start |
+| `!notevib:n` | note column $60-$77: vibrato with amplitude n, ending a slide |
+| `!noteglide:0` | note column $78: the next note slides at the default speed |
+
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
 (GoatTracker's `ctrl: [...]` or `ctrl: c1`). A row or command a player can't express is
@@ -162,6 +176,9 @@ write a value that would not read back (a defMON pulse cell over `$0FFF`). Playe
 - **GoatTracker 2:** pulse and filter sweep rows and wavetable command rows (list rows),
   and the instrument keys.
 - **defMON:** the sidTAB columns `wgl`, `af`, `ps`, `re`, `fv`, `cp`, `acid`.
+- **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
+  detune (list rows `[w, a, d]`), pulse and filter sweeps and keyboard-tracked rows (list
+  rows), a filter row's resonance `res`, and the instrument keys.
 
 ## Canonical form
 
@@ -307,7 +324,8 @@ The player keeps one cursor per voice and the playroutine decides when it moves.
 | `ev_kind` | 0 empty, 1 note, 2 off, 3 on |
 | `ev_note` | note + transpose |
 | `ev_instr` | instrument index + `base`, or 0 when absent |
-| `ev_cmd`, `ev_arg` | command and argument (an index for a reference), or 0 and 0 |
+| `ev_cmd`, `ev_arg` | first command and argument (an index for a reference), or 0 and 0 |
+| `ev_cmd2`, `ev_arg2` | second command and argument, or 0 and 0 |
 | `at_phrase_start` | 1 when the next `fetch` reads step 0 of a phrase |
 | `ended` | 1 once the voice has stopped |
 
@@ -336,6 +354,7 @@ tables. Lifters produce this representation and `songio.dumps` writes it.
 |---|---|---|---|
 | `goattracker2` | packed GoatTracker 2 `.sid` (pygoattracker) | one pattern row | the decompiled song and the build's constants |
 | `defmon` | defMON `$1000` replay `.sid` (pydefmon) | one tick | the replay's memory after init |
+| `sidwizard` | SID-Wizard 1.x export, normal build (pysidwizard) | one pattern row | the decoded module |
 
 **GoatTracker 2.** The playroutine counts ticks per row itself, and `fetch` runs on its
 gate-timer lookahead. Instrument 1 is pinned because every voice starts on it. A
@@ -357,3 +376,16 @@ order: `dl` is `hold` (a frozen row ends its program), `wgh` is `ctrl`, `tr` is
 defMON index 48 is `C2`. The replay probes `$D41B` at init to tell the SID models apart; the result
 becomes the playroutine constants `floor` and `dbl`. The ghost masks pulse-width high
 to a nibble, as the reference grid does.
+
+**SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
+applies it at TICK_2 and writes the next instrument's hard-restart ADSR on the ticks
+between, ticking the voices in the player's reverse order. An instrument is its header
+(`flags`, `hrad`, `hrsr`, `ad`, `sr`, `vibrato`, `vibdelay`, `arpspeed`, `chord`,
+`octave`, `firstctrl`) and its WF/arp, pulse and filter programs (`ctrl`, `pulse`,
+`filter`). WF rows use `ctrl` and `note`; pulse set rows `pw`; filter set rows `mode`,
+`cut` and `res`; chords are programs of `note` offsets that loop or end. Note names are
+offset by one index: SID-Wizard index 49 is `C4`. Before a voice's first note the player
+walks instrument 1's header as WF rows; the lifter requires each voice's first note to
+select an instrument, so the walk reads only its first two rows. Table jumps, orderlist
+transposes, tempo and volume commands, multispeed, other player builds and the effects
+not listed above are not covered yet; the lifter names what it meets.
