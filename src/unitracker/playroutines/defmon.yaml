@@ -27,22 +27,45 @@ record_types:
     chain: next
     stop: "dl >= 0x80"
     form: map
+    # A row carries one mod: an af slide ($80+: the rate of af & $3F, down with bit 6), else
+    # a ps pulse sweep (0: none; $81+ up by ps & $7F; $01-$7F down by ps + 1, reflecting).
     codec:
-      - keys:
-          hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
-          ctrl: {value: wgh, omit: "wgh < 0"}
-          note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
-          ad: {value: ad, omit: "ad < 0"}
-          sr: {value: sr, omit: "sr < 0"}
-          pw: {value: "((pw & 0x0F) << 8) | (pw & 0xF0)", omit: "pw < 0"}
-        keep: [wgl, af, ps, re, fv, cp, acid]
+      - when: "af >= 0x80"
+        keys:
+          <<: &columns
+            hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
+            ctrl: {value: wgh, omit: "wgh < 0"}
+            note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
+            ad: {value: ad, omit: "ad < 0"}
+            sr: {value: sr, omit: "sr < 0"}
+            pw: {value: "((pw & 0x0F) << 8) | (pw & 0xF0)", omit: "pw < 0"}
+          reg: FREQ
+          step: {value: "0 - rate(af) if af & 0x40 else rate(af)", omit: "rate(af) == 0"}
+          for: NOTE
+        keep: [wgl, ps, re, fv, cp, acid]
         raw:
-          dl: "(hold - 1) if has_hold else 0"
-          wgh: "ctrl if has_ctrl else -1"
-          tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
-          ad: "ad if has_ad else -1"
-          sr: "sr if has_sr else -1"
-          pw: "(((pw >> 8) & 0x0F) | (pw & 0xF0)) if has_pw else -1"
+          <<: &fields
+            dl: "(hold - 1) if has_hold else 0"
+            wgh: "ctrl if has_ctrl else -1"
+            tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
+            ad: "ad if has_ad else -1"
+            sr: "sr if has_sr else -1"
+            pw: "(((pw >> 8) & 0x0F) | (pw & 0xF0)) if has_pw else -1"
+          af: {search: [0x80, 0xFF]}
+      - when: "af < 0x80 and ps >= 0"
+        keys:
+          <<: *columns
+          reg: PW
+          step: {value: "(ps & 0x7F) if ps >= 0x80 else -1 - ps", omit: "(ps & 0x7F) == 0"}
+          at: {value: REFLECT, omit: "(ps & 0x7F) == 0"}
+        keep: [wgl, af, re, fv, cp, acid]
+        raw:
+          <<: *fields
+          ps: "0 if step == 0 else ((0x80 | step) if step > 0 else -1 - step)"
+      - when: "af < 0x80 and ps < 0"
+        keys: *columns
+        keep: [wgl, af, re, fv, cp, acid]
+        raw: *fields
     # A frozen row ends a program.
     end: {dl: 0x80}
     fields: {dl: 0, wgh: -1, wgl: -1, ad: -1, sr: -1, tr: -1, af: -1, pw: -1, ps: -1, re: -1, fv: -1, cp: -1, acid: -1, next: 0}

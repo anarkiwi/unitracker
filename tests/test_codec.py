@@ -183,7 +183,16 @@ def test_goattracker_rejects_what_it_cannot_express(name, shared, match):
 def test_defmon_row_and_freeze():
     c = codec(DM, DM_TYPES, "sidtab")
     raw = {"dl": 1, "wgh": 80, "wgl": 5, "ad": 0, "sr": 68, "tr": 12, "pw": 1, "ps": 0}
-    shared = {"hold": 2, "ctrl": 80, "note": "+12", "ad": 0, "sr": 68, "pw": 256, "wgl": 5, "ps": 0}
+    shared = {
+        "hold": 2,
+        "ctrl": 80,
+        "note": "+12",
+        "ad": 0,
+        "sr": 68,
+        "pw": 256,
+        "reg": "pw",
+        "wgl": 5,
+    }
     assert written(raw, c) == shared
     assert c.decode(shared) == {**{f: -1 for f in ("re", "fv", "cp", "acid", "af")}, **raw}
     assert written({"dl": 242, "tr": 180}, c) == {"note": "=28"}
@@ -574,3 +583,63 @@ def test_sidwizard_speed_bytes_of_one_table_offset_write_alike():
 def test_sidwizard_refuses_mods_it_cannot_play(name, shared, match):
     with pytest.raises(CodecError, match=match):
         codec(SW, SW_TYPES, name).decode(shared)
+
+
+def dm_mod(**cols):
+    return {f: -1 for f in ("wgh", "wgl", "ad", "sr", "tr", "pw", "re", "fv", "cp", "acid")} | {
+        "dl": 0,
+        "af": -1,
+        "ps": -1,
+        **cols,
+    }
+
+
+def dm_rate(m):
+    return DM["tables"]["rate_lo"][2 * m] | DM["tables"]["rate_hi"][2 * m] << 8
+
+
+@pytest.mark.parametrize(
+    "cols,shared",
+    [
+        ({"af": 0xD8}, {"reg": "freq", "step": -dm_rate(0x18), "for": "note"}),
+        ({"af": 0xBF}, {"reg": "freq", "step": dm_rate(0x3F), "for": "note"}),
+        ({"af": 0x80}, {"reg": "freq", "for": "note"}),
+        ({"af": 0x80, "ps": 0x85}, {"reg": "freq", "for": "note", "ps": 0x85}),
+        ({"ps": 0x85}, {"reg": "pw", "step": 5, "at": "reflect"}),
+        ({"ps": 0x05}, {"reg": "pw", "step": -6, "at": "reflect"}),
+        ({"ps": 0x7F}, {"reg": "pw", "step": -128, "at": "reflect"}),
+        ({"ps": 0}, {"reg": "pw"}),
+        ({"ps": 0x81, "af": 0x10}, {"reg": "pw", "step": 1, "at": "reflect", "af": 0x10}),
+    ],
+)
+def test_defmon_slide_and_pulse_columns_are_mods(cols, shared):
+    c = codec(DM, DM_TYPES, "sidtab")
+    assert written(cols, c) == shared
+    assert c.decode(shared) == dm_mod(**cols)
+
+
+def test_defmon_mods_that_never_move_are_one_mod():
+    c = codec(DM, DM_TYPES, "sidtab")
+    assert written({"af": 0xC0}, c) == written({"af": 0x80}, c)
+    assert written({"ps": 0x80}, c) == written({"ps": 0}, c)
+    assert len({dm_rate(m) for m in range(64)}) == 64
+    for af in range(0x80, 0x100):
+        assert c.decode(written({"af": af}, c))["af"] == (af if af & 0x3F else 0x80)
+
+
+@pytest.mark.parametrize(
+    "shared,match",
+    [
+        ({"reg": "freq", "step": 5, "for": "note"}, "values of"),
+        ({"reg": "freq", "step": -dm_rate(3)}, "keys"),
+        ({"reg": "pw", "step": -1, "at": "reflect"}, "values of"),
+        ({"reg": "pw", "step": 128, "at": "reflect"}, "values of"),
+        ({"reg": "pw", "step": 5}, "values of"),
+        ({"reg": "cut", "step": 5}, "values of"),
+        ({"ps": 0x85}, "can't express"),
+        ({"af": 0xD8}, "keys"),
+    ],
+)
+def test_defmon_refuses_mods_it_cannot_play(shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec(DM, DM_TYPES, "sidtab").decode(shared)
