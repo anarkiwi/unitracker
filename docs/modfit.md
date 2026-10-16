@@ -38,7 +38,9 @@ by what they do to the SID.
    each also `signed` when the cell has a width.
    A candidate is accepted only when z3 shows that every pair of original and candidate
    paths gives the cell identical values under the guard. Otherwise `witness` returns a
-   counterexample.
+   counterexample. For a fused pair, a condition on either part (a carry) is dynamic, not a
+   dispatch guard. Two plain accumulates whose guards differ in one complementary test join
+   into one whose step selects on that test, when that is proved.
 4. **Orbits** (`orbit`). For multi-tick rewrites such as vibrato, the proc is run
    concretely, once per period value, with record data and constant tables folded in.
    Each per-tick delta is wrapped to the cell's width as a signed value. A ping-pong of
@@ -152,7 +154,30 @@ by what they do to the SID.
    (the run lengths). Their numbers are fitted exactly as `(a·p + b)//k` over maximal
    runs of the domain (least `k`, at most the point count), with more than three points;
    otherwise a table. Orbit specs' per-tick steps give the vibrato signatures the same way.
-11. **Report** (`generic`). One row per keyword (its composed per-tick effect's gate
+11. **Bounce orbits** (`bounce.Bounce`). A mode cell flipped `q ^ k` in a case leaves the
+   parameter `m = q & ~k`. For each flip bit and each `m`, z3 finds the non-hit step (one some
+   value takes, of one sign for every input) or proves the cell constant. Over all `m` of a
+   step at once it then proves, for the first threshold `B` (a hit test's constant at each
+   bracket value, or a width edge) and reload that hold: `v0 + s` within `B` steps the cell,
+   past `B` it reloads and flips the mode, and beyond `B` the cell wraps with no hit. A phase
+   from `x` lasts `|B − x|//|s| + 1` ticks and turns at `B ∓ |B − x| % |s|`, so two opposite
+   phases give the cycle's period and bounds. The cycle is also stepped through the guarded
+   cases for every `m` and input value and must recur first after the period, within the
+   bounds.
+12. **Table programs** (`sweeps`). A spec names a record type, the list that steps it, the
+   swept cell, the program pointer and the control state at a start. The list is cut to what
+   can affect the swept cell, pointer and control. A tick runs it on the concrete control state
+   over the song's records (missing rows and fields at their defaults, templates run with
+   `row` bound) with the swept cell symbolic: every path must give one op, `set c` or
+   `add d` (wrapped, pairs fused), and one concrete control state. The control state recurs.
+   From the cycle's set row (else the prefix's last one) the ticks that change the value are
+   matched to one accumulator: a reload closing a sawtooth, a ping-pong (`clamp: reflect`), an
+   endless sweep (wrap) or a sweep that stops (clamp at its last value). The candidate runs
+   through `vm._acc` and must give every changing tick's value, and a bounded candidate must
+   recur with the cycle. Otherwise the reason names the step sizes, the turns inside the
+   bounds, the set rows in the cycle, or a value the program never sets. Starts are reference
+   fields (with `when`) and command arguments.
+13. **Report** (`generic`). One row per keyword (its composed per-tick effect's gate
    groups, or its setup) and per modulation gate group (a record row kind). Each row gives
    role, step, basis, hit, respond, gate and status. The gate is the timers it reads with
    their duration's closed form, else the lifetime: `until the next note` when a note row
@@ -182,14 +207,20 @@ unitracker-modfit keywords [PLAYROUTINE ...]         # signature table with matc
 unitracker-modfit --out out/modfit/keywords.txt keywords
 unitracker-modfit generic [PLAYROUTINE ...] [--ticks N]  # factorised events, grouping, timers, vibrato
 unitracker-modfit --out out/modfit/generic.txt generic
+unitracker-modfit sweeps [SONG ...]                  # bounce orbits, fused pair fits, table programs
+unitracker-modfit --out out/modfit/sweeps.txt sweeps \
+  .tunecache/MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid \
+  .tunecache/MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid
 ```
+
+A song is a unitracker YAML or a tune its backend lifts.
 
 A pair cell is named `hi:lo` (`k = 8`) or `hi:lo:k`, e.g. `sidwizard:procs.tick_filt:vfhi:vflo:3`.
 
 `src/unitracker/modfit/specs.yaml` lists the modulations to fit, the given candidates to
-check (proved, or refuted with a witness) and the orbit specs. An
-orbit spec gives the period cell or `record.index.field`, the period range, the initial
-state and the record rows.
+check (proved, or refuted with a witness, under an optional guard), the orbit specs, the
+bounce units and the sweep specs. An orbit spec gives the period cell or
+`record.index.field`, the period range, the initial state and the record rows.
 
 ## Results
 
@@ -203,7 +234,7 @@ state and the record rows.
 | SID-Wizard `procs.tick_porta` → `voff` | no single accumulator; see below |
 | SID-Wizard `procs.tick_vibrato` → `vfc` | `accumulate`, step −1 (`255`), `max: (vper−1)&255`, proved under the invariant `vfc <= (vper−1)&255` |
 | GT `record_types.filttab.each` → `filtercutoff` | `accumulate`, step `row.r` |
-| SID-Wizard `procs.tick_pw` → `pwhi:pwlo` | `accumulate`, step `s8(b)` as `b` or `b − 256` |
+| SID-Wizard `procs.tick_pw` → `pwhi:pwlo` | one fused 16-bit `accumulate` over both carries, step `b + 65280·[b ≥ 128]`; `s8(b)` proved under the sweep guard |
 | SID-Wizard `procs.tick_filt` → `vfhi:vflo:3` | 11-bit `accumulate`, step `s8(flttab[fpos].b)`; set rows `8·b` |
 | defMON `procs.acid` → `acc` | refuted under the invariant `acc < 32768` (the reload reads the stepped cell) |
 | defMON `procs.acid` → `acc`, given | `accumulate`, `max: 0x7FFF`, `clamp: false`, `on_bound: acc := 512 + (acc & 255)`: proved |
@@ -236,7 +267,8 @@ past the signed range and the two also differ.
 
 Not expressible yet:
 
-- defMON's pulse bounds depend on the high byte (`(pw >> 8) == 0x0F`).
+- defMON's pulse bounds depend on the high byte (`(pw >> 8) == 0x0F`); its bounce orbit is
+  below.
 - defMON's ACID reload `(floor << 8) | (acc & 0xFF)` reads the stepped cell; the candidate
   reloads are cell-free, so the fit is refuted even under `acc < 32768`.
 
@@ -299,6 +331,32 @@ not count it.
 | GT, `p` in 0..125 | period, bounds `[(−p − 2)//2, (p + 2)//2]` |
 | SW, even `p` | period, bounds `[(−p)//2, 0]` |
 | SW, odd `p` ≥ 3 | drift, runs `(p − 1)//2` down, `(p + 1)//2` up |
+
+defMON's pulse sweep, `m = ps & 127`, `d = 1 − fc + m`, proved for every `m` and stepped for
+every `m` and `fc`:
+
+| Mode | Phase |
+| --- | --- |
+| `ps ≥ 128`, `m` in 1..127 | `+m` while `v ≤ 0x0FFF`, else `pw := 0x0FF8`, down; from `x ≤ 0x0FFF`: `(4095 − x)//m + 1` ticks; above, wraps at `0x10000` first |
+| `ps < 128`, `m` in 1..127 | `−d` while `v ≥ 0`, else `pw := 1`, up; from `x`: `x//d + 1` ticks |
+| `ps` 0 or 128 | constant |
+| cycle | period `4094//m + 4088//d + 2`, bounds `[min(1, 4088 % d), max(4088, 4095 − 4094 % m)]` |
+
+`fc` (the pitch carry) is read per tick: with it held the forms are exact, otherwise a phase
+lasts between its forms at `fc = 0` and `fc = 1`.
+
+Reference-song table programs (`sweeps.txt`):
+
+| Program | Accumulator |
+| --- | --- |
+| GT Metal Warrior pulse, `i1`, `i3` | set, then a reflect ping-pong on every tick |
+| GT Metal Warrior pulse `i2`, filters `i1`, `i2` | set, then holds |
+| SW Csillag pulse `i6`, `i8` | set, then one sweep clamped at its end |
+| SW Csillag pulse `i3`, `i7` | set, then holds |
+| SW Csillag pulse `i1`, `i2`, filters `i4`, `i5` | none: several step sizes |
+
+Instruments are numbered as in the song file read back (tunes are lifted and written
+canonically first).
 
 The SID-Wizard header walk (before the first note `wf_row` reads instrument 1's header as
 WF rows) gives `ins.ad` a `CTRL` role and `ins.hrad`, `ins.hrsr`, `ins.sr` a `FREQ` role.

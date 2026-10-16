@@ -12,7 +12,7 @@ fits:
   - {playroutine: sidwizard, path: procs.tick_filt, cell: "vfhi:vflo:3"}
   - {playroutine: defmon, path: procs.acid, cell: acc}
 
-# Candidates proved or refuted as given.
+# Candidates proved or refuted as given, under an optional guard.
 checks:
   - playroutine: sidwizard
     path: procs.tick_porta
@@ -27,6 +27,11 @@ checks:
       max: 0x7FFF
       clamp: false
       on_bound: [{set: {acc: "512 + (acc & 255)"}}]
+  - playroutine: sidwizard
+    path: procs.tick_pw
+    cell: "pwhi:pwlo"
+    candidate: {accumulate: "pwhi:pwlo", step: "s8(pwtab[ppos].b)"}
+    guard: "ci != 0 and ppos != 0 and pwtab[ppos].a < 0x80 and pwcnt < pwtab[ppos].a"
 
 # Multi-tick orbits: ``period`` is a cell or a ``record.index.field``, swept over the
 # inclusive ``periods`` range from ``state`` with record rows ``data``.
@@ -78,3 +83,22 @@ commands:
     rows:
       plain: {pk: 0, pins: 0, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}
       note: {pk: 1, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}
+
+# Bounce orbits: a cell whose hit reloads it and flips a mode cell, proved over every parameter.
+bounces:
+  - {playroutine: defmon, path: procs.pulse, cell: pw}
+
+# Table programs: the record type, the list that steps it, the swept cell, the program pointer,
+# the control state at a program start and the cell holding the instrument that starts it.
+sweeps:
+  goattracker2:
+    - {record: pulsetab, path: procs.pulse_exec, cell: pulse, pointer: pptr, state: {ptime: 0}}
+    - {record: filttab, path: procs.filter_exec, cell: filtercutoff, pointer: fptr, state: {ftime: 0}}
+  sidwizard:
+    - {record: pwtab, path: procs.tick_pw, cell: "pwhi:pwlo", pointer: ppos, state: {pwcnt: 0}, instrument: ci}
+    - record: flttab
+      path: procs.tick_filt
+      cell: "vfhi:vflo:3"
+      pointer: fpos
+      state: {fsweep: 0, vi: 0, fctl: 0}
+      instrument: ci
