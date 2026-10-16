@@ -295,11 +295,7 @@ class Signer:
         A declared reference is a program pointer (chained type) or a table reference.
         """
         node = f"{rtype}.{name}"
-        entries = []
-        for target, _ in self.rtypes[rtype].refs.get(name, []):
-            chained = self.rtypes[target].chain if target in self.rtypes else None
-            kind = "PTR" if chained else "REF"
-            entries.append((role_text(self.type_role(target)), kind, f"ref {target}", rtype))
+        entries = self.refs(rtype, name)
         if entries:
             return {"sig": frozenset(e[:3] for e in entries), "entries": entries}
         for path, cell, val, step in self.flow.log:
@@ -317,6 +313,14 @@ class Signer:
         if tested or any(self.reads_field(t, rtype, name) for t in self.tests):
             entries.append((NONE, "TEST", NONE, rtype))
         return {"sig": frozenset(e[:3] for e in entries), "entries": entries}
+
+    def refs(self, rtype: str, name: str) -> list:
+        """Entries of a field's declared references: ``PTR`` to a chained type, else ``REF``."""
+        out = []
+        for target, _ in self.rtypes[rtype].refs.get(name, []):
+            kind = "PTR" if target in self.rtypes and self.rtypes[target].chain else "REF"
+            out.append((role_text(self.type_role(target)), kind, f"ref {target}", rtype))
+        return out
 
     def reads_field(self, text, rtype: str, name: str) -> bool:
         """True when a test source reads ``rtype``'s field ``name``."""
