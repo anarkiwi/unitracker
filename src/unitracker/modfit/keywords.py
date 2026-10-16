@@ -452,8 +452,8 @@ def best(x: Item, pool: list) -> tuple:
 def diff_reason(x: Item, y: Item) -> str:
     """How two signatures differ, entry by entry."""
     out = []
-    for r, k, u in sorted(x.sig - y.sig):
-        twin = [e for e in y.sig - x.sig if e[1] == k and coarse(e[0]) & coarse(r)]
+    for r, k, u in sorted(x.match - y.match):
+        twin = [e for e in y.match - x.match if e[1] == k and coarse(e[0]) & coarse(r)]
         if twin and twin[0][0] != r:
             out.append(f"{r} vs {twin[0][0]} ({width(u)} vs {width(twin[0][2])})")
         elif twin:
@@ -462,8 +462,8 @@ def diff_reason(x: Item, y: Item) -> str:
             out.append(f"only {x.pr}: {r} {k}")
     out += [
         f"only {y.pr}: {r} {k}"
-        for r, k, _ in sorted(y.sig - x.sig)
-        if not any(e[1] == k and coarse(e[0]) & coarse(r) for e in x.sig - y.sig)
+        for r, k, _ in sorted(y.match - x.match)
+        if not any(e[1] == k and coarse(e[0]) & coarse(r) for e in x.match - y.match)
     ]
     return "; ".join(dict.fromkeys(out))
 
