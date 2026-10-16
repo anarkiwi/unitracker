@@ -10,7 +10,7 @@ import yaml
 
 
 def _kind(line: str, current: str) -> str:
-    """The part of a v1/v1.1/v1.2 song a line belongs to, given the part of the line before it."""
+    """The part of a v1.x song a line belongs to, given the part of the line before it."""
     stripped = line.strip()
     indent = len(line) - len(line.lstrip())
     if stripped.startswith("play:"):
@@ -27,7 +27,7 @@ def report(path: str, enc) -> str:
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
     total = len(enc.encode(text))
-    if yaml.safe_load(text).get("unitracker") not in (1, 1.1, 1.2):
+    if yaml.safe_load(text).get("unitracker") not in (1, 1.1, 1.2, 1.3):
         return f"{path}: {total} tokens"
     head, _, song = text.partition("\nsong:")
     counts, current = {}, "structure"

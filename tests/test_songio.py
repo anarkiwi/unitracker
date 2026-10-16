@@ -1,4 +1,4 @@
-"""The v1.2 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.3 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 
@@ -211,6 +211,7 @@ DEF = ("song", 0, "def")
         (edit(DEF + ("init", 0), {"o": 1}), None),
         (edit(DEF + ("phrase", "p2"), ["-!ad:@w1"]), "can't express"),
         (edit(DEF + ("phrase", "p2"), ["-!run:@zz"]), "unknown name"),
+        (edit(DEF + ("phrase", "p2"), ["-!run:@w1!run:@w1!run:@w1"]), "more than 2 commands"),
         (edit(DEF + ("phrase", "p2"), ["C2.w1"]), "not a ins"),
         (edit(("song", 0, "play"), ["p1", "p2+x"]), "bad play entry"),
         (edit(("song", 0, "play"), ["p1"]), "entries"),

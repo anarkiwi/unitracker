@@ -42,3 +42,15 @@ def crosseyed() -> Path:
     if path is None:
         pytest.skip("HVSC tune unavailable")
     return Path(path)
+
+
+CSILLAG = "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid"
+
+
+@pytest.fixture(scope="session")
+def csillag() -> Path:
+    """Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export."""
+    path = resolve_tune(CSILLAG, cache_dir=CACHE)
+    if path is None:
+        pytest.skip("HVSC tune unavailable")
+    return Path(path)

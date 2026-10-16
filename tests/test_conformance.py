@@ -1,11 +1,12 @@
-"""Lifted songs, written as v1.2 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.3 text and read back, play identically to their native players."""
 
 import numpy as np
 import pytest
 from pydefmon import DefmonPlayer
 from pygoattracker import decompile_sid
+from pysidwizard import SWMPlayer, parse_sid_song
 
-from unitracker import defmon, songio
+from unitracker import defmon, sidwizard, songio
 from unitracker.goattracker import lift
 from unitracker.vm import SongPlayer
 
@@ -48,7 +49,25 @@ def test_crosseyed_intro_and_two_loops_exact(crosseyed, embed):
     np.testing.assert_array_equal(ours, theirs)
 
 
-def test_lift_is_deterministic(metal_warrior, crosseyed):
+CSILLAG_LOOP = 2304 * 6
+
+
+@pytest.mark.parametrize("embed", [False, True])
+def test_csillag_loop_exact(csillag, embed):
+    raw = csillag.read_bytes()
+    text = songio.dumps(sidwizard.lift(raw), embed=embed)
+    song = songio.loads(text)
+    assert songio.dumps(song, embed=embed) == text
+    n = CSILLAG_LOOP + 600
+    ours = SongPlayer(song).render_grid(n)
+    theirs = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n), dtype=np.uint8)
+    assert len(np.unique(theirs, axis=0)) > 5000
+    np.testing.assert_array_equal(ours, theirs)
+
+
+def test_lift_is_deterministic(metal_warrior, crosseyed, csillag):
+    raw = csillag.read_bytes()
+    assert songio.dumps(sidwizard.lift(raw)) == songio.dumps(sidwizard.lift(raw))
     dec = decompile_sid(metal_warrior.read_bytes(), subtune=0)
     assert songio.dumps(lift(dec)) == songio.dumps(lift(dec))
     raw = crosseyed.read_bytes()

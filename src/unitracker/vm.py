@@ -11,14 +11,38 @@ from unitracker.records import record_types
 
 IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
-PSEUDO = ("ev_kind", "ev_note", "ev_instr", "ev_cmd", "ev_arg", "at_phrase_start", "ended")
+MAX_COMMANDS = 2
+PSEUDO = (
+    "ev_kind",
+    "ev_note",
+    "ev_instr",
+    "ev_cmd",
+    "ev_arg",
+    "ev_cmd2",
+    "ev_arg2",
+    "at_phrase_start",
+    "ended",
+)
+EVENT_COLUMNS = 3 + 2 * MAX_COMMANDS
 
 
 class SongError(ValueError):
     """The song document is malformed or uses something the format does not define."""
 
 
-def _event_row(event) -> tuple[int, int, int, int, int]:
+def event_commands(event) -> list[tuple[int, int]]:
+    """An event's ``(command, argument)`` pairs, in the order the playroutine reads them."""
+    if "command" in event and "commands" in event:
+        raise SongError(f"an event has command or commands, not both: {event!r}")
+    commands = event.get("commands")
+    if commands is None:
+        commands = [event["command"]] if event.get("command") else []
+    if len(commands) > MAX_COMMANDS:
+        raise SongError(f"an event has at most {MAX_COMMANDS} commands: {event!r}")
+    return [(int(c), int(a)) for c, a in commands]
+
+
+def _event_row(event) -> tuple[int, ...]:
     note = event.get("note")
     if isinstance(note, bool):
         note = "on" if note else "off"
@@ -28,19 +52,31 @@ def _event_row(event) -> tuple[int, int, int, int, int]:
         kind, pitch = NOTE_KINDS[note], 0
     else:
         raise SongError(f"bad note {note!r}")
-    cmd, arg = event.get("command") or (0, 0)
-    return kind, pitch, int(event.get("instrument") or 0), int(cmd), int(arg)
+    cmds = event_commands(event)
+    cmds += [(0, 0)] * (MAX_COMMANDS - len(cmds))
+    return (kind, pitch, int(event.get("instrument") or 0), *(x for pair in cmds for x in pair))
+
+
+def fold_empty(events) -> list[dict]:
+    """Events with each fully empty event folded into the ``steps`` of the one before it."""
+    out = []
+    for event in events:
+        if not event and out:
+            out[-1]["steps"] = out[-1].get("steps", 1) + 1
+        else:
+            out.append(event)
+    return out
 
 
 def compile_phrase(events) -> np.ndarray:
-    """A phrase as an ``(steps, 5)`` array of (kind, note, instrument, cmd, arg)."""
+    """A phrase as an ``(steps, 7)`` array of (kind, note, instrument, cmd, arg, cmd2, arg2)."""
     rows = []
     for event in events:
         steps = int(event.get("steps", 1))
         if steps < 1:
             raise SongError(f"event steps must be >= 1: {event!r}")
         rows.append(_event_row(event))
-        rows.extend([(0, 0, 0, 0, 0)] * (steps - 1))
+        rows.extend([(0,) * EVENT_COLUMNS] * (steps - 1))
     if not rows:
         raise SongError("empty phrase")
     return np.asarray(rows, dtype=np.int64)
@@ -71,12 +107,12 @@ class Cursor:
         self.step = 0
         self.ended = False
 
-    def fetch(self) -> tuple[int, int, int, int, int]:
-        """Read the next step: (kind, note + transpose, instrument, cmd, arg)."""
+    def fetch(self) -> tuple[int, ...]:
+        """Read the next step: (kind, note + transpose, instrument, cmd, arg, cmd2, arg2)."""
         if self.ended:
-            return 0, 0, 0, 0, 0
+            return (0,) * EVENT_COLUMNS
         rows, transpose, _ = self.plays[self.index]
-        kind, note, instr, cmd, arg = (int(x) for x in rows[self.step])
+        kind, note, *rest = (int(x) for x in rows[self.step])
         self.step += 1
         if self.step == len(rows):
             self.step = 0
@@ -90,7 +126,7 @@ class Cursor:
                     else:
                         self.index = self.loop
                 self.repeat = self.plays[self.index][2]
-        return kind, note + transpose if kind == 1 else note, instr, cmd, arg
+        return (kind, note + transpose if kind == 1 else note, *rest)
 
     @property
     def at_phrase_start(self) -> int:
@@ -409,8 +445,8 @@ def _fetcher(gen):
         cursor = v[slot]
         for i, value in zip(idx, cursor.fetch()):
             v[i] = value
-        v[idx[5]] = cursor.at_phrase_start
-        v[idx[6]] = int(cursor.ended)
+        v[idx[EVENT_COLUMNS]] = cursor.at_phrase_start
+        v[idx[EVENT_COLUMNS + 1]] = int(cursor.ended)
 
     return fetch
 

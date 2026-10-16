@@ -20,12 +20,15 @@ from unitracker.codec import (
 from unitracker.defmon import lift as lift_defmon
 from unitracker.goattracker import lift as lift_gt
 from unitracker.records import record_types
+from unitracker.sidwizard import lift as lift_sw
 from unitracker.vm import SongPlayer
 
 GT = songio.library("goattracker2")
 DM = songio.library("defmon")
+SW = songio.library("sidwizard")
 GT_TYPES = record_types(GT)
 DM_TYPES = record_types(DM)
+SW_TYPES = record_types(SW)
 
 
 def codec(pr, types, name):
@@ -115,7 +118,7 @@ def test_defmon_pw_and_note_columns_round_trip_every_byte():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": 1.2,
+        "unitracker": 1.3,
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -206,16 +209,53 @@ def test_note_offsets_follow_the_frequency_tables():
     for index in range(24, 110):
         word = dm["note_lo"][index] | dm["note_hi"][index] << 8
         assert midi(word) == index - DM["note_offset"] + 12
+    sw = SW["tables"]
+    for index in range(1, 96):
+        word = sw["freqlo"][index] | sw["freqhi"][index] << 8
+        assert midi(word) == index - SW["note_offset"] + 12
 
 
-PROGRAM_TYPES = {"ctrl": "ctrltab", "pulse": "pulsetab", "filter": "filttab"}
-GT_INS = {"ad", "sr", "ctrl", "pulse", "filter", "speed", "vd", "gt", "fw"}
+PROGRAM_TYPES = {
+    "goattracker2": {"ctrl": "ctrltab", "pulse": "pulsetab", "filter": "filttab"},
+    "sidwizard": {"ctrl": "wftab", "pulse": "pwtab", "filter": "flttab"},
+}
+INS_KEYS = {
+    "goattracker2": {"ad", "sr", "ctrl", "pulse", "filter", "speed", "vd", "gt", "fw"},
+    "sidwizard": {
+        "flags",
+        "hrad",
+        "hrsr",
+        "ad",
+        "sr",
+        "vibrato",
+        "vibdelay",
+        "arpspeed",
+        "chord",
+        "octave",
+        "firstctrl",
+        "ctrl",
+        "pulse",
+        "filter",
+    },
+}
 DM_KEEP = {"wgl", "af", "ps", "re", "fv", "cp", "acid"}
+# Player-specific keys a program row may carry besides the shared ones.
+ROW_KEEP = {"defmon": DM_KEEP, "sidwizard": {"res"}}
+# Program types that may hold list rows, with the rows each allows.
+LIST_ROWS = {
+    "ctrltab": lambda r: r[0] >= 0xF0,
+    "pulsetab": lambda r: r[0] < 0x80,
+    "filttab": lambda r: 0 < r[0] < 0x80,
+    "wftab": lambda r: r[0] < 0x10 or r[1:2] == [0x7F] or len(r) > 2,
+    "pwtab": lambda r: r[0] < 0x80 or len(r) > 2,
+    "flttab": lambda r: r[0] < 0x80 or len(r) > 3,
+}
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
 # envelope and control-register values in init records, the $D417 value as resfilt, and in a
 # GoatTracker instrument ctrl names the program its voice runs on the control register.
 SHARED_OUTSIDE_ROWS = {
     ("goattracker2", "ins"): {"ad", "sr", "ctrl"},
+    ("sidwizard", "ins"): {"ad", "sr", "ctrl"},
     ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
     ("defmon", "ginit"): {"resfilt"},
 }
@@ -230,27 +270,22 @@ def _check_rows(name, rows, keep):
         if isinstance(row, dict) and set(row) != {"loop"}:
             assert set(row) <= set(ROW_KEYS) | keep, (name, row)
         elif isinstance(row, list):
-            assert name in ("ctrltab", "pulsetab", "filttab"), (name, row)
-            first = row[0]
-            assert {"ctrltab": first >= 0xF0, "pulsetab": first < 0x80}.get(
-                name, 0 < first < 0x80
-            ), (name, row)
+            assert name in LIST_ROWS and LIST_ROWS[name](row), (name, row)
 
 
 def _check_program(pr_name, tname, value):
-    keep = DM_KEEP if pr_name == "defmon" else set()
-    _check_rows(tname, value, keep)
+    _check_rows(tname, value, ROW_KEEP.get(pr_name, set()))
 
 
 def _commands(atoms):
-    return {a.split("!")[1].split(":")[0] for a in atoms if isinstance(a, str) and "!" in a}
+    return {part.split(":")[0] for a in atoms if isinstance(a, str) for part in a.split("!")[1:]}
 
 
 def _check_shared_outside_rows(pr_name, tname, value):
     used = set(value) & set(ROW_KEYS)
     assert used <= SHARED_OUTSIDE_ROWS.get((pr_name, tname), set()), (pr_name, tname, value)
     for key in used:
-        if (pr_name, tname, key) == ("goattracker2", "ins", "ctrl"):
+        if (tname, key) == ("ins", "ctrl"):
             assert isinstance(value[key], (list, str)), value
         else:
             assert isinstance(value[key], int) or key == "note", (tname, key, value)
@@ -258,22 +293,24 @@ def _check_shared_outside_rows(pr_name, tname, value):
 
 def _check_def(pr_name, tname, value):
     if tname == "ins":
-        assert set(value) <= GT_INS
+        assert set(value) <= INS_KEYS[pr_name]
         _check_shared_outside_rows(pr_name, tname, value)
-        for key, rtype in PROGRAM_TYPES.items():
+        for key, rtype in PROGRAM_TYPES[pr_name].items():
             if isinstance(value.get(key), list):
                 _check_program(pr_name, rtype, value[key])
     elif tname in INIT_KEYS:
         assert set(value) <= INIT_KEYS[tname] | SHARED_OUTSIDE_ROWS[(pr_name, tname)], value
         _check_shared_outside_rows(pr_name, tname, value)
-    elif tname in ("ctrltab", "pulsetab", "filttab", "sidtab"):
+    elif tname in ("ctrltab", "pulsetab", "filttab", "sidtab", "wftab", "pwtab", "flttab"):
         _check_program(pr_name, tname, value)
+    elif tname == "chordtab":
+        _check_rows(tname, value, set())
     else:
         assert not set(value if isinstance(value, dict) else {}) & set(ROW_KEYS), (tname, value)
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.2 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.3 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -287,19 +324,66 @@ def vocabulary(doc):
     return commands
 
 
-def test_both_songs_use_only_the_shared_vocabulary(metal_warrior, crosseyed):
+def _keys(node, out):
+    """Every mapping key under ``node``."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            out.add(key)
+            _keys(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _keys(value, out)
+    return out
+
+
+def _song_keys(doc):
+    keys = set()
+    for item in doc["song"]:
+        for tname, defs in (item.get("def") or {}).items():
+            if tname != "phrase":
+                for value in defs.values():
+                    _keys(value, keys)
+    return {k for k in keys if isinstance(k, str)}
+
+
+def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, csillag):
     ir = lift_gt(decompile_sid(metal_warrior.read_bytes(), subtune=0))
-    gt_cmds = vocabulary(yaml.safe_load(songio.dumps(ir)))
+    gt_doc = yaml.safe_load(songio.dumps(ir))
+    gt_cmds = vocabulary(gt_doc)
     assert gt_cmds == {"run", "slideup", "porta", "vib", "tempo"}
-    dm_cmds = vocabulary(yaml.safe_load(songio.dumps(lift_defmon(crosseyed.read_bytes()))))
+    dm_doc = yaml.safe_load(songio.dumps(lift_defmon(crosseyed.read_bytes())))
+    dm_cmds = vocabulary(dm_doc)
     assert dm_cmds == {"run2"}
+    sw_doc = yaml.safe_load(songio.dumps(lift_sw(csillag.read_bytes())))
+    sw_cmds = vocabulary(sw_doc)
+    assert sw_cmds == {
+        "pitchup",
+        "pitchdown",
+        "glide",
+        "attack",
+        "sustain",
+        "chord",
+        "legato",
+        "isustain",
+        "irelease",
+        "ichord",
+        "notevib",
+        "noteglide",
+    }
+    # A key two players both use is a shared key; every other key belongs to one player.
+    keys = [_song_keys(d) - {"loop"} for d in (gt_doc, dm_doc, sw_doc)]
+    for i, mine in enumerate(keys):
+        for j, theirs in enumerate(keys):
+            if i != j:
+                assert mine & theirs <= set(ROW_KEYS) | {"ad", "sr", "ctrl", "pulse", "filter"}
+    assert not keys[2] & (set(COMMAND_NAMES) - {"chord"} - set(ROW_KEYS))
 
 
 def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": 1.2,
+                "unitracker": 1.3,
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {

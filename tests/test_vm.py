@@ -114,7 +114,7 @@ def test_control_flow_procs_records_and_return():
 def test_cursor_steps_transpose_repeat_loop():
     phrases = {
         "a": compile_phrase([{"note": 1, "steps": 2}, {"note": "off"}]),
-        "b": compile_phrase([{"note": 5, "instrument": 2, "command": [3, 4]}]),
+        "b": compile_phrase([{"note": 5, "instrument": 2, "commands": [[3, 4], [6, 7]]}]),
     }
     cur = Cursor(
         {"plays": [{"phrase": "a", "transpose": 12, "repeat": 2}, {"phrase": "b"}], "loop": 1},
@@ -124,16 +124,28 @@ def test_cursor_steps_transpose_repeat_loop():
     for _ in range(9):
         seen.append((cur.at_phrase_start, cur.fetch()))
     assert seen == [
-        (1, (1, 13, 0, 0, 0)),
-        (0, (0, 0, 0, 0, 0)),
-        (0, (2, 0, 0, 0, 0)),
-        (1, (1, 13, 0, 0, 0)),
-        (0, (0, 0, 0, 0, 0)),
-        (0, (2, 0, 0, 0, 0)),
-        (1, (1, 5, 2, 3, 4)),
-        (1, (1, 5, 2, 3, 4)),
-        (1, (1, 5, 2, 3, 4)),
+        (1, (1, 13, 0, 0, 0, 0, 0)),
+        (0, (0, 0, 0, 0, 0, 0, 0)),
+        (0, (2, 0, 0, 0, 0, 0, 0)),
+        (1, (1, 13, 0, 0, 0, 0, 0)),
+        (0, (0, 0, 0, 0, 0, 0, 0)),
+        (0, (2, 0, 0, 0, 0, 0, 0)),
+        (1, (1, 5, 2, 3, 4, 6, 7)),
+        (1, (1, 5, 2, 3, 4, 6, 7)),
+        (1, (1, 5, 2, 3, 4, 6, 7)),
     ]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"command": [1, 2], "commands": [[1, 2]]},
+        {"commands": [[1, 2], [3, 4], [5, 6]]},
+    ],
+)
+def test_event_commands_rejects(event):
+    with pytest.raises(SongError):
+        compile_phrase([event])
 
 
 def test_cursor_end_and_fetch_pseudo_cells():

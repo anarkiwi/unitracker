@@ -13,13 +13,17 @@ def _start_song(raw: bytes) -> int:
 
 
 def detect(raw: bytes) -> str:
-    """The backend that recognises ``raw``: ``defmon`` or ``goattracker2``."""
+    """The backend that recognises ``raw``: ``defmon``, ``sidwizard`` or ``goattracker2``."""
     from pydefmon import DefmonSidParser  # pylint: disable=import-outside-toplevel
     from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
+    from pysidwizard import SidWizardSidParser  # pylint: disable=import-outside-toplevel
 
     try:
-        if DefmonSidParser().recognize(SidImage.from_bytes(raw)) is not None:
+        image = SidImage.from_bytes(raw)
+        if DefmonSidParser().recognize(image) is not None:
             return "defmon"
+        if SidWizardSidParser().recognize(image) is not None:
+            return "sidwizard"
         decompile_sid(raw)
     except SidError as exc:
         raise UnknownFormat(f"no backend recognises this tune: {exc}") from exc
@@ -30,10 +34,15 @@ def lift(raw: bytes, subtune=None) -> dict:
     """A unitracker song for ``raw``, lifted by the backend that recognises it."""
     if subtune is None:
         subtune = _start_song(raw)
-    if detect(raw) == "defmon":
+    backend = detect(raw)
+    if backend == "defmon":
         from unitracker import defmon  # pylint: disable=import-outside-toplevel
 
         return defmon.lift(raw, subtune)
+    if backend == "sidwizard":
+        from unitracker import sidwizard  # pylint: disable=import-outside-toplevel
+
+        return sidwizard.lift(raw, subtune)
     from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
 
     from unitracker import goattracker  # pylint: disable=import-outside-toplevel
@@ -45,10 +54,15 @@ def native_player(raw: bytes, subtune=None):
     """The native player for ``raw``, a ``pysidtracker.MemPlayer``."""
     if subtune is None:
         subtune = _start_song(raw)
-    if detect(raw) == "defmon":
+    backend = detect(raw)
+    if backend == "defmon":
         from pydefmon import DefmonPlayer  # pylint: disable=import-outside-toplevel
 
         return DefmonPlayer(raw, subtune=subtune)
+    if backend == "sidwizard":
+        from pysidwizard import SWMPlayer, parse_sid_song  # pylint: disable=import-outside-toplevel
+
+        return SWMPlayer(parse_sid_song(raw, subtune + 1))
     from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
 
     return decompile_sid(raw, subtune=subtune).player()
