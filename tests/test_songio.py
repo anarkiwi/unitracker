@@ -142,7 +142,7 @@ def test_reference_form_patches_library_tables(metal_warrior):
     doc = yaml.safe_load(songio.dumps(ir))
     assert doc["playroutine"]["ref"] == "goattracker2"
     assert doc["playroutine"]["constants"] == {"deftempo": 11}
-    assert 0 in doc["playroutine"]["tables"]["ftab"]
+    assert "tables" not in doc["playroutine"]
     assert "clock" not in doc and "registers" not in doc
     ir["tables"]["ftab"] = ir["tables"]["ftab"][:4]
     back = songio.loads(songio.dumps(ir))
