@@ -126,7 +126,7 @@ def phrase(rows) -> list:
             raise LiftError(f"bad note byte {row.note:#04x}")
         if row.instrument:
             event["instrument"] = row.instrument
-        if row.command or row.data:
+        if row.command:
             event["command"] = [row.command, row.data]
         if not event and events:
             events[-1]["steps"] = events[-1].get("steps", 1) + 1

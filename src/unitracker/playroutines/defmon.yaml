@@ -16,7 +16,9 @@ tables:
   rate_lo: [0, 0, 1, 1, 2, 2, 4, 4, 8, 8, 12, 12, 17, 18, 20, 21, 22, 23, 25, 26, 28, 29, 31, 33, 35, 37, 39, 41, 44, 46, 49, 52, 55, 59, 62, 66, 70, 74, 78, 83, 88, 93, 98, 104, 110, 117, 124, 131, 139, 147, 156, 166, 175, 186, 197, 209, 221, 234, 248, 7, 22, 39, 57, 75, 95, 116, 138, 161, 186, 212, 240, 14, 45, 78, 113, 150, 190, 231, 20, 66, 116, 169, 224, 27, 90, 156, 226, 45, 123, 207, 39, 133, 232, 81, 193, 55, 180, 56, 196, 89, 247, 157, 78, 10, 208, 162, 129, 109, 103, 112, 137, 178, 237, 59, 156, 19, 160, 69, 2, 218, 206, 224, 17, 100, 218, 118, 57, 38]
   rate_hi: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52]
 instrument: {type: sidtab, base: 1}
-commands: {1: sidtab}
+note_offset: 24
+commands:
+  1: {name: run2, ref: sidtab}
 record_types:
   # sidTAB row: dl holds the row dl + 1 ticks ($80+ freezes the layer); each column, -1 when
   # absent, applies in the replay's bitmap-walk order ($16B0).
@@ -25,6 +27,24 @@ record_types:
     chain: next
     stop: "dl >= 0x80"
     form: map
+    codec:
+      - keys:
+          hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
+          ctrl: {value: wgh, omit: "wgh < 0"}
+          note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
+          ad: {value: ad, omit: "ad < 0"}
+          sr: {value: sr, omit: "sr < 0"}
+          pw: {value: "((pw & 0x0F) << 8) | (pw & 0xF0)", omit: "pw < 0"}
+        keep: [wgl, af, ps, re, fv, cp, acid]
+        raw:
+          dl: "(hold - 1) if has_hold else 0"
+          wgh: "ctrl if has_ctrl else -1"
+          tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
+          ad: "ad if has_ad else -1"
+          sr: "sr if has_sr else -1"
+          pw: "(((pw >> 8) & 0x0F) | (pw & 0xF0)) if has_pw else -1"
+    # A frozen row ends a program.
+    end: {dl: 0x80}
     fields: {dl: 0, wgh: -1, wgl: -1, ad: -1, sr: -1, tr: -1, af: -1, pw: -1, ps: -1, re: -1, fv: -1, cp: -1, acid: -1, next: 0}
     do:
       - {if: "row.wgh >= 0", then: [{set: {ctrl: row.wgh}}]}

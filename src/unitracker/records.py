@@ -12,6 +12,8 @@ META_KEYS = {
     "fixed",
     "form",
     "refs",
+    "codec",
+    "end",
 }
 
 
@@ -53,6 +55,8 @@ class RecordType:
                     ref = {"type": ref}
                 out.append((str(ref["type"]), ref.get("when")))
             self.refs[str(field)] = out
+        self.codec = list(spec.get("codec") or [])
+        self.end = dict(spec.get("end") or {})
         self.templates = {k: v for k, v in spec.items() if k not in META_KEYS}
         for key, actions in self.templates.items():
             if not isinstance(actions, list):

@@ -1,4 +1,4 @@
-"""The v1 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.1 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 
@@ -20,7 +20,7 @@ PLAYROUTINE = {
         "registers": [0] * 25,
     },
     "instrument": {"type": "ins", "base": 0},
-    "commands": {8: "prog"},
+    "commands": {8: {"name": "run", "ref": "prog"}},
     "record_types": {
         "ins": {
             "prefix": "i",
@@ -131,7 +131,7 @@ def test_programs_split_named_inline_and_by_first_use():
     assert first["ins"]["i3"] == {"p": [[99, "w2"], [50], "end"]}
     assert "i4" not in first["ins"]
     assert first["phrase"]["p1"] == ["C2.i1*2", "D2.i2*2"]
-    assert first["phrase"]["p2"] == ["-!8:@w1", "F#2.i3*3"]
+    assert first["phrase"]["p2"] == ["-!run:@w1", "F#2.i3*3"]
     assert doc["song"][0]["play"] == ["p1", "p2"]
     assert doc["song"][1]["play"] == ["p1+3", "p2"]
     assert doc["loop"] == 0
@@ -209,7 +209,8 @@ DEF = ("song", 0, "def")
         (edit(DEF + ("phrase", "w1"), ["-"]), "defined twice"),
         (edit(DEF + ("bogus",), {"x": 1}), "unknown record type"),
         (edit(DEF + ("init", 0), {"o": 1}), None),
-        (edit(DEF + ("phrase", "p2"), ["-!9:@w1"]), "takes no reference"),
+        (edit(DEF + ("phrase", "p2"), ["-!ad:@w1"]), "can't express"),
+        (edit(DEF + ("phrase", "p2"), ["-!run:@zz"]), "unknown name"),
         (edit(DEF + ("phrase", "p2"), ["C2.w1"]), "not a ins"),
         (edit(("song", 0, "play"), ["p1", "p2+x"]), "bad play entry"),
         (edit(("song", 0, "play"), ["p1"]), "entries"),

@@ -1,4 +1,4 @@
-# unitracker song format (v1)
+# unitracker song format (v1.1)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2 and defMON), and the generic player
@@ -13,24 +13,24 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1
-playroutine:
-  ref: goattracker2
-  constants: {deftempo: 11}
+unitracker: 1.1
+playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
 song:
   - def:
       ins:
-        i1: {ad: 1, sr: 136, wave: [[233], [233], [129, 196], [65], end], pulse: [[132], [32, 16], [64,
-              240], [32, 16], {loop: 1}], filter: [[144, 193, 128], end], gt: 4, fw: 9}
+        i1: {ad: 1, sr: 136, wave: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: =68},
+            {ctrl: 65, note: +0}, end], pulse: [{pw: 1024}, [32, 16], [64, 240], [32, 16], {loop: 1}],
+          filter: [{cut: 1024, resfilt: 193, mode: 16}, end], gt: 4, fw: 9}
         ...
       wavetab:
-        w1: [[233], [233], [81], [65], [1, 5], [1, 8], [1], {loop: 4}]
+        w1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0},
+          {wait: 1, note: +5}, {wait: 1, note: +8}, {wait: 1, note: +0}, {loop: 4}]
       phrase:
         p1: [C2.i1*3, C4.i2, off, C3.i1, C2*3, C4.i2*3, C2.i1*3, C4.i2, off, C3.i1, G2, A#2, ...]
-        p2: [off*3, G4.i3!8:@w1*3, off*3, G4!8:@w1*3, ...]
-        p3: [off!15:16*48]
+        p2: [off*3, G4.i3!run:@w1*3, off*3, G4!run:@w1*3, ...]
+        p3: [off!tempo:16*48]
     play: [p1, p2, p3]
   - def:
       ...
@@ -44,7 +44,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1` |
+| `unitracker` | `1.1` |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -92,10 +92,11 @@ type's prefix and a number, given in first-use order (`i1`, `i2`, ..., `w1`, ...
 phrases `p1`, ...). The reader allocates each type's indices in definition order from
 the type's `first` index, so a name stands for whatever index the playroutine needs.
 
-- **Rows** are written in the type's `form`. A `list` row holds the fields in
-  declaration order, with trailing defaults left out: GoatTracker wave rows are `[w, n]`
-  in its own column bytes. A `map` row holds the fields that differ from their
-  defaults: `{ad: 1, sr: 136, gt: 4}`.
+- **Rows** use the shared row keys (see Shared vocabulary) wherever the playroutine's
+  codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
+  written in the type's `form`: a `list` row holds the fields in declaration order, with
+  trailing defaults left out (a GoatTracker pulse sweep `[32, 16]`); a `map` row holds
+  the fields that differ from their defaults (`{ad: 1, sr: 136, gt: 4}`).
 - **Programs** are the rows of a chained type, in the order they run, followed by
   `end` or `{loop: k}` (k is a row of the same program). A program is cut from the
   player's chained tables at every entry point. A tail two programs share is written
@@ -114,12 +115,47 @@ A phrase is a list of event atoms:
 note[.instrument][!command:arg][*steps]
 ```
 
-- `note` is a note name such as `C2`, `A#3` or `C10` (semitone index 24 is `C2`), `-`
-  for no note, `off` (gate off) or `on` (gate on).
+- `note` is a note name such as `C2`, `A#3` or `C10`, `-` for no note, `off` (gate off)
+  or `on` (gate on). Names are real pitch: `C2` is 65.4 Hz in every song, whatever
+  index the player's frequency table gives it (see `note_offset`).
 - `.i3` names the instrument. For defMON it names a sidTAB program.
-- `!8:@w1` is command 8 with an argument. The argument is a number, or `@name` when
-  the playroutine declares that the command references a record type.
+- `!run:@w1` is a named command with an argument: a number, `@name` for a command that
+  references a record, or `none`. Command names are the shared ones below.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
+
+## Shared vocabulary
+
+Program rows and commands use one vocabulary in every song, in chip units.
+
+| row key | meaning |
+|---|---|
+| `ctrl` | control register value |
+| `note` | `+n` / `-n` relative to the event note, `=n` absolute (format numbering, C2 = 24); omitted: no change |
+| `wait` | ticks before the row applies |
+| `hold` | ticks the row lasts after applying; omitted: 1 |
+| `ad`, `sr` | envelope registers |
+| `pw` | the 12-bit pulse width written |
+| `cut` | the 11-bit cutoff over `$D415`/`$D416` |
+| `resfilt` | `$D417`, resonance and filter routing |
+| `mode` | the `$D418` filter-mode bits, volume excluded |
+
+| command | meaning |
+|---|---|
+| `!run:@x` | start program `x` in the slot its kind implies; `!run:none` stops it |
+| `!run2:@x` | start program `x` in slot 2, for players with generic slots |
+| `!ad:`, `!sr:`, `!ctrl:`, `!resfilt:`, `!vol:` | set the register |
+| `!cut:n` | set the 11-bit cutoff |
+| `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice |
+| `!funk:@s` | swing tempo pair |
+| `!slideup:@s`, `!slidedown:@s`, `!porta:@s`, `!vib:@s` | pitch effects |
+| `!mark:n` | a timing mark that changes no sound |
+
+A row or command a player can't express is rejected on reading, naming the key or
+command and the player. Player-specific leftovers keep their v1 form:
+
+- **GoatTracker 2:** pulse and filter sweep rows and wavetable command rows (list rows),
+  and the instrument keys.
+- **defMON:** the sidTAB columns `wgl`, `af`, `ps`, `re`, `fv`, `cp`, `acid`.
 
 ## Canonical form
 
@@ -143,8 +179,9 @@ name: str
 constants: {name: int}
 defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3, registers: [25 ints]}
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
+note_offset: 0                            # frequency-table index of format note 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
-commands: {8: wavetab, ...}               # commands whose argument references a record type
+commands: {8: {name: run, ref: wavetab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
 global: {cell: {width: 8, init: 0}}       # width omitted: unbounded
@@ -172,6 +209,8 @@ ghost:
 | `pin` | indices the playroutine reads directly; they are defined first |
 | `fixed` | the rows keep their indices |
 | `refs` | `{field: type}`, or `{field: [{type: t, when: expr}, ...]}` for a reference that depends on the row |
+| `codec` | shapes writing rows as shared keys (see Codecs) |
+| `end` | raw fields set on a program's last row when it is followed by `end` |
 | any other key | a template: an action list run for a row |
 
 A template reads the row it runs for as `row.<field>`. `run: {record: r, index: i,
@@ -189,6 +228,17 @@ wavetab:
       then: [{set: {arg: row.n}}, {run: {record: wavecmd, index: "row.w & 0x0F", field: do}}, ...]
     ...
 ```
+
+### Codecs
+
+A codec shape has a `when` over the raw fields, `keys` (`{key: {value, omit, abs}}`:
+the shared key's value from the raw fields, when to leave it out, and for `note` whether
+it is absolute), `raw` (each raw field from the written keys, with `has_<key>` and
+`note_abs` defined) and `keep` (raw fields written under their own names). The writer
+uses the first shape whose `when` holds; the reader accepts a written row only if
+encoding its inverse gives the row again. A command entry has a `name`, an optional
+`ref`, and for a plain argument optional `when`, `arg` (raw to written) and `raw`
+(written to raw), checked the same way.
 
 ### Cells and expressions
 
@@ -291,11 +341,12 @@ tick the replay applies it. The playroutine fetches every tick and maps the even
 fields as follows:
 
 - `.t3` is the sidTAB program sidcall layer A starts;
-- `!1:@t5` arms layer B;
+- `!run2:@t5` arms layer B;
 - the note is a GATE_N note.
 
-sidTAB rows are maps of the columns present (`dl`, `wgh`, `wgl`, `ad`, `sr`, `tr`,
-`af`, `pw`, `ps`, `re`, `fv`, `cp`, `acid`), applied in the replay's bitmap-walk
-order. The replay probes `$D41B` at init to tell the SID models apart; the result
+sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk
+order: `dl` is `hold` (a frozen row ends its program), `wgh` is `ctrl`, `tr` is
+`note`, and the other columns keep their names. Note names are offset by 24 indices:
+defMON index 48 is `C2`. The replay probes `$D41B` at init to tell the SID models apart; the result
 becomes the playroutine constants `floor` and `dbl`. The ghost masks pulse-width high
 to a nibble, as the reference grid does.

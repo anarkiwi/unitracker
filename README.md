@@ -4,8 +4,9 @@ A generic tracker song format for the C64 SID, GoatTracker 2 and defMON lifters,
 generic player. A song is a compact YAML document: a header naming its playroutine
 (integer cells, bounded accumulators and event handlers, from the library in
 `src/unitracker/playroutines/`), then one timeline that defines each instrument,
-program and phrase where it is first used. The player has no player-specific
-knowledge, and its register writes are flushed in one canonical order.
+program and phrase where it is first used. Rows and commands share one vocabulary across
+players, and notes are named by real pitch. The player has no player-specific knowledge,
+and its register writes are flushed in one canonical order.
 
 Format specification: [docs/format.md](docs/format.md).
 
