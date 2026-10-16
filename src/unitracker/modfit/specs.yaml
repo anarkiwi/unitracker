@@ -1,0 +1,27 @@
+# Modulations to fit: the action list at a dotted path and the cell it modulates.
+fits:
+  - {playroutine: goattracker2, path: record_types.pulsetab.each, cell: pulse}
+  - {playroutine: goattracker2, path: records.tickn.1.do, cell: freq}
+  - {playroutine: goattracker2, path: procs.toneporta, cell: freq}
+  - {playroutine: defmon, path: procs.pulse, cell: pw}
+  - {playroutine: defmon, path: procs.pitch, cell: sacc}
+  - {playroutine: sidwizard, path: procs.tick_porta, cell: voff}
+  - {playroutine: sidwizard, path: procs.tick_vibrato, cell: vfc}
+
+# Multi-tick orbits: ``period`` is a cell or a ``record.index.field``, swept over the
+# inclusive ``periods`` range from ``state`` with record rows ``data``.
+orbits:
+  goattracker2:
+    path: procs.vibrato
+    cell: freq
+    period: speedtab.1.l
+    periods: [0, 127]
+    state: {vibtime: 0, freq: 20000, lastnote: 40, arg: 1}
+    data: {speedtab: {1: {l: 0, r: 1}}}
+  sidwizard:
+    path: procs.tick_vibrato
+    cell: voff
+    period: vper
+    periods: [1, 127]
+    state: {ci: 1, svib: 0x10, vdc: -1, vfc: 0, vper: 1, fml: 1, fmh: 0, voff: 0}
+    data: {}
