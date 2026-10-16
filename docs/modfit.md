@@ -96,9 +96,11 @@ by what they do to the SID.
    - `MODE`: a cell the row procs test, a mode for later notes;
    - `PTR`: a pointer into a chained record type, a program start;
    - `REF`: a declared reference to an unchained record type;
-   - per tick: `ACC`, `TOWARD` and `LOAD` from the fits, `MOD` when no single
-     accumulator holds, and `REFLECT` when the orbit spec's proc runs and the fitted step
-     turns (several steps, or one reading a cell the tick moves).
+   - per tick: `ACC+`/`ACC-`/`ACC±` (the step's provable sign), `TOWARD` and `LOAD` from
+     the fits, `MOD` when no single accumulator holds, and `REFLECT` when the orbit spec's
+     proc runs and the fitted step turns (several steps, or one reading a cell the tick
+     moves);
+   - `TEST`: a field read by a test (not matched).
 
    Argument use is the arg's bit mapping into the role, `ref <type>`, `note-relative` (a
    table index that also reads the event note) or `table`. Per-tick effects steered by a
@@ -106,13 +108,14 @@ by what they do to the SID.
    other playroutines, by class:
    - *same effect*: identical signature;
    - *same effect, different argument decoding*: same roles and kinds;
-   - *partial*: some shared quantity and kind;
-   - *different*: nothing shared.
+   - *partial*: entries of the same kind over an intersecting quantity;
+   - *different*: nothing shared, or only tests.
 
    A keyword with an identical signature in its own playroutine is a duplicate. It is
    *partial* when the two differ on a row with a note (setup cells or routed tests).
-   Reasons name the differing entries, a *sticky override* (two loads of the arg, one cell
-   feeding the other) and a *mode for later notes*.
+   Reasons name the differing entries, a *sticky override* and a *mode for later notes*. A
+   sticky override is an arg load folded by a setup proc into another loaded cell, where
+   that proc also runs outside the setup.
 
 ## Assumptions
 
