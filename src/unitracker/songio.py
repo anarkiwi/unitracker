@@ -16,6 +16,7 @@ import yaml
 from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.expr import ExprError, Resolver
+from unitracker.reach import ReachabilityError, table_reads
 from unitracker.records import record_types
 from unitracker.vm import IR_VERSION, compile_phrase
 
@@ -424,7 +425,7 @@ class _Writer:
         consts = {k: v for k, v in (self.pr.get("constants") or {}).items() if libc.get(k) != v}
         if consts:
             pr["constants"] = FlowMap(consts)
-        diff = _table_diff(tables, lib.get("tables") or {})
+        diff = _unread_dropped(_table_diff(tables, lib.get("tables") or {}), self.ir)
         return {**pr, "tables": diff} if diff else pr
 
     def environment(self) -> dict:
@@ -463,6 +464,29 @@ def _table_diff(tables, defaults) -> dict:
         diff = FlowMap({i: v for i, (v, d) in enumerate(zip(values, base)) if v != d})
         if diff:
             out[name] = diff
+    return out
+
+
+def _unread_dropped(diff: dict, ir: dict) -> dict:
+    """``diff`` without the patch entries the song never reads.
+
+    An entry no reachable tick reads cannot change the output, so the reader's library
+    default stands in for it. If reachability can't be established the patch is kept whole.
+    """
+    if not diff:
+        return diff
+    try:
+        reads = table_reads(ir)[0]
+    except ReachabilityError:
+        return diff
+    out = {}
+    for name, values in diff.items():
+        if isinstance(values, Flow):
+            out[name] = values
+            continue
+        kept = FlowMap({i: v for i, v in values.items() if i in reads.get(name, ())})
+        if kept:
+            out[name] = kept
     return out
 
 

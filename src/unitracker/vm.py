@@ -418,7 +418,9 @@ def _fetcher(gen):
 class SongPlayer:
     """Plays a unitracker song dict, one tick per call."""
 
-    def __init__(self, song: dict):
+    # pylint: disable=too-many-instance-attributes
+
+    def __init__(self, song: dict, record_reads: bool = False):
         if song.get("unitracker") != IR_VERSION:
             raise SongError("not an expanded unitracker song; read files with unitracker.songio")
         if len(song["tracks"]) != int(song.get("voices", 3)):
@@ -428,12 +430,13 @@ class SongPlayer:
         self.globals = [init for _, init in gen.gcells.values()]
         self._index = (gen.gindex, gen.vindex)
         self.voice_cells = _voice_cells(song, gen)
+        self.table_reads: dict[str, set[int]] | None = None
         namespace = {
             "g": self.globals,
             "VS": self.voice_cells,
             "T": gen.tables,
             "F": gen.fields,
-            "_tg": _tg,
+            "_tg": self._reader(gen.tables) if record_reads else _tg,
             "_acc": _acc,
             "_fetch": _fetcher(gen),
         }
@@ -445,6 +448,27 @@ class SongPlayer:
             raise SongError(f"registers must have {REG_COUNT} values")
         self.regs = [int(r) & 0xFF for r in regs]
         self.ticks = 0
+
+    def _reader(self, tables):
+        """A table read that records each in-range index it reads, per table."""
+        self.table_reads = {name: set() for name in tables}
+        reads = {id(table): self.table_reads[name] for name, table in tables.items()}
+
+        def tg(table, index):
+            if 0 <= index < len(table):
+                reads[id(table)].add(index)
+                return table[index]
+            return 0
+
+        return tg
+
+    def state(self) -> tuple:
+        """The complete playback state: every cell, cursor position and register."""
+        voices = tuple(
+            (*cells[:-1], c.index, c.repeat, c.step, c.ended)
+            for cells, c in ((cells, cells[-1]) for cells in self.voice_cells)
+        )
+        return (tuple(self.globals), voices, tuple(self.regs))
 
     def cell(self, name: str, voice: int | None = None) -> int:
         """The current value of a global cell, or of ``voice``'s cell ``name``."""

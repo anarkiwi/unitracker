@@ -17,8 +17,6 @@ unitracker: 1
 playroutine:
   ref: goattracker2
   constants: {deftempo: 11}
-  tables:
-    ftab: {0: 26368, 1: 56576, ...}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
 song:
@@ -57,6 +55,12 @@ Top-level keys, in this order:
 `playroutine.constants` lists only the constants that differ from the library's.
 `playroutine.tables` patches the library's tables: `{index: value}` for the entries that
 differ, or a full list when the length differs.
+
+The patch holds only entries the song can read. The writer plays the song, recording
+every table index read, until its complete state (all cells, cursors and registers)
+recurs. Playback is deterministic, so no later tick reads anything new, and an entry
+never read cannot change the output; the library default stands in for it. If the
+state does not recur within a bound, the patch is written whole.
 
 ### Embedding
 
