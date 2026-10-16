@@ -5,21 +5,15 @@ expands exactly as ``vm._acc``; terms normalise to linear forms, brackets and in
 """
 
 import ast
-import functools
 
 import z3
 
+from unitracker.modfit.flow import flow_of, parse
 from unitracker.vm import acc_mode
 
 INF = float("inf")
 BITS = 48
 CONDS = {"lt", "eq", "not", "land", "lor"}
-
-
-@functools.lru_cache(maxsize=None)
-def parse(src: str) -> ast.expr:
-    """The cached AST of an expression source."""
-    return ast.parse(src, mode="eval").body
 
 
 def is_cond(t) -> bool:
@@ -32,13 +26,19 @@ def is_ones(m) -> bool:
     return isinstance(m, int) and m >= 0 and m & (m + 1) == 0
 
 
+SHOWN = {}
+
+
 def show(t) -> str:
-    """S-expression text of a term."""
+    """S-expression text of a term, memoised per tuple object."""
     if isinstance(t, bool):
         return "true" if t else "false"
-    if isinstance(t, tuple):
-        return "(" + " ".join(show(x) for x in t) + ")"
-    return str(t)
+    if not isinstance(t, tuple):
+        return str(t)
+    hit = SHOWN.get(id(t))
+    if hit is None or hit[0] is not t:
+        hit = SHOWN[id(t)] = (t, "(" + " ".join(show(x) for x in t) + ")")
+    return hit[1]
 
 
 def sexpr(t):
@@ -90,86 +90,6 @@ def atoms(t) -> set:
     if isinstance(t, tuple):
         return set().union(*(atoms(x) for x in t))
     return set()
-
-
-def names(src) -> set:
-    """Cell-like names read by an expression source."""
-    if isinstance(src, (bool, int, float)) or src is None:
-        return set()
-    return {n.id for n in ast.walk(parse(str(src))) if isinstance(n, ast.Name)}
-
-
-def assignments(doc, scratch=frozenset(), env=None):
-    """``(cell, source, names read)`` per assignment; scratch cells resolve per action list."""
-    env = {} if env is None else env
-    if isinstance(doc, list):
-        local = dict(env)
-        for x in doc:
-            yield from assignments(x, scratch, local)
-        return
-    if not isinstance(doc, dict):
-        return
-    for key in ("set", "with"):
-        for cell, src in doc[key].items() if isinstance(doc.get(key), dict) else ():
-            read = set().union(*(env.get(n, {n}) for n in names(src)))
-            if cell in scratch:
-                env[cell] = read
-            else:
-                yield cell, src, read
-    for k, v in doc.items():
-        if k not in ("set", "with") and isinstance(v, (dict, list)):
-            yield from assignments(v, scratch, dict(env) if isinstance(v, dict) else env)
-
-
-def shifted(n) -> str | None:
-    """``x`` when node ``n`` is ``x << 8`` for a name ``x``."""
-    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.LShift) and isinstance(n.left, ast.Name):
-        return n.left.id if isinstance(n.right, ast.Constant) and n.right.value == 8 else None
-    return None
-
-
-def joined(src) -> set:
-    """``(lo, hi)`` for each ``(hi << 8) | lo`` (or ``+``) in an expression source."""
-    if not isinstance(src, str):
-        return set()
-    return {
-        (b.id, shifted(a))
-        for n in ast.walk(parse(src))
-        if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.BitOr, ast.Add))
-        for a, b in ((n.left, n.right), (n.right, n.left))
-        if isinstance(b, ast.Name) and shifted(a)
-    }
-
-
-def descendants(edges: dict, start) -> set:
-    """Every node reachable from ``start``, itself included."""
-    seen, todo = {start}, [start]
-    while todo:
-        for nxt in edges.get(todo.pop(), set()) - seen:
-            seen.add(nxt)
-            todo.append(nxt)
-    return seen
-
-
-def byte_pairs(pr: dict) -> set:
-    """``(lo, hi)`` cells joined, or routed only into one SID ghost register pair's halves."""
-    cells = {**(pr.get("global") or {}), **(pr.get("voice") or {})}
-    scratch = frozenset(k for k, v in cells.items() if isinstance(v, dict) and "width" not in v)
-    edges, pairs = {}, set()
-    for cell, src, read in assignments(pr, scratch):
-        pairs |= joined(src)
-        for n in read:
-            edges.setdefault(n, set()).add(cell)
-    ghost = ((pr.get("ghost") or {}).get("voice") or {}).items()
-    register = {cell: i for i, src in ghost for cell in names(src)}
-    single = {}
-    for start in edges:
-        regs = {register[c] for c in descendants(edges, start) if c in register}
-        if len(regs) == 1:
-            single.setdefault(regs.pop(), []).append(start)
-    return pairs | {
-        (lo, hi) for r in (0, 2) for lo in single.get(r, ()) for hi in single.get(r + 1, ())
-    }
 
 
 NOATOMS = ()
@@ -294,6 +214,12 @@ class Algebra:
 
     def __init__(self, width: dict, tables: dict, byte_fields: set, pairs: set):
         self.width, self.tables, self.byte_fields, self.pairs = width, tables, byte_fields, pairs
+        self.pair = {}
+        for lo, hi, k in sorted(pairs):
+            name = f"{hi}:{lo}" if k == width[lo] == 8 else f"{hi}:{lo}:{k}"
+            self.width[name] = k + width[hi]
+            part = lo if width[lo] <= k else ("and", lo, (1 << k) - 1)
+            self.pair[name] = (lo, hi, k, part)
 
     # ranges -----------------------------------------------------------------
     def rng(self, t) -> tuple:
@@ -302,8 +228,6 @@ class Algebra:
         if isinstance(t, (bool, int)):
             return int(t), int(t)
         if isinstance(t, str):
-            if ":" in t:
-                return 0, 0xFFFF
             w = self.width.get(t)
             return (0, (1 << w) - 1) if w else (-INF, INF)
         head = t[0]
@@ -365,13 +289,13 @@ class Algebra:
         return self.iv(t) if is_cond(t) else t
 
     def pair_names(self, t):
-        """Rewrite ``c*lo + 256c*hi`` over an 8-bit cell pair as ``c * hi:lo``."""
+        """Rewrite ``c*lo + c*2**k*hi`` over a cell pair as ``c`` times the pair."""
         const, coeffs = lin(t)
-        for lo, hi in self.pairs:
-            if lo in coeffs and coeffs.get(hi) == 256 * coeffs[lo]:
-                k = coeffs.pop(lo)
+        for name, (_, hi, k, part) in self.pair.items():
+            if part in coeffs and coeffs.get(hi) == coeffs[part] << k:
+                c = coeffs.pop(part)
                 coeffs.pop(hi)
-                coeffs[f"{hi}:{lo}"] = coeffs.get(f"{hi}:{lo}", 0) + k
+                coeffs[name] = coeffs.get(name, 0) + c
         return mk(const, coeffs)
 
     def mul(self, a, b):
@@ -597,7 +521,7 @@ class Algebra:
 class Form(Algebra):
     """Symbolic evaluator of one playroutine's actions, optionally over record data."""
 
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes,too-many-public-methods
 
     def __init__(self, pr: dict, data: dict | None = None):
         cells = {**(pr.get("global") or {}), **(pr.get("voice") or {})}
@@ -614,7 +538,7 @@ class Form(Algebra):
             width,
             {k: (min(v), max(v)) for k, v in self.table_data.items() if v},
             byte_fields,
-            {(lo, hi) for lo, hi in byte_pairs(pr) if width.get(lo) == width.get(hi) == 8},
+            flow_of(pr).pairs(),
         )
         self.pr, self.data = pr, data or {}
         self.scratch = {k for k, w in width.items() if w is None}
@@ -779,15 +703,23 @@ class Form(Algebra):
                 return self.accumulate(a, rest, conds, state)
             if "call" in a:
                 self.assign(a.get("with") or {}, state)
+                self.enter(a["call"])
                 return [
                     p
                     for cs, st in self.paths(self.procs[a["call"]], conds, state)
                     for p in self.paths(rest, cs, st)
                 ]
             if "set" not in a:
-                raise ValueError(f"unsupported action {a!r}")
+                return self.opaque(a, rest, conds, state)
             self.assign(a["set"], state)
         return [(conds, state)]
+
+    def enter(self, proc: str) -> None:
+        """Called before a proc's actions are evaluated."""
+
+    def opaque(self, a: dict, rest, conds, state) -> list:
+        """Paths through an action this evaluator does not model."""
+        raise ValueError(f"unsupported action {a!r}")
 
     def assign(self, sets: dict, state: dict) -> None:
         """Run sequential sets on ``state``, each wrapped to its cell."""
@@ -903,17 +835,21 @@ class Form(Algebra):
         return None, k, False
 
     def fuse(self, conds, upd: dict) -> dict:
-        """Write each byte pair whose joint update is ``P + D`` (``D`` free of its bytes) as one."""
-        for lo, hi in sorted(self.pairs):
+        """Write each pair whose joint update is ``P + D`` (``D`` free of its parts) as one."""
+        for name, (lo, hi, k, part) in self.pair.items():
             if lo not in upd and hi not in upd:
                 continue
-            name = f"{hi}:{lo}"
-            joint = self.add(self.scale(256, upd.get(hi, hi)), upd.get(lo, lo), self.neg(name))
-            d, _ = self.unwrap(conds, joint, 1 << 16)
+            low = upd.get(lo, lo) if part == lo else self.band(upd.get(lo, lo), (1 << k) - 1)
+            joint = self.add(self.scale(1 << k, upd.get(hi, hi)), low, self.neg(name))
+            d, _ = self.unwrap(conds, joint, 1 << self.width[name])
             if not {lo, hi} & atoms(d):
-                upd = {k: v for k, v in upd.items() if k not in (lo, hi)}
-                upd[name] = self.band(self.add(name, d), 0xFFFF)
+                upd = {c: v for c, v in upd.items() if c not in (lo, hi)}
+                upd[name] = self.band(self.add(name, d), (1 << self.width[name]) - 1)
         return upd
+
+    def fused(self, paths) -> list:
+        """``paths`` with each final state's pairs fused."""
+        return [(conds, self.fuse(conds, final)) for conds, final in paths]
 
     def updates(self, actions) -> list:
         """``[(conds, {cell: term})]`` per path, byte pairs fused, unchanged and scratch dropped."""

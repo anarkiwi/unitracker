@@ -9,7 +9,10 @@ from tqdm import tqdm
 
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.arith import Arith
+from unitracker.modfit.compose import command_lines
+from unitracker.modfit.keywords import table as keyword_table
 from unitracker.modfit.fit import Fitter, model_text, src
+from unitracker.modfit.invariant import fit_under, invariants
 from unitracker.modfit.orbit import report
 
 
@@ -27,7 +30,25 @@ def fit_lines(name: str, path: str, cell: str) -> list:
         lines.append("      no single accumulator")
         if cand:
             lines.append(f"      against {cand}: {model_text(model) if model else 'undecided'}")
+        if model:
+            lines += reachable_lines(fitter, (name, path, cell), actions, guard)
     return lines
+
+
+def reachable_lines(fitter: Fitter, unit: tuple, actions, guard) -> list:
+    """The fit of a refuted dispatch group re-proved under the cell's inductive invariants."""
+    invs = invariants(*unit)
+    if not invs:
+        return ["      no inductive invariant"]
+    inv, found = fit_under(fitter, actions, unit[2], guard, invs)
+    if found:
+        return [f"      proved under invariant {inv}: {found}"]
+    cands = fitter.candidates(unit[2], fitter.cases(fitter.paths(actions, unit[2]), unit[2]))
+    f = fitter.form
+    model = fitter.check(
+        fitter.paths(actions, unit[2]), (*guard, f.truth(f.expr(inv, {}))), unit[2], cands[0]
+    )[1]
+    return [f"      refuted under invariant {inv}: against {cands[0]}: {model_text(model)}"]
 
 
 def check_lines(name: str, path: str, cell: str, candidate: dict) -> list:
@@ -53,7 +74,7 @@ def run(args) -> list:
     """Report lines of the chosen subcommand."""
     if args.command == "fit":
         if args.units:
-            units = [u.split(":") for u in args.units]
+            units = [u.split(":", 2) for u in args.units]
             return [x for u in tqdm(units, desc="fit", unit="cell") for x in fit_lines(*u)]
         table = specs()
         return [
@@ -63,6 +84,11 @@ def run(args) -> list:
             for c in tqdm(table["checks"], desc="check", unit="cell")
             for x in check_lines(*c.values())
         ]
+    if args.command == "command":
+        units = [(u.split(":") + [None])[:2] for u in args.units or specs()["commands"]]
+        return [x for name, kw in units for x in command_lines(name, kw)]
+    if args.command == "keywords":
+        return keyword_table(tuple(args.units) or ("goattracker2", "defmon", "sidwizard"))
     if args.command == "poly":
         units = [u.split(":") for u in args.units]
         return [x for u in tqdm(units, desc="poly", unit="op") for x in poly_lines(*u)]
@@ -82,6 +108,12 @@ def main(argv=None) -> None:
     )
     sub.add_parser("poly", help="print the arithmetic form").add_argument(
         "units", nargs="+", metavar="PLAYROUTINE:PATH"
+    )
+    sub.add_parser("command", help="compose keywords into setup and per-tick effects").add_argument(
+        "units", nargs="*", metavar="PLAYROUTINE[:NAME]"
+    )
+    sub.add_parser("keywords", help="match keyword and field signatures").add_argument(
+        "units", nargs="*", metavar="PLAYROUTINE"
     )
     orbit = sub.add_parser("orbit", help="test vibrato orbits as reflect accumulators")
     orbit.add_argument("units", nargs="*", metavar="PLAYROUTINE")

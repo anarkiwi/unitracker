@@ -7,6 +7,10 @@ fits:
   - {playroutine: defmon, path: procs.pitch, cell: sacc}
   - {playroutine: sidwizard, path: procs.tick_porta, cell: voff}
   - {playroutine: sidwizard, path: procs.tick_vibrato, cell: vfc}
+  - {playroutine: goattracker2, path: record_types.filttab.each, cell: filtercutoff}
+  - {playroutine: sidwizard, path: procs.tick_pw, cell: "pwhi:pwlo"}
+  - {playroutine: sidwizard, path: procs.tick_filt, cell: "vfhi:vflo:3"}
+  - {playroutine: defmon, path: procs.acid, cell: acc}
 
 # Candidates proved or refuted as given.
 checks:
@@ -14,6 +18,15 @@ checks:
     path: procs.tick_porta
     cell: voff
     candidate: {accumulate: voff, step: "((fmh << 8) | fml) + 1", toward: 0, signed: true}
+  - playroutine: defmon
+    path: procs.acid
+    cell: acc
+    candidate:
+      accumulate: acc
+      step: "(0 - astep - 1) if sub else astep"
+      max: 0x7FFF
+      clamp: false
+      on_bound: [{set: {acc: "512 + (acc & 255)"}}]
 
 # Multi-tick orbits: ``period`` is a cell or a ``record.index.field``, swept over the
 # inclusive ``periods`` range from ``state`` with record rows ``data``.
@@ -32,3 +45,36 @@ orbits:
     periods: [1, 127]
     state: {ci: 1, svib: 0x10, vdc: -1, vfc: 0, vper: 1, fml: 1, fmh: 0, voff: 0}
     data: {}
+
+# Keyword composition: the setup template (CODE the command code, arg its argument), the tick
+# lists that may follow it, the routing cells left out of reports and the row templates.
+commands:
+  goattracker2:
+    setup:
+      - set: {newcommand: CODE, newcmddata: arg}
+      - {if: hasnew, then: [{call: new_note_init}]}
+      - run: {record: tick0, index: CODE, field: do}
+    ticks:
+      - [{run: {record: tickn, index: command, field: do}}]
+    routing: [newcommand, newcmddata]
+    rows:
+      plain: {hasnew: 0}
+      note: {hasnew: 1}
+  defmon:
+    setup:
+      - set: {ev_cmd: CODE, ev_arg: arg}
+      - call: pattern
+    ticks: [procs.layer_b]
+    routing: [ev_cmd, ev_arg]
+    rows:
+      plain: {ev_kind: 0, ev_instr: 0}
+      note: {ev_kind: 1}
+  sidwizard:
+    setup:
+      - {call: route, with: {rc: CODE, ra: arg}}
+      - call: apply_row
+    ticks: [procs.tick_vibrato, procs.run_deferred, procs.tick_pw, procs.tick_filt, procs.tick_chord]
+    routing: [pfx, pfv, pifx, pia, pnfx, rc, ra, xfc, xfv, xia, xifx, xpa, dfc, dfv, difx, dia, dpa]
+    rows:
+      plain: {pk: 0, pins: 0, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}
+      note: {pk: 1, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}

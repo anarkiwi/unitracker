@@ -77,12 +77,33 @@ def test_comparisons_canonical(toy):
     assert not toy.implies((toy.lt("x", 9),), toy.lt("x", 4))
 
 
-def test_byte_pairs():
-    assert {("pwlo", "pwhi"), ("fml", "fmh"), ("zpl", "zph")} <= Form(
-        playroutine("sidwizard")
-    ).pairs
-    assert ("flo", "fhi") in Form(playroutine("defmon")).pairs
-    assert not Form(playroutine("goattracker2")).pairs
+BYTE_PAIRS = {
+    "sidwizard": {
+        ("fml", "fmh"),
+        ("pwlo", "pwhi"),
+        ("pwlo", "sph"),
+        ("sfl", "sfh"),
+        ("spl", "pwhi"),
+        ("spl", "sph"),
+        ("zpl", "zph"),
+    },
+    "defmon": {("flo", "fhi")},
+    "goattracker2": set(),
+}
+
+
+@pytest.mark.parametrize("name", BYTE_PAIRS)
+def test_byte_pairs_kept(name):
+    pairs = Form(playroutine(name)).pairs
+    assert {(lo, hi, 8) for lo, hi in BYTE_PAIRS[name]} <= pairs
+    assert all(k == 8 for lo, hi, k in pairs if (lo, hi) in BYTE_PAIRS[name])
+
+
+def test_shifted_pairs_from_masks_and_ghost():
+    pairs = Form(playroutine("sidwizard")).pairs
+    assert {("vflo", "vfhi", 3), ("fcutlo", "fcuthi", 3)} <= pairs
+    assert {k for _, _, k in pairs} == {3, 8}
+    assert all(k == 8 for _, _, k in Form(playroutine("defmon")).pairs)
 
 
 def test_sweep_fuses_to_one_16bit_update(fitters):
