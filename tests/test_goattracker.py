@@ -287,6 +287,12 @@ def test_a_waveform_command_whose_pause_is_unheard_is_a_waveform_row():
     assert "[{ctrl: 33}, {ctrl: 5}, {loop: 0}]" in text
 
 
+def test_a_volume_command_from_16_is_an_empty_row():
+    text = lifted(*gt_tune([(0x41, 0), (0xFD, 0x10), (0xFD, 0xFF), (0x21, 0x80), (0xFF, 4)]))
+    rows = yaml.safe_load(text)["song"][0]["def"]["ins"]["i1"]["ctrl"]
+    assert rows[1:] == [{}, {}, {"ctrl": 33}, {"loop": 3}]
+
+
 def test_wavetable_program_stops_name_the_program_kind():
     wave = [(0x41, 0), (0xF9, 1), (0xFA, 1), (0x03, 0x80), (0xF9, 0), (0x03, 0x80), (0xFA, 0)]
     wave += [(0x03, 0x80), (0xFA, 1), (0x03, 0x80), (0xFB, 0), (0x41, 0x80), (0xFF, 12)]

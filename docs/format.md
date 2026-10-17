@@ -779,7 +779,9 @@ pauses the tick's continuous effect; the lifter writes it as the waveform row of
 (`ctrl`) when a replay to the song's recurrence and one period more proves the pause unheard,
 and otherwise fails, naming the rows and the tick that hears it, as it does for a value from
 $E0, which no waveform row sets. $F0, $F8 and $FE, on which the playroutine stops, are not
-lifted: the lifter names the row. $FD $10-$FF has no shared form.
+lifted: the lifter names the row. $FD $10-$FF does nothing but pause the tick's continuous
+effect, and the lifter writes it as the empty row `{}`, proved as for $F7; it has no written form
+of its own (`{vol: 16}` is refused).
 
 **defMON.** The arranger and pattern counters are lifted as timing. Each song step
 becomes one phrase per voice, all of the same length in ticks, with each event on the

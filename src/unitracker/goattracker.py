@@ -287,12 +287,14 @@ def _unpaused(row: dict) -> dict | None:
     """The row that does what wavetable command row ``row`` does but pause the tick's
     continuous effect, or None when it does more.
 
-    $F7 sets the waveform, as a waveform row does. Raises LiftError for the commands the
-    playroutine stops on.
+    $F7 sets the waveform, as a waveform row does, and $FD $10-$FF does nothing, as an empty
+    row does. Raises LiftError for the commands the playroutine stops on.
     """
     w, n = row["w"], row["n"]
     if w >= C.WAVECMD and w & 0x0F in STOPS:
         raise LiftError(f"wavetable command ${w:02X} stops the playroutine: not lifted")
+    if w == 0xF0 | C.CMD_SETMASTERVOL and n >= 0x10:
+        return {**row, "w": 0, "n": 0x80}
     if w == 0xF0 | C.CMD_SETWAVE:
         if n >= C.WAVESILENT:
             raise LiftError(f"$F7 sets waveform ${n:02X}, which no waveform row sets")
