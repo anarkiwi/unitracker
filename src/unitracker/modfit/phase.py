@@ -15,10 +15,9 @@ import z3
 
 from unitracker.modfit import grammar as G
 from unitracker.modfit.flow import Writes
-from unitracker.modfit.form import INF, Form, atoms, lin, mk, show
+from unitracker.modfit.form import INF, Form, Programs, atoms, lin, mk, record_data, show
 from unitracker.modfit.invariant import Slicer
 from unitracker.codec import Evaluator
-from unitracker.modfit.sweeps import Programs, record_data
 
 PHI_BOUND = 1 << 20
 

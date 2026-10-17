@@ -12,47 +12,17 @@ import multiprocessing
 import os
 from pathlib import Path
 
-import numpy as np
 from tqdm import tqdm
 
-from unitracker import backends
 from unitracker.modfit import grammar as G
 from unitracker.modfit.form import atoms
 from unitracker.modfit.phase import Lift, Machine, derive, dispatch
 from unitracker.modfit.replay import Stepper
 from unitracker.modulation import declared
 
-TICKS = {"goattracker2": 2 * 3840, "defmon": 95 + 2 * 1152 + 100, "sidwizard": 2304 * 6 + 600}
-CACHE = Path("out/modfit/cache")
-CHUNK = 256
-
-
-@dataclasses.dataclass
-class Song:
-    """A tune: its bytes and its internal form lifted with its native modulations."""
-
-    path: Path
-    ir: dict
-    raw: bytes
-
-    @property
-    def player(self) -> str:
-        """The playroutine name."""
-        return self.ir["playroutine"]["name"]
-
-
-def load(path: Path) -> Song:
-    """A tune read for analysis, lifted with its native modulations."""
-    raw = Path(path).read_bytes()
-    return Song(Path(path), backends.lift(raw, None, expressions=False), raw)
-
-
-def native_grid(song: Song, ticks: int) -> np.ndarray:
-    """The native player's register grid of a tune."""
-    return np.asarray(backends.native_player(song.raw).render_grid(ticks), dtype=np.uint8)
-
-
 # ---- derivation --------------------------------------------------------------------------
+
+CHUNK = 256
 
 
 @dataclasses.dataclass

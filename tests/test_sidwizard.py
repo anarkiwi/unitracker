@@ -6,7 +6,7 @@ import pytest
 from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, Transpose
 from pysidwizard.features import features_for_driver
 
-from unitracker import backends, songio, sidwizard
+from unitracker import backends, sidwizard
 from unitracker.sidwizard import LiftError
 from unitracker.vm import SongPlayer
 

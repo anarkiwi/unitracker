@@ -5,7 +5,8 @@ from pysidwizard import End, Loop, PlayPattern, parse_sid_song
 from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
 
-from unitracker.songio import library, modulated, song_meta
+from unitracker.songio import library, song_meta
+from unitracker.modfit.convert import convert
 from unitracker.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
@@ -318,6 +319,7 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
 
     With ``expressions`` its modulations are written as the format's expressions.
     """
+    # pylint: disable=too-many-locals
     swm = parse_sid_song(raw, subtune + 1)
     features = features_for_driver(swm.driver_type)
     check_build(swm, features)
@@ -360,4 +362,4 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
         "phrases": phrases,
         "playroutine": playroutine,
     }
-    return modulated(ir) if expressions else ir
+    return convert(ir) if expressions else ir

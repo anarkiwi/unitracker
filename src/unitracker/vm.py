@@ -320,7 +320,9 @@ class _Codegen:
         if "word" in freq:
             word = f"_tg(T[{freq['word']!r}], k + {offset})"
         else:
-            word = f"(_tg(T[{freq['hi']!r}], k + {offset}) << 8) | _tg(T[{freq['lo']!r}], k + {offset})"
+            word = " | ".join(
+                f"(_tg(T[{freq[b]!r}], k + {offset}) << {s})" for b, s in (("hi", 8), ("lo", 0))
+            )
         out = [f"def _F(k):\n    return {word}"]
         names = []
         for name, table in (spec.get("tables") or {}).items():

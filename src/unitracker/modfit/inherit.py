@@ -64,6 +64,7 @@ def guarded(machine, cells: set):
 def inherit(an, unit: dict, live: list) -> Inherited:
     """The general form of a unit's starts ``live`` (results with ``start`` and ``derived``):
     carried cells as inputs, or a carried counter as a delay gate."""
+    # pylint: disable=too-many-locals
     machine = an.machines[unit["name"]]
     starts = [dict(r.start) for r in live]
     varying = sorted({c for s in starts for c in s if len({str(x.get(c)) for x in starts}) > 1})
@@ -121,6 +122,7 @@ def delay_gate(an, machine, live: list, cells: list, why: str) -> Inherited:
     Proved for every ``d``: each firing above the base counter keeps the value and counts down
     one (z3), the base run is derived, and the form at each start's ``d`` solves its recurrence.
     """
+    # pylint: disable=too-many-locals
     if len(cells) != 1:
         return Inherited("none", cells, reason=f"{why}; {len(cells)} carried cells")
     cell = cells[0]

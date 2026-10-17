@@ -42,7 +42,11 @@ class _Source:
 
     def __call__(self, node) -> str:
         # pylint: disable=too-many-return-statements
-        if isinstance(node, ast.Constant) and type(node.value) is int:
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, int)
+            and not isinstance(node.value, bool)
+        ):
             return str(node.value)
         if isinstance(node, ast.Name) and node.id in NAMES:
             self.reads.add(node.id)

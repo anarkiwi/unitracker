@@ -6,7 +6,8 @@ import yaml
 from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
-from unitracker.songio import modulated, song_meta
+from unitracker.songio import song_meta
+from unitracker.modfit.convert import convert
 from unitracker.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
@@ -242,6 +243,7 @@ def lift(dec, expressions: bool = True) -> dict:
 
     With ``expressions`` its modulations are written as the format's expressions.
     """
+    # pylint: disable=too-many-locals
     info = dec.info
     _check_build(info)
     song = dec.typed.to_song()
@@ -283,4 +285,4 @@ def lift(dec, expressions: bool = True) -> dict:
         "phrases": phrases,
         "playroutine": playroutine,
     }
-    return modulated(ir) if expressions else ir
+    return convert(ir) if expressions else ir

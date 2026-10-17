@@ -1,20 +1,48 @@
-"""The ``exprs`` report: each song's modulators, their proofs and general forms, and token counts."""
+"""The ``exprs`` report: each song's modulators, proofs, general forms and token counts."""
 
+import dataclasses
 from pathlib import Path
 
 import numpy as np
 import yaml
 
-from unitracker import songio
+from unitracker import backends, songio
 from unitracker.modfit import grammar as G
 from unitracker.modfit.convert import CACHE, analyse, groups
-from unitracker.modfit.exprs import TICKS, Result, Song, load, native_grid
+from unitracker.modfit.exprs import Result
 from unitracker.modfit.inherit import inherit
 from unitracker.modfit.phase import unproved_functions
 from unitracker.modulation import declared
 from unitracker.vm import SongPlayer
 
 KEYS = ("freq", "pw", "cut")
+
+TICKS = {"goattracker2": 2 * 3840, "defmon": 95 + 2 * 1152 + 100, "sidwizard": 2304 * 6 + 600}
+
+
+@dataclasses.dataclass
+class Song:
+    """A tune: its bytes and its internal form lifted with its native modulations."""
+
+    path: Path
+    ir: dict
+    raw: bytes
+
+    @property
+    def player(self) -> str:
+        """The playroutine name."""
+        return self.ir["playroutine"]["name"]
+
+
+def load(path: Path) -> Song:
+    """A tune read for analysis, lifted with its native modulations."""
+    raw = Path(path).read_bytes()
+    return Song(Path(path), backends.lift(raw, None, expressions=False), raw)
+
+
+def native_grid(song: Song, ticks: int) -> np.ndarray:
+    """The native player's register grid of a tune."""
+    return np.asarray(backends.native_player(song.raw).render_grid(ticks), dtype=np.uint8)
 
 
 def start_lines(r: Result, tag: str) -> list:
@@ -109,8 +137,8 @@ def song_lines(song: Song, workers) -> tuple:
     lines.append(f"  occurrences {len(occs)} over {conv.ticks} ticks (to the state's recurrence "
                  f"and one period more); expressions {len(conv.out['exprs'])}")  # fmt: skip
     lines.append("  the rewritten song plays the native song's register grid exactly over them")
-    lines.append(f"  read back from its v1.5 text, {ticks} ticks are "
-                 + ("equal to" if exact else "DIFFERENT from") + " the native player's")  # fmt: skip
+    same = "equal to" if exact else "DIFFERENT from"
+    lines.append(f"  read back from its v1.5 text, {ticks} ticks are {same} the native player's")
     unproved = unproved_functions(song.ir, declared(song.ir["playroutine"]))
     if unproved:
         lines.append(f"  named-table functions NOT equal: {unproved}")

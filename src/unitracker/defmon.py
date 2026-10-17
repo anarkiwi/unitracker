@@ -10,7 +10,8 @@ from importlib import resources
 import yaml
 from pysidtracker import SidImage
 
-from unitracker.songio import modulated, song_meta
+from unitracker.songio import song_meta
+from unitracker.modfit.convert import convert
 
 PAL_HZ = 985248
 NTSC_HZ = 1022727
@@ -403,4 +404,4 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
         "tracks": tracks,
         "phrases": phrases,
     }
-    return modulated(ir) if expressions else ir
+    return convert(ir) if expressions else ir

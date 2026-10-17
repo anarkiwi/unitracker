@@ -13,7 +13,8 @@ from unitracker.modfit import grammar as G
 from unitracker import songio
 from unitracker.modfit.cli import main
 from unitracker.modfit.convert import analyse, groups
-from unitracker.modfit.exprs import Analysis, Result, load, native_grid
+from unitracker.modfit.exprs import Analysis, Result
+from unitracker.modfit.exprs_report import load, native_grid
 from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.form import Form
 from unitracker.modfit.orbit import deltas

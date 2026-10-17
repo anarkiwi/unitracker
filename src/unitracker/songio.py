@@ -30,7 +30,8 @@ from unitracker.modulation import declared
 from unitracker.reach import ReachabilityError, table_reads
 from unitracker.records import EXPR, record_types
 from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
-from unitracker.xexpr import ExpressionError, source, text_of, written
+from unitracker import xexpr
+from unitracker.xexpr import ExpressionError, text_of
 
 VERSION = 1.5
 WIDTH = 100
@@ -54,13 +55,6 @@ def _library_text(name: str) -> str:
 def library(name: str) -> dict:
     """The library definition of playroutine ``name``."""
     return yaml.safe_load(_library_text(name))
-
-
-def modulated(ir: dict) -> dict:
-    """``ir`` with its modulations written as expressions (see :mod:`unitracker.modfit.convert`)."""
-    from unitracker.modfit.convert import convert  # pylint: disable=import-outside-toplevel
-
-    return convert(ir)
 
 
 def song_meta(header, source: str) -> dict:
@@ -298,7 +292,7 @@ class _Writer:
     def ref_value(self, key):
         """A reference to ``key``: its name, its program written inline, or an expression."""
         if key[0] == EXPR:
-            return written(self.exprs[key[1]])
+            return xexpr.written(self.exprs[key[1]])
         if key in self.names:
             return Atom(self.names[key])
         return self.program_value(key)
@@ -675,7 +669,7 @@ class _Reader:
         """The index of a new expression for a written value, checked against the grammar."""
         try:
             text = text_of(value)
-            source(text, self.named_tables)
+            xexpr.source(text, self.named_tables)
         except ExpressionError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         self.exprs[len(self.exprs) + 1] = text
@@ -683,32 +677,17 @@ class _Reader:
 
     def _proto(self, rtype, value) -> dict:
         """A row's fields; references stay ``("name", str)`` or allocate inline programs."""
+        # pylint: disable=too-many-branches
         codec = self.codecs.get(rtype.name)
+        decoded = set()
         if codec is not None and isinstance(value, dict):
-            value = dict(value)
-            for key, number in codec.expr_keys().items():
-                v = value.get(key)
-                if isinstance(v, str) or (not number and isinstance(v, int) and key in value):
-                    value[key] = (EXPR, self.expr(v))
-            named = {
-                k: v
-                for k, v in value.items()
-                if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
-            }
-            try:
-                row = codec.decode({k: v for k, v in value.items() if k not in named})
-            except CodecError as exc:
-                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-            decoded = set(row)
-            row.update(named)
+            row, decoded = self._decoded(codec, rtype, value)
         elif rtype.form == "map":
             if not isinstance(value, dict):
                 raise SongFormatError(f"{rtype.name}: a row must be a mapping")
             row = dict(value)
         else:
             row = self._list_row(rtype, codec, value)
-        if not (codec is not None and isinstance(value, dict)):
-            decoded = set()
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
@@ -731,6 +710,24 @@ class _Reader:
             elif not isinstance(val, int) or isinstance(val, bool):
                 raise SongFormatError(f"{rtype.name}.{field}: bad value {val!r}")
         return row
+
+    def _decoded(self, codec, rtype, value: dict) -> tuple:
+        """``(row, decoded fields)`` of a codec row, its named references kept as written."""
+        value = dict(value)
+        for key, number in codec.expr_keys().items():
+            v = value.get(key)
+            if isinstance(v, str) or (not number and isinstance(v, int) and key in value):
+                value[key] = (EXPR, self.expr(v))
+        named = {
+            k: v
+            for k, v in value.items()
+            if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
+        }
+        try:
+            row = codec.decode({k: v for k, v in value.items() if k not in named})
+        except CodecError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+        return {**row, **named}, set(row)
 
     @staticmethod
     def _list_row(rtype, codec, value) -> dict:

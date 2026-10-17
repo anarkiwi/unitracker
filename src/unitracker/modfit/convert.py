@@ -20,7 +20,7 @@ from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay
 from unitracker.modulation import declared
 from unitracker.songio import codecs
-from unitracker.records import EXPR, record_types
+from unitracker.records import record_types
 from unitracker.vm import SongPlayer
 from unitracker.xexpr import ExpressionError, source
 
@@ -179,6 +179,7 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
     Within a unit and label the shared closed form, else the shared recurrence, else each
     start's own.
     """
+    # pylint: disable=too-many-locals
     for occ in occs:
         if occ.key is None:
             raise ConversionError(f"{occ.unit} at tick {occ.tick}: {occ.error}")
@@ -213,6 +214,7 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
 
 def derive_all(ir: dict, obs: dict, cache: Path | None, workers=None) -> tuple:
     """``(start derivations, each occurrence's text)``, every distinct start derived in parallel."""
+    # pylint: disable=too-many-locals
     key = ir_key(ir)
     occs = obs["occurrences"]
     chunks = [occs[i : i + CHUNK] for i in range(0, len(occs), CHUNK)]
@@ -332,6 +334,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
 
     def written(self, where: tuple, texts: dict, copy_row: bool = False) -> int:
         """The record (a program copy, or one row) with the units' expressions written."""
+        # pylint: disable=too-many-locals
         name, index = where
         rtype, rows = self.rtypes[name], self.records.setdefault(name, {})
         specs = [self.units[u]["site"] for u in texts]
@@ -488,6 +491,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     # -- phrases and tracks --
     def phrases(self) -> None:
         """Phrase variants for instances whose events changed, tracks unrolled where needed."""
+        # pylint: disable=too-many-locals
         variants, names = {}, {}
         per = {}
         for (voice, count, step), event in self.events.items():
@@ -499,8 +503,8 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             for count, pos in enumerate(counts):
                 cycle = 0 if count < n else 1 + (count - n) // max(1, n - (loop or 0))
                 edits = per.get((voice, count), {})
-                key = (track["plays"][pos]["phrase"], tuple(sorted((s, _frozen(e))
-                                                                   for s, e in edits.items())))  # fmt: skip
+                frozen = tuple(sorted((s, _frozen(e)) for s, e in edits.items()))
+                key = (track["plays"][pos]["phrase"], frozen)
                 by_pos.setdefault(pos, []).append((cycle, key, edits))
             plays = [dict(p) for p in track["plays"]]
             tail = None
