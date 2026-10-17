@@ -16,8 +16,11 @@ from pygoattracker.model import (
 )
 
 import numpy as np
+import yaml
+from conftest import gt_tune
 
 from unitracker import goattracker as gt, songio
+from unitracker.modfit.convert import ConversionError
 from unitracker.vm import SongPlayer
 
 
@@ -205,7 +208,7 @@ def test_lift_document(metal_warrior):
 
 
 COMMANDS_SONG = """
-unitracker: 1.14
+unitracker: 1.15
 playroutine: {ref: goattracker2, constants: {deftempo: 6}}
 song:
   - def:
@@ -243,3 +246,83 @@ def test_wavetable_commands_are_their_shared_keys():
 def test_a_wavetable_command_names_a_program_of_its_kind():
     with pytest.raises(songio.SongFormatError, match="'i1' names no filttab or pulsetab"):
         songio.loads(COMMANDS_SONG.replace("{run: pw1}", "{run: i1}"))
+
+
+SPEEDS = [(0, 0x20), (0x80, 1), (0x02, 0x10)]
+TWO_NOTES = [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 7 + [(31, 1, 0, 0)] + [(None, 0, 0, 0)] * 7
+
+
+def lifted(dec, native, ticks=400) -> str:
+    """The canonical text of a synthetic tune's lift, asserting it plays as the native player."""
+    text = songio.dumps(gt.lift(dec))
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    theirs = np.asarray(native.render_grid(ticks), dtype=np.uint8)
+    assert SongPlayer(song).mismatch(theirs) is None
+    return text
+
+
+def test_wavetable_steps_are_their_rows_freq():
+    steps = [(0x41, 0), (0xF4, 3), (0xF4, 3), (0xF3, 1), (0xF2, 2), (0xF1, 1), (0x41, 0x80)]
+    text = lifted(*gt_tune(steps + [(0xFF, 7)], rows=TWO_NOTES, speed=SPEEDS))
+    rows = yaml.safe_load(text)["song"][0]["def"]["ins"]["i1"]["ctrl"]
+    assert rows[1:3] == [{"freq": "(v + 16) % 65536"}] * 2
+    assert rows[4:6] == [
+        {"freq": "(v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2) % 65536"},
+        {"freq": "(v + 32) % 65536"},
+    ]
+    assert all(isinstance(r, dict) for r in rows) and "speedtab" not in text
+
+
+def test_a_wavetable_step_on_changing_phases_is_named():
+    dec, _ = gt_tune([(0x41, 0), (0xF4, 3), (0xFF, 2)], speed=SPEEDS)
+    with pytest.raises(ConversionError, match="ctrltab row 2: its runs need several freq"):
+        gt.lift(dec)
+
+
+def test_a_waveform_command_whose_pause_is_unheard_is_a_waveform_row():
+    wave = [(0x41, 0), (0xFF, 0), (0xF7, 0x21), (0xF7, 0x05), (0xFF, 3)]
+    rows = [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 7 + [(None, 0, 8, 3)] + [(None, 0, 0, 0)] * 7
+    text = lifted(*gt_tune(wave, rows=rows))
+    assert "[{ctrl: 33}, {ctrl: 5}, {loop: 0}]" in text
+
+
+def test_a_volume_command_from_16_is_an_empty_row():
+    text = lifted(*gt_tune([(0x41, 0), (0xFD, 0x10), (0xFD, 0xFF), (0x21, 0x80), (0xFF, 4)]))
+    rows = yaml.safe_load(text)["song"][0]["def"]["ins"]["i1"]["ctrl"]
+    assert rows[1:] == [{}, {}, {"ctrl": 33}, {"loop": 3}]
+
+
+def test_wavetable_program_stops_name_the_program_kind():
+    wave = [(0x41, 0), (0xF9, 1), (0xFA, 1), (0x03, 0x80), (0xF9, 0), (0x03, 0x80), (0xFA, 0)]
+    wave += [(0x03, 0x80), (0xFA, 1), (0x03, 0x80), (0xFB, 0), (0x41, 0x80), (0xFF, 12)]
+    pulse = [(0x88, 0), (0x20, 0x10), (0xFF, 2)]
+    filt = [(0x90, 0x00), (0x00, 0x40), (0x10, 0x02), (0xFF, 3)]
+    text = lifted(*gt_tune(wave, pulse=pulse, filt=filt))
+    rows = yaml.safe_load(text)["song"][0]["def"]["ins"]["i1"]["ctrl"]
+    assert rows[4::2][:4] == [
+        {"pw": "none"},
+        {"filter": "none"},
+        {"run": "f1"},
+        {"res": 0, "route": 0, "filter": "none"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "wave,rows,match",
+    [
+        (
+            [(0x41, 0), (0xF7, 0x21), (0xFF, 2)],
+            [(24, 1, 1, 1)] + [(None, 0, 0, 0)] * 15,
+            r"ctrltab rows \[2\] pause the tick's continuous effect, which the song hears at tick",
+        ),
+        ([(0x41, 0), (0xF7, 0xE1), (0xFF, 2)], None, r"row 2: \$F7 sets waveform \$E1, which no"),
+        ([(0x41, 0), (0xF0, 0), (0xFF, 2)], None, r"row 2: wavetable command \$F0 stops the"),
+        ([(0x41, 0), (0xF8, 1), (0xFF, 2)], None, r"row 2: wavetable command \$F8 stops the"),
+        ([(0x41, 0), (0xFE, 1), (0xFF, 2)], None, r"row 2: wavetable command \$FE stops the"),
+    ],
+)
+def test_wavetable_rows_without_a_form_are_named(wave, rows, match):
+    dec, _ = gt_tune(wave, rows=rows, speed=[(0, 0x20)])
+    with pytest.raises(gt.LiftError, match=match):
+        gt.lift(dec)

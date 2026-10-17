@@ -306,7 +306,7 @@ def test_keys_without_an_expression_field_refuse_one(pr_name, name, shared):
     [
         ("goattracker2", "filttab", {"cut": True}),
         ("goattracker2", "pulsetab", {}),
-        ("goattracker2", "ctrltab", {}),
+        ("goattracker2", "ctrltab", {"freq": False}),
         ("sidwizard", "flttab", {"cut": True}),
         ("sidwizard", "pwtab", {}),
         ("sidwizard", "wftab", {}),
@@ -452,7 +452,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.14",
+        "unitracker": "1.15",
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -624,20 +624,24 @@ INS_KEYS = {
 DM_KEEP = {"af", "ps"}
 # Player-specific keys a program row may carry besides the shared ones.
 ROW_KEEP = {"defmon": {"cp"}}
-# The list rows the format keeps: GoatTracker wavetable commands with no shared form.
-LIST_ROWS = {"ctrltab": lambda r: r[0] >= 0xF0}
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
 # envelope and control-register values in init records, the filter registers as res, route and
-# mode, and in an instrument ctrl names the program its voice runs on the control register, pw
-# and freq the program or expression driving the pulse width and the frequency.
+# mode, and in an instrument ctrl names the program its voice runs on the control register, pw,
+# filter and freq the program or expression driving the pulse width, the filter and the
+# frequency.
 SHARED_OUTSIDE_ROWS = {
-    ("goattracker2", "ins"): {"ad", "sr", "ctrl", "pw"},
-    ("sidwizard", "ins"): {"ad", "sr", "ctrl", "pw", "freq"},
+    ("goattracker2", "ins"): {"ad", "sr", "ctrl", "pw", "filter"},
+    ("sidwizard", "ins"): {"ad", "sr", "ctrl", "pw", "filter", "freq"},
     ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
     ("defmon", "ginit"): {"res", "route", "mode"},
 }
 PROGRAMS = ("ctrltab", "pulsetab", "filttab", "sidtab", "wftab", "pwtab", "flttab", "restart")
-INS_FORMS = {"ctrl": (list, str), "pw": (list, str, int), "freq": (str, int)}
+INS_FORMS = {
+    "ctrl": (list, str),
+    "pw": (list, str, int),
+    "filter": (list, str, int),
+    "freq": (str, int),
+}
 INIT_KEYS = {
     "vinit": {"flo", "fhi", "sacc", "tbase", "rowA", "cntA", "rowB", "cntB"} | DM_KEEP,
     "ginit": {"acc", "astep", "sub"},
@@ -651,11 +655,10 @@ def _check_rows(name, rows, keep, exprs=frozenset()):
             text = {
                 k
                 for k, v in row.items()
-                if isinstance(v, str) and k not in ("note", "route", "ctrl")
+                if isinstance(v, str) and v != "none" and k not in ("note", "route", "ctrl")
             }
             assert text <= exprs, (name, row)
-        elif isinstance(row, list):
-            assert name in LIST_ROWS and LIST_ROWS[name](row), (name, row)
+        assert not isinstance(row, list), (name, row)
 
 
 def _check_program(pr_name, tname, value):
@@ -696,7 +699,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.14 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.15 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -748,7 +751,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     for i, mine in enumerate(keys):
         for j, theirs in enumerate(keys):
             if i != j:
-                assert mine & theirs <= set(ROW_KEYS) | {"filter", "restart"}
+                assert mine & theirs <= set(ROW_KEYS) | {"restart"}
     assert not keys[2] & (set(COMMAND_NAMES) - {"restart"} - set(ROW_KEYS))
 
 
@@ -756,7 +759,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.14",
+                "unitracker": "1.15",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -798,7 +801,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.14
+unitracker: 1.15
 playroutine: {ref: defmon}
 song:
   - def:
@@ -890,7 +893,7 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.14
+unitracker: 1.15
 playroutine: {ref: sidwizard}
 song:
   - def:
