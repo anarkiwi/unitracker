@@ -4,13 +4,13 @@ fits:
   - {playroutine: goattracker2, path: records.tickn.1.do, cell: freq}
   - {playroutine: goattracker2, path: procs.toneporta, cell: freq}
   - {playroutine: defmon, path: procs.pulse, cell: pw}
-  - {playroutine: defmon, path: procs.pitch, cell: sacc}
+  - {playroutine: defmon, path: procs.pitch_acc, cell: sacc}
   - {playroutine: sidwizard, path: procs.tick_porta, cell: voff}
   - {playroutine: sidwizard, path: procs.tick_vibrato, cell: vfc}
   - {playroutine: goattracker2, path: record_types.filttab.each, cell: filtercutoff}
   - {playroutine: sidwizard, path: procs.tick_pw, cell: "pwhi:pwlo"}
   - {playroutine: sidwizard, path: procs.tick_filt, cell: "vfhi:vflo:3"}
-  - {playroutine: defmon, path: procs.acid, cell: acc}
+  - {playroutine: defmon, path: procs.acid_step, cell: acc}
 
 # Candidates proved or refuted as given, under an optional guard.
 checks:
@@ -18,15 +18,6 @@ checks:
     path: procs.tick_porta
     cell: voff
     candidate: {accumulate: voff, step: "((fmh << 8) | fml) + 1", toward: 0, signed: true}
-  - playroutine: defmon
-    path: procs.acid
-    cell: acc
-    candidate:
-      accumulate: acc
-      step: "(0 - astep - 1) if sub else astep"
-      max: 0x7FFF
-      clamp: false
-      on_bound: [{set: {acc: "512 + (acc & 255)"}}]
   - playroutine: sidwizard
     path: procs.tick_pw
     cell: "pwhi:pwlo"
@@ -79,7 +70,7 @@ commands:
       - {call: route, with: {rc: CODE, ra: arg}}
       - call: apply_row
     ticks: [procs.tick_vibrato, procs.run_deferred, procs.tick_pw, procs.tick_filt, procs.tick_chord]
-    routing: [pfx, pfv, pifx, pia, pnfx, rc, ra, xfc, xfv, xia, xifx, xpa, dfc, dfv, difx, dia, dpa]
+    routing: [pfx, pfv, pifx, pia, pnfx, rc, ra, xfc, xfv, xia, xifx, dfc, dfv, difx, dia]
     rows:
       plain: {pk: 0, pins: 0, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}
       note: {pk: 1, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}
@@ -102,103 +93,3 @@ sweeps:
       pointer: fpos
       state: {fsweep: 0, vi: 0, fctl: 0}
       instrument: ci
-
-# Modulators as phase and value expressions: per playroutine the frequency table, the note
-# cells read as N (less ``transpose``), tables named by their entries and functions read
-# through them (proved equal on every argument byte), and the units. A unit's ``fire`` list is one firing, run between the calls
-# ``pre`` and ``post``; a ``hook`` restarts it when it writes ``written``, changes ``key``, or
-# writes ``pointer`` to a ``program`` whose rows set one of ``fields``.
-exprs:
-  goattracker2:
-    freq: {word: ftab}
-    notes: [note]
-    units:
-      - name: command
-        cell: freq
-        fire: [{run: {record: tickn, index: command, field: do}}]
-        pre: records.tickn.do
-        label: [command, cmddata]
-        hooks:
-          - {at: records.tick0.do, key: [command, cmddata]}
-          - {at: record_types.ctrltab.do, written: [lastnote]}
-      - name: pulse
-        cell: pulse
-        fire: [pulse_exec]
-        pre: procs.pulse_exec
-        label: [pptr]
-        hooks:
-          - {at: procs.new_note_init, written: [pptr]}
-          - {at: records.tick0.do.9, written: [pptr]}
-          - {at: records.wavecmd.do.9, written: [pptr]}
-      - name: filter
-        scope: global
-        cell: filtercutoff
-        fire: [filter_exec]
-        pre: procs.filter_exec
-        label: [fptr]
-        hooks:
-          - {at: procs.new_note_init, written: [fptr]}
-          - {at: records.tick0.do.10, written: [fptr]}
-          - {at: records.tick0.do.11, written: [fptr]}
-          - {at: records.wavecmd.do.10, written: [fptr]}
-          - {at: records.wavecmd.do.11, written: [fptr]}
-  defmon:
-    freq: {hi: note_hi, lo: note_lo}
-    notes: [note, tbase]
-    units:
-      - name: pitch A
-        cell: sacc
-        fire: [layer_a, pitch]
-        pre: procs.layer_a
-        post: procs.pitch
-        label: [rowA]
-        program: {pointer: rowA, record: sidtab, fields: [af]}
-        hooks: [{at: procs.pattern, written: [sacc], pointer: [rowA]}]
-      - name: pulse A
-        cell: pw
-        fire: [layer_a, pulse]
-        pre: procs.layer_a
-        post: procs.pulse
-        label: [rowA]
-        program: {pointer: rowA, record: sidtab, fields: [pw, ps]}
-        hooks: [{at: procs.pattern, pointer: [rowA]}]
-      - name: acid B
-        scope: global
-        cell: acc
-        fire: [layer_b, acid]
-        pre: procs.layer_b
-        post: procs.acid
-        label: [rowB]
-        program: {pointer: rowB, record: sidtab, fields: [acid]}
-        hooks: [{at: procs.pattern, pointer: [rowB]}]
-  sidwizard:
-    freq: {hi: freqhi, lo: freqlo}
-    notes: [note, pn]
-    transpose: oct
-    tables:
-      W: {size: 204, entry: "exptab[i] if i < 107 else (freqhi[i - 107] << 8) | freqlo[i - 107]"}
-    functions:
-      fmlo: "W[fyc(a, d)] & 0xFF"
-      fmhi: "W[fyc(a, d)] >> 8"
-    units:
-      - name: pitch
-        cell: voff
-        fire: [tick_vibrato]
-        pre: procs.tick_vibrato
-        label: [svib, pk, pfx, pfv, pnfx, pleg, ci]
-        hooks:
-          - {at: procs.apply_row, written: [voff], key: [svib, fml, fmh, vper]}
-          - {at: procs.run_deferred, key: [svib, fml, fmh, vper]}
-      - name: pulse
-        cell: "pwhi:pwlo"
-        fire: [tick_pw]
-        pre: procs.tick_pw
-        label: [ppos]
-        hooks: [{at: procs.start_note, written: [ppos]}]
-      - name: filter
-        cell: "vfhi:vflo:3"
-        mirror: "fcuthi:fcutlo:3"
-        fire: [tick_filt]
-        pre: procs.tick_filt
-        label: [fpos]
-        hooks: [{at: procs.start_note, written: [fpos]}]

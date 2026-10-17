@@ -43,10 +43,10 @@ def defaults(rtype: dict) -> dict:
 
 
 def load(path: Path) -> dict:
-    """The internal representation of a song YAML, or of a tune lifted and written canonically."""
+    """The internal representation of a song YAML, or of a tune lifted with its native modulations."""
     if path.suffix in (".yaml", ".yml"):
         return songio.loads(path.read_text(encoding="utf-8"))
-    return songio.loads(songio.dumps(backends.lift(path.read_bytes(), None)))
+    return backends.lift(path.read_bytes(), None, expressions=False)
 
 
 def entries(song: dict, record: str) -> dict:

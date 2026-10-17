@@ -865,10 +865,13 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
 
 def closed_of(values, o: Order, mask: int, v0, f, prover: Prover):
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    """The shortest closed form proved against ``f``, wrapped only when it leaves the range."""
-    found = []
-    for g in filter(G.valid, closed_forms(values, o, mask, v0)):
-        g = g if prover.in_range(g, mask) else sympy.Mod(g, mask + 1)
+    """The shortest closed form proved against ``f``, wrapped only when it leaves the range.
+
+    Candidates are proved in rank order, so the first proved is the shortest proved.
+    """
+    forms = [g if prover.in_range(g, mask) else sympy.Mod(g, mask + 1)
+             for g in filter(G.valid, closed_forms(values, o, mask, v0))]  # fmt: skip
+    for g in sorted(dict.fromkeys(f for f in forms if G.valid(f)), key=G.rank):
         if prover.closed(g, f, v0) is None:
-            found.append(g)
-    return G.shortest(found) if found else None
+            return g
+    return None

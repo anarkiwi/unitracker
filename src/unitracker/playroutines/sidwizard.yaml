@@ -16,9 +16,7 @@ tables:
 instrument: {type: ins, base: 0}
 note_offset: 1
 commands:
-  1: {name: mod, mod: {cmd: 1}}
-  2: {name: mod, mod: {cmd: 2}}
-  3: {name: mod, mod: {cmd: 3}}
+  16: {name: freq, ref: x}
   32: {name: attack}
   48: {name: decay}
   80: {name: sustain}
@@ -31,7 +29,6 @@ commands:
   352: {name: irelease}
   368: {name: ichord, ref: chordtab}
   608: {name: notevib}
-  632: {name: noteglide}
 record_types:
   # An instrument's 16-byte header as fields, its WF/arp, pulse and filter tables as programs.
   ins:
@@ -39,8 +36,8 @@ record_types:
     none: 0
     pin: [1]
     form: map
-    fields: {flags: 26, hrad: 15, hrsr: 0, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, arpspeed: 0, chord: 0, octave: 0, firstctrl: 9, ctrl: 0, pulse: 0, filter: 0}
-    refs: {ctrl: wftab, pulse: pwtab, filter: flttab, chord: chordtab}
+    fields: {flags: 26, hrad: 15, hrsr: 0, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, arpspeed: 0, chord: 0, octave: 0, firstctrl: 9, ctrl: 0, pw: 0, filter: 0, freq: 0}
+    refs: {ctrl: wftab, pw: pwtab, filter: flttab, chord: chordtab, freq: x}
   # WF/arp row: w a waveform ($10+) or a row-hold count; a the arp byte (relative up $00-$7E,
   # chord $7F, none $80, absolute $81-$DF, relative down $E0-$FF); d the detune ($FF: none).
   wftab:
@@ -57,57 +54,33 @@ record_types:
           w: ctrl
           a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
   # Pulse row: a $80+ sets the width from (a & $7F, b); otherwise a ticks of a signed b sweep.
-  # k is the keyboard-track amount.
+  # k is the keyboard-track amount; x the expression a program of that one row is.
   pwtab:
     prefix: pw
     none: 0
     chain: next
-    fields: {a: 0, b: 0, k: 0, next: 0}
+    expr: x
+    fields: {a: 0, b: 0, k: 0, next: 0, x: 0}
+    refs: {x: x}
     codec:
       - when: "a >= 0x80 and (a & 0x70) == 0 and k == 0"
         keys: {pw: "((a & 0x0F) << 8) | b"}
         raw: {a: "0x80 | (pw >> 8)", b: "pw & 0xFF"}
-      - when: "a < 0x80 and k == 0"
-        implies: {reg: pw}
-        keys:
-          hold: 2
-          step: {value: s8(b), omit: "b == 0"}
-          for: a
-        raw: {a: for_, b: "step & 0xFF"}
   # Filter row: a $80+ sets the filter-mode bits (a & $70), resonance res and cutoff b;
-  # otherwise a ticks of a signed b cutoff sweep. k is the keyboard-track amount.
+  # otherwise a ticks of a signed b cutoff sweep. k is the keyboard-track amount; x an
+  # expression driving the cutoff from this row.
   flttab:
     prefix: f
     none: 0
     chain: next
-    fields: {a: 0, b: 0, res: 0, k: 0, next: 0}
+    expr: x
+    fields: {a: 0, b: 0, res: 0, k: 0, next: 0, x: 0}
+    refs: {x: x}
     codec:
-      - when: "a >= 0x80 and k == 0"
-        keys: {mode: "a & 0x70", cut: "b << 3"}
+      - when: "a >= 0x80 and k == 0 and (x == 0 or b == 0)"
+        keys: {mode: "a & 0x70", cut: {value: "b << 3", expr: x}}
         keep: [res]
         raw: {a: "0x80 | mode", b: "cut >> 3"}
-      - when: "a < 0x80 and k == 0 and res == 0"
-        implies: {reg: cut}
-        keys:
-          hold: 2
-          step: {value: s8(b), omit: "b == 0"}
-          for: a
-        raw: {a: for_, b: "step & 0xFF"}
-  # Slide up (cmd 1), slide down (2) or glide to the note (3) at FX speed byte arg.
-  mod:
-    prefix: m
-    form: map
-    fields: [cmd, arg]
-    codec:
-      - when: "cmd <= 2 and arg == 0"
-        keys: {reg: FREQ, for: NOTE}
-        raw: {cmd: 1, arg: 0}
-      - when: "cmd <= 2 and 0 < arg < 0x100"
-        keys: {reg: FREQ, step: "((arg + 1) >> 1) * (3 - 2 * cmd)", rel: NOTE, for: NOTE}
-        raw: {cmd: "2 if step < 0 else 1", arg: "2 * (step if step > 0 else 0 - step) - 1"}
-      - when: "cmd == 3 and 0 <= arg < 0x100"
-        keys: {reg: FREQ, step: "(arg + 1) >> 1", rel: NOTE, to: NOTE, for: NOTE}
-        raw: {cmd: 3, arg: "2 * step - 1 if step > 0 else 0"}
   # Chord row: a note offset; a chord loops or ends back to the WF table.
   chordtab:
     prefix: ch
@@ -176,7 +149,6 @@ voice:
   pre: {width: 8}
   portrow: {width: 1}
   sel: {width: 1}
-  papplied: {width: 1}
   startn: {width: 1}
   note: {width: 8}
   ci: {width: 8}
@@ -195,6 +167,7 @@ voice:
   fml: {width: 8}
   fmh: {width: 8}
   svib: {width: 8}
+  fx: {width: 8}
   voff: {width: 16}
   carry: {width: 1}
   skipw: {width: 1}
@@ -228,12 +201,10 @@ voice:
   dia: {width: 8}
   dfc: {width: 16}
   dfv: {width: 8}
-  dpa: {width: 1}
   xifx: {width: 16}
   xia: {width: 8}
   xfc: {width: 16}
   xfv: {width: 8}
-  xpa: {width: 1}
   sfc: {width: 16}
   sa: {width: 8}
   aov: {init: -1}
@@ -281,10 +252,12 @@ procs:
     - {call: route, with: {rc: ev_cmd, ra: ev_arg}}
     - {call: route, with: {rc: ev_cmd2, ra: ev_arg2}}
     - {if: "pk or pins or pleg or pifx or pfx or pnfx", then: [{set: {trig: 1}}]}
+    # A note read while a note glide is pending slides there without a new start.
+    - {if: "pk == 1 and svib == 0xFF", then: [{set: {pleg: 1}}]}
   # The instrument whose hard restart this pre-trigger tick fires, in upi (0: none).
   pre_hr_ins:
     - set: {upi: 0}
-    - if: "haspend and pk == 1 and pfx != 3 and not pleg and svib != 0xFF"
+    - if: "haspend and pk == 1 and not pleg"
       then: [{set: {upi: "pins if pins else ci"}}]
     - if: "upi != 0 and not ((pre == 0 and (ins[upi].flags & 2)) or (pre == 1 and (ins[upi].flags & 1)))"
       then: [{set: {upi: 0}}]
@@ -306,6 +279,7 @@ procs:
       else: [{set: {fswitch: "fswitch & (0xFF ^ (1 << vi))"}}]
   setup_vibrato:
     - set:
+        fx: "ins[ci].freq"
         svib: "ins[ci].flags & 0x30"
         voff: 0
         vdc: "ins[ci].vibdelay & 0x7F"
@@ -318,7 +292,7 @@ procs:
             fml: "fmlo((ins[ci].vibrato >> 4) << 3, note + oct)"
             fmh: "fmhi((ins[ci].vibrato >> 4) << 3, note + oct)"
   vib_byte:
-    - set: {svib: "(ins[ci].flags & 0x30) if ci != 0 else 0", vper: "(vb & 0x0F) * 2"}
+    - set: {fx: 0, svib: "(ins[ci].flags & 0x30) if ci != 0 else 0", vper: "(vb & 0x0F) * 2"}
     - set: {vfc: "0 if svib == 0x30 else ((vb & 0x0F) if svib >= 0x20 else ((vb & 0x0F) >> 1))"}
     - if: "((vb >> 4) & 0x0F) == 0"
       then: [{set: {fml: 0, fmh: 0}}]
@@ -343,20 +317,21 @@ procs:
   fx_columns:
     - {if: xifx, then: [{call: small_fx, with: {sfc: xifx, sa: xia}}]}
     - {if: "xfc >= 0x20", then: [{call: small_fx, with: {sfc: xfc, sa: xfv}}, {return: true}]}
-    - {if: "xfc == 1", then: [{set: {svib: 0x81}}, {call: slide_speed}]}
-    - {if: "xfc == 2", then: [{set: {svib: 0x82}}, {call: slide_speed}]}
-    - if: "xfc == 3 and not xpa"
-      then: [{set: {svib: 0x83, fml: "fmlo(xfv, note + oct)", fmh: "fmhi(xfv, note + oct)"}}]
+    - {if: "xfc == 16", then: [{set: {fx: xfv}}, {return: true}]}
+    - {if: "xfc == 1", then: [{set: {svib: 0x81, fx: 0}}, {call: slide_speed}]}
+    - {if: "xfc == 2", then: [{set: {svib: 0x82, fx: 0}}, {call: slide_speed}]}
+    - if: "xfc == 3"
+      then: [{set: {svib: 0x83, fx: 0, fml: "fmlo(xfv, note + oct)", fmh: "fmhi(xfv, note + oct)"}}]
   run_deferred:
     - {if: "dfx == 0", then: [{return: true}]}
     - set: {dfx: 0}
-    - {call: fx_columns, with: {xifx: difx, xia: dia, xfc: dfc, xfv: dfv, xpa: dpa}}
+    - {call: fx_columns, with: {xifx: difx, xia: dia, xfc: dfc, xfv: dfv}}
   # STRTSND: a new note restarts the instrument's tables and the hard restart.
   start_note:
     - set: {gate: 0xFF, hr: 1, trig: 1, aov: -1, dov: -1, sov: -1, rov: -1}
     - {if: "ci == 0", then: [{return: true}]}
     - set: {started: 1, wpos: "ins[ci].ctrl"}
-    - {if: "sel or not (ins[ci].flags & 0x40)", then: [{set: {ppos: "ins[ci].pulse"}}]}
+    - {if: "sel or not (ins[ci].flags & 0x40)", then: [{set: {ppos: "ins[ci].pw"}}]}
     - {if: "sel or not (ins[ci].flags & 0x80)", then: [{set: {fpos: "ins[ci].filter"}}]}
     - set: {wfarp: 0, wfabs: 0, arpcnt: 0xFF, arpre: "ins[ci].arpspeed", det: 0, vif: "ins[ci].filter != 0"}
     - call: set_routing
@@ -367,39 +342,29 @@ procs:
   # TICK_2: apply the row read at TICK_0.
   apply_row:
     - {if: "pk or pins or pleg or pifx or pfx or pnfx", then: [{set: {trig: 1}}]}
-    - set: {sel: "pins != 0", papplied: 0, startn: 0}
+    - set: {sel: "pins != 0", startn: 0}
     - {if: sel, then: [{set: {ci: pins, oct: "ins[pins].octave"}}]}
     - if: "pk == 1"
       then:
-        - if: "pfx == 3"
+        - if: pleg
           then:
-            - set: {note: pn, t2: "(pn + oct) & 0xFF"}
-            - set:
-                voff: "((zph << 8) | zpl) - dfreq(t2)"
-                svib: 0x83
-                fml: "fmlo(pfv, t2)"
-                fmh: "fmhi(pfv, t2)"
-                papplied: 1
-          else:
-            - if: "svib == 0xFF or pleg"
-              then:
-                - set: {voff: "((zph << 8) | zpl) - dfreq(pn + oct)", fmh: "0x7F if svib != 0xFF else fmh"}
-                - set: {svib: 0x83, note: pn}
-              else: [{set: {note: pn}}, {call: start_note}, {set: {startn: 1}}]
+            - set: {voff: "((zph << 8) | zpl) - dfreq(pn + oct)", fmh: "0x7F if svib != 0xFF else fmh"}
+            - set: {svib: 0x83, note: pn}
+          else: [{set: {note: pn}}, {call: start_note}, {set: {startn: 1}}]
       else:
         - {if: "pk == 2", then: [{set: {gate: 0xFE, sctl: "sctl & 0xFE"}}]}
         - {if: "pk == 3", then: [{set: {gate: 0xFF, sctl: "sctl | 1"}}]}
         - if: "pnfx == 0x78"
-          then: [{set: {svib: 0xFF, fml: "fmlo(110, note + oct)", fmh: "fmhi(110, note + oct)"}}]
+          then: [{set: {fx: 0, svib: 0xFF, fml: "fmlo(110, note + oct)", fmh: "fmhi(110, note + oct)"}}]
         - if: "pnfx >= 0x60 and pnfx < 0x78 and ci != 0"
           then:
             - {call: vib_byte, with: {vb: "((pnfx & 0x0F) << 4) | (ins[ci].vibrato & 0x0F)"}}
             - set: {voff: 0}
     - if: startn
-      then: [{set: {dfx: 1, difx: pifx, dia: pia, dfc: pfx, dfv: pfv, dpa: papplied}}]
+      then: [{set: {dfx: 1, difx: pifx, dia: pia, dfc: pfx, dfv: pfv}}]
       else:
         - set: {dfx: 0}
-        - {call: fx_columns, with: {xifx: pifx, xia: pia, xfc: pfx, xfv: pfv, xpa: papplied}}
+        - {call: fx_columns, with: {xifx: pifx, xia: pia, xfc: pfx, xfv: pfv}}
   tick_porta:
     - set: {t4: "s16(voff)", t5: "(fmh << 8) | fml"}
     - {if: "t4 == 0", then: [{return: true}]}
@@ -542,11 +507,11 @@ procs:
       then: [{call: compose}, {call: run_deferred}, {set: {hr: "hr - 1"}}, {return: true}]
     - call: pre_hr_ins
     - {if: "pre < 2 and upi != 0 and (ins[upi].flags & 0x04)", then: [{call: emit_pre_hr}, {return: true}]}
-    - set: {innew: "haspend and pk == 1 and pfx != 3 and not pleg and svib != 0xFF"}
+    - set: {innew: "haspend and pk == 1 and not pleg"}
     - {if: "pre < 2 and upi != 0", then: [{set: {gate: 0xFE}}]}
     - {if: "not innew", then: [{call: tick_vibrato}]}
     - call: tick_wf
-    - if: "skipw and pre < 2 and haspend and pk == 1 and pfx != 3 and svib != 0xFF and pifx != 0"
+    - if: "skipw and pre < 2 and haspend and pk == 1 and not pleg and pifx != 0"
       then: [{set: {carry: 1}}]
     - {if: "not innew", then: [{call: tick_pw}, {call: tick_filt}]}
     - call: compose
@@ -563,11 +528,11 @@ procs:
     - set: {portrow: 0}
     - if: "pre == 2 and haspend"
       then:
-        - set: {portrow: "pk == 1 and (pfx == 3 or pleg or svib == 0xFF)"}
+        - set: {portrow: "pk == 1 and pleg"}
         - call: apply_row
         - set: {haspend: 0}
     - {if: portrow, then: [{set: {leg2: 1}}, {call: compose}, {return: true}]}
-    - if: "ci == 0 and pre < 2 and haspend and pk == 1 and pfx != 3 and not pleg and svib != 0xFF"
+    - if: "ci == 0 and pre < 2 and haspend and pk == 1 and not pleg"
       then: [{set: {ci: 1, zpd: 1}}, {call: note_setup}, {set: {ci: 0}}, {return: true}]
     - call: note_setup
   write_regs:
@@ -596,3 +561,53 @@ tick:
 ghost:
   global: {0x15: fcutlo, 0x16: "fcuthi + fshift", 0x17: "(fres & 0xF0) | (fswitch & 0x0F)", 0x18: fmv}
   voice: {0: r0, 1: r1, 2: r2, 3: "r3 & 0x0F", 4: r4, 5: r5, 6: r6}
+# The modulators (see goattracker2.yaml). W is the speed table the vibrato and slide speeds
+# index: exptab below 107, then the frequency words.
+modulators:
+  freq: {hi: freqhi, lo: freqlo}
+  notes: [note, pn]
+  transpose: oct
+  legato: {cell: pleg, command: 63}
+  tables:
+    W: {size: 204, entry: "exptab[i] if i < 107 else (freqhi[i - 107] << 8) | freqlo[i - 107]"}
+  functions:
+    fmlo: "W[fyc(a, d)] & 0xFF"
+    fmhi: "W[fyc(a, d)] >> 8"
+  units:
+    - name: pitch
+      key: freq
+      cell: voff
+      fire: [tick_vibrato]
+      pre: procs.tick_vibrato
+      label: [svib, pk, pfx, pfv, pnfx, pleg, ci]
+      x: fx
+      command: 16
+      commands: [1, 2, 3, 608, 632]
+      site:
+        when: "svib < 0x80 and pnfx == 0"
+        record: ins
+        index: ci
+        field: freq
+        clear: {vibrato: 0, vibdelay: 0}
+      hooks:
+        - {at: procs.apply_row, written: [voff], key: [svib, fml, fmh, vper, fx]}
+        - {at: procs.run_deferred, key: [svib, fml, fmh, vper, fx]}
+    - name: pulse
+      key: pw
+      cell: "pwhi:pwlo"
+      fire: [tick_pw]
+      pre: procs.tick_pw
+      label: [ppos]
+      x: "pwtab[ppos].x"
+      site: {record: pwtab, index: ppos, field: x, clear: {a: 0, b: 0}}
+      hooks: [{at: procs.start_note, written: [ppos]}]
+    - name: filter
+      key: cut
+      cell: "vfhi:vflo:3"
+      mirror: "fcuthi:fcutlo:3"
+      fire: [tick_filt]
+      pre: procs.tick_filt
+      label: [fpos]
+      x: "flttab[fpos].x"
+      site: {record: flttab, index: fpos, field: x, clear: {a: "a if a >= 0x80 else 0", b: 0}}
+      hooks: [{at: procs.start_note, written: [fpos]}]

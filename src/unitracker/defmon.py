@@ -10,7 +10,7 @@ from importlib import resources
 import yaml
 from pysidtracker import SidImage
 
-from unitracker.songio import song_meta
+from unitracker.songio import modulated, song_meta
 
 PAL_HZ = 985248
 NTSC_HZ = 1022727
@@ -366,8 +366,11 @@ def _seeds(vinit, seeds) -> set:
     return seeds
 
 
-def lift(raw: bytes, subtune=None) -> dict:
-    """A unitracker song dict for a defMON replay ``.sid``."""
+def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
+    """A unitracker song dict for a defMON replay ``.sid``.
+
+    With ``expressions`` its modulations are written as the format's expressions.
+    """
     from pydefmon import DefmonPlayer  # pylint: disable=import-outside-toplevel
 
     header = SidImage.from_bytes(raw).header
@@ -380,7 +383,7 @@ def lift(raw: bytes, subtune=None) -> dict:
     tracks, phrases, seeds = structure(mem, subtune)
     playroutine = load_playroutine()
     playroutine["constants"] = model_constants(mem)
-    return {
+    ir = {
         "unitracker": "ir",
         "hints": {"ticks_per_step": 1},
         "meta": song_meta(header, f"defmon subtune {subtune}"),
@@ -400,3 +403,4 @@ def lift(raw: bytes, subtune=None) -> dict:
         "tracks": tracks,
         "phrases": phrases,
     }
+    return modulated(ir) if expressions else ir

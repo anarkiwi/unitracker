@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.4 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.5 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -16,21 +16,23 @@ import yaml
 from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
-    MOD,
     NONE,
     ROW_KEYS,
     CodecError,
     CommandCodec,
     Evaluator,
     RowCodec,
+    is_expr,
     note_text,
 )
 from unitracker.expr import ExprError, Resolver
+from unitracker.modulation import declared
 from unitracker.reach import ReachabilityError, table_reads
-from unitracker.records import record_types
+from unitracker.records import EXPR, record_types
 from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
+from unitracker.xexpr import ExpressionError, source, text_of, written
 
-VERSION = 1.4
+VERSION = 1.5
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -38,7 +40,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.4 format."""
+    """A document does not follow the unitracker v1.5 format."""
 
 
 @functools.cache
@@ -52,6 +54,13 @@ def _library_text(name: str) -> str:
 def library(name: str) -> dict:
     """The library definition of playroutine ``name``."""
     return yaml.safe_load(_library_text(name))
+
+
+def modulated(ir: dict) -> dict:
+    """``ir`` with its modulations written as expressions (see :mod:`unitracker.modfit.convert`)."""
+    from unitracker.modfit.convert import convert  # pylint: disable=import-outside-toplevel
+
+    return convert(ir)
 
 
 def song_meta(header, source: str) -> dict:
@@ -87,10 +96,22 @@ def _codecs(pr, rtypes, tables):
     offset = int(pr.get("note_offset", 0))
     ev = Evaluator(pr.get("functions"), tables)
     try:
-        codecs = {n: RowCodec(rt, rt.codec, offset, ev) for n, rt in rtypes.items() if rt.codec}
-        return offset, codecs, CommandCodec(pr.get("commands"), rtypes)
+        rows = {n: RowCodec(rt, rt.codec, offset, ev) for n, rt in rtypes.items() if rt.codec}
+        return offset, rows, CommandCodec(pr.get("commands"), rtypes)
     except CodecError as exc:
         raise SongFormatError(f"{pr.get('name')}: {exc}") from exc
+
+
+def codecs(pr: dict, tables) -> dict:
+    """``{type: RowCodec}`` of a playroutine over a song's tables."""
+    return _codecs(pr, record_types(pr), tables)[1]
+
+
+def _expr_fields(codec) -> set:
+    """The raw fields a codec writes as expression keys."""
+    if codec is None:
+        return set()
+    return {k["expr"] for shape in codec.shapes for k in shape.keys.values() if "expr" in k}
 
 
 def _ref_type(rtype, field, row):
@@ -148,7 +169,7 @@ _Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.or
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.4 document."""
+    """Turns the internal representation into a canonical v1.5 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -164,7 +185,9 @@ class _Writer:
         self.ins_type = inst.get("type")
         self.ins_base = int(inst.get("base", 0))
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
-        self.mods = ({}, {})
+        self.exprs = {int(k): str(v) for k, v in (ir.get("exprs") or {}).items()}
+        canon = {}
+        self.xcanon = {i: canon.setdefault(t, i) for i, t in sorted(self.exprs.items())}
         self.first_row = {}
         self.order = []
         self.post = []
@@ -179,6 +202,10 @@ class _Writer:
         return self.records.get(rtype.name, {})
 
     def _row(self, rtype, index):
+        if rtype.name == EXPR:
+            if index not in self.exprs:
+                raise SongFormatError(f"expression {index} is referenced but not defined")
+            return {}
         rows = self._rows(rtype)
         if index in rows:
             return rows[index]
@@ -221,8 +248,12 @@ class _Writer:
             index = int(row[field])
             if ttype.none is not None and index == ttype.none:
                 continue
-            out.append((field, (target, index)))
+            out.append((field, self.key(target, index)))
         return out
+
+    def key(self, rtype: str, index: int) -> tuple:
+        """The object ``(type, index)``; equal expressions are one."""
+        return (rtype, self.xcanon.get(index, index) if rtype == EXPR else index)
 
     def _children(self, key):
         rtype = self.rtypes[key[0]]
@@ -243,17 +274,6 @@ class _Writer:
         for field, child in self._children(key):
             self.visit(child, (key, field))
         self.post.append(key)
-
-    def mod_key(self, code, arg):
-        """The ``mod`` object command ``code`` with ``arg`` writes as; equal mods are one."""
-        by_command, by_text = self.mods
-        if (code, arg) not in by_command:
-            row = self.commands.mod_row(code, arg, lambda t, i: self._row(self.rtypes[t], i))
-            text = tuple(self.row_value(self.rtypes[MOD], row).items())
-            index = by_text.setdefault(text, len(by_text) + 1)
-            self.records.setdefault(MOD, {})[index] = row
-            by_command[(code, arg)] = index
-        return (MOD, by_command[(code, arg)])
 
     # -- phrases --
 
@@ -276,7 +296,9 @@ class _Writer:
     # -- representations --
 
     def ref_value(self, key):
-        """A reference to ``key``: its name, or its program written inline."""
+        """A reference to ``key``: its name, its program written inline, or an expression."""
+        if key[0] == EXPR:
+            return written(self.exprs[key[1]])
         if key in self.names:
             return Atom(self.names[key])
         return self.program_value(key)
@@ -287,10 +309,17 @@ class _Writer:
         shared = codec.encode(row) if codec is not None else None
         refs = dict(self._refs(rtype, row))
         if shared is not None:
-            written = {k: Atom(note_text(*v)) if k == "note" else v for k, v in shared.items()}
-            self._reads_back(codec, written)
-            written.update((field, self.ref_value(key)) for field, key in refs.items())
-            return FlowMap(written)
+            self._reads_back(codec, shared)
+            out = {}
+            for k, v in shared.items():
+                if k == "note":
+                    v = Atom(note_text(*v))
+                elif is_expr(v):
+                    v = self.ref_value(self.key(EXPR, v[1]))
+                out[k] = v
+            fields = _expr_fields(codec)
+            out.update((f, self.ref_value(k)) for f, k in refs.items() if f not in fields)
+            return FlowMap(out)
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
         values = {}
@@ -313,25 +342,37 @@ class _Writer:
             out.pop()
         return Flow(out)
 
-    def _reads_back(self, codec, written):
-        """Raise, naming the key, unless the player can read ``written`` back."""
+    def _reads_back(self, codec, shared):
+        """Raise, naming the key, unless the player can read ``shared`` back."""
         try:
-            codec.decode(written)
+            codec.decode({k: note_text(*v) if k == "note" else v for k, v in shared.items()})
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
     def program_value(self, key):
-        """A program as rows followed by ``end`` or ``{loop: k}``."""
+        """A program as rows followed by ``end`` or ``{loop: k}``, or the one expression it is."""
         rtype = self.rtypes[key[0]]
         path, loop = self.program(rtype, key[1])
+        if rtype.expr is not None and len(path) == 1 and loop is None:
+            row = self._row(rtype, path[0])
+            if row.get(rtype.expr) and not any(
+                v != rtype.default(f) for f, v in row.items() if f not in (rtype.expr, rtype.chain)
+            ):
+                return self.ref_value(self.key(EXPR, int(row[rtype.expr])))
         rows = [self.row_value(rtype, self._row(rtype, i)) for i in path]
         rows.append(Atom("end") if loop is None else FlowMap(loop=loop))
         return Flow(rows)
 
     def inline(self, key):
-        """Whether ``key`` is a program written inside its single instrument."""
+        """Whether ``key`` is written where it is used: an expression no command names, or a
+        program inside its single instrument."""
         refs = self.referrers.get(key, [])
+        if key[0] == EXPR:
+            return "command" not in refs
         rtype = self.rtypes[key[0]]
+        if rtype.expr is not None and "command" not in refs:
+            if not isinstance(self.program_value(key), Flow):
+                return True
         return (
             rtype.chain is not None
             and len(refs) == 1
@@ -357,14 +398,12 @@ class _Writer:
         """A command as ``name:arg``, or None for no command."""
         if not (cmd or raw):
             return None
-        if self.commands.is_mod(cmd):
-            return f"{MOD}:@{self.names[self.mod_key(cmd, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         if isinstance(value, tuple):
-            return f"{name}:@{self.names[value]}"
+            return f"{name}:@{self.names[self.key(*value)]}"
         return f"{name}:{value}"
 
     # -- document --
@@ -374,14 +413,11 @@ class _Writer:
             if row[2]:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             for cmd, arg in zip(row[3::2], row[4::2]):
-                if self.commands.is_mod(int(cmd)):
-                    yield self.mod_key(int(cmd), int(arg)), "command"
-                    continue
                 target = self.commands.ref(int(cmd))
                 if target is not None:
                     none = self.rtypes[target].none
                     if none is None or int(arg) != none:
-                        yield (target, int(arg)), "command"
+                        yield self.key(target, int(arg)), "command"
 
     def _roots(self):
         """Visit the playroutine's pinned rows and the fixed rows; ``{type: indices}`` fixed."""
@@ -426,11 +462,12 @@ class _Writer:
             if self.inline(key):
                 continue
             rtype = self.rtypes[key[0]]
-            value = (
-                self.program_value(key)
-                if rtype.chain is not None
-                else self.row_value(rtype, self._row(rtype, key[1]))
-            )
+            if rtype.name == EXPR:
+                value = self.ref_value(key)
+            elif rtype.chain is not None:
+                value = self.program_value(key)
+            else:
+                value = self.row_value(rtype, self._row(rtype, key[1]))
             defs[self.first_row[key]].setdefault(key[0], {})[Atom(self.names[key])] = value
         for i, (base, r) in enumerate(phrase_row.items(), start=1):
             defs[r].setdefault(PHRASE, {})[Atom(f"p{i}")] = self.atoms(compiled[base])
@@ -559,7 +596,7 @@ def _unread_dropped(diff: dict, ir: dict) -> dict:
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.4 document for internal-representation song ``ir``.
+    """A canonical v1.5 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -583,7 +620,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.4 document to the internal representation."""
+    """Expands a v1.5 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -595,7 +632,8 @@ class _Reader:
         self.ins_type = inst.get("type")
         self.ins_base = int(inst.get("base", 0))
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
-        self.mods = []
+        self.exprs = {}
+        self.named_tables = set((declared(self.pr).get("tables") or {}))
         self.next_index = {name: rt.first for name, rt in self.rtypes.items()}
         self.names = {}
         self.pending = []
@@ -633,10 +671,25 @@ class _Reader:
         self.next_index[rtype.name] = start + count
         return start
 
+    def expr(self, value) -> int:
+        """The index of a new expression for a written value, checked against the grammar."""
+        try:
+            text = text_of(value)
+            source(text, self.named_tables)
+        except ExpressionError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+        self.exprs[len(self.exprs) + 1] = text
+        return len(self.exprs)
+
     def _proto(self, rtype, value) -> dict:
         """A row's fields; references stay ``("name", str)`` or allocate inline programs."""
         codec = self.codecs.get(rtype.name)
         if codec is not None and isinstance(value, dict):
+            value = dict(value)
+            for key, number in codec.expr_keys().items():
+                v = value.get(key)
+                if isinstance(v, str) or (not number and isinstance(v, int) and key in value):
+                    value[key] = (EXPR, self.expr(v))
             named = {
                 k: v
                 for k, v in value.items()
@@ -646,6 +699,7 @@ class _Reader:
                 row = codec.decode({k: v for k, v in value.items() if k not in named})
             except CodecError as exc:
                 raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+            decoded = set(row)
             row.update(named)
         elif rtype.form == "map":
             if not isinstance(value, dict):
@@ -653,10 +707,20 @@ class _Reader:
             row = dict(value)
         else:
             row = self._list_row(rtype, codec, value)
+        if not (codec is not None and isinstance(value, dict)):
+            decoded = set()
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
-            if isinstance(val, str):
+            if field in decoded:
+                continue
+            plain = {k: v for k, v in row.items() if isinstance(v, int)}
+            target = _ref_type(rtype, field, plain) if field in rtype.refs else None
+            if target == EXPR and isinstance(val, (str, int)) and not isinstance(val, bool):
+                row[field] = (EXPR, self.expr(val))
+            elif target is not None and self.rtypes[target].expr and isinstance(val, (str, int)):
+                row[field] = self._program(self.rtypes[target], val)
+            elif isinstance(val, str):
                 row[field] = ("name", val)
             elif isinstance(val, list):
                 plain = {k: v for k, v in row.items() if isinstance(v, int)}
@@ -680,7 +744,13 @@ class _Reader:
         return row
 
     def _program(self, rtype, value) -> int:
-        """Allocate a program's rows; its entry index."""
+        """Allocate a program's rows, or the one row of an expression program; its entry index."""
+        if rtype.expr is not None and isinstance(value, (str, int)) and not isinstance(value, bool):
+            start = self._alloc(rtype, 1)
+            row = {rtype.expr: (EXPR, self.expr(value))}
+            row[rtype.chain] = rtype.none if rtype.none is not None else 0
+            self.pending.append((rtype, start, row))
+            return start
         if not isinstance(value, list) or len(value) < 2:
             raise SongFormatError(f"{rtype.name}: a program is rows then end or loop")
         rows, term = value[:-1], value[-1]
@@ -711,7 +781,8 @@ class _Reader:
         codec = self.codecs.get(rtype.name)
         if codec is not None and isinstance(written, dict):
             try:
-                codec.check_end({k: v for k, v in last.items() if isinstance(v, int)}, written)
+                raw = {k: v[1] if is_expr(v) else v for k, v in last.items()}
+                codec.check_end({k: v for k, v in raw.items() if isinstance(v, int)}, written)
             except CodecError as exc:
                 raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
@@ -726,8 +797,8 @@ class _Reader:
             raise SongFormatError(f"{tname}: bad name {name!r}")
         if name in self.names:
             raise SongFormatError(f"name {name!r} defined twice")
-        if tname == MOD:
-            self.names[name] = (MOD, self._mod(self._proto(rtype, value)))
+        if tname == EXPR:
+            self.names[name] = (EXPR, self.expr(value))
             return
         if rtype.chain is not None:
             index = self._program(rtype, value)
@@ -735,23 +806,6 @@ class _Reader:
             index = self._alloc(rtype, 1)
             self.pending.append((rtype, index, self._proto(rtype, value)))
         self.names[name] = (tname, index)
-
-    def _mod(self, row) -> int:
-        """Index of the ``(code, arg)`` a raw ``mod`` row is, allocating its argument row."""
-        try:
-            code, src = self.commands.mod_command(row)
-        except CodecError as exc:
-            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        arg = row.get("arg", 0)
-        if src is not None:
-            rtype = self.rtypes[src]
-            arg = rtype.none
-            if row.get("arg"):
-                arg = self._alloc(rtype, 1)
-                fields = {f: row.get(f, rtype.default(f)) for f in rtype.fields if f != rtype.chain}
-                self.pending.append((rtype, arg, fields))
-        self.mods.append((code, int(arg)))
-        return len(self.mods) - 1
 
     def lookup(self, name, tname) -> int:
         """The index of object ``name``, which must be a ``tname``."""
@@ -766,7 +820,9 @@ class _Reader:
         for rtype, index, row in self.pending:
             out = {}
             for field, val in row.items():
-                if isinstance(val, tuple):
+                if isinstance(val, tuple) and val[0] == EXPR:
+                    val = val[1]
+                elif isinstance(val, tuple):
                     plain = {k: v for k, v in row.items() if isinstance(v, int)}
                     target = _ref_type(rtype, field, plain)
                     if target is None:
@@ -804,10 +860,6 @@ class _Reader:
             if arg[1:] not in self.names:
                 raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
             arg = self.names[arg[1:]]
-        if (cmd == MOD) != (isinstance(arg, tuple) and arg[0] == MOD):
-            raise SongFormatError(f"!{MOD} takes a {MOD} record and only it does, in {atom!r}")
-        if cmd == MOD:
-            return list(self.mods[arg[1]])
         try:
             return list(self.commands.decode(cmd, arg))
         except CodecError as exc:
@@ -854,6 +906,7 @@ class _Reader:
             "tables": self.tables,
             "playroutine": self.pr,
             "records": {k: v for k, v in self.records.items() if v},
+            "exprs": self.exprs,
             "tracks": tracks,
             "phrases": events,
         }
@@ -871,7 +924,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.4 document."""
+    """The internal representation of a v1.5 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
@@ -879,13 +932,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.4 document at ``path``."""
+    """The internal representation of the v1.5 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.4 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.5 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

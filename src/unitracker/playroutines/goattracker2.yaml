@@ -11,9 +11,6 @@ tables:
 instrument: {type: ins, base: 0}
 note_offset: 0
 commands:
-  1: {name: mod, mod: {cmd: 1}, from: speedtab}
-  2: {name: mod, mod: {cmd: 2}, from: speedtab}
-  3: {name: mod, mod: {cmd: 3}, from: speedtab}
   4: {name: vib, ref: speedtab}
   5: {name: ad}
   6: {name: sr}
@@ -29,47 +26,20 @@ commands:
   15:
     - {name: tempo, when: "arg >= 2 and arg < 0x80", arg: "arg if arg >= 3 else 3", raw: arg}
     - {name: vtempo, when: "arg >= 0x82", arg: "(arg & 0x7F) if (arg & 0x7F) >= 3 else 3", raw: "arg | 0x80"}
+  16: {name: freq, ref: x}
+  17: {name: legato, when: "arg == 0"}
 record_types:
   ins:
     prefix: i
     none: 0
     pin: [1]
     form: map
-    fields: {ad: 0, sr: 0, ctrl: 0, pulse: 0, filter: 0, speed: 0, vd: 0, gt: 0, fw: 0}
-    refs: {ctrl: ctrltab, pulse: pulsetab, filter: filttab, speed: speedtab}
+    fields: {ad: 0, sr: 0, ctrl: 0, pw: 0, filter: 0, speed: 0, vd: 0, gt: 0, fw: 0}
+    refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab}
   speedtab:
     prefix: s
     none: 0
     fields: [l, r]
-  # Slide up (cmd 1), slide down (2) or toneporta (3) at the speed of speedtab row l, r
-  # (arg 0: none): l $80+ is a note-relative speed, the semitone interval shifted right r.
-  mod:
-    prefix: m
-    form: map
-    fields: [cmd, arg, l, r]
-    codec:
-      - when: "cmd <= 2 and (arg == 0 or (l < 0x80 and (l | r) == 0) or (l >= 0x80 and r >= 16))"
-        keys: {reg: FREQ}
-        raw: {cmd: 1, arg: 0}
-      - when: "cmd <= 2 and arg != 0 and l < 0x80 and (l | r) != 0"
-        keys: {reg: FREQ, step: "((l << 8) | r) * (3 - 2 * cmd)"}
-        raw:
-          cmd: "2 if step < 0 else 1"
-          arg: 1
-          l: "(step if step > 0 else 0 - step) >> 8"
-          r: "(step if step > 0 else 0 - step) & 0xFF"
-      - when: "cmd <= 2 and arg != 0 and l >= 0x80 and r < 16"
-        keys: {reg: FREQ, step: "(1 << r) * (3 - 2 * cmd)", rel: NOTE}
-        raw: {cmd: "2 if step < 0 else 1", arg: 1, l: 0x80, r: {search: [0, 15]}}
-      - when: "cmd == 3 and arg == 0"
-        keys: {reg: FREQ, to: NOTE}
-        raw: {cmd: 3, arg: 0}
-      - when: "cmd == 3 and arg != 0 and (0 <= l < 0x80 or (l >= 0x80 and r >= 16))"
-        keys: {reg: FREQ, step: "0 if l >= 0x80 else (l << 8) | r", to: NOTE}
-        raw: {cmd: 3, arg: 1, l: "step >> 8", r: "step & 0xFF"}
-      - when: "cmd == 3 and arg != 0 and l >= 0x80 and r < 16"
-        keys: {reg: FREQ, step: "1 << r", rel: NOTE, to: NOTE}
-        raw: {cmd: 3, arg: 1, l: 0x80, r: {search: [0, 15]}}
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
   # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
   ctrltab:
@@ -104,21 +74,18 @@ record_types:
       - if: "row.n != 0x80"
         then: [{call: wnote, with: {n: "(row.n & 0x7F) if row.n >= 0x80 else ((note + row.n) & 0x7F)"}}]
   # Pulsetable row: l $80+ sets the width from (l & $0F, r); otherwise l ticks of a signed r sweep.
+  # x: the expression a program of that one row is (see modulators).
   pulsetab:
     prefix: pw
     none: 0
     chain: next
-    fields: [l, r, next]
+    expr: x
+    fields: [l, r, next, x]
+    refs: {x: x}
     codec:
       - when: "l >= 0x80"
         keys: {pw: "((l & 0x0F) << 8) | r"}
         raw: {l: "0x80 | (pw >> 8)", r: "pw & 0xFF"}
-      - when: "0 < l < 0x80"
-        implies: {reg: pw}
-        keys:
-          step: {value: "r - 0x100 if r >= 0x80 else r", omit: "r == 0"}
-          for: l
-        raw: {l: for_, r: "step & 0xFF"}
     do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
     each: [{accumulate: pulse, step: "row.r - 0x100 if row.r >= 0x80 else row.r"}]
   # Filtertable row: l $80+ sets type and routing (and cut, a cutoff the player reads from the
@@ -127,23 +94,19 @@ record_types:
     prefix: f
     none: 0
     chain: next
-    fields: {l: 0, r: 0, cut: -1, next: 0}
+    expr: x
+    fields: {l: 0, r: 0, cut: -1, next: 0, x: 0}
+    refs: {x: x}
     codec:
-      - when: "l >= 0x80"
+      - when: "l >= 0x80 and (x == 0 or cut < 0)"
         keys:
           mode: "l & 0x70"
           resfilt: r
-          cut: {value: "cut << 3", omit: "cut < 0"}
+          cut: {value: "cut << 3", omit: "cut < 0", expr: x}
         raw: {l: "0x80 | mode", r: resfilt, cut: "(cut >> 3) if has_cut else -1"}
-      - when: "l == 0"
+      - when: "l == 0 and x == 0"
         keys: {cut: "r << 3"}
         raw: {l: 0, r: "cut >> 3"}
-      - when: "0 < l < 0x80 and cut < 0"
-        implies: {reg: cut}
-        keys:
-          step: {value: "(r - 0x100 if r >= 0x80 else r) << 3", omit: "r == 0"}
-          for: l
-        raw: {l: for_, r: "(step >> 3) & 0xFF"}
     do:
       - if: "row.l >= 0x80"
         then:
@@ -190,6 +153,7 @@ voice:
   command: {width: 8}
   cmddata: {width: 8}
   newcommand: {width: 8}
+  legato: {width: 1}
   newcmddata: {width: 8}
   tick: {width: 8}
   tempo: {width: 8}
@@ -230,6 +194,7 @@ records:
         - if: newcmddata
           then: [{set: {funk0: "speedtab[newcmddata].l - 1", funk1: "speedtab[newcmddata].r - 1"}}]
         - for_voices: [{set: {tempo: 0}}]
+    16: {do: [{set: {command: 16, cmddata: newcmddata}}]}
     15:
       do:
         - set: {nt: "newcmddata & 0x7F"}
@@ -249,6 +214,8 @@ records:
     2: {do: [{accumulate: freq, step: "0 - spd(cmddata)"}]}
     3: {do: [{call: toneporta, with: {arg: cmddata}}]}
     4: {do: [{call: vibrato, with: {arg: cmddata}}]}
+    # A freq command: the modulator drives freq (see modulators).
+    16: {do: [{return: true}]}
   # Command run from a wavetable row ($F0-$FE), argument arg.
   wavecmd:
     0: {do: [{set: {state: 1}}]}
@@ -330,7 +297,7 @@ procs:
         - {if: "ftime == 0", then: [{set: {fptr: "filttab[fptr].next"}}]}
   new_note_init:
     - set: {note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "ins[ii].speed"}
-    - {if: "newcommand == 3", then: [{return: true}]}
+    - {if: legato, then: [{return: true}]}
     - set: {fw: "ins[ii].fw"}
     - if: fw
       then:
@@ -338,19 +305,22 @@ procs:
           then: [{set: {gate: fw}}]
           else: [{set: {wave: fw, gate: 0xFF}}]
     - set: {wptr: "ins[ii].ctrl"}
-    - {if: "ins[ii].pulse", then: [{set: {pptr: "ins[ii].pulse", ptime: 0}}]}
+    - {if: "ins[ii].pw", then: [{set: {pptr: "ins[ii].pw", ptime: 0}}]}
     - {if: "ins[ii].filter", then: [{set: {fptr: "ins[ii].filter", ftime: 0}}]}
     - set: {ad: "ins[ii].ad", sr: "ins[ii].sr"}
   get_new_notes:
     - fetch: true
     - {if: ev_instr, then: [{set: {instr: ev_instr}}]}
-    - set: {newcommand: ev_cmd, newcmddata: ev_arg}
+    - set:
+        legato: "ev_cmd == 17 or ev_cmd2 == 17"
+        newcommand: "ev_cmd2 if ev_cmd == 17 else ev_cmd"
+        newcmddata: "ev_arg2 if ev_cmd == 17 else ev_arg"
     - {if: "ev_kind == 2", then: [{set: {gate: 0xFE}}]}
     - {if: "ev_kind == 3", then: [{set: {gate: 0xFF}}]}
     - if: "ev_kind == 1"
       then:
         - set: {newnote: ev_note, hasnew: 1}
-        - if: "newcommand != 3 and not (ins[instr & 0x3F].gt & 0x40)"
+        - if: "not legato and not (ins[instr & 0x3F].gt & 0x40)"
           then:
             - set: {gate: 0xFE}
             - if: "not (ins[instr & 0x3F].gt & 0x80)"
@@ -365,7 +335,7 @@ procs:
         - if: hasnew
           then:
             - set: {hasnew: 0}
-            - {if: "newcommand != 3", then: [{return: true}]}
+            - {if: "not legato", then: [{return: true}]}
         - call: wave_exec
       else:
         - if: "tick >= 0x80"
@@ -417,3 +387,55 @@ ghost:
     4: "wave & gate"
     5: ad
     6: sr
+
+# The modulators: per unit, the cell its expression drives, the calls that are one firing
+# (pre to post), what starts it (hooks), which expression a start selects (x) and where
+# that expression is written: key, and the site (a record) or the command of the event.
+modulators:
+  freq: {word: ftab}
+  notes: [note]
+  legato: {cell: legato, command: 17}
+  units:
+    - name: command
+      key: freq
+      cell: freq
+      fire: [{run: {record: tickn, index: command, field: do}}]
+      pre: records.tickn.do
+      label: [command, cmddata]
+      x: "cmddata if command == 16 else 0"
+      command: 16
+      commands: [1, 2, 3, 4]
+      hooks:
+        - {at: records.tick0.do, key: [command, cmddata]}
+        - {at: record_types.ctrltab.do, written: [lastnote]}
+    - name: pulse
+      key: pw
+      cell: pulse
+      fire: [pulse_exec]
+      pre: procs.pulse_exec
+      label: [pptr]
+      x: "pulsetab[pptr].x"
+      site: {record: pulsetab, index: pptr, field: x, clear: {l: 0, r: 0}}
+      hooks:
+        - {at: procs.new_note_init, written: [pptr]}
+        - {at: records.tick0.do.9, written: [pptr]}
+        - {at: records.wavecmd.do.9, written: [pptr]}
+    - name: filter
+      scope: global
+      key: cut
+      cell: filtercutoff
+      fire: [filter_exec]
+      pre: procs.filter_exec
+      label: [fptr]
+      x: "filttab[fptr].x"
+      site:
+        record: filttab
+        index: fptr
+        field: x
+        clear: {l: "l if l >= 0x80 else 0", r: "r if l >= 0x80 else 0", cut: -1}
+      hooks:
+        - {at: procs.new_note_init, written: [fptr]}
+        - {at: records.tick0.do.10, written: [fptr]}
+        - {at: records.tick0.do.11, written: [fptr]}
+        - {at: records.wavecmd.do.10, written: [fptr]}
+        - {at: records.wavecmd.do.11, written: [fptr]}

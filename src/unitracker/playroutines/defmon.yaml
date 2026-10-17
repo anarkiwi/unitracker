@@ -27,10 +27,11 @@ record_types:
     chain: next
     stop: "dl >= 0x80"
     form: map
-    # A row carries one mod: an af slide ($80+: the rate of af & $3F, down with bit 6), else
-    # a ps pulse sweep (0: none; $81+ up by ps & $7F; $01-$7F down by ps + 1, reflecting).
+    # freq, pw and cut are the row's pitch, pulse and ACID modulator expressions (xf, xp, xc):
+    # a pitch expression runs the slide mode (af $80), a pw or cut expression replaces the
+    # pw, ps and acid columns. af below $80 is a fixed offset, kept as a column.
     codec:
-      - when: "af >= 0x80"
+      - when: "xf != 0 and af == 0x80 and pw < 0 and ps < 0 and acid < 0"
         keys:
           <<: &columns
             hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
@@ -38,11 +39,10 @@ record_types:
             note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
             ad: {value: ad, omit: "ad < 0"}
             sr: {value: sr, omit: "sr < 0"}
-            pw: {value: "((pw & 0x0F) << 8) | (pw & 0xF0)", omit: "pw < 0"}
-          reg: FREQ
-          step: {value: "0 - rate(af) if af & 0x40 else rate(af)", omit: "rate(af) == 0"}
-          for: NOTE
-        keep: [wgl, ps, re, fv, cp, acid]
+            pw: {expr: xp}
+            cut: {expr: xc}
+          freq: {expr: xf}
+        keep: [wgl, re, fv, cp]
         raw:
           <<: &fields
             dl: "(hold - 1) if has_hold else 0"
@@ -50,25 +50,15 @@ record_types:
             tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
             ad: "ad if has_ad else -1"
             sr: "sr if has_sr else -1"
-            pw: "(((pw >> 8) & 0x0F) | (pw & 0xF0)) if has_pw else -1"
-          af: {search: [0x80, 0xFF]}
-      - when: "af < 0x80 and ps >= 0"
-        keys:
-          <<: *columns
-          reg: PW
-          step: {value: "(ps & 0x7F) if ps >= 0x80 else -1 - ps", omit: "(ps & 0x7F) == 0"}
-          at: {value: REFLECT, omit: "(ps & 0x7F) == 0"}
-        keep: [wgl, af, re, fv, cp, acid]
-        raw:
-          <<: *fields
-          ps: "0 if step == 0 else ((0x80 | step) if step > 0 else -1 - step)"
-      - when: "af < 0x80 and ps < 0"
+          af: 0x80
+      - when: "xf == 0 and af < 0x80 and pw < 0 and ps < 0 and acid < 0"
         keys: *columns
-        keep: [wgl, af, re, fv, cp, acid]
+        keep: [wgl, af, re, fv, cp]
         raw: *fields
     # A frozen row ends a program.
     end: {dl: 0x80}
-    fields: {dl: 0, wgh: -1, wgl: -1, ad: -1, sr: -1, tr: -1, af: -1, pw: -1, ps: -1, re: -1, fv: -1, cp: -1, acid: -1, next: 0}
+    fields: {dl: 0, wgh: -1, wgl: -1, ad: -1, sr: -1, tr: -1, af: -1, pw: -1, ps: -1, re: -1, fv: -1, cp: -1, acid: -1, next: 0, xf: 0, xp: 0, xc: 0}
+    refs: {xf: x, xp: x, xc: x}
     do:
       - {if: "row.wgh >= 0", then: [{set: {ctrl: row.wgh}}]}
       - {if: "row.wgl >= 0", then: [{set: {eor: row.wgl}}]}
@@ -134,10 +124,9 @@ global:
   res: {width: 8}
   fv: {width: 8}
   cp: {width: 8}
-  acc: {width: 16}
+  acc: {width: 17}
   astep: {width: 16}
   sub: {width: 1}
-  ac: {width: 1}
   cf: {width: 8}
   o16: {width: 8}
   o17: {width: 8}
@@ -179,15 +168,14 @@ procs:
   # $1022 SID band: this call writes the state the previous call left.
   latch:
     - set: {o_flo: flo, o_fhi: fhi, o_pw: pw, o_ctrl: "ctrl ^ eor", o_ad: ad, o_sr: sr}
-  # $10B5 ACID cutoff: CLC then SBC subtracts step + 1; a negative high byte saturates.
-  acid:
-    - set: {ac: "(acc - astep - 1 >= 0) if sub else (acc + astep > 0xFFFF)"}
-    - accumulate: acc
-      step: "(0 - astep - 1) if sub else astep"
-      max: 0x7FFF
-      clamp: false
-      on_bound: [{set: {acc: "(floor << 8) | (acc & 0xFF)"}}]
-    - set: {cf: "(acc >> 8) + cp + ac"}
+  # $10B5 ACID cutoff: CLC then ADC adds the step, or SBC adds its complement (step + 1 less);
+  # bit 16 of acc is the carry, which the cutoff adds; a negative high byte saturates.
+  acid_step:
+    - set: {acc: "(acc & 0xFFFF) + ((0xFFFF - astep) if sub else astep)"}
+    - if: "(acc & 0xFFFF) > 0x7FFF"
+      then: [{set: {acc: "((acc >= 0x10000) << 16) + (floor << 8) + (acc & 0xFF)"}}]
+  acid_out:
+    - set: {cf: "((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)"}
     - set: {o16: "floor if (cf >= 0x80 or cf < floor) else cf"}
     - {if: dbl, then: [{set: {o16: "o16 << 1"}}]}
   # $117F pattern event: arm the sidcall layers, latch a note.
@@ -214,14 +202,17 @@ procs:
   # $1405 pitch: no slide adds detune to the low byte only; $80+ integrates a
   # slide rate; $01-$7F adds one adjacent-semitone step. fc is the carry left
   # for the pulse sweep.
+  pitch_acc:
+    - if: "mode >= 0x80"
+      then: [{accumulate: sacc, step: "(0 - rate(mode)) if mode & 0x40 else rate(mode)"}]
   pitch:
+    - call: pitch_acc
     - if: "mode == 0"
       then:
         - set: {fc: "note_lo[note] + detune > 0xFF", flo: "note_lo[note] + detune", fhi: "note_hi[note]"}
       else:
         - if: "mode >= 0x80"
           then:
-            - {accumulate: sacc, step: "(0 - rate(mode)) if mode & 0x40 else rate(mode)"}
             - set: {pf: "sacc + nfreq(note)"}
           else:
             - set: {pf: "nfreq(note) + por((note + mode) & 0xFF)"}
@@ -246,7 +237,8 @@ procs:
   play:
     - for_voices: [{call: latch}]
     - set: {o17: res, o18: "fv | 0x0F"}
-    - call: acid
+    - call: acid_step
+    - call: acid_out
     - for_voices: [{call: pattern}]
     - for_voices: [{call: layer_a}]
     - for_voices: [{call: layer_b}]
@@ -296,3 +288,49 @@ ghost:
     4: o_ctrl
     5: o_ad
     6: o_sr
+
+# The modulators (see goattracker2.yaml); a start counts only when the new program sets one of
+# the unit's program fields.
+modulators:
+  freq: {hi: note_hi, lo: note_lo}
+  notes: [note, tbase]
+  units:
+    - name: pitch A
+      key: freq
+      cell: sacc
+      fire: [layer_a, pitch_acc]
+      pre: procs.layer_a
+      post: procs.pitch_acc
+      label: [rowA]
+      x: "sidtab[rowA].xf"
+      program: {pointer: rowA, record: sidtab, fields: [af, xf]}
+      site:
+        record: sidtab
+        index: rowA
+        field: xf
+        clear: {af: "-1 if af >= 0x80 else af"}
+        first: {af: 0x80}
+      hooks: [{at: procs.pattern, written: [sacc], pointer: [rowA]}]
+    - name: pulse A
+      key: pw
+      cell: pw
+      fire: [layer_a, pulse]
+      pre: procs.layer_a
+      post: procs.pulse
+      label: [rowA]
+      x: "sidtab[rowA].xp"
+      program: {pointer: rowA, record: sidtab, fields: [pw, ps, xp]}
+      site: {record: sidtab, index: rowA, field: xp, clear: {pw: -1, ps: -1}}
+      hooks: [{at: procs.pattern, pointer: [rowA]}]
+    - name: acid B
+      scope: global
+      key: cut
+      cell: acc
+      fire: [layer_b, acid_step]
+      pre: procs.layer_b
+      post: procs.acid_step
+      label: [rowB]
+      x: "sidtab[rowB].xc"
+      program: {pointer: rowB, record: sidtab, fields: [acid, xc]}
+      site: {record: sidtab, index: rowB, field: xc, clear: {acid: -1}}
+      hooks: [{at: procs.pattern, pointer: [rowB]}]
