@@ -1,4 +1,6 @@
-"""Lifted songs, written as v1.12 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.13 text and read back, play identically to their native players."""
+
+import dataclasses
 
 import numpy as np
 import pytest
@@ -59,6 +61,25 @@ def test_csillag_loop_exact(csillag, embed):
     n = CSILLAG_LOOP + 600
     theirs = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n), dtype=np.uint8)
     assert len(np.unique(theirs, axis=0)) > 5000
+    assert SongPlayer(song).mismatch(theirs) is None
+
+
+def test_csillag_with_kept_programs_exact(csillag, monkeypatch):
+    raw = csillag.read_bytes()
+    swm = parse_sid_song(raw, 1)
+    swm.instruments = [
+        dataclasses.replace(ins, control=ins.control | (0x40 if k % 2 else 0x80))
+        for k, ins in enumerate(swm.instruments)
+    ]
+    monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
+    text = songio.dumps(sidwizard.lift(raw))
+    assert "!pulse:0" in text and "!filter:0" in text and "flags" not in text
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    n = CSILLAG_LOOP + 600
+    theirs = np.asarray(SWMPlayer(swm).render_grid(n), dtype=np.uint8)
+    plain = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n), dtype=np.uint8)
+    assert not np.array_equal(theirs, plain)
     assert SongPlayer(song).mismatch(theirs) is None
 
 

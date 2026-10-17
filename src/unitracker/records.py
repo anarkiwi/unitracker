@@ -1,5 +1,7 @@
 """Record types: the field layout, references and templates a playroutine declares."""
 
+from unitracker.expr import ExprError, Resolver
+
 META_KEYS = {
     "fields",
     "prefix",
@@ -87,3 +89,42 @@ def record_types(playroutine: dict) -> dict:
     out = {name: RecordType(name, spec or {}) for name, spec in specs.items()}
     out[EXPR] = RecordType(EXPR, {"prefix": EXPR, "none": 0, "max": 0xFFFF})
     return out
+
+
+class RowEval(Resolver):
+    """Evaluates a record type's ``when`` expressions over one row's fields."""
+
+    error = RecordTypeError
+
+    def __init__(self, rtype):
+        super().__init__()
+        self.rtype = rtype
+
+    def name(self, name):
+        return f"R.get({name!r}, {self.rtype.default(name)})"
+
+    def holds(self, text, row) -> bool:
+        """Whether ``text`` is true for ``row``."""
+        try:
+            return bool(eval(self.compile(text), {"R": row}))  # pylint: disable=eval-used
+        except ExprError as exc:
+            raise self.error(f"{self.rtype.name}: {exc}") from exc
+
+
+def ref_type(rtype, field, row, ev=RowEval):
+    """The record type ``field`` of ``row`` references, or None."""
+    for target, when in rtype.refs.get(field, ()):
+        if when is None or ev(rtype).holds(when, row):
+            return target
+    return None
+
+
+def program_rows(rtype, rows: dict, entry: int, ev=RowEval):
+    """The rows of the program of chained type ``rtype`` starting at ``entry``, each once."""
+    seen = set()
+    while rtype.chain is not None and entry != rtype.none and entry in rows and entry not in seen:
+        seen.add(entry)
+        yield rows[entry]
+        if rtype.stop is not None and ev(rtype).holds(rtype.stop, rows[entry]):
+            return
+        entry = int(rows[entry].get(rtype.chain, rtype.default(rtype.chain)))

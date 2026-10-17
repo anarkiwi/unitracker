@@ -19,9 +19,9 @@ INS = (
 
 
 def gt_ir(phrase: str, ins: str = INS + "}"):
-    """A one-voice goattracker2 song read from v1.12 text, the other voices silent."""
-    return songio.loads(f"""
-unitracker: 1.12
+    """A one-voice goattracker2 song read from v1.13 text, the other voices silent."""
+    text = f"""
+unitracker: 1.13
 playroutine: {{ref: goattracker2, constants: {{deftempo: 6}}}}
 song:
   - def:
@@ -32,7 +32,8 @@ song:
         p2: [off*8]
     play: [p1, p2, p2]
 loop: ~
-""")
+"""
+    return songio.loads(text)
 
 
 def regs(ir, ticks):
@@ -228,9 +229,9 @@ def test_an_unproved_start_names_its_program_and_start():
 
 
 def sw_ir(phrase: str):
-    """A one-voice sidwizard song read from v1.12 text, the other voices silent."""
-    return songio.loads(f"""
-unitracker: 1.12
+    """A one-voice sidwizard song read from v1.13 text, the other voices silent."""
+    text = f"""
+unitracker: 1.13
 playroutine: {{ref: sidwizard}}
 song:
   - def:
@@ -241,7 +242,8 @@ song:
         p2: [off*8]
     play: [p1, p2, p2]
 loop: ~
-""")
+"""
+    return songio.loads(text)
 
 
 @pytest.mark.parametrize("flags,cleared,driven", [(0x50, 0x50, True), (0x60, 0x50, False)])
@@ -255,15 +257,14 @@ def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, 
     assert (ins["vibrato"], ins["vibdelay"], ins["flags"]) == (0, 0, cleared)
     assert bool(ins.get("freq")) == driven
     text = songio.dumps(out)
-    assert "flags: 64" in text and "vib" not in text
+    assert "flags" not in text and "vib" not in text
     back = songio.loads(text)
-    assert back["records"]["ins"][1]["flags"] == cleared
     assert np.array_equal(regs(back, 120), want)
 
 
 DM_VOICE = "{cntA: 255, cntB: 255}"
 DM_AF = f"""
-unitracker: 1.12
+unitracker: 1.13
 playroutine: {{ref: defmon}}
 song:
   - def:

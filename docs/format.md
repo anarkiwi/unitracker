@@ -1,4 +1,4 @@
-# unitracker song format (v1.12)
+# unitracker song format (v1.13)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.12
+unitracker: 1.13
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.12`; readers reject any other version |
+| `unitracker` | `1.13`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -143,7 +143,8 @@ note[.instrument][!command:arg[!command:arg]][*steps]
 - `!run:@c1` is a named command with an argument: a number, `@name` for a command that
   references a record or an expression, or `none`. An event carries at most two commands,
   in the order the player reads them (for SID-Wizard: instrument column, note column, FX
-  column). Command names are the ones below.
+  column), then `!pulse:0` and `!filter:0` (see Lifetime), which are not among the two.
+  Command names are the ones below.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
 
 ## Shared vocabulary
@@ -181,6 +182,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!legato:0` | the event's note does not retrigger (see Legato) |
 | `!mark:n` | a timing mark that changes no sound |
 | `!restart:@r` | the note's hard restart, for a player whose instruments have none (see Hard restart) |
+| `!pulse:0`, `!filter:0` | the note does not restart the instrument's pulse / filter program (see Lifetime) |
 
 SID-Wizard's effect commands are its own: they have no identical shared form.
 
@@ -200,8 +202,6 @@ can't express !attack:1`); the writer refuses to write a value that would not re
   the GoatTracker 2 backend), the instrument keys `speed` and `vd` (the instrument vibrato, which
   runs on every step without a command) and the record type `speedtab`, which they, `!funk`
   and the wavetable commands $F1-$F4 name.
-- **SID-Wizard:** the instrument key `flags` (bits 6 and 7 of the header's control byte:
-  keeping the pulse and filter programs across notes).
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -216,8 +216,11 @@ A vibrato is a `freq` expression in every player: the SID-Wizard instrument keys
 and `vibdelay`, bits 4 and 5 of `flags` (the vibrato type) and the note-column command
 `!notevib`, and the GoatTracker command `!vib`, are retired in v1.11 (`ins.vibrato is
 retired in v1.11: write the vibrato as the instrument's freq expression`, `!vib is retired
-in v1.11`). A field's retired bits are written without, and read as its default's: `flags`
-reads with the plain vibrato type, which no expression-driven note consults. An `!freq` is
+in v1.11`). With bits 6 and 7 a note's `!pulse:0` and `!filter:0` (see Lifetime), the
+SID-Wizard instrument key `flags` has no written form and is retired in v1.13 (`ins.flags is
+retired in v1.13: its bits are the instrument's restart program, its freq expression, and a
+note's !pulse:0 and !filter:0`); it reads as $10, the plain vibrato type, which no
+expression-driven note consults, with bits 6 and 7 from the notes. An `!freq` is
 always read as the player's expression command (GoatTracker command 16, SID-Wizard FX $10),
 which plays every expression; no written form selects the player's own vibrato.
 A note names the pitch it sounds, so SID-Wizard's per-instrument octave shift is in the
@@ -320,6 +323,24 @@ with a free command slot, running a program that ends, sets no column but `dl`, 
 `wgl`, `ad` and `sr`, and fits in the steps. The note's own sidTAB program starts on its
 first tick, so the restart's last row is empty. A step is one tick in defMON, so `hold`
 counts both.
+
+### Lifetime
+
+Whether a note restarts its instrument's pulse or filter program is a property of the note:
+`!pulse:0` and `!filter:0` mean it does not, as `!legato:0` means it does not retrigger. A
+note that names no instrument plays the voice's last one; the reader finds it by walking
+each voice's plays twice through its loop. The playroutine declares the commands it plays
+(`lifetime: {pulse: {field: pw, flag: {flags: 0x40}}, ...}`, `field` the instrument key of
+the program, `flag` the header bit that keeps it), and each player maps them as follows:
+
+| player | `!pulse:0`, `!filter:0` |
+|---|---|
+| SID-Wizard | control bits 6 and 7 of the instrument header: the writer puts the command on every note that starts an instrument with the bit set and names none; the reader sets the bit from those notes, and refuses an instrument some of whose such notes carry it and others not, and a note that names an instrument, which restarts both programs |
+| GoatTracker 2 | the absence of a pointer: a note starts the instrument's `pw` and `filter` programs, and its wavetable `run` rows ($F9, $FA) start them where the composer put them; the reader accepts the command on a note whose instrument has neither (and that runs no such program itself), the writer leaves it out |
+| defMON | refused: a sidTAB program is armed per event (`!run2`) |
+
+A note played under instruments of which some keep a program and others restart it has no
+written form. A legato note restarts nothing, so the command adds nothing there.
 
 ## Modulators
 
@@ -468,6 +489,7 @@ tables: {name: [ints]}                    # player-build data; reads out of rang
 note_offset: 0                            # frequency-table index of format note 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
 restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
+lifetime: {pulse: {field: pw, flag: {flags: 0x40}}}   # !pulse:0 and !filter:0 (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
@@ -752,10 +774,11 @@ to a nibble, as the reference grid does.
 
 **SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
 applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking
-the voices in the player's reverse order. An instrument is its header (`flags`, `ad`, `sr`),
+the voices in the player's reverse order. An instrument is its header (`ad`, `sr`),
 its WF/arp, pulse, filter and restart programs (`ctrl`, `pw`, `filter`,
 `restart`) and its pitch expression (`freq`), which holds the header's vibrato; a
-note-column vibrato is `!freq`. The header's octave shift moves into the notes the
+note-column vibrato is `!freq`. The header's control bits 6 and 7 are its notes' `!pulse:0`
+and `!filter:0` (see Lifetime). The header's octave shift moves into the notes the
 instrument plays, each written as the pitch it sounds; a row that selects an instrument of
 another shift without a note, and a phrase note played under instruments of different
 shifts, are not covered. The header's hard-restart bytes and control bits 0-3 become the
