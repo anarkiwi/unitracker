@@ -167,8 +167,8 @@ def reads(mod: Modulator) -> list:
     syms = {x.name for x in a.free_symbols | f.free_symbols}
     out = ["φ"] if "φ" in syms else []
     out += ["N"] if "N" in syms else []
-    out += sorted({type(x).__name__ for x in (a.atoms(sympy.core.function.AppliedUndef)
-                                              | f.atoms(sympy.core.function.AppliedUndef))})  # fmt: skip
+    calls = a.atoms(sympy.core.function.AppliedUndef) | f.atoms(sympy.core.function.AppliedUndef)
+    out += sorted({type(x).__name__ for x in calls})
     out += [f"{c} (a cell read when it starts)" for c in sorted(syms - {"φ", "N", "v"})]
     return out or ["v only"]
 
@@ -285,8 +285,9 @@ def report(
         "firing at φ. N is the voice's sounding note in format numbering, F(k) the player's",
         "frequency of note k, W the SID-Wizard speed table (exptab below 107, then frequencies).",
         "Proofs are z3 over 48-bit integers: every reachable control state's paths against f and",
-        "of f and a over the cycle, and g(φ + 1) = f(g(φ), φ + 1). A cell the previous modulator",
-        "left is an input of the expression, read when the modulator starts, or a start offset of φ.",
+        "of f and a over the cycle, and g(φ + 1) = f(g(φ), φ + 1). A cell the previous",
+        "modulator left is an input of the expression, read when the modulator starts, or a",
+        "start offset of φ.",
         "",
     ]
     for rep in reports:
