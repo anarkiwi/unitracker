@@ -477,7 +477,7 @@ the unit to the playroutine's own firing.
 | key | the unit's value |
 |---|---|
 | `freq` | the 16-bit voice frequency word (GoatTracker); in defMON and SID-Wizard, the 16-bit offset the player adds to the note's frequency |
-| `pw` | the pulse width: 12 bits (GoatTracker), the 16-bit pair `pwhi:pwlo` (SID-Wizard), a 16-bit cell whose low 12 bits are the register (defMON) |
+| `pw` | the pulse width: 12 bits (GoatTracker); the 12-bit register (SID-Wizard: the pair `pwhi:pwlo` plus its row's keyboard-track term); a 16-bit cell whose low 12 bits are the register (defMON) |
 | `cut` | the 11-bit cutoff (GoatTracker, SID-Wizard); defMON's 17-bit ACID accumulator, the offset `cp` in its high byte (see Filter) |
 
 A unit with `scale: s` keeps its value in a cell that holds the chip value divided by
@@ -537,15 +537,19 @@ song hears fails it too.
 | unit | key | cell | fires | starts | written |
 |---|---|---|---|---|---|
 | `pitch` | `freq` | `voff` | every tick but the one a note starts on | a row writes `voff` or changes the vibrato or slide state, at the row or at its deferred FX | the instrument's `freq` for an instrument vibrato; else `!freq:@x` (FX 16) |
-| `pulse` | `pw` | `pwhi:pwlo` | every tick but the one a note starts on | a note starts the pulse program | the program's first row (instrument `pw`) |
+| `pulse` | `pw` | `pwhi:pwlo`, as the register: plus the row's keyboard-track term | every tick but the one a note starts on | a note starts the pulse program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `vfhi:vflo:3`, mirrored to the global cutoff | every tick but the one a note starts on | a note starts the filter program | the program's first row (instrument `filter`) |
 
 A `!freq` lasts until a note starts the instrument (which selects its `freq`) or another
 pitch effect replaces it. Big FX $01-$03, note-column vibrato ($60-$77) and glide ($78)
 are the pitch unit's own firings; a lifted song writes their modulations as `!freq`.
 Speeds read the table `W[k]` (`exptab[k]` below 107, the frequency word of note index
-`k - 107` above, size 204). The filter program runs for the voice that controls the
-filter.
+`k - 107` above, size 204). A pulse row's keyboard-track amount `k` (its third byte) adds a
+term of the note to the register's high nibble from the row until a later row's amount
+replaces it: with `y` the sum `N + 1 + k` wrapped to a byte and `c` its carry, `256·(E[y] -
+E[y - 1] + c - [E[y] - E[y - 1] + c < 1])` over the table `E[i]`, the player's EXPTABH (0 below 11,
+then the frequency high bytes from index `i - 11`, size 256). A lifted program writes it as
+its `pw` expression in `N`. The filter program runs for the voice that controls the filter.
 
 ### defMON
 
@@ -770,6 +774,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `name` | the unit's name |
 | `key` | the shared key it drives: `freq`, `pw` or `cut` |
 | `cell` | the driven cell; a pair `hi:lo[:k]` is the value `hi << k \| lo & (2**k - 1)` (k 8 when omitted) |
+| `chip` | `{width, value, store}`: the unit's value is the chip value `value` reads from the cells, `width` bits, which `store` (reading `value`) writes back; on a pair cell it is the pair plus an offset free of the pair's parts |
 | `scale` | the chip value per cell unit (default 1; see Units) |
 | `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it |
 | `fire` | the actions (or proc names) of one firing |
@@ -942,7 +947,8 @@ program at another arp speed is not covered. `freq` is the row's detune, a const
 to 126 the player adds to the frequency word from that row until a later row sets another
 (a row without it sets 0; a native row that keeps the detune is written with the one it
 keeps, and the lifter refuses one that keeps different detunes on its loop's passes). Pulse
-set rows use `pw`; filter set rows `mode`, `cut` and
+set rows use `pw`, and a program with a keyboard-tracked row is its `pw` expression in `N` (see
+Modulators); filter set rows `mode`, `cut` and
 `res`. A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there,
 each row with that row's waveform, which the player writes on every chord step. A chord
 small FX ($7x) holds until the voice's next note, so on a note it becomes `!run` of the

@@ -1,5 +1,6 @@
 """SID-Wizard lifting: tables, chords, orderlists, events and the playroutine's limits."""
 
+import itertools
 from types import SimpleNamespace
 
 import numpy as np
@@ -9,6 +10,7 @@ from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, SWMPlayer, Tran
 from pysidwizard.features import features_for_driver
 
 from unitracker import backends, sidwizard, songio
+from unitracker.codec import Evaluator
 from unitracker.sidwizard import NO_DETUNE as KEEP, LiftError
 from unitracker.vm import SongPlayer
 
@@ -466,3 +468,18 @@ def test_a_vibrato_across_empty_steps_is_written_once(csillag):
     cmds = [(e, c) for e in played for c in e.get("commands") or [e.get("command")] if c]
     assert text.count("!freq") <= CSILLAG_FREQS
     assert sum("note" not in e for e, _ in cmds) <= CSILLAG_EMPTY_STEP_COMMANDS
+
+
+@pytest.mark.parametrize("name", ["pulse"])
+def test_a_keyboard_tracked_chip_map_inverts_its_store(name):
+    pr = songio.library("sidwizard")
+    chip = next(u for u in pr["modulators"]["units"] if u["name"] == name)["chip"]
+    ev = Evaluator(pr["functions"], pr["tables"])
+    width = {c: int(pr["voice"][c]["width"]) for c in chip["store"]}
+    for amount, note in itertools.product((0, 1, 5, 0x7F, 0xF4, 0xFF), range(0, 96, 5)):
+        env = {"pwkt": amount, "note": note, "oct": 0}
+        for v in range(0, 1 << int(chip["width"]), 7):
+            cells = {
+                c: ev(e, {**env, "value": v}) % (1 << width[c]) for c, e in chip["store"].items()
+            }
+            assert ev(chip["value"], {**env, **cells}) == v

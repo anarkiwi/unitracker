@@ -173,6 +173,18 @@ functions:
   fmhi:
     args: [a, d]
     expr: "0 if fyc(a, d) < 107 else freqhi[fyc(a, d) - 107]"
+  # EXPTABH, which the keyboard tracking reads: 11 zero bytes, then FREQTBH and what follows.
+  ex:
+    args: [i]
+    expr: "freqhi[i - 11] if i >= 11 else 0"
+  # The pulse high byte's keyboard-track term for amount k at discrete pitch d: the
+  # add-with-carry of k and d indexes EXPTABH, then the subtract-with-carry of its neighbours.
+  ktd:
+    args: [k, d]
+    expr: "ex((k + (d & 0xFF)) & 0xFF) - ex(((k + (d & 0xFF)) & 0xFF) - 1) - 1 + ((k + (d & 0xFF)) >> 8)"
+  pwtrack:
+    args: [k, d]
+    expr: "0 if k == 0 else (ktd(k, d) & 0xFF) + (ktd(k, d) >= 0)"
   s8:
     args: [x]
     expr: "(x - 0x100) if x & 0x80 else x"
@@ -546,12 +558,7 @@ procs:
         - set: {t1: "dfreq((wfarp if wfabs else note + wfarp + oct) & 0x7F) + voff"}
         - set: {zpl: t1, zph: "t1 >> 8"}
     - set: {t2: "zpl + (det & 0xFF) + carry"}
-    - set: {sfl: t2, sfh: "zph + (t2 > 0xFF)", t3: "pwhi & 0x7F"}
-    - if: "pwkt != 0"
-      then:
-        - set: {t4: "(((note + oct) & 0x7F) + pwkt) & 0xFF"}
-        - set: {t3: "((exptab[t4] - exptab[t4 - 1] - 1) + t3 + (exptab[t4] >= exptab[t4 - 1] + 1))"}
-    - set: {sph: t3, spl: pwlo}
+    - set: {sfl: t2, sfh: "zph + (t2 > 0xFF)", sph: "(pwhi & 0x7F) + pwtrack(pwkt, note + oct)", spl: pwlo}
   note_setup:
     - if: "hr > 0"
       then: [{call: compose}, {call: run_deferred}, {set: {hr: "hr - 1"}}, {return: true}]
@@ -620,9 +627,11 @@ modulators:
   legato: {cell: pleg, command: 63}
   tables:
     W: {size: 204, entry: "exptab[i] if i < 107 else (freqhi[i - 107] << 8) | freqlo[i - 107]"}
+    E: {size: 256, entry: "freqhi[i - 11] if i >= 11 else 0"}
   functions:
     fmlo: "W[fyc(a, d)] & 0xFF"
     fmhi: "W[fyc(a, d)] >> 8"
+    ex: "E[i]"
   units:
     - name: pitch
       key: freq
@@ -648,12 +657,16 @@ modulators:
     - name: pulse
       key: pw
       cell: "pwhi:pwlo"
-      chip: {width: 12, value: "((pwhi << 8) | pwlo) & 0xFFF", store: {pwhi: "value >> 8", pwlo: value}}
+      # The register: the cell's high nibble plus the row's keyboard-track term at the note.
+      chip:
+        width: 12
+        value: "(((pwhi + pwtrack(pwkt, note + oct)) & 0x0F) << 8) | pwlo"
+        store: {pwhi: "((value >> 8) - pwtrack(pwkt, note + oct)) & 0x0F", pwlo: value}
       fire: [tick_pw]
       pre: procs.tick_pw
       label: [ppos]
       x: "pwtab[ppos].x"
-      site: {record: pwtab, index: ppos, field: x, clear: {a: 0, b: 0}}
+      site: {record: pwtab, index: ppos, field: x, clear: {a: 0, b: 0, k: 0}}
       hooks: [{at: procs.start_note, written: [ppos]}]
     - name: filter
       key: cut

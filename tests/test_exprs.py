@@ -200,6 +200,21 @@ def test_sidwizard_instrument_freq_and_pulse_and_a_freq_command():
     assert [int(d) for d in np.diff(pulse)[3:9] if d] == [2, 2, 2, 2]
 
 
+SW_TRACKED = doc(
+    "sidwizard",
+    """      ins:
+        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '2048 + 256*(E[N + 6] - E[N + 5])'}""",
+    "[C2.i1*8, C6.i1*8]",
+)
+
+
+def test_a_sidwizard_pulse_expression_reads_the_keyboard_track_table():
+    _, pulse, _ = voice0(SW_TRACKED, 120)
+    step = [SW["freqhi"][n + 6 - 11] - SW["freqhi"][n + 5 - 11] for n in (24, 72)]
+    assert step[0] != step[1]
+    assert {2048 + 256 * d for d in step} <= {int(p) for p in pulse}
+
+
 DM_SONG = doc(
     "defmon",
     """      ins:

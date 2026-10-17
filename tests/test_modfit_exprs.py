@@ -1,5 +1,6 @@
 """Modulators as phase and value expressions: grammar, derivation, proofs and replay."""
 
+import copy
 import random
 import re
 import types
@@ -30,13 +31,17 @@ GT_FREQ, DM_FREQ = {"word": "ftab"}, {"hi": "note_hi", "lo": "note_lo"}
 TICKN = [{"run": {"record": "tickn", "index": "command", "field": "do"}}]
 
 
-def from_text(text: str):
-    """A Python function of ``(v, phi, N)`` parsed from grammar text, brackets innermost first."""
+def from_text(text: str, tables: dict | None = None):
+    """A Python function of ``(v, phi, N)`` parsed from grammar text, brackets innermost first;
+    ``tables`` are the functions its table reads ``T[k]`` call."""
     src = text.replace("φ", "phi")
+    if tables:
+        src = re.sub(r"\b([A-Z])\[([^\[\]]*)\]", r"\1(\2)", src)
     inner = re.compile(r"\[([^\[\]]*)\]")
     while inner.search(src):
         src = inner.sub(lambda m: f"(1 if {m.group(1)} else 0)", src)
-    return eval(f"lambda v, phi, N: {src}")  # pylint: disable=eval-used
+    env = {**globals(), **(tables or {})}
+    return eval(f"lambda v, phi, N: {src}", env)  # pylint: disable=eval-used
 
 
 def equal(a, b, phi_from=0, bounds=((0, 1 << 16),)) -> bool:
@@ -199,6 +204,32 @@ def test_csillag_pulse_program_is_one_modulator(csillag_song):
     assert equal(
         d.closed, 2048 + 2 * sympy.Min(PHI, 64) - 8 * sympy.Max(0, sympy.Min(PHI - 65, 64))
     )
+
+
+def pulse_unit(song) -> dict:
+    return next(u for u in Analysis(song.ir).units if u["name"] == "pulse")
+
+
+def test_a_keyboard_tracked_pulse_row_is_a_term_of_the_note(csillag_song):
+    ir = copy.deepcopy(csillag_song.ir)
+    ir["records"]["pwtab"][1]["k"] = 5
+    machine = Machine(ir, pulse_unit(csillag_song), Analysis(ir).spec)
+    start = {"ppos": 1, "pwcnt": 0, "ci": 1, "pwkt": 0, "note": ("lin", 1, (("N", 1),)), "oct": 0}
+    d = derive(machine, machine.start(start), None, {"hi": "freqhi", "lo": "freqlo"})
+    assert d.exact and {"E[N + 5]", "E[N + 6]"} <= set(re.findall(r"E\[[^]]*\]", G.text(d.closed)))
+    hi = ir["tables"]["freqhi"]
+    track = from_text(G.text(d.closed), {"E": lambda i: hi[i - 11] if i >= 11 else 0})
+    for n in (24, 48, 71):
+        step = hi[n + 6 - 11] - hi[n + 5 - 11]
+        assert track(0, 0, n) == 2048 + 256 * (step if step else -1)
+
+
+def test_a_paired_chip_value_must_be_its_pair_plus_an_offset(csillag_song):
+    unit = {**pulse_unit(csillag_song), "chip": {"width": 12, "value": "(pwhi << 8) ^ pwlo"}}
+    machine = Machine(csillag_song.ir, unit, Analysis(csillag_song.ir).spec)
+    start = {"ppos": 1, "pwcnt": 0, "ci": 1, "pwkt": 0, "note": 0, "oct": 0}
+    d = derive(machine, machine.start(start), None, {"hi": "freqhi", "lo": "freqlo"})
+    assert d.error == "the chip value is not its pair plus an offset"
 
 
 def test_named_tables_equal_the_functions_they_replace(csillag_song):
