@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.15 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.16 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -13,7 +13,8 @@ from importlib import resources
 
 import yaml
 
-from unitracker import envelope, eventrestart, hints, lifetime, refkeys, retired, timeline
+from unitracker import envelope, eventrestart, hints, inline, lifetime, refkeys, retired
+from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -36,7 +37,7 @@ from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 
-VERSION = "1.15"
+VERSION = "1.16"
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -44,7 +45,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.15 format."""
+    """A document does not follow the unitracker v1.16 format."""
 
 
 @functools.cache
@@ -118,7 +119,7 @@ def _player(pr, call, *args):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.15 document."""
+    """Turns the internal representation into a canonical v1.16 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -269,18 +270,9 @@ class _Writer:
         raws = eventrestart.restart_rows(rows, target, rtype, codec, gap)
         if raws is None:
             return None
-        return self._restart_entry(rtype, raws)
-
-    def _restart_entry(self, rtype, raws: list) -> int:
-        """The entry index of the restart of raw rows ``raws``, allocated on first use."""
-        key = tuple(tuple(sorted(r.items())) for r in raws)
-        if key not in self.restarts:
-            table = self.records.setdefault(rtype.name, {})
-            self.restarts[key] = start = max([rtype.first - 1, *table]) + 1
-            for k, raw in enumerate(raws):
-                nxt = start + k + 1 if k + 1 < len(raws) else rtype.none
-                table[start + k] = {**raw, rtype.chain: nxt}
-        return self.restarts[key]
+        return eventrestart.entry_of(
+            raws, rtype, self.records.setdefault(rtype.name, {}), self.restarts
+        )
 
     # -- representations --
 
@@ -413,6 +405,9 @@ class _Writer:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+        if isinstance(value, tuple) and self.commands.inline(name):
+            rtype = self.rtypes[value[0]]
+            return f"{name}:{inline.written(rtype, self._row(rtype, value[1]))}"
         if isinstance(value, tuple):
             return f"{name}:@{self.names[self.key(*value)]}"
         return f"{name}:{value}"
@@ -429,7 +424,7 @@ class _Writer:
                     yield (eventrestart.NAME, int(arg)), "command"
                     continue
                 target = self.commands.ref(int(cmd))
-                if target is not None:
+                if target is not None and not self.commands.inline(int(cmd)):
                     none = self.rtypes[target].none
                     if none is None or int(arg) != none:
                         yield self.key(target, int(arg)), "command"
@@ -566,7 +561,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False, respell=None) -> str:
-    """A canonical v1.15 document for internal-representation song ``ir``.
+    """A canonical v1.16 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference;
     ``respell(doc)`` rewrites the written structure before it is dumped (spelling studies).
@@ -592,7 +587,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
 
 
 class _Reader:
-    """Expands a v1.15 document to the internal representation."""
+    """Expands a v1.16 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -719,7 +714,7 @@ class _Reader:
             row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
         except ValueError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        return {**row, **named, **names}, set(row)
+        return {**row, **named, **names}, set(row) - set(named)
 
     @staticmethod
     def _list_row(rtype, codec, value, place) -> dict:
@@ -873,24 +868,14 @@ class _Reader:
     def _played(self, index: int) -> tuple:
         """``(entry, steps)``: the program event restart ``index`` runs, and how far ahead."""
         if index not in self.played:
-            rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
             target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
-            path, rows, entry = [], self.records[rtype.name], index
-            while entry != rtype.none:
-                path.append({f: v for f, v in rows[entry].items() if f != rtype.chain})
-                entry = rows[entry][rtype.chain]
+            rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
             try:
-                ahead, steps = eventrestart.lookahead(path, target, codec)
+                self.played[index] = eventrestart.played(
+                    index, self.records, (rtype, target), codec, self._alloc
+                )
             except eventrestart.RestartError as exc:
                 raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-            start = self._alloc(target, len(ahead))
-            for k, row in enumerate(ahead):
-                last = k + 1 == len(ahead)
-                self.records[target.name][start + k] = {
-                    **row,
-                    target.chain: 0 if last else start + k + 1,
-                }
-            self.played[index] = (start, steps)
         return self.played[index]
 
     def command(self, cmd, arg, atom) -> list[int]:
@@ -899,7 +884,9 @@ class _Reader:
             raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
         if cmd == eventrestart.NAME and self._event_restart(cmd) and isinstance(arg, str):
             return [eventrestart.CODE, self.lookup(arg[1:], eventrestart.NAME)]
-        if isinstance(arg, str) and arg != NONE:
+        if isinstance(arg, tuple) or (isinstance(arg, int) and self.commands.inline(cmd)):
+            arg = self._inline(cmd, arg if isinstance(arg, tuple) else (arg,), atom)
+        elif isinstance(arg, str) and arg != NONE:
             if arg[1:] not in self.names:
                 raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
             arg = self.names[arg[1:]]
@@ -907,6 +894,14 @@ class _Reader:
             return list(self.commands.decode(cmd, arg))
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
+
+    def _inline(self, cmd: str, values: tuple, atom) -> tuple:
+        """``(type, index)`` of the row an inline argument writes, allocated on first use."""
+        ref = self.commands.inline(cmd)
+        try:
+            return inline.allocated(self.rtypes.get(ref), values, self.records, self._alloc)
+        except ValueError as exc:
+            raise SongFormatError(f"!{cmd}: {exc} in {atom!r}") from exc
 
     def _collect(self, song):
         """Define every record and phrase; ``(phrase atoms, play rows)``."""
@@ -968,7 +963,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.15 document."""
+    """The internal representation of a v1.16 document."""
     doc = parse(text)
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
@@ -978,13 +973,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.15 document at ``path``."""
+    """The internal representation of the v1.16 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.15 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.16 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

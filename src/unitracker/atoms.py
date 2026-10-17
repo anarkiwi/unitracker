@@ -9,10 +9,10 @@ _NOTE_INDEX = {name: i for i, name in enumerate(NOTE_NAMES)}
 _ATOM = re.compile(
     r"^(?P<note>-|off|on|(?P<pc>[A-G]#?)(?P<oct>\d+))"
     r"(?:\.(?P<ins>[A-Za-z_]\w*))?"
-    r"(?P<cmds>(?:![a-z][a-z0-9]*:(?:@[A-Za-z_]\w*|none|\d+))*)"
+    r"(?P<cmds>(?:![a-z][a-z0-9]*:(?:@[A-Za-z_]\w*|none|\d+(?:/\d+)*))*)"
     r"(?:\*(?P<steps>\d+))?$"
 )
-_COMMAND = re.compile(r"!(?P<cmd>[a-z][a-z0-9]*):(?P<arg>@[A-Za-z_]\w*|none|\d+)")
+_COMMAND = re.compile(r"!(?P<cmd>[a-z][a-z0-9]*):(?P<arg>@[A-Za-z_]\w*|none|\d+(?:/\d+)*)")
 KINDS = {0: "-", 2: "off", 3: "on"}
 
 
@@ -53,7 +53,7 @@ def format_atom(kind: int, note: int, steps: int, ins: str | None, commands=()) 
 def parse_atom(atom) -> dict:
     """``{kind, note, ins, commands, steps}`` for an atom; ``commands`` is ``[(cmd, arg)]``.
 
-    Names, ``@`` args and ``none`` stay text.
+    Names, ``@`` args and ``none`` stay text; an argument ``a/b`` is the tuple ``(a, b)``.
     """
     if isinstance(atom, bool):
         atom = "on" if atom else "off"
@@ -67,10 +67,7 @@ def parse_atom(atom) -> dict:
         kind, pitch = 1, note_index(note)
     else:
         kind, pitch = {"-": 0, "off": 2, "on": 3}[note], 0
-    commands = [
-        (m["cmd"], m["arg"] if m["arg"][0] in "@n" else int(m["arg"]))
-        for m in _COMMAND.finditer(match["cmds"])
-    ]
+    commands = [(m["cmd"], _arg(m["arg"])) for m in _COMMAND.finditer(match["cmds"])]
     return {
         "kind": kind,
         "note": pitch,
@@ -78,6 +75,13 @@ def parse_atom(atom) -> dict:
         "commands": commands,
         "steps": int(match["steps"] or 1),
     }
+
+
+def _arg(text: str):
+    if text[0] in "@n":
+        return text
+    values = tuple(int(v) for v in text.split("/"))
+    return values if len(values) > 1 else values[0]
 
 
 def runs(rows: np.ndarray) -> list[tuple[int, int]]:

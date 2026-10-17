@@ -1,4 +1,4 @@
-"""v1.15 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.16 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.15
+unitracker: 1.16
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -68,6 +68,8 @@ GT_SONG = doc(
         ("sidwizard", "{vibdelay: 4}", "ins.vibdelay is retired in v1.11"),
         ("sidwizard", "{octave: -12}", "ins.octave is retired in v1.11: a note is written as"),
         ("sidwizard", "{flags: 192}", "ins.flags is retired in v1.13"),
+        ("goattracker2", "{speed: 1}", "ins.speed is retired in v1.16: write the vibrato as"),
+        ("goattracker2", "{vd: 3}", "ins.vd is retired in v1.16"),
     ],
 )
 def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
@@ -79,8 +81,7 @@ def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
     "playroutine,command", [("sidwizard", "!notevib:5"), ("goattracker2", "!vib:@s1")]
 )
 def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
-    speeds = "      speedtab:\n        s1: [4, 32]\n" if playroutine == "goattracker2" else ""
-    text = doc(playroutine, speeds + "      ins:\n        i1: {sr: 240}", f"[C4.i1, -{command}]")
+    text = doc(playroutine, "      ins:\n        i1: {sr: 240}", f"[C4.i1, -{command}]")
     name = command.split(":")[0]
     with pytest.raises(songio.SongFormatError, match=f"{name} is retired in v1.11: write"):
         songio.loads(text)
@@ -103,6 +104,27 @@ def test_the_writer_refuses_the_retired_header_bytes(fields, match):
         songio.dumps(song)
 
 
+def test_the_speed_table_is_retired():
+    text = doc("goattracker2", "      speedtab:\n        s1: [4, 32]", "[C4]")
+    with pytest.raises(songio.SongFormatError, match="record type 'speedtab' is retired in v1.16"):
+        songio.loads(text)
+
+
+@pytest.mark.parametrize(
+    "fields,match",
+    [
+        ({"vd": 3}, "ins.vd has no written form: it is retired in v1.16"),
+        ({"speed": 1}, "ins.speed"),
+    ],
+)
+def test_the_writer_refuses_the_goattracker_instrument_vibrato(fields, match):
+    song = songio.loads(GT_SONG)
+    song["records"]["ins"][1].update(fields)
+    song["records"]["speedtab"] = {1: {"l": 0, "r": 32}}
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.dumps(song)
+
+
 @pytest.mark.parametrize(
     "row,match",
     [
@@ -114,6 +136,28 @@ def test_the_reader_names_the_retired_sidtab_columns(row, match):
     text = doc("defmon", f"      sidtab:\n        t1: [{row}, end]", "[C4.t1]")
     with pytest.raises(songio.SongFormatError, match=match):
         songio.loads(text)
+
+
+def test_funk_arguments_share_their_speed_table_rows():
+    text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
+    song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
+    assert song["records"]["speedtab"] == {1: {"l": 6, "r": 9}, 2: {"l": 3, "r": 4}}
+    cmds = [e.get("command") or e["commands"][-1] for e in song["phrases"]["p1"]]
+    assert cmds == [[14, 1], [14, 1], [14, 2], [14, 0]]
+    assert "-!funk:3/4, -!funk:none]" in songio.dumps(song)
+
+
+@pytest.mark.parametrize(
+    "command,match",
+    [
+        ("!funk:6", r"!funk: the argument is 2 values, l/r"),
+        ("!funk:6/256", r"!funk: each value is a byte"),
+        ("!run:6/9", r"!run: the command takes no row argument"),
+    ],
+)
+def test_the_reader_refuses_a_bad_row_argument(command, match):
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.loads(doc("goattracker2", "      ins:\n        i1: {sr: 240}", f"[C4.i1{command}]"))
 
 
 def test_goattracker_freq_command_pulse_expression_and_legato():
@@ -174,7 +218,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.15", "unitracker: 1.8", "not a unitracker v1.15 document"),
+        ("unitracker: 1.16", "unitracker: 1.8", "not a unitracker v1.16 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

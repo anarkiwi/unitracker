@@ -43,6 +43,8 @@ RETIRED = {
     "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
     "notevib": "retired in v1.11: write the vibrato as `!freq:@x`",
     "vib": "retired in v1.11: write the vibrato as `!freq:@x`",
+    "speedtab": "retired in v1.16: a vibrato or slide is a `freq` expression, and `!funk` writes"
+    " its tempos (`!funk:6/7`)",
     **dict.fromkeys(
         ("attack", "decay", "sustain", "release", "iattack", "idecay", "isustain", "irelease"),
         _ENVELOPE,
@@ -485,6 +487,13 @@ class CommandCodec:
         """The record type command ``code``'s argument references, if any."""
         for ecode, _, ref, _ in self.entries:
             if ecode == code and ref is not None:
+                return ref
+        return None
+
+    def inline(self, key: int | str) -> str | None:
+        """The record type whose row a command (a code or a name) writes as its argument."""
+        for code, name, ref, var in self.entries:
+            if key in (code, name) and ref is not None and var.get("inline"):
                 return ref
         return None
 

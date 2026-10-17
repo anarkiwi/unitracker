@@ -37,9 +37,14 @@ def spans(values) -> str:
 
 def accepted(pr: dict) -> dict:
     """``{name: cell}``: what each shared command takes in playroutine ``pr``."""
-    cmds = CommandCodec(pr.get("commands"), record_types(pr))
+    rtypes = record_types(pr)
+    cmds = CommandCodec(pr.get("commands"), rtypes)
     values, refs = {}, {}
     for code, name, ref, _ in cmds.entries:
+        if ref is not None and cmds.inline(code):
+            fields = [f for f in rtypes[ref].fields if f != rtypes[ref].chain]
+            refs.setdefault(name, []).append("/".join(["0-255"] * len(fields)))
+            continue
         if ref is not None:
             refs.setdefault(name, []).append(f"`@{ref}`")
             continue

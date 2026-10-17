@@ -1,4 +1,4 @@
-# unitracker song format (v1.15)
+# unitracker song format (v1.16)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.15
+unitracker: 1.16
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.15`; readers reject any other version |
+| `unitracker` | `1.16`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -107,7 +107,7 @@ playroutine needs.
 - **Rows** use the shared row keys (see Shared vocabulary) wherever the playroutine's
   codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
   written in the type's `form`: a `list` row holds the fields in declaration order, with
-  trailing defaults left out (a GoatTracker speed-table row `[4, 32]`); a `map`
+  trailing defaults left out (`[4, 32]`); a `map`
   row holds the fields that differ from their defaults. A type's `retired` rows have no
   written form.
 - **Programs** are the rows of a chained type, in the order they run, followed by
@@ -141,7 +141,8 @@ note[.instrument][!command:arg[!command:arg]][*steps]
   index the player's frequency table gives it (see `note_offset`).
 - `.i3` names the instrument. For defMON it names a sidTAB program.
 - `!run:@c1` is a named command with an argument: a number, `@name` for a command that
-  references a record or an expression, or `none`. An event carries at most two commands,
+  references a record or an expression, `none`, or values joined by `/` for a command that
+  carries its record's row (`!funk:6/7`). An event carries at most two commands,
   its two slots, then `!pulse:0` and `!filter:0` (see Lifetime), which take no slot. The
   first slot is the instrument column and the second the FX column, and an event that names
   an instrument fills the instrument column with it, so its commands are the FX column's. A
@@ -183,7 +184,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
 | `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice |
-| `!funk:@s` | swing tempo pair |
+| `!funk:a/b`, `!funk:none` | swing tempo, for all voices: the steps alternate `a` and `b` ticks (each from 2); `none` swings on the pair already set (9/6 until one is) |
 | `!freq:@x` | drive the voice frequency by expression `x` (see Modulators) |
 | `!legato:0` | the event's note does not retrigger (see Legato) |
 | `!mark:n` | a timing mark that changes no sound |
@@ -210,7 +211,7 @@ a command the player refuses by name (`sidwizard: the player can't express !temp
 | `!cut` | — | 0-2040 step 8 | — |
 | `!tempo` | — | 3-127 | — |
 | `!vtempo` | — | 3-127 | — |
-| `!funk` | — | `@speedtab`, `none` | — |
+| `!funk` | — | 0-255/0-255, `none` | — |
 | `!freq` | — | `@x`, `none` | `@x`, `none` |
 | `!mark` | — | 16-255 | — |
 | `!restart` | `@restart` | — | — |
@@ -219,7 +220,7 @@ a command the player refuses by name (`sidwizard: the player can't express !temp
 | `!filter` | — | 0 | 0 |
 
 The timing commands are GoatTracker's: its command $F plays a tempo of 2 as 3, so `!tempo`
-and `!vtempo` start at 3; `!funk` names the `speedtab` row of the swing pair, and the
+and `!vtempo` start at 3; `!funk:a/b` carries the swing pair, and the
 default tempo is the constant `deftempo`. SID-Wizard's tempo is the subtune's tempo pair, the
 constants `tempol` and `tempor`, and its tempo commands are not covered yet. A defMON step is
 one tick, and its arranger and pattern counters are lifted as the timeline (see Backends).
@@ -229,10 +230,8 @@ records, and in instruments, where `ctrl` names the program run on the control r
 (GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
 rejected on reading, naming the key or command and the player (`sidwizard: the player
 can't express !ad:255 over the instrument's ad 18`); the writer refuses to write a value that
-would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
-
-- **GoatTracker 2:** the instrument keys `speed` and `vd` (the instrument vibrato, which runs on
-  every step without a command) and the record type `speedtab`, which they and `!funk` name.
+would not read back (a defMON pulse cell over `$0FFF`). No key, command or record type is
+one player's own.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -250,8 +249,12 @@ A vibrato is a `freq` expression in every player: the SID-Wizard instrument keys
 and `vibdelay`, bits 4 and 5 of `flags` (the vibrato type) and the note-column command
 `!notevib`, and the GoatTracker command `!vib`, are retired in v1.11 (`ins.vibrato is
 retired in v1.11: write the vibrato as the instrument's freq expression`, `!vib is retired
-in v1.11`). With bits 6 and 7 a note's `!pulse:0` and `!filter:0` (see Lifetime), the
-SID-Wizard instrument key `flags` has no written form and is retired in v1.13 (`ins.flags is
+in v1.11`), and the GoatTracker instrument keys `speed` and `vd` (its vibrato and the vibrato's
+delay) in v1.16 (`ins.speed is retired in v1.16: write the vibrato as the instrument's freq
+expression`). GoatTracker's speed table has no written form: its vibrato and slide speeds are in
+the `freq` expressions and `!funk` writes its tempos, so the record type `speedtab` is retired
+in v1.16 (`record type 'speedtab' is retired in v1.16`).
+With bits 6 and 7 a note's `!pulse:0` and `!filter:0` (see Lifetime), the SID-Wizard instrument key `flags` has no written form and is retired in v1.13 (`ins.flags is
 retired in v1.13: its bits are the instrument's restart program, its freq expression, and a
 note's !pulse:0 and !filter:0`); it reads as $10, the plain vibrato type, which no
 expression-driven note consults, with bits 6 and 7 from the notes. An `!freq` is
@@ -440,7 +443,7 @@ result floor-divided by `s`. GoatTracker's filter cell holds the top 8 bits of t
 |---|---|
 | a program row's `pw`, `cut` or `freq` | defMON sidTAB rows (`freq`, `pw`, `cut`); GoatTracker filter parameter rows and SID-Wizard filter set rows (`cut`); GoatTracker wavetable step rows (`freq`) |
 | an instrument's `pw` or `filter` program, written as the one expression | GoatTracker, SID-Wizard |
-| an instrument's `freq`: the pitch expression a note starting the instrument runs | SID-Wizard |
+| an instrument's `freq`: the pitch expression a note starting the instrument runs | GoatTracker, SID-Wizard |
 | an event's `!freq:@x1`, naming an `x` definition | GoatTracker, SID-Wizard |
 
 A key that also takes a plain value (`cut` in a GoatTracker or SID-Wizard filter row)
@@ -458,16 +461,20 @@ command 17); SID-Wizard writes instrument column $3F.
 
 | unit | key | cell | fires | starts | written |
 |---|---|---|---|---|---|
-| `command` | `freq` | `freq` | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, or a wavetable row plays a note | `!freq:@x` (command 16) |
+| `command` | `freq` | `freq` | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:@x` (command 16); without a command, the instrument's `freq` |
 | `pulse` | `pw` | `pulse` | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:@pw` or a wavetable `$F9` sets the program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `filtercutoff`, `scale: 8`, global | each filter-program tick | an instrument, `!run:@f`, `!resfilt:0` or a wavetable `$FA`/`$FB` sets the program | the program's first row (instrument `filter`) |
 | `wave` | `freq` | `freq` | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
 
 A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence
 (`φ` keeps counting); a different one, or a step with another or no command, starts the
-next. Commands 1-4 and the instrument vibrato are the unit's own firings; a lifted song
-writes the commands' modulations as `!freq`, and the instrument vibrato's on the step of a
-note, whose later steps without a command keep the instrument's `speed`.
+next. A step without a command runs the instrument's `freq` expression, which a note's steps
+without a command continue. Commands 1-4 and the instrument vibrato are the unit's own
+firings; a lifted song writes the commands' modulations as `!freq`, and the instrument
+vibrato as the instrument's `freq`, its delay a term in `φ` (`[φ >= 38]` for a delay of 40),
+when it starts with the note; a vibrato that resumes after a command, or after a row that
+selects another instrument without a note, is `!freq` on each of its steps. An instrument
+with a vibrato delay of 0 has no vibrato, whatever its speed, as the player packs it.
 
 A wavetable row's `freq` is one firing: the portamento, toneporta or vibrato step ($F1-$F4)
 the row runs, with its speed and the voice's state at the run resolved (a realtime speed reads
@@ -612,7 +619,9 @@ uses the first shape whose `when` holds and refuses a row that would not read ba
 shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or
 `x` for an expression), and for a plain argument optional `when`, `arg` (raw to written)
-and `raw` (written to raw), checked the same way. An entry `{name: ad, nibble: s, slot: k}`
+and `raw` (written to raw), checked the same way. A `ref` entry with `inline: true` writes
+the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
+one row per distinct argument, and the type has no definitions of its own. An entry `{name: ad, nibble: s, slot: k}`
 is an envelope command: the code sets the nibble at shift `s` of the register `name` over
 the instrument's field `name`, played from event slot `k`, and is written as the byte it
 writes (see the SID-Wizard backend).
@@ -780,7 +789,8 @@ internal representation with the native modulations. The conversion
 period more, derives and proves each occurrence's expression from its start, and writes
 it at the unit's site. Within a unit and label the occurrences share one closed form,
 else one recurrence, else each start keeps its own. The rewritten song must play the
-native register grid exactly over that window; otherwise the lift fails. A start whose
+native register grid exactly over that window, each voice from its first note (see Checking
+against the native player); otherwise the lift fails. A start whose
 expression is not proved fails the lift, naming the unit, its program and the start
 (`pulse program pulsetab 3, start [pptr 3] at tick 40: not proved: ...`), and so does a
 pulse or filter program the song references whose rows keep no shared form because no
@@ -795,7 +805,9 @@ start proves its expression.
 | `sidwizard` | SID-Wizard 1.x export, normal build (pysidwizard) | one pattern row | the decoded module |
 
 **GoatTracker 2.** The playroutine counts ticks per row itself, and `fetch` runs on its
-gate-timer lookahead, the hold of the restart's first row. Instruments with one gate timer and
+gate-timer lookahead, the hold of the restart's first row. A voice's `onset` is the tick a
+wavetable row first sets its frequency: on its first note's first tick the voice still sounds
+the frequency it had before the note, which the format does not carry. Instruments with one gate timer and
 first wave share a restart program; a hard restart on gate timer 0 is not covered. Instrument 1 is pinned because every voice starts on it. A
 filter parameter row carries the following cutoff row's value as `cut`, because the
 player reads both in one tick. A wavetable delay row is `wait` on the row it delays. A

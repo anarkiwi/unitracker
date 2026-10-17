@@ -130,13 +130,15 @@ def restart_rows(timer: int, first: int, adparam: int) -> list[dict]:
 def instrument_records(instruments, adparam: int) -> tuple[dict, dict]:
     """Instruments 1..63 as records of their nonzero byte fields, and their restart programs.
 
-    Instruments with one gate timer and first wave share one program. An instrument without
-    one reads the voice's next step on its note's first tick, as gate timer 0 does: an empty
-    instrument, or one whose gate timer 0 leaves the gate and first wave alone.
+    A zero vibrato delay is no vibrato, as the player packs it. Instruments with one gate timer
+    and first wave share one program. An instrument without one reads the voice's next step on
+    its note's first tick, as gate timer 0 does: an empty instrument, or one whose gate timer 0
+    leaves the gate and first wave alone.
     """
     out, restarts, entry = {}, {}, {}
     for num, ins in enumerate(instruments[: C.MAX_INSTR - 1], start=1):
         rec = {k: getattr(ins, attr) & 0xFF for k, attr in _INS_FIELDS}
+        rec["speed"] *= bool(rec["vd"])
         rec = {k: v for k, v in rec.items() if v}
         key = (ins.gateoff_timer & 0xFF, ins.first_wave & 0xFF)
         out[num] = rec
