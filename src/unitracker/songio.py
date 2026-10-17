@@ -106,10 +106,11 @@ def codecs(pr: dict, tables) -> dict:
 
 
 def _expr_fields(codec) -> set:
-    """The raw fields a codec writes as expression keys."""
+    """The raw fields a codec writes as expression or reference keys."""
     if codec is None:
         return set()
-    return {k["expr"] for shape in codec.shapes for k in shape.keys.values() if "expr" in k}
+    keys = [k for shape in codec.shapes for k in shape.keys.values()]
+    return {k["expr"] for k in keys if "expr" in k} | {k["field"] for k in keys if "ref" in k}
 
 
 def _refuse(problem) -> None:
@@ -335,12 +336,14 @@ class _Writer:
     def _shared_row(self, codec, shared: dict, refs: dict, place=None) -> FlowMap:
         """A row's shared-vocabulary form: notes named, expressions referenced, refs resolved."""
         self._reads_back(codec, shared, place)
-        out, number = {}, codec.expr_keys()
+        out, number, named = {}, codec.expr_keys(), codec.ref_keys()
         for k, v in shared.items():
             if k == "note":
                 v = Atom(note_text(*v))
             elif k in ("route", "ctrl"):
                 v = written_value(k, v)
+            elif k in named:
+                v = Atom(self.names[self.key(*v)])
             elif is_expr(v):
                 v = self.ref_value(self.key(EXPR, v[1]))
                 v = str(v) if number.get(k) else v
@@ -379,6 +382,8 @@ class _Writer:
         refs = self.referrers.get(key, [])
         if key[0] == EXPR:
             return "command" not in refs
+        if any(self._named_ref(r) for r in refs):
+            return False
         rtype = self.rtypes[key[0]]
         if rtype.expr is not None and "command" not in refs:
             if not isinstance(self.program_value(key), Flow):
@@ -390,6 +395,13 @@ class _Writer:
             and isinstance(refs[0][0], tuple)
             and refs[0][0][0] == self.ins_type
         )
+
+    def _named_ref(self, referrer) -> bool:
+        """Whether a referrer is a row key that names its record, as a command does."""
+        if not (isinstance(referrer, tuple) and isinstance(referrer[0], tuple)):
+            return False
+        codec = self.codecs.get(referrer[0][0])
+        return codec is not None and any(f == referrer[1] for f, _ in codec.ref_keys().values())
 
     def atoms(self, arr) -> Flow:
         """A phrase's rows as atoms."""
@@ -682,7 +694,12 @@ class _Reader:
             target = _ref_type(rtype, field, plain) if field in rtype.refs else None
             if target == EXPR and isinstance(val, (str, int)) and not isinstance(val, bool):
                 row[field] = (EXPR, self.expr(val))
-            elif target is not None and self.rtypes[target].expr and isinstance(val, (str, int)):
+            elif (
+                target is not None
+                and self.rtypes[target].expr
+                and isinstance(val, (str, int))
+                and not self._is_name(val, target)
+            ):
                 row[field] = self._program(self.rtypes[target], val)
             elif isinstance(val, str):
                 row[field] = ("name", val)
@@ -708,11 +725,34 @@ class _Reader:
             for k, v in value.items()
             if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
         }
+        keys, names = codec.ref_keys(), {}
+        for key in keys.keys() & value.keys():
+            kind = self._named_type(value[key], keys[key][1])
+            names[keys[key][0]] = ("name", value[key])
+            value[key] = (kind, self.rtypes[kind].first)
         try:
             row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        return {**row, **named}, set(row)
+        return {**row, **named, **names}, set(row)
+
+    def _is_name(self, value, tname: str) -> bool:
+        """Whether ``value`` names a ``tname``: defined as one, or not yet defined and of its
+        name form (its prefix and a number)."""
+        if not isinstance(value, str):
+            return False
+        if value in self.names:
+            return self.names[value][0] == tname
+        return re.fullmatch(f"{re.escape(self.rtypes[tname].prefix)}[0-9]+", value) is not None
+
+    def _named_type(self, name, types: set) -> str:
+        """The one of record ``types`` a reference key's ``name`` names."""
+        kinds = [t for t in sorted(types) if self._is_name(name, t)]
+        if len(kinds) != 1:
+            raise SongFormatError(
+                f"{self.pr['name']}: {name!r} names no {' or '.join(sorted(types))}"
+            )
+        return kinds[0]
 
     @staticmethod
     def _list_row(rtype, codec, value, place) -> dict:

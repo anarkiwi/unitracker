@@ -163,6 +163,8 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `res` | the resonance, bits 4-7 of `$D417` (see Filter) |
 | `route` | the filter routing, bits 0-3 of `$D417`: a mask, or an edit for the program's voice (see Filter) |
 | `mode` | the `$D418` filter-mode bits 4-7, volume excluded (see Filter) |
+| `run` | the program the row starts in the slot its kind implies, by name, as `!run:@x` |
+| `vol` | the volume, the low nibble of `$D418`, as `!vol:n` |
 
 | command | meaning |
 |---|---|
@@ -499,8 +501,10 @@ it is absolute, the raw field holding the key's expression, and for `ctrl` its m
 `note_abs`, and for a mask `has_eor` and `eor` defined) and `keep` (raw fields
 written under their own names; a kept reference is written as a name). A key with `expr`
 is written as the expression when that field is set; a key with both `value` and `expr`
-reads an integer as a value and a string as an expression. The writer uses the first
-shape whose `when` holds and refuses a row that would not read back; a `map` row no
+reads an integer as a value and a string as an expression. A key given as
+`{ref: type, field: f}` is the reference raw field `f` holds, written as the record's name
+(`run: pw1`); the reader takes the shape whose `ref` is the type the name has. The writer
+uses the first shape whose `when` holds and refuses a row that would not read back; a `map` row no
 shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or
 `x` for an expression), and for a plain argument optional `when`, `arg` (raw to written)
@@ -685,7 +689,15 @@ start proves its expression.
 gate-timer lookahead, the hold of the restart's first row. Instruments with one gate timer and
 first wave share a restart program; a hard restart on gate timer 0 is not covered. Instrument 1 is pinned because every voice starts on it. A
 filter parameter row carries the following cutoff row's value as `cut`, because the
-player reads both in one tick.
+player reads both in one tick. A wavetable delay row is `wait` on the row it delays. A
+wavetable command row runs the pattern command of its low nibble, and the tick's continuous
+effect does not run, as on a note row; the commands with a shared form are written with its key:
+$F5 `ad`, $F6 `sr`, $F9 and $FA `run` (the pulse or filter program), $FB `res` and `route`
+(but $FB 00, which also stops the filter program), $FC `cut` and $FD `vol` (below $10). A
+wavetable jump is the program's `loop`. $F1-$F4 (one portamento, toneporta or vibrato
+step at the row's speed), $F7 (a `ctrl` that, unlike a waveform row's, stops the tick's continuous effect),
+$F0, $F8 and $FE (which the playroutine stops on), $F9 00 and $FA 00 (which `run: none`
+can't tell apart), $FB 00 and $FD $10-$FF have no shared form.
 
 **defMON.** The arranger and pattern counters are lifted as timing. Each song step
 becomes one phrase per voice, all of the same length in ticks, with each event on the

@@ -15,7 +15,10 @@ from pygoattracker.model import (
     Transpose,
 )
 
-from unitracker import goattracker as gt
+import numpy as np
+
+from unitracker import goattracker as gt, songio
+from unitracker.vm import SongPlayer
 
 
 def table(*rows):
@@ -199,3 +202,44 @@ def test_lift_document(metal_warrior):
     assert [len(t["plays"]) for t in song["tracks"]] == [5, 5, 5]
     assert len(song["tables"]["ftab"]) == 128
     assert song["records"]["ins"][1]["sr"] == 0x88
+
+
+COMMANDS_SONG = """
+unitracker: 1.9
+playroutine: {ref: goattracker2, constants: {deftempo: 6}}
+song:
+  - def:
+      pulsetab:
+        pw1: [{pw: 2048}, end]
+      filttab:
+        f1: [{cut: 512, res: 3, route: 1, mode: 16}, end]
+      ins:
+        i1: {sr: 240, pw: pw1, ctrl: [{ctrl: 65, note: +0}, {ad: 25}, {sr: 200}, {run: pw1},
+            {run: f1},
+            {res: 12, route: 2}, {cut: 1024}, {vol: 9}, end]}
+      phrase:
+        p1: [C4.i1*8]
+        p2: [off*8]
+    play: [p1, p2, p2]
+loop: ~
+"""
+
+
+def test_wavetable_commands_are_their_shared_keys():
+    ir = songio.loads(COMMANDS_SONG)
+    rows = ir["records"]["ctrltab"]
+    assert [(r["w"], r["n"]) for r in rows.values()][1:] == [
+        (0xF5, 25), (0xF6, 200), (0xF9, 1), (0xFA, 1), (0xFB, 0xC2), (0xFC, 128), (0xFD, 9)
+    ]  # fmt: skip
+    grid = SongPlayer(ir).render_grid(20).astype(int)
+    last = grid[-1]
+    assert (last[5], last[6], last[2] | last[3] << 8) == (25, 200, 2048)
+    assert (last[22], last[23], last[24]) == (128, 0xC2, 0x10 | 9)
+    text = songio.dumps(ir)
+    assert "{run: pw1}, {run: f1}" in text and songio.dumps(songio.loads(text)) == text
+    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(20), grid)
+
+
+def test_a_wavetable_command_names_a_program_of_its_kind():
+    with pytest.raises(songio.SongFormatError, match="'i1' names no filttab or pulsetab"):
+        songio.loads(COMMANDS_SONG.replace("{run: pw1}", "{run: i1}"))

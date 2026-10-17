@@ -66,6 +66,55 @@ def test_goattracker_wave_rows(raw, shared):
 
 
 @pytest.mark.parametrize(
+    "raw,shared",
+    [
+        ({"w": 0xF5, "n": 0x19}, {"ad": 0x19}),
+        ({"w": 0xF6, "n": 0xC8}, {"sr": 0xC8}),
+        ({"w": 0xF9, "n": 3}, {"run": ("pulsetab", 3)}),
+        ({"w": 0xFA, "n": 2}, {"run": ("filttab", 2)}),
+        ({"w": 0xFB, "n": 0xC1}, {"res": 12, "route": 1}),
+        ({"w": 0xFC, "n": 0x80}, {"cut": 1024}),
+        ({"w": 0xFD, "n": 9}, {"vol": 9}),
+    ],
+)
+def test_goattracker_wave_commands_are_shared_row_keys(raw, shared):
+    c = codec("goattracker2", "ctrltab")
+    assert written(raw, c) == shared
+    assert c.decode(shared) == raw
+    assert c.ref_keys() == {"run": ("n", {"pulsetab", "filttab"})}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [{"w": 0xF0 + c, "n": 1} for c in (0, 1, 2, 3, 4, 7, 8, 14)]
+    + [{"w": 0xF9, "n": 0}, {"w": 0xFA, "n": 0}, {"w": 0xFB, "n": 0}, {"w": 0xFD, "n": 0x10}],
+)
+def test_goattracker_wave_commands_without_a_shared_form(raw):
+    assert codec("goattracker2", "ctrltab").encode(raw) is None
+
+
+@pytest.mark.parametrize(
+    "shared,match",
+    [
+        ({"run": ("speedtab", 1)}, "names no"),
+        ({"ad": 256}, "no shape"),
+        ({"vol": 16}, "no shape"),
+        ({"res": 0, "route": 0}, "no shape"),
+        ({"cut": 1025}, "values of"),
+        ({"ad": 1, "sr": 2}, "keys"),
+    ],
+)
+def test_goattracker_wave_commands_refuse_what_they_cannot_set(shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec("goattracker2", "ctrltab").decode(shared)
+
+
+def test_a_reference_key_needs_ref_and_field():
+    with pytest.raises(CodecError, match="both ref and field"):
+        RowCodec(GT_TYPES["ctrltab"], [{"keys": {"run": {"ref": "pulsetab"}}}], 0)
+
+
+@pytest.mark.parametrize(
     "name,raw,shared",
     [
         ("pulsetab", {"l": 0x84, "r": 0}, {"pw": 1024}),
