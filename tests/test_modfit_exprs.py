@@ -358,7 +358,7 @@ def test_a_counted_inherited_cell_is_a_phase_offset(mw):
             want(0, phi, 0) for phi in range(40)
         ]
     other = machine.start({"pptr": 3, "ptime": 5})
-    off = live[:1] + [types.SimpleNamespace(start=other, derived=derive(machine, other, None, GT_FREQ),
-                                            start_value=None)]  # fmt: skip
+    far = derive(machine, other, None, GT_FREQ)
+    off = live[:1] + [types.SimpleNamespace(start=other, derived=far, start_value=None)]
     lost = inherit(an, types.SimpleNamespace(unit=unit, live=off))
     assert lost.kind == "none" and lost.update is None and lost.reason
