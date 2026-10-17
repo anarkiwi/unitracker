@@ -20,15 +20,17 @@ dependencies = [
     "pysidwizard @ git+https://github.com/anarkiwi/pysidwizard",
     "z3-solver>=4.12",
     "sympy>=1.12",
+    "tiktoken>=0.7",
 ]
 
 [project.optional-dependencies]
-dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tiktoken>=0.7"]
+dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tokenizers>=0.20"]
 
 [project.scripts]
 unitracker-lift = "unitracker.cli:lift_main"
 unitracker-play = "unitracker.cli:play_main"
 unitracker-modfit = "unitracker.modfit.cli:main"
+unitracker-optimise = "unitracker.cli:optimise_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -144,6 +144,7 @@ class _Writer:
         self.names = {}
         self.row = 0
         self.restarts = {}
+        self.phrase_names = {}
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         rows = self.records.get(self.ins_type, {})
         written = lifetime.Lifetime(self.pr, self.rtypes).written
@@ -498,6 +499,7 @@ class _Writer:
         phrase_row = self._discover(rows, alias, compiled)
         defs = self._defs(len(rows), fixed, phrase_row, compiled)
         pnames = {base: f"p{i}" for i, base in enumerate(phrase_row, start=1)}
+        self.phrase_names = {p: (pnames[b], d) for p, (b, d) in alias.items()}
         out = []
         for row, item_defs in zip(rows, defs):
             item = {"def": item_defs} if item_defs else {}
@@ -563,10 +565,11 @@ def _transpose_key(arr):
     return norm.tobytes() + str(norm.shape).encode(), shift
 
 
-def dumps(ir: dict, embed: bool = False) -> str:
+def dumps(ir: dict, embed: bool = False, respell=None) -> str:
     """A canonical v1.15 document for internal-representation song ``ir``.
 
-    With ``embed`` the playroutine and its tables are written in full instead of by reference.
+    With ``embed`` the playroutine and its tables are written in full instead of by reference;
+    ``respell(doc)`` rewrites the written structure before it is dumped (spelling studies).
     """
     writer = _Writer(ir)
     meta = ir.get("meta") or {}
@@ -581,6 +584,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
     doc.update(writer.environment())
     doc["song"] = rows
     doc["loop"] = loop
+    doc = respell(doc) if respell else doc
     return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
 
 
