@@ -13,11 +13,11 @@ from importlib import resources
 
 import yaml
 
-from unitracker.format import hints, inline, refkeys, retired, timeline, xexpr
+from unitracker.format import hints, inline, refkeys, timeline, xexpr
 from unitracker.format.atoms import format_atom, parse_atom, runs
 from unitracker.format.codec import (
+    COMMAND_NAMES,
     NONE,
-    RETIRED,
     ROW_KEYS,
     CodecError,
     CommandCodec,
@@ -40,6 +40,7 @@ from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compil
 VERSION = "1.19"
 WIDTH = 100
 PHRASE = "phrase"
+DOC_KEYS = ("unitracker", "playroutine", "meta", "hints", "clock", "voices", "song", "loop")
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -102,7 +103,7 @@ def _expr_fields(codec) -> set:
 
 
 def _refuse(problem) -> None:
-    """Raise for a retired form's reason, if there is one."""
+    """Raise for a problem, if there is one."""
     if problem is not None:
         raise SongFormatError(problem)
 
@@ -265,10 +266,11 @@ class _Writer:
         refs = dict(self._refs(rtype, row))
         if shared is not None:
             return self._shared_row(codec, shared, refs, place)
-        if codec is not None and rtype.form == "map":
+        if codec is not None:
             raise SongFormatError(f"{rtype.written}: row {row} has no shared-vocabulary form")
-        _refuse(retired.row(rtype, row, row, _RowEval(rtype).holds))
-        _refuse(retired.unwritten(rtype, row))
+        for field in sorted(rtype.unwritten):
+            if int(row.get(field, rtype.default(field))) != rtype.default(field):
+                raise SongFormatError(f"{rtype.written}.{field} has no written form")
         values = {}
         for field in rtype.own:
             value = int(row.get(field, rtype.default(field)))
@@ -572,7 +574,10 @@ class _Reader:
         self.names = {}
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
-        self.written = {rt.written: rt for rt in self.rtypes.values()}
+        inline_types = {self.commands.inline(name) for name in COMMAND_NAMES}
+        self.written = {
+            rt.written: rt for rt in self.rtypes.values() if rt.name not in inline_types
+        }
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
 
@@ -626,8 +631,6 @@ class _Reader:
         # pylint: disable=too-many-branches
         codec = self.codecs.get(rtype.name)
         decoded = set()
-        if isinstance(value, dict):
-            _refuse(retired.fields(rtype, value))
         if codec is not None and isinstance(value, dict):
             row, decoded = self._decoded(codec, rtype, value, place)
         elif rtype.form == "map":
@@ -635,11 +638,10 @@ class _Reader:
                 raise SongFormatError(f"{rtype.written}: a row must be a mapping")
             row = dict(value)
         else:
-            row = self._list_row(rtype, codec, value, place)
-            _refuse(retired.row(rtype, row, value, _RowEval(rtype).holds))
+            row = self._list_row(rtype, codec, value)
         for field, val in list(row.items()):
-            if field not in rtype.fields or field == rtype.chain:
-                raise SongFormatError(f"{rtype.written}: unknown field {field!r}")
+            if field not in rtype.fields or field == rtype.chain or field in rtype.unwritten:
+                raise SongFormatError(f"unknown key {field} in {rtype.written}")
             if field in decoded:
                 continue
             plain = {k: v for k, v in row.items() if isinstance(v, int)}
@@ -685,15 +687,13 @@ class _Reader:
         return {**row, **named, **names}, set(row) - set(named)
 
     @staticmethod
-    def _list_row(rtype, codec, value, place) -> dict:
-        """A list row's fields; a row the codec writes with shared keys has no list form."""
-        fields = rtype.own
-        if not isinstance(value, list) or len(value) > len(fields):
-            raise SongFormatError(f"{rtype.written}: bad row {value!r}")
-        row = dict(zip(fields, value))
-        if codec is not None and codec.encode(row, place) is not None:
+    def _list_row(rtype, codec, value) -> dict:
+        """A list row's fields; a type with a codec writes its rows with shared keys."""
+        if codec is not None:
             raise SongFormatError(f"{rtype.written}: write row {value!r} with shared keys")
-        return row
+        if not isinstance(value, list) or len(value) > len(rtype.own):
+            raise SongFormatError(f"{rtype.written}: bad row {value!r}")
+        return dict(zip(rtype.own, value))
 
     def _program(self, rtype, value) -> int:
         """Allocate a program's rows, or the one row of an expression program; its entry index."""
@@ -743,8 +743,6 @@ class _Reader:
 
     def _define(self, written, name, value):
         rtype = self.written.get(written)
-        if written in RETIRED:
-            raise SongFormatError(f"record type {written!r} is {RETIRED[written]}")
         if rtype is None:
             raise SongFormatError(f"unknown record type {written!r}")
         tname = rtype.name
@@ -829,8 +827,8 @@ class _Reader:
 
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
-        if cmd in RETIRED:
-            raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
+        if cmd not in COMMAND_NAMES:
+            raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
         if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
             return [restart.CODE, self.lookup(arg[1:], restart.NAME)]
         row = isinstance(arg, tuple) and not self.commands.values(cmd)
@@ -920,7 +918,9 @@ def loads(text: str) -> dict:
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
-    _refuse(retired.document(doc) or hints.problem(doc.get("hints")))
+    for key in sorted(set(doc) - set(DOC_KEYS)):
+        raise SongFormatError(f"unknown key {key} in document")
+    _refuse(hints.problem(doc.get("hints")))
     return _Reader(doc).read()
 
 

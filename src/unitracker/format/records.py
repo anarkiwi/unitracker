@@ -17,7 +17,7 @@ META_KEYS = {
     "codec",
     "end",
     "expr",
-    "retired",
+    "unwritten",
     "writes_as",
 }
 EXPR = "x"
@@ -66,7 +66,11 @@ class RecordType:
         self.codec = list(spec.get("codec") or [])
         self.end = dict(spec.get("end") or {})
         self.expr = spec.get("expr")
-        self.retired = {str(k): str(v) for k, v in (spec.get("retired") or {}).items()}
+        self.unwritten = frozenset(str(f) for f in spec.get("unwritten") or ())
+        if not self.unwritten <= self.fields.keys():
+            raise RecordTypeError(
+                f"{name}: unwritten fields {sorted(self.unwritten)} are not fields"
+            )
         self.templates = {k: v for k, v in spec.items() if k not in META_KEYS}
         for key, actions in self.templates.items():
             if not isinstance(actions, list):

@@ -24,6 +24,7 @@ def test_defaults_and_refs():
         ({"form": "grid"}, "form"),
         ({"do": {"set": {}}}, "action list"),
         ({"fields": ["a"], "chain": "next"}, "chain field"),
+        ({"fields": ["a"], "unwritten": ["b"]}, r"unwritten fields \['b'\] are not fields"),
     ],
 )
 def test_bad_declarations(spec, match):
