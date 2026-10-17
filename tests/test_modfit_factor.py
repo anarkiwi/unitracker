@@ -94,8 +94,8 @@ def test_defmon_slide_pulse_bounce_and_acid(units):
     pulse = unit(units, "defmon", "procs.pulse", "pw")
     assert len(pulse) == 2 and all(g.proved and g.kinds == ("bounce",) for g in pulse)
     assert all("(v0 >> 8)" in g.hit for g in pulse)
-    [acid] = unit(units, "defmon", "procs.acid_step", "acc")
-    assert not acid.proved and acid.kinds == ()
+    acid = unit(units, "defmon", "procs.acid_step", "acc")
+    assert len(acid) == 2 and not any(g.proved or g.kinds for g in acid)
 
 
 @pytest.mark.parametrize(

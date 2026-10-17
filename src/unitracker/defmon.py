@@ -153,14 +153,18 @@ def voice_init(mem) -> dict:
 
 
 def global_init(mem) -> dict:
-    """The filter, volume and ACID state as init leaves it, as the ``ginit`` record."""
+    """The filter, volume and ACID state as init leaves it, as the ``ginit`` record.
+
+    The build's init zeroes the ACID offset ``cp``; the accumulator holds any later offset, so
+    an init that leaves another is refused."""
     ops = {mem[0x10B8], mem[0x10BF]}
     if len(ops) != 1 or not ops <= {0xE9, 0x69}:
         raise LiftError("ACID opcodes are not a matching SBC/ADC pair")
+    if mem[0x10CA]:
+        raise LiftError(f"init leaves the ACID offset cp at ${mem[0x10CA]:02X}, not 0")
     return {
         "resfilt": mem[0x10AA],
         "fv": mem[0x10AF],
-        "cp": mem[0x10CA],
         "acc": _word(mem, 0x10B6, 0x10BE),
         "astep": _word(mem, 0x10B9, 0x10C0),
         "sub": int(mem[0x10B8] == 0xE9),

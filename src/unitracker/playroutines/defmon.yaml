@@ -52,12 +52,13 @@ record_types:
     stop: "dl >= 0x80"
     form: map
     # freq, pw and cut are the row's pitch, pulse and ACID modulator expressions (xf, xp, xc):
-    # a pitch expression runs the slide mode (af $80), a pw or cut expression replaces the
-    # pw, ps and acid columns; af below $80, a fixed offset, is a pitch expression too.
-    # re edits $D417 for the row's voice: 0 unroutes it (route -), bit 3 keeps the routing and adds the voice and
-    # the low nibble under resonance re >> 4 (route + m), any other value is the byte (res, route).
+    # a pitch expression runs the slide mode (af $80), a pw expression replaces the pw and ps
+    # columns and a cut expression the cp and acid columns; af below $80, a fixed offset, is a
+    # pitch expression too. re edits $D417 for the row's voice: 0 unroutes it (route -), bit 3
+    # keeps the routing and adds the voice and the low nibble under resonance re >> 4
+    # (route + m), any other value is the byte (res, route).
     codec:
-      - when: "xf != 0 and af == 0x80 and pw < 0 and ps < 0 and acid < 0"
+      - when: "xf != 0 and af == 0x80 and pw < 0 and ps < 0 and cp < 0 and acid < 0"
         keys:
           <<: &columns
             hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
@@ -71,7 +72,6 @@ record_types:
             route: {value: "re & 0x0F", rel: "-1 if re == 0 else (1 if re & 0x08 else 0)", omit: "re < 0"}
             mode: {value: "fv & 0xF0", omit: "fv < 0"}
           freq: {expr: xf}
-        keep: [cp]
         raw:
           <<: &fields
             dl: "(hold - 1) if has_hold else 0"
@@ -83,9 +83,8 @@ record_types:
             re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
             fv: "mode if has_mode else -1"
           af: 0x80
-      - when: "xf == 0 and af < 0 and pw < 0 and ps < 0 and acid < 0"
+      - when: "xf == 0 and af < 0 and pw < 0 and ps < 0 and cp < 0 and acid < 0"
         keys: *columns
-        keep: [cp]
         raw: *fields
     # A frozen row ends a program.
     end: {dl: 0x80}
@@ -106,7 +105,8 @@ record_types:
           - set:
               res: "(res & rmask) if row.re == 0 else (((res & 0x0F) | row.re | rbit) if row.re & 0x08 else row.re)"
       - {if: "row.fv >= 0", then: [{set: {fv: row.fv}}]}
-      - {if: "row.cp >= 0", then: [{set: {cp: row.cp}}]}
+      - if: "row.cp >= 0"
+        then: [{set: {acc: "((acc >= 0x10000) << 16) + ((acc + (row.cp - cp) * 256) & 0xFFFF)", cp: row.cp}}]
       - if: "row.acid >= 0"
         then:
           - if: "row.acid & 0x8000"
@@ -114,7 +114,7 @@ record_types:
               - if: "row.acid & 0x4000"
                 then: [{set: {astep: "row.acid & 0x3FFF", sub: 1}}]
                 else: [{set: {astep: "row.acid & 0x7FFF", sub: 0}}]
-            else: [{set: {acc: row.acid, astep: 0}}]
+            else: [{set: {acc: "(row.acid + cp * 256) & 0xFFFF", astep: 0}}]
   # Each voice's state as init leaves it; a layer's row is a reference while its counter runs.
   vinit:
     fixed: true
@@ -142,13 +142,13 @@ record_types:
   ginit:
     fixed: true
     form: map
-    fields: [resfilt, fv, cp, acc, astep, sub]
+    fields: [resfilt, fv, acc, astep, sub]
     codec:
       - keys:
           res: {value: "resfilt >> 4", omit: "resfilt < 0x10"}
           route: {value: "resfilt & 0x0F", omit: "(resfilt & 0x0F) == 0"}
           mode: {value: "fv & 0xF0", omit: "fv < 0x10"}
-        keep: [cp, acc, astep, sub]
+        keep: [acc, astep, sub]
         raw: {resfilt: "((res & 0x0F) << 4) | (route & 0x0F)", fv: mode}
 functions:
   nfreq:
@@ -168,7 +168,6 @@ global:
   astep: {width: 16}
   sub: {width: 1}
   cf: {width: 8}
-  o16: {width: 8}
   o17: {width: 8}
   o18: {width: 8}
   vi: {width: 8}
@@ -209,16 +208,18 @@ procs:
   # $1022 SID band: this call writes the state the previous call left.
   latch:
     - set: {o_flo: flo, o_fhi: fhi, o_pw: pw, o_ctrl: "ctrl ^ eor", o_ad: ad, o_sr: sr}
-  # $10B5 ACID cutoff: CLC then ADC adds the step, or SBC adds its complement (step + 1 less);
-  # bit 16 of acc is the carry, which the cutoff adds; a negative high byte saturates.
+  # $10B5 ACID accumulator. acc holds it with the offset cp added to its high byte, wrapped to
+  # 16 bits; bit 16 is the carry of the last step. CLC then ADC adds the step, or SBC adds its
+  # complement (step + 1 less), to the accumulator without the offset; a negative high byte
+  # saturates to the floor.
   acid_step:
-    - set: {acc: "(acc & 0xFFFF) + ((0xFFFF - astep) if sub else astep)"}
+    - set: {acc: "((acc - cp * 256) & 0xFFFF) + ((0xFFFF - astep) if sub else astep)"}
     - if: "(acc & 0xFFFF) > 0x7FFF"
       then: [{set: {acc: "((acc >= 0x10000) << 16) + (floor << 8) + (acc & 0xFF)"}}]
+    - {if: cp, then: [{set: {acc: "((acc >= 0x10000) << 16) + ((acc + cp * 256) & 0xFFFF)"}}]}
+  # $10CA the cutoff byte: the high byte, which holds the offset, plus the carry, wrapped to 8 bits.
   acid_out:
-    - set: {cf: "((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)"}
-    - set: {o16: "floor if (cf >= 0x80 or cf < floor) else cf"}
-    - {if: dbl, then: [{set: {o16: "o16 << 1"}}]}
+    - set: {cf: "(acc >> 8) + (acc >> 16)"}
   # $117F pattern event: arm the sidcall layers, latch a note.
   pattern:
     - fetch: true
@@ -310,7 +311,6 @@ init:
   - set:
       res: "ginit[0].resfilt"
       fv: "ginit[0].fv"
-      cp: "ginit[0].cp"
       acc: "ginit[0].acc"
       astep: "ginit[0].astep"
       sub: "ginit[0].sub"
@@ -320,7 +320,7 @@ tick:
   - call: play
 
 ghost:
-  global: {0x16: o16, 0x17: o17, 0x18: o18}
+  global: {0x16: "(floor if cf >= 0x80 or cf < floor else cf) << dbl", 0x17: o17, 0x18: o18}
   voice:
     0: o_flo
     1: o_fhi
@@ -375,15 +375,11 @@ modulators:
       scope: global
       key: cut
       cell: acc
-      chip:
-        width: 11
-        value: "(floor if ((((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)) >= 0x80 or (((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)) < floor) else (((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000))) << dbl << 3"
-        store: {acc: "((value >> 3 >> dbl) - cp) << 8"}
       fire: [layer_b, acid_step]
       pre: procs.layer_b
       post: procs.acid_step
       label: [rowB]
       x: "sidtab[rowB].xc"
-      program: {pointer: rowB, record: sidtab, fields: [acid, xc]}
-      site: {record: sidtab, index: rowB, field: xc, clear: {acid: -1}}
+      program: {pointer: rowB, record: sidtab, fields: [cp, acid, xc]}
+      site: {record: sidtab, index: rowB, field: xc, clear: {cp: -1, acid: -1}}
       hooks: [{at: procs.pattern, pointer: [rowB]}]

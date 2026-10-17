@@ -1,4 +1,4 @@
-"""v1.11 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.12 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.11
+unitracker: 1.12
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -181,7 +181,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.11", "unitracker: 1.8", "not a unitracker v1.11 document"),
+        ("unitracker: 1.12", "unitracker: 1.8", "not a unitracker v1.12 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
@@ -291,10 +291,10 @@ def test_csillag_wrong_delay_constant_breaks_the_grid(csillag):
     assert mismatch(later, native(raw, 2304 * 6)) is not None
 
 
-def test_crosseyed_wrong_carried_constant_breaks_the_grid(crosseyed):
+def test_crosseyed_wrong_acid_step_breaks_the_grid(crosseyed):
     raw, text = lifted(crosseyed)
     want = native(raw, 95 + 2 * 1152 + 100)
     assert mismatch(text, want) is None
-    carried = "16*[φ >= 1]"
-    assert carried in text
-    assert mismatch(text.replace(carried, "8*[φ >= 1]"), want) is not None
+    step = "v % 65536 + 2560)*[v % 65536 < 62976]"
+    assert step in text
+    assert mismatch(text.replace(step, "v % 65536 + 2304)*[v % 65536 < 62976]"), want) is not None

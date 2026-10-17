@@ -186,6 +186,8 @@ def test_restart_programs_hold_only_what_the_player_plays(pr_name, place, shared
         ("defmon", "sidtab", {"route": "- 1"}, r"values of \['route'\]"),
         ("defmon", "sidtab", {"re": 0}, "re is retired in v1.7"),
         ("defmon", "sidtab", {"acid": 0x8001}, "acid is retired in v1.7"),
+        ("defmon", "sidtab", {"cp": 5}, "cp is retired in v1.12"),
+        ("defmon", "ginit", {"cp": 5}, "cp is retired in v1.12"),
     ],
 )
 def test_res_and_route_are_refused_where_the_player_cannot_set_them(pr_name, name, shared, match):
@@ -316,7 +318,7 @@ def test_expression_keys(pr_name, name, keys):
     assert codec(pr_name, name).expr_keys() == keys
 
 
-DM_UNSET = {"re": -1, "fv": -1, "cp": -1}
+DM_UNSET = {"re": -1, "fv": -1}
 
 
 def test_defmon_row_and_freeze():
@@ -450,7 +452,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.11",
+        "unitracker": "1.12",
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -620,7 +622,7 @@ INS_KEYS = {
         "freq",
     },
 }
-DM_KEEP = {"af", "ps", "cp"}
+DM_KEEP = {"af", "ps"}
 # Player-specific keys a program row may carry besides the shared ones.
 ROW_KEEP = {"defmon": {"cp"}}
 # The list rows the format keeps: GoatTracker wavetable commands with no shared form.
@@ -639,7 +641,7 @@ PROGRAMS = ("ctrltab", "pulsetab", "filttab", "sidtab", "wftab", "pwtab", "fltta
 INS_FORMS = {"ctrl": (list, str), "pw": (list, str, int), "freq": (str, int)}
 INIT_KEYS = {
     "vinit": {"flo", "fhi", "sacc", "tbase", "rowA", "cntA", "rowB", "cntB"} | DM_KEEP,
-    "ginit": {"cp", "acc", "astep", "sub"},
+    "ginit": {"acc", "astep", "sub"},
 }
 
 
@@ -695,7 +697,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.11 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.12 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -763,7 +765,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.11",
+                "unitracker": "1.12",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -805,7 +807,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.11
+unitracker: 1.12
 playroutine: {ref: defmon}
 song:
   - def:
@@ -897,7 +899,7 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.11
+unitracker: 1.12
 playroutine: {ref: sidwizard}
 song:
   - def:
