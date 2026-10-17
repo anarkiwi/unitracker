@@ -14,6 +14,12 @@ TABLE_JUMP = 0xFE
 TABLE_END = 0xFF
 CHORD_RETURN = 0x7E
 CHORD_LOOP = 0x7F
+# A WF row's arp byte that plays the chord; a row's waveform byte from $10; the arp speed bits
+# the normal build reads; the detune byte that leaves the detune.
+CHORD_ROW = 0x7F
+WAVEFORM = 0x10
+ARP_SPEED = 0x3F
+NO_DETUNE = 0xFF
 MAX_INSTRUMENT = 0x3E
 LEGATO = 0x3F
 GATE_ON, GATE_OFF = 0x7D, 0x7E
@@ -45,15 +51,18 @@ class Tables:
 
     def program(self, name: str, data: bytes, decode) -> int:
         """Allocate ``data``'s 3-byte rows as a program; its entry index, 0 when empty."""
-        rows = table_rows(name, data)
+        return self.allocate(name, [decode(row) for row in table_rows(name, data)])
+
+    def allocate(self, name: str, rows: list, loop: int | None = None) -> int:
+        """Allocate ``rows`` as a program that ends, or loops to row ``loop``; its entry, 0 when
+        empty."""
         if not rows:
             return 0
         recs = self.records[name]
         start = len(recs) + 1
-        for k, row in enumerate(rows):
-            rec = decode(row)
-            rec["next"] = start + k + 1 if k + 1 < len(rows) else 0
-            recs[start + k] = rec
+        for k, rec in enumerate(rows):
+            last = 0 if loop is None else start + loop
+            recs[start + k] = {**rec, "next": start + k + 1 if k + 1 < len(rows) else last}
         return start
 
 
@@ -71,11 +80,6 @@ def table_rows(name: str, data: bytes) -> list[bytes]:
     return rows
 
 
-def wf_record(row: bytes) -> dict:
-    """A WF/arp row's waveform, arp and detune bytes."""
-    return {"w": row[0], "a": row[1], "d": row[2]}
-
-
 def pw_record(row: bytes) -> dict:
     """A pulse row's two bytes and keyboard-track amount."""
     return {"a": row[0], "b": row[1], "k": row[2]}
@@ -88,35 +92,23 @@ def filter_record(row: bytes) -> dict:
     return {"a": row[0], "b": row[1], "k": row[2]}
 
 
-def chords(table: bytes) -> tuple[dict, dict]:
-    """Chord programs: ``{index: record}`` and ``{chord number: entry index}``.
+def chords(table: bytes) -> dict:
+    """``{chord number: (note offsets, loops)}`` of the chord table.
 
     A chord ending in $7F loops to its start; one ending in $7E ends, returning to the WF
     table. The last chord may run to the end of the table, which loops.
     """
-    records, starts, rows = {}, {}, []
-    number = 1
-
-    def close(loop: bool):
-        nonlocal rows, number
-        if rows:
-            start = len(records) + 1
-            for k, offset in enumerate(rows):
-                last = k + 1 == len(rows)
-                nxt = (start if loop else 0) if last else start + k + 1
-                records[start + k] = {"n": offset, "next": nxt}
-            starts[number] = start
-        number += 1
-        rows = []
-
+    out, rows, number = {}, [], 1
     for byte in table:
         if byte in (CHORD_RETURN, CHORD_LOOP):
-            close(byte == CHORD_LOOP)
+            if rows:
+                out[number] = (tuple(rows), byte == CHORD_LOOP)
+            number, rows = number + 1, []
         else:
             rows.append(byte)
     if rows:
-        close(True)
-    return records, starts
+        out[number] = (tuple(rows), True)
+    return out
 
 
 class Restarts:
@@ -160,8 +152,67 @@ def restart_rows(control: int, hrad: int, hrsr: int, first: int) -> tuple:
     return tuple(tuple(sorted(row.items())) for row in rows)
 
 
-def instrument_record(ins, tables: Tables, chord_starts: dict, restarts: Restarts) -> dict:
-    """An instrument's header fields and its table and restart programs."""
+def wf_rows(ins, chord) -> tuple[list, int | None]:
+    """An instrument's WF rows with ``chord`` (from :func:`chords`) inlined at each $7F row,
+    and the row a looping chord returns to.
+
+    Every row holds for the instrument's arp speed. A chord step writes the $7F row's waveform
+    and the next offset, so each chord row carries both; it leaves the detune, which a row
+    clears unless the program sets none.
+    """
+    rows = table_rows("wftab", ins.wf_table)
+    hold = ins.arp_speed & ARP_SPEED
+    detune = 0 if all(row[2] in (0, NO_DETUNE) for row in rows) else NO_DETUNE
+    out = []
+    for k, (wave, arp, det) in enumerate(rows):
+        if arp != CHORD_ROW:
+            out.append({"w": wave, "a": arp, "d": det, "h": hold})
+            continue
+        if chord is None:
+            raise LiftError("a WF row plays a chord the instrument does not have")
+        offsets, loops = chord
+        if max(offsets) >= 0x80:
+            raise LiftError(f"chord offset ${max(offsets):02X} is not covered")
+        if not loops and (wave < WAVEFORM or (k + 1 < len(rows) and rows[k + 1][0] < WAVEFORM)):
+            raise LiftError("a chord returning to or from a WF hold row is not covered")
+        start = len(out)
+        out += [{"w": wave, "a": n, "d": detune, "h": hold} for n in offsets]
+        if loops:
+            return out, start
+    return out, None
+
+
+class Waves:
+    """Each instrument's WF program with the chord its $7F rows play."""
+
+    # pylint: disable=too-few-public-methods
+
+    def __init__(self, instruments, chord_table: bytes, tables: Tables):
+        self.instruments = instruments
+        self.chords = chords(chord_table)
+        self.tables = tables
+        self.entries = {}
+
+    def entry(self, ins: int, chord: int) -> int:
+        """The program instrument record ``ins`` plays with chord number ``chord``, 0 for none.
+
+        A chord the table does not hold leaves the instrument's own.
+        """
+        if not 1 <= ins <= len(self.instruments):
+            return 0
+        native = self.instruments[ins - 1]
+        chosen = None
+        if any(row[1] == CHORD_ROW for row in table_rows("wftab", native.wf_table)):
+            chosen = self.chords.get(chord, self.chords.get(native.default_chord))
+        key = (ins, chosen)
+        if key not in self.entries:
+            self.entries[key] = self.tables.allocate("wftab", *wf_rows(native, chosen))
+        return self.entries[key]
+
+
+def instrument_record(ins, tables: Tables, wave: int, restarts: Restarts) -> dict:
+    """An instrument's header fields and its table and restart programs, ``wave`` its WF
+    program."""
     if ins.filter_table and ins.filter_table[0] == TABLE_END:
         raise LiftError("instruments marked unfiltered ($FF filter table) are not covered")
     hrad = (ins.hr_attack << 4) | ins.hr_decay
@@ -173,10 +224,8 @@ def instrument_record(ins, tables: Tables, chord_starts: dict, restarts: Restart
         "sr": (ins.sustain << 4) | ins.release,
         "vibrato": ins.vibrato,
         "vibdelay": ins.vibrato_delay,
-        "arpspeed": ins.arp_speed,
-        "chord": chord_starts.get(ins.default_chord, 0),
         "octave": ins.octave_shift,
-        "ctrl": tables.program("wftab", ins.wf_table, wf_record),
+        "ctrl": wave,
         "pw": tables.program("pwtab", ins.pw_table, pw_record),
         "filter": tables.program("flttab", ins.filter_table, filter_record),
         "restart": restarts.program(rows),
@@ -187,17 +236,15 @@ def instrument_record(ins, tables: Tables, chord_starts: dict, restarts: Restart
 class Events:
     """Pattern rows as events: commands in column order, instrument column first."""
 
-    def __init__(self, ins_index, chord_starts):
+    def __init__(self, ins_index):
         self.ins_index = ins_index
-        self.chord_starts = chord_starts
 
     def small(self, byte: int, column: int) -> tuple[int, int]:
-        """A small FX in ``column`` (0: the FX column) as ``(command, argument)``."""
+        """A small FX in ``column`` (0: the FX column) as ``(command, argument)``; a chord's
+        argument is its number until :func:`chord_runs` resolves it."""
         cls, low = byte & 0xF0, byte & 0x0F
         if cls not in SMALL_FX:
             raise LiftError(f"small FX ${byte:02X} is not covered")
-        if cls == CHORD_FX:
-            return column | cls, self.chord_starts.get(low, 0)
         return column | cls, low
 
     def instrument_column(self, ins, event, commands) -> None:
@@ -297,6 +344,49 @@ def first_note_selects(tracks, phrases) -> None:
                 break
 
 
+def _commands(event: dict) -> list:
+    if "commands" in event:
+        return event["commands"]
+    return [event["command"]] if "command" in event else []
+
+
+def chord_runs(tracks, phrases, waves: Waves) -> None:
+    """Each chord FX as ``!run`` of the WF program its note starts.
+
+    A chord FX selects the chord a $7F row plays until the voice's next note, so on a note
+    that starts the instrument it starts that instrument's program with the chord inlined.
+    A note that names no instrument plays the voice's last one, found by walking each
+    orderlist twice through its loop. The playroutine plays ``!run`` in the instrument
+    column on a row that names no instrument, else in the FX column.
+    """
+    runs = {}
+    for trk in tracks:
+        loop = trk["loop"]
+        ins, glide = 0, False
+        for play in trk["plays"] + (trk["plays"][loop:] if loop is not None else []):
+            for k, event in enumerate(phrases[play["phrase"]]):
+                ins = event.get("instrument", ins)
+                cmds = _commands(event)
+                starts = isinstance(event.get("note"), int) and [LEGATO, 0] not in cmds
+                for j, (code, number) in enumerate(cmds):
+                    if code not in (CHORD_FX, INST_COLUMN | CHORD_FX):
+                        continue
+                    if not starts or glide:
+                        raise LiftError("a chord FX on a row that starts no note is not covered")
+                    if code == CHORD_FX and "instrument" not in event:
+                        raise LiftError("an FX-column chord on a note without an instrument")
+                    target = waves.entry(ins, number)
+                    if runs.setdefault((play["phrase"], k, j), target) != target:
+                        raise LiftError("a chord FX's note plays different instruments")
+                codes = {code for code, _ in cmds}
+                if NOTE_COLUMN | NOTE_GLIDE in codes:
+                    glide = True
+                elif isinstance(event.get("note"), int) or codes & {*BIG_FX, NOTE_COLUMN | NOTE_FX}:
+                    glide = False
+    for (name, k, j), target in runs.items():
+        _commands(phrases[name][k])[j][:] = [CHORD_FX, target]
+
+
 def check_build(swm, features) -> None:
     """Raise for builds and tunes the sidwizard playroutine does not cover yet."""
     unsupported = {
@@ -315,14 +405,16 @@ class Instruments:
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, swm, tables: Tables, chord_starts: dict):
+    def __init__(self, swm, tables: Tables):
         self.restarts = Restarts()
+        self.waves = Waves(swm.instruments, swm.chord_table, tables)
         self.records = {
-            num: instrument_record(ins, tables, chord_starts, self.restarts)
+            num: instrument_record(
+                ins, tables, self.waves.entry(num, ins.default_chord), self.restarts
+            )
             for num, ins in enumerate(swm.instruments, start=1)
         }
         self.count = len(swm.instruments)
-        self.chord = chord_starts.get(1, 0)
 
     def index(self, ref: int) -> int:
         """The record an instrument-column reference plays: past the count, the empty one."""
@@ -334,7 +426,6 @@ class Instruments:
             self.records[empty] = {
                 "flags": EMPTY_CONTROL & FLAGS,
                 "sr": 0xF0,
-                "chord": self.chord,
                 "restart": self.restarts.program(rows),
             }
         return empty
@@ -368,10 +459,9 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
     features = features_for_driver(swm.driver_type)
     check_build(swm, features)
     lo, hi = freq(swm, features)
-    chord_records, chord_starts = chords(swm.chord_table)
     tables = Tables()
-    instruments = Instruments(swm, tables, chord_starts)
-    events = Events(instruments.index, chord_starts)
+    instruments = Instruments(swm, tables)
+    events = Events(instruments.index)
     tracks = [track(seq, len(swm.patterns)) for seq in swm.sequences[:3]]
     if len(tracks) != 3:
         raise LiftError("a subtune needs three orderlists")
@@ -380,6 +470,7 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
         for name in sorted({p["phrase"] for t in tracks for p in t["plays"]})
     }
     first_note_selects(tracks, phrases)
+    chord_runs(tracks, phrases, instruments.waves)
     playroutine = library("sidwizard")
     playroutine["constants"], hints = tempo(swm)
     ir = {
@@ -398,7 +489,6 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
             "wftab": tables.records["wftab"],
             "pwtab": tables.records["pwtab"],
             "flttab": tables.records["flttab"],
-            "chordtab": chord_records,
             "restart": instruments.restarts.records,
         },
         "tracks": tracks,

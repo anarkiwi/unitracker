@@ -1,4 +1,4 @@
-# unitracker song format (v1.8)
+# unitracker song format (v1.9)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.8
+unitracker: 1.9
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.8`; readers reject any other version |
+| `unitracker` | `1.9`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -185,8 +185,7 @@ SID-Wizard's effect commands are its own: they have no identical shared form.
 | command | meaning |
 |---|---|
 | `!attack:n`, `!decay:n`, `!sustain:n`, `!release:n` | small FX $2x/$3x/$5x/$6x: one ADSR nibble |
-| `!chord:@ch` | small FX $7x: select a chord |
-| `!iattack`, `!idecay`, `!isustain`, `!irelease`, `!ichord` | the same small FX in the instrument column, which the player times differently |
+| `!iattack`, `!idecay`, `!isustain`, `!irelease` | the same small FX in the instrument column, which the player times differently |
 | `!notevib:n` | note column $60-$77: vibrato with amplitude n |
 
 A shared key means the same wherever it appears: in program rows, in initial-state
@@ -199,11 +198,11 @@ can't express !notevib:1`); the writer refuses to write a value that would not r
 - **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
   command rows (list rows), `!vib:@s` and the instrument keys `speed` and `vd`.
 - **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
-- **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
-  detune (list rows `[w, a, d]`), pulse and filter sweep rows and keyboard-tracked rows
-  (list rows), `!notevib` and the instrument keys `flags` (bits 4-7 of the header's control
-  byte: the vibrato type, and keeping the pulse and filter programs across notes),
-  `vibrato`, `vibdelay`, `arpspeed`, `chord` and `octave`.
+- **SID-Wizard:** WF rows that hold a row (`w` below $10) or set a detune (list rows
+  `[w, a, d, h]`), pulse and filter sweep rows and keyboard-tracked rows (list rows),
+  `!notevib` and the instrument keys `flags` (bits 4-7 of the header's control byte: the
+  vibrato type, and keeping the pulse and filter programs across notes), `vibrato`,
+  `vibdelay` and `octave`.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -215,6 +214,16 @@ keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a 
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
 `can't express !noteglide:0`). A command's argument is a byte: `!freq:@x` names one of the
 first 255 expressions, else the reader refuses it.
+
+### Chords
+
+A chord or arpeggio is a `ctrl` program of relative-note rows in every player, as GoatTracker
+writes it: `[{ctrl: 65, note: +0}, {wait: 1, note: +5}, {wait: 1, note: +8}, {loop: 1}]`. A
+chord that loops is the program's looping tail; one that ends runs into the program's next
+row. An event that plays a different chord starts that program with `!run` (SID-Wizard: see
+Backends). The SID-Wizard record type `chordtab`, the instrument keys `chord` and `arpspeed`,
+the commands `!chord` and `!ichord` and the WF row with `a` $7F are refused
+(`record type 'chordtab' is retired in v1.9`, `ins.arpspeed is retired in v1.9`).
 
 ### Filter
 
@@ -696,12 +705,19 @@ to a nibble, as the reference grid does.
 **SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
 applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking
 the voices in the player's reverse order. An instrument is its header (`flags`, `ad`, `sr`,
-`vibrato`, `vibdelay`, `arpspeed`, `chord`, `octave`), its WF/arp, pulse, filter and
-restart programs (`ctrl`, `pw`, `filter`, `restart`) and its pitch expression (`freq`).
-The header's hard-restart bytes and control bits 0-3 become the restart program; a
-restart on both ticks before the note (control bits 0 and 1) is not covered. WF rows use `ctrl` and `note`; pulse set rows `pw`;
-filter set rows `mode`, `cut` and `res`; chords are programs of `note` offsets that loop
-or end. Note names are offset by one index: SID-Wizard index 49 is `C4`. The lifter
+`vibrato`, `vibdelay`, `octave`), its WF/arp, pulse, filter and restart programs (`ctrl`,
+`pw`, `filter`, `restart`) and its pitch expression (`freq`). The header's hard-restart
+bytes and control bits 0-3 become the restart program; a restart on both ticks before the
+note (control bits 0 and 1) is not covered. WF rows use `ctrl`, `note` and `hold`, the
+instrument's arp speed plus one; pulse set rows `pw`; filter set rows `mode`, `cut` and
+`res`. A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there,
+each row with that row's waveform, which the player writes on every chord step. A chord
+small FX ($7x) holds until the voice's next note, so on a note it becomes `!run` of the
+instrument's program with that chord inlined. `!run` plays in the instrument column on an
+event that names no instrument and in the FX column otherwise: the player times the two
+differently on a note's hard-restart ticks. A chord FX on a row that starts no note, and an
+FX-column chord on a note that names no instrument, are not covered. Note names are offset
+by one index: SID-Wizard index 49 is `C4`. The lifter
 requires each voice's first note to select an instrument: a note that selects none on a
 voice that has never had one has no instrument state to play. Table jumps, orderlist
 transposes, tempo and volume commands,

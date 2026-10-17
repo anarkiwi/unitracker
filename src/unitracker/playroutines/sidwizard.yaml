@@ -22,13 +22,12 @@ commands:
   48: {name: decay}
   80: {name: sustain}
   96: {name: release}
-  112: {name: chord, ref: chordtab}
+  112: {name: run, ref: wftab}
   63: {name: legato}
   288: {name: iattack}
   304: {name: idecay}
   336: {name: isustain}
   352: {name: irelease}
-  368: {name: ichord, ref: chordtab}
   608: {name: notevib}
 record_types:
   # An instrument's 16-byte header as fields, its WF/arp, pulse and filter tables as programs.
@@ -38,8 +37,8 @@ record_types:
     form: map
     # flags: bits 4-5 the vibrato type, bit 6 keeps the pulse and bit 7 the filter program
     # running across notes.
-    fields: {flags: 16, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, arpspeed: 0, chord: 0, octave: 0, ctrl: 0, pw: 0, filter: 0, freq: 0, restart: 0}
-    refs: {ctrl: wftab, pw: pwtab, filter: flttab, chord: chordtab, freq: x, restart: restart}
+    fields: {flags: 16, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, octave: 0, ctrl: 0, pw: 0, filter: 0, freq: 0, restart: 0}
+    refs: {ctrl: wftab, pw: pwtab, filter: flttab, freq: x, restart: restart}
   # Hard restart: a lookahead row, written hold (2 or 1) ticks before the note's row applies:
   # the gate off and the hard-restart envelope, with control $18 (staccato, the voice's tables
   # paused) or the gated-off waveform; then the note's first-tick row, the first waveform the
@@ -70,20 +69,25 @@ record_types:
         raw:
           ctrl: "ctrl if has_ctrl else -1"
   # WF/arp row: w a waveform ($10+) or a row-hold count; a the arp byte (relative up $00-$7E,
-  # chord $7F, none $80, absolute $81-$DF, relative down $E0-$FF); d the detune ($FF: none).
+  # none $80, absolute $81-$DF, relative down $E0-$FF); d the detune ($FF: none); h the ticks
+  # the row holds after its first, the instrument's arp speed. A chord is the program's own rows.
   wftab:
     prefix: w
     none: 0
     chain: next
-    fields: {w: 0, a: 128, d: 0, next: 0}
+    fields: {w: 0, a: 128, d: 0, h: 0, next: 0}
+    retired:
+      "a == 0x7F": "retired in v1.9: a chord is the program's own rows of relative notes"
     codec:
-      - when: "w >= 0x10 and a != 0x7F and d == 0"
+      - when: "w >= 0x10 and a != 0x7F and d == 0 and 0 <= h <= 0x3F"
         keys:
+          hold: {value: "h + 1", omit: "h == 0"}
           ctrl: w
           note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
         raw:
           w: ctrl
           a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
+          h: "hold - 1 if has_hold else 0"
   # Pulse row: a $80+ sets the width from (a & $7F, b); otherwise a ticks of a signed b sweep.
   # k is the keyboard-track amount; x the expression a program of that one row is.
   pwtab:
@@ -111,16 +115,6 @@ record_types:
       - when: "a >= 0x80 and k == 0 and (x == 0 or b == 0)"
         keys: {mode: "a & 0x70", res: "res & 0x0F", cut: {value: "b << 3", expr: x}}
         raw: {a: "0x80 | mode", b: "cut >> 3", res: res}
-  # Chord row: a note offset; a chord loops or ends back to the WF table.
-  chordtab:
-    prefix: ch
-    none: 0
-    chain: next
-    fields: [n, next]
-    codec:
-      - when: "n < 0x7E"
-        keys: {note: n}
-        raw: {n: note}
 functions:
   # The row of restart program r on the note's first tick: its last.
   hrnote:
@@ -246,11 +240,6 @@ voice:
   dov: {init: -1}
   sov: {init: -1}
   rov: {init: -1}
-  chord: {width: 8}
-  cpos: {width: 8}
-  cstart: {width: 8}
-  cret: {width: 1}
-  cont: {width: 1}
   upi: {width: 8}
   vb: {width: 8}
   rw: {width: 8}
@@ -284,8 +273,9 @@ procs:
     - set: {fmv: "(fmv & 0xF0) | (seqvolu & 0x0F)"}
     - fetch: true
     - set: {haspend: 1, pk: ev_kind, pn: ev_note, pins: ev_instr, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}
-    - {call: route, with: {rc: ev_cmd, ra: ev_arg}}
-    - {call: route, with: {rc: ev_cmd2, ra: ev_arg2}}
+    # !run plays in the instrument column on a row that names no instrument.
+    - {call: route, with: {rc: "(ev_cmd | 0x100) if ev_cmd == 0x70 and ev_instr == 0 else ev_cmd", ra: ev_arg}}
+    - {call: route, with: {rc: "(ev_cmd2 | 0x100) if ev_cmd2 == 0x70 and ev_instr == 0 else ev_cmd2", ra: ev_arg2}}
     - {if: "pk or pins or pleg or pifx or pfx or pnfx", then: [{set: {trig: 1}}]}
     # A note read while a note glide is pending slides there without a new start.
     - {if: "pk == 1 and svib == 0xFF", then: [{set: {pleg: 1}}]}
@@ -336,15 +326,16 @@ procs:
         - set:
             fml: "fmlo(((vb >> 4) & 0x0F) << 3, note + oct)"
             fmh: "fmhi(((vb >> 4) & 0x0F) << 3, note + oct)"
-  select_chord:
-    - {if: "sa != 0", then: [{set: {chord: sa, cpos: sa, cstart: sa}}]}
+  # !run (the chord FX): the WF program the note plays from its next row.
+  run_wf:
+    - {if: "sa != 0", then: [{set: {wpos: sa}}]}
   small_fx:
     - {if: "sfc == 0x20", then: [{set: {aov: sa, dov: -1}}]}
     - {if: "sfc == 0x30", then: [{set: {aov: -1, dov: sa}}]}
     - {if: "sfc == 0x50", then: [{set: {sov: sa, rov: -1}}]}
     - {if: "sfc == 0x60", then: [{set: {sov: -1, rov: sa}}]}
     - {if: "sfc != 0x70 and ci != 0", then: [{call: write_adsr}]}
-    - {if: "sfc == 0x70", then: [{call: select_chord}]}
+    - {if: "sfc == 0x70", then: [{call: run_wf}]}
   slide_speed:
     - if: "xfv == 0"
       then: [{set: {fml: 0, fmh: 0}}]
@@ -369,11 +360,10 @@ procs:
     - set: {started: 1, wpos: "ins[ci].ctrl"}
     - {if: "sel or not (ins[ci].flags & 0x40)", then: [{set: {ppos: "ins[ci].pw"}}]}
     - {if: "sel or not (ins[ci].flags & 0x80)", then: [{set: {fpos: "ins[ci].filter"}}]}
-    - set: {wfarp: 0, wfabs: 0, arpcnt: 0xFF, arpre: "ins[ci].arpspeed", det: 0, vif: "ins[ci].filter != 0"}
+    - set: {wfarp: 0, wfabs: 0, arpcnt: 0xFF, det: 0, vif: "ins[ci].filter != 0"}
     - call: set_routing
     - if: "ins[ci].filter != 0 and flttab[ins[ci].filter].a != 0"
       then: [{set: {fctl: vi}}]
-    - set: {chord: "ins[ci].chord", cpos: "ins[ci].chord", cstart: "ins[ci].chord"}
     - call: setup_vibrato
   # TICK_2: apply the row read at TICK_0.
   apply_row:
@@ -428,24 +418,13 @@ procs:
     - if: "((vfc << 1) & 0xFF) < vper"
       then: [{set: {voff: "voff + ((fmh << 8) | fml)"}}]
       else: [{set: {voff: "voff - ((fmh << 8) | fml)"}}]
-  # A chord step: the next offset (cret 0), or the end of a returning chord (cret 1).
-  tick_chord:
-    - set: {cret: 0}
-    - {if: "chord == 0", then: [{return: true}]}
-    - {if: "cpos == 0", then: [{set: {cpos: cstart, cret: 1}}, {return: true}]}
-    - set: {wfarp: "chordtab[cpos].n", wfabs: 0, voff: 0, cpos: "chordtab[cpos].next"}
   wf_advance:
     - set: {wpos: "wftab[wpos].next"}
-  # One WF/arp row: rw, rx, rd. cont 1 when a chord ended and the next row plays now.
+  # One WF/arp row: rw, rx, rd.
   wf_apply:
     - if: "rw < 0x10"
       then: [{set: {arpcnt: rw}}]
       else: [{set: {sctl: "rw & gate"}}]
-    - if: "rx == 0x7F"
-      then:
-        - call: tick_chord
-        - {if: cret, then: [{call: wf_advance}, {set: {cont: 1}}]}
-        - return: true
     - if: "rx == 0x80"
       then: [{set: {carry: 1}}]
       else:
@@ -460,7 +439,6 @@ procs:
     - {if: "rd != 0xFF", then: [{set: {det: "s8(rd)"}}]}
     - call: wf_advance
   wf_row:
-    - set: {cont: 0}
     - {if: "wpos == 0", then: [{set: {carry: 1}}, {return: true}]}
     - set: {rw: "wftab[wpos].w", rx: "wftab[wpos].a", rd: "wftab[wpos].d"}
     - call: wf_apply
@@ -469,11 +447,10 @@ procs:
     - {if: "started and ins[ci].ctrl == 0", then: [{set: {carry: 1, skipw: 0}}, {return: true}]}
     - set: {carry: 0, skipw: 0, arpcnt: "arpcnt - 1"}
     - {if: "arpcnt < 0x80", then: [{set: {skipw: 1}}, {return: true}]}
-    - set: {arpcnt: "arpre & 0x3F"}
+    # The row's hold reloads the counter; past the program's end, the last row's.
+    - {if: wpos, then: [{set: {arpre: "wftab[wpos].h"}}]}
+    - set: {arpcnt: arpre}
     - call: wf_row
-    - {if: cont, then: [{call: wf_row}]}
-    - {if: cont, then: [{call: wf_row}]}
-    - {if: cont, then: [{call: wf_row}]}
   tick_pw:
     - {if: "ci == 0 or ppos == 0", then: [{return: true}]}
     - set: {t1: "pwtab[ppos].a", t2: "pwtab[ppos].b"}

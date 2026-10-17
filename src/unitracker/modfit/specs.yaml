@@ -69,7 +69,7 @@ commands:
     setup:
       - {call: route, with: {rc: CODE, ra: arg}}
       - call: apply_row
-    ticks: [procs.tick_vibrato, procs.run_deferred, procs.tick_pw, procs.tick_filt, procs.tick_chord]
+    ticks: [procs.tick_vibrato, procs.run_deferred, procs.tick_pw, procs.tick_filt]
     routing: [pfx, pfv, pifx, pia, pnfx, rc, ra, xfc, xfv, xia, xifx, dfc, dfv, difx, dia]
     rows:
       plain: {pk: 0, pins: 0, pleg: 0, pifx: 0, pia: 0, pfx: 0, pfv: 0, pnfx: 0}

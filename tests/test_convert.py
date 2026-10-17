@@ -19,9 +19,9 @@ INS = (
 
 
 def gt_ir(phrase: str, ins: str = INS + "}"):
-    """A one-voice goattracker2 song read from v1.8 text, the other voices silent."""
+    """A one-voice goattracker2 song read from v1.9 text, the other voices silent."""
     return songio.loads(f"""
-unitracker: 1.8
+unitracker: 1.9
 playroutine: {{ref: goattracker2, constants: {{deftempo: 6}}}}
 song:
   - def:

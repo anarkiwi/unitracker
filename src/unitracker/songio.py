@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.8 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.9 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -37,7 +37,7 @@ from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap
 
-VERSION = 1.8
+VERSION = 1.9
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -46,11 +46,17 @@ RETIRED_KEYS = {"registers": "retired in v1.6: the player starts from a zeroed S
 _RESTART = "retired in v1.8: write the hard restart as the instrument's restart program"
 RETIRED_FIELDS = {"gt": _RESTART, "fw": _RESTART, "hrad": _RESTART, "hrsr": _RESTART}
 RETIRED_FIELDS["firstctrl"] = _RESTART
+RETIRED_FIELDS["chord"] = (
+    "retired in v1.9: a chord is the instrument's `ctrl` program of relative notes"
+)
+RETIRED_FIELDS["arpspeed"] = (
+    "retired in v1.9: write the arp speed as the `ctrl` program rows' `hold`"
+)
 RETIRED_BITS = {"flags": (0x0F, _RESTART)}
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.8 format."""
+    """A document does not follow the unitracker v1.9 format."""
 
 
 @functools.cache
@@ -146,7 +152,7 @@ def _retired(rtype, value: dict) -> None:
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.8 document."""
+    """Turns the internal representation into a canonical v1.9 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -584,7 +590,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.8 document for internal-representation song ``ir``.
+    """A canonical v1.9 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -608,7 +614,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.8 document to the internal representation."""
+    """Expands a v1.9 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -971,7 +977,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.8 document."""
+    """The internal representation of a v1.9 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
@@ -981,13 +987,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.8 document at ``path``."""
+    """The internal representation of the v1.9 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.8 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.9 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

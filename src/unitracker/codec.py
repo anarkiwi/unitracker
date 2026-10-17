@@ -28,7 +28,10 @@ ROW_KEYS = (
 EXPR = "x"
 RETIRED = {
     "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
-    " row's `pw`, `cut` or `freq`)"
+    " row's `pw`, `cut` or `freq`)",
+    "chordtab": "retired in v1.9: write a chord as a `ctrl` program of relative notes",
+    "chord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
+    "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
 }
 RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
@@ -58,13 +61,11 @@ COMMAND_NAMES = (
     "decay",
     "sustain",
     "release",
-    "chord",
     "legato",
     "iattack",
     "idecay",
     "isustain",
     "irelease",
-    "ichord",
     "notevib",
 )
 NONE = "none"
