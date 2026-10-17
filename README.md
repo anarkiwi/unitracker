@@ -38,7 +38,7 @@ player = SongPlayer(songio.load("song.yaml"))
 grid = player.render_grid(3000)            # (ticks, 25) SID register grid
 ```
 
-`python tools/token_report.py song.yaml` counts a document's tokens (needs `tiktoken`).
+`python tools/token_report.py song.yaml` counts a document's tokens per section (needs the `dev` extras).
 
 ## Test
 

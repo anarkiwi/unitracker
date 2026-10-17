@@ -11,11 +11,12 @@ models: `cl100k_base` (GPT-4's BPE) is the objective, and every count below is a
 ```sh
 unitracker-optimise song.yaml -o smaller.yaml [--passes hoist,commands] [--workers N] [--report orthogonality.md]
 unitracker-lift TUNE.sid -o song.yaml --optimise
+python -m unitracker.tokenstudy song.yaml ...     # the context-efficiency mock-ups below, as Markdown tables
 ```
 
 The code is the package `unitracker.optimise` (`proof`, `model`, `edits`, `passes`, `driver`,
 `describe`); the orthogonality report is `unitracker.orthogonality` ([orthogonality.md](orthogonality.md)
-for the three reference tunes).
+for the three reference tunes) and the studies are `unitracker.tokenstudy`.
 
 ## The proof
 
@@ -83,17 +84,17 @@ names records in first-use order and the driver's last step makes the output can
 Not done, because the format cannot write the result:
 
 - **A program sharing another's prefix** with its `loop` or `end` moved: the format writes every
-  program whole, so two programs cannot share rows.
+  program whole, so two programs cannot share rows (proposal P5).
 - **Expression generalisation**: the families of expressions that differ only in per-use
   constants (Csillag's legato glides `([v >= 32768]*((v + K) % 65536) + ...)*[v < 65538 - K]`,
   Metal Warrior's two vibrato depths) are one general form only with inputs, which the grammar of
   `v`, `φ` and `N` does not have; the modfit report proves those general forms with the constants
   as inputs (`docs/modfit.md`, *Conversion*). Within the grammar the pass merges expressions that
-  play alike in context, which the grid finds even where the texts differ.
+  play alike in context, which the grid finds even where the texts differ (proposal P1).
 - **Relative versus absolute row forms** (`note: +n` against `=n`): the absolute form depends on
   the note each use sounds; the optimiser does not guess values for the grid to test.
-- **An instrument override in the play entry**: a format change; no two phrases of the three
-  tunes differ only by their instruments.
+- **An instrument override in the play entry**: measured below (*Phrase text*); no two phrases of
+  the three tunes differ only by their instruments, so it is not proposed.
 
 ## Results
 
@@ -144,3 +145,106 @@ What the edits found, in brief (the full list is [orthogonality.md](orthogonalit
   `!run2:@t6` on the step after a note that already armed `t6` plays nothing, and neither does the
   restart `r2`, whose lookahead row only sets the control mask 0.
 
+## Context-efficiency suggestions
+
+Measured by `python -m unitracker.tokenstudy` on the three optimised documents. Each suggestion
+is a mock-up: the study rewrites the written structure (`songio.dumps(ir, respell=...)`), which the
+reader does not accept, so each is evidence for a format decision, not a format. Deltas are tokens
+against the optimised document; totals under each tokenizer, sections under `cl100k_base`.
+
+| suggestion | tune | cl100k | o200k | llama2 | header | definitions | phrases | plays | structure |
+|---|---|---|---|---|---|---|---|---|---|
+| parameterised forms | Metal Warrior | +16 | +16 | +22 | +68 | -52 | 0 | 0 | 0 |
+| | Csillag | -219 | -219 | -309 | +187 | -406 | 0 | 0 | 0 |
+| | Crosseyed | +61 | +61 | +69 | +24 | +37 | 0 | 0 | 0 |
+| `tri`, `clamp` primitives | Metal Warrior | -16 | -16 | -20 | 0 | -16 | 0 | 0 | 0 |
+| | Csillag | -12 | -8 | -12 | 0 | -12 | 0 | 0 | 0 |
+| | Crosseyed | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| sub-phrase references | Metal Warrior | -463 | -463 | -504 | 0 | +614 | -1077 | 0 | 0 |
+| | Csillag | -599 | -599 | -616 | 0 | +920 | -1519 | 0 | 0 |
+| | Crosseyed | -85 | -85 | -108 | 0 | +141 | -226 | 0 | 0 |
+| instruments in the play entry | all three | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| grouped definitions | Metal Warrior | -33 | -33 | -44 | 0 | -9 | -12 | +4 | -16 |
+| | Csillag | -196 | -196 | -260 | 0 | -40 | -78 | +26 | -104 |
+| | Crosseyed | -34 | -34 | -45 | 0 | -4 | -15 | +5 | -20 |
+| instrument summaries | Metal Warrior | +110 | +108 | +124 | +110 | 0 | 0 | 0 | 0 |
+| | Csillag | +153 | +150 | +175 | +153 | 0 | 0 | 0 | 0 |
+| | Crosseyed | +61 | +61 | +62 | +61 | 0 | 0 | 0 | 0 |
+| mnemonic names | Metal Warrior | +181 | +181 | +277 | 0 | +9 | +172 | 0 | 0 |
+| | Csillag | +312 | +312 | +514 | 0 | +13 | +299 | 0 | 0 |
+| | Crosseyed | +83 | +83 | +141 | 0 | +10 | +73 | 0 | 0 |
+| tempo hint | each | +5 | +5 | +7 to +8 | +5 | 0 | 0 | 0 | 0 |
+| contents per voice | Metal Warrior | +50 | +50 | +58 | +50 | 0 | 0 | 0 | 0 |
+| | Csillag | +334 | +334 | +412 | +334 | 0 | 0 | 0 | 0 |
+| | Crosseyed | +123 | +123 | +127 | +123 | 0 | 0 | 0 | 0 |
+| plays first | Metal Warrior | -34 | -34 | -45 | 0 | -8 | -13 | +5 | -18 |
+| | Csillag | -197 | -197 | -266 | 0 | -38 | -80 | +27 | -106 |
+| | Crosseyed | -37 | -37 | -49 | 0 | -6 | -15 | +6 | -22 |
+
+**Expression size.** The *forms* mock-up writes every family of expressions that differ only in
+integers as one parameterised form in the header (`f1: '(a, b) (v + a*[(φ - 3) % 12 >= 6] - b) %
+65536'`) and each use as `f1(64, 32)`. It saves 219 tokens on Csillag, whose glides and vibratos
+come in families, and costs 16 and 61 on the others, where a family has two members and the
+definition costs more than the uses save. On the lifted Csillag, before the optimiser proves
+fourteen glides constant, it saved 689: most of the saving the format change would buy, the
+optimiser already buys within the format. The forms keep the semantics visible (the body is the
+proved expression), and the modfit report already proves the inputs (`docs/modfit.md`). Of the
+grammar primitives, `abs((φ - a) % p - p/2)` occurs 7 times (Metal Warrior's and Csillag's pulse
+ping-pongs) and `min(n, max(0, φ - d))` 5 times (Csillag's ramps), none in defMON's tune; writing
+them `tri(φ - a, p)` and `clamp(φ - d, 0, n)` saves 16, 12 and 0 tokens, under 0.5%.
+*Recommendation:* parameterised forms need a format change and pay only on a tune with large
+families: sub-issue P1, low priority. Reject the primitives: the saving does not pay for two more
+grammar functions every reader must learn.
+
+**Phrase text.** Repetition the transposed-phrase merge leaves is large: the *sub-phrases* mock-up
+writes every run of four or more atoms that recurs apart once, in a `sub` definition, and as
+`&s1` where it occurs; it saves 463, 599 and 85 tokens (14%, 8%, 6%), the largest measured. Within
+the format the `share` pass plays such runs as phrases of their own, but every split adds a
+timeline row naming all three voices, so on the three tunes no split pays and none is kept. An
+instrument override in the play entry (`p1(i1=i4)`) would merge phrases that differ only in their
+instruments: the three tunes have none, so it saves nothing and is not proposed. Run lengths are
+already cheap: writing every step (`C4, -, -` for `C4*3`) costs 36 to 863 tokens with
+`cl100k_base` and 359 to 2310 with Llama 2, and rests and gate-offs are 33%, 9% and 18% of the
+phrase atoms' tokens even run-length coded. *Recommendation:* sub-phrase references need a format
+change: sub-issue P2. Keep `*n`; reject the play-entry instrument override.
+
+**Definition placement.** Grouping every definition in the first row saves 33, 196 and 34 tokens
+(1-2.5%), mostly the `- def:` keys of later rows and the indentation of phrases; it loses the
+property that a definition sits in the row that first plays it, which the document's prefix
+playability and a reader's locality rely on. A one-line summary per instrument derived from its
+keys (`i1: 'pul wave; ad, ctrl, pw, restart'`) costs 61 to 153 tokens and says nothing the
+definition's keys do not. *Recommendation:* reject both.
+
+**Naming.** A waveform mnemonic on every instrument name (`i1_pul`) costs 83 to 312 tokens
+(+5.6%, +4.0%, +5.9%; 6-8% under Llama 2, which splits the suffix finer), on every note that names an
+instrument, for a word the definition's first `ctrl` already gives. *Recommendation:* reject.
+
+**Header and hints.** The headers are 64 to 79 tokens; `hints` already carry `ticks_per_step` and
+`phrase_steps`, and `loop` is its own key. A derived tempo (`bpm`, four steps to the beat) costs 5
+tokens but assumes a beat the format does not know. *Recommendation:* reject until the hints carry
+the song's beat structure (#39).
+
+**Document ordering.** Writing the play rows first and every definition after saves 34 to 197
+tokens, almost all from the same `- def:` keys as grouping, and puts a definition far from the row
+that first needs it. A table of contents of each voice's phrases in the header costs 50, 334 and
+123 tokens and repeats the timeline, whose rows already answer "what plays at row 12". *Recommendation:*
+reject both.
+
+## Proposals
+
+Each can be filed as a sub-issue of #23; neither is implemented here.
+
+- **P1: parameterised expression forms.** Let the `x` definitions take integer parameters, `x:
+  {f1: '(a, b) (v + a*[(φ - 3) % 12 >= 6] - b) % 65536'}`, and a use name a form with arguments
+  (`!freq:@f1(64, 32)`, `freq: f1(32, 16)`); the reader expands each use to the expression it
+  proves today, so the grid is unchanged and the canonical form writes a form only for a family of
+  two or more texts that saves tokens. Measured: -219 tokens on Csillag, +16 and +61 on the others
+  with every family written, so the writer must choose per family. Low priority.
+- **P2: sub-phrase references.** Let a phrase name a recurring run of atoms defined once (`sub:
+  {s1: [off*3, G4*3]}`, `p2: [&s1, &s1, ...]`), expanded by the reader into the events it stands
+  for, with the canonical form choosing runs by a fixed rule (maximal runs that recur apart, longest
+  first) so that it stays unique. Measured: -463, -599 and -85 tokens (14%, 8%, 6%) on the three
+  optimised tunes, the largest of every change measured; it also gives a model the repetition
+  structure directly.
+- Not measured, so not proposed: a program written as another program's prefix with its `end` or
+  `loop` moved (the passes cannot produce it to measure, since the format has no form for it).

@@ -565,10 +565,11 @@ def _transpose_key(arr):
     return norm.tobytes() + str(norm.shape).encode(), shift
 
 
-def dumps(ir: dict, embed: bool = False) -> str:
+def dumps(ir: dict, embed: bool = False, respell=None) -> str:
     """A canonical v1.15 document for internal-representation song ``ir``.
 
-    With ``embed`` the playroutine and its tables are written in full instead of by reference.
+    With ``embed`` the playroutine and its tables are written in full instead of by reference;
+    ``respell(doc)`` rewrites the written structure before it is dumped (spelling studies).
     """
     writer = _Writer(ir)
     meta = ir.get("meta") or {}
@@ -583,6 +584,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
     doc.update(writer.environment())
     doc["song"] = rows
     doc["loop"] = loop
+    doc = respell(doc) if respell else doc
     return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
 
 
