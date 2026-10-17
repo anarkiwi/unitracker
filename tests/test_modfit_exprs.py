@@ -357,8 +357,15 @@ def test_a_counted_inherited_cell_is_a_phase_offset(mw):
         assert [f(0, phi, 0, dict(s)["ptime"]) for phi in range(40)] == [
             want(0, phi, 0) for phi in range(40)
         ]
-    other = machine.start({"pptr": 3, "ptime": 5})
-    far = derive(machine, other, None, GT_FREQ)
-    off = live[:1] + [types.SimpleNamespace(start=other, derived=far, start_value=None)]
-    lost = inherit(an, types.SimpleNamespace(unit=unit, live=off))
+
+
+def test_a_start_off_the_longest_run_is_no_phase_offset(mw):
+    machine = Machine(mw.ir, {"cell": "pulse", "fire": ["pulse_exec"]})
+    starts = [machine.start({"pptr": 2, "ptime": 7}), machine.start({"pptr": 3, "ptime": 5})]
+    live = [
+        types.SimpleNamespace(start=s, derived=derive(machine, s, None, GT_FREQ), start_value=None)
+        for s in starts
+    ]
+    an = types.SimpleNamespace(machines={"pulse": machine}, freq=GT_FREQ)
+    lost = inherit(an, types.SimpleNamespace(unit={"name": "pulse", "cell": "pulse"}, live=live))
     assert lost.kind == "none" and lost.update is None and lost.reason
