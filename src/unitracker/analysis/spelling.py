@@ -9,10 +9,16 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from unitracker import songio
-from unitracker.atoms import NOTE_NAMES, note_name, parse_atom
-from unitracker.tokenstudy import count_rows, delta_rows, phrase_defs, table_header, tokenizers
-from unitracker.yamlstyle import Atom, Flow
+from unitracker.analysis.tokenstudy import (
+    count_rows,
+    delta_rows,
+    phrase_defs,
+    table_header,
+    tokenizers,
+)
+from unitracker.format import songio
+from unitracker.format.atoms import NOTE_NAMES, note_name, parse_atom
+from unitracker.format.yamlstyle import Atom, Flow
 
 SCALES = {"major": (0, 2, 4, 5, 7, 9, 11), "minor": (0, 2, 3, 5, 7, 8, 10)}
 

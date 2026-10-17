@@ -2,25 +2,20 @@
 
 import copy
 
-from unitracker.codec import CodecError
+from unitracker.format.codec import CodecError
+from unitracker.format.records import RowEval, chained, program_path, ref_type
+from unitracker.format.refs import put_slots, redirect, slots, view
 from unitracker.optimise.model import (
     apart,
     copied,
     currents,
     first_note,
     free_index,
-    holds,
     incoming,
     is_note,
-    program,
-    put_slots,
-    redirect,
     shape,
-    slots,
     steps_of,
-    view,
 )
-from unitracker.records import ref_type
 
 
 def merge(ir: dict, tname: str, keep: int, drop: int) -> dict | None:
@@ -37,28 +32,24 @@ def _rewritten(ir: dict, tname: str, entry: int, seq: list, loop: int | None) ->
     start = free_index(rows, rtype, len(seq))
     if start is None:
         return None
-    for k, row in enumerate(seq):
-        rows[start + k] = {**row, rtype.chain: start + k + 1}
+    rows.update(chained(rtype, seq, start, loop))
     last = rows[start + len(seq) - 1]
     if loop is None:
-        last[rtype.chain] = rtype.none if rtype.none is not None else 0
         last.update({f: int(v) for f, v in rtype.end.items()})
-        if rtype.stop is not None and not holds(rtype, rtype.stop, last):
+        if rtype.stop is not None and not RowEval(rtype).holds(rtype.stop, last):
             return None
-    else:
-        last[rtype.chain] = start + loop
     return out if redirect(out, tname, entry, start) else None
 
 
 def _body(rtype, rows: dict, path: list) -> list:
-    return [{f: v for f, v in rows[i].items() if f != rtype.chain} for i in path]
+    return [rtype.body(rows[i]) for i in path]
 
 
 def truncate(ir: dict, tname: str, entry: int, length: int) -> dict | None:
     """The song with program ``entry`` cut to its first ``length`` rows and ending there."""
     rtype = view(ir).rtypes[tname]
     rows = ir["records"][tname]
-    path, loop = program(rtype, rows, entry)
+    path, loop = program_path(rtype, rows.get, entry)
     if length > len(path) or (length == len(path) and loop is None):
         return None
     return _rewritten(ir, tname, entry, _body(rtype, rows, path[:length]), None)
@@ -68,7 +59,7 @@ def reloop(ir: dict, tname: str, entry: int) -> dict | None:
     """The song with looping program ``entry`` written with its shortest prefix and cycle."""
     rtype = view(ir).rtypes[tname]
     rows = ir["records"][tname]
-    path, loop = program(rtype, rows, entry)
+    path, loop = program_path(rtype, rows.get, entry)
     if loop is None:
         return None
     seq = _body(rtype, rows, path)
@@ -183,7 +174,7 @@ def _content(ir: dict, rtype, row: dict, fname: str):
     if ttype is None or ttype.chain is None or value == ttype.none:
         return value
     rows = ir["records"].get(target, {})
-    path, loop = program(ttype, rows, value)
+    path, loop = program_path(ttype, rows.get, value)
     return repr(_body(ttype, rows, path)), loop
 
 

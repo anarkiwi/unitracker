@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-
 from conftest import mini_song
-from unitracker.expr import ExprError
-from unitracker.vm import Cursor, SongError, SongPlayer, compile_phrase, first_mismatch
+
+from unitracker.format.expr import ExprError
+from unitracker.player.vm import Cursor, SongError, SongPlayer, compile_phrase, first_mismatch
 
 
 def run(playroutine, ticks=1, **kw):

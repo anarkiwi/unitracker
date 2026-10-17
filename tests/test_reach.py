@@ -5,10 +5,10 @@ import pytest
 import yaml
 from pygoattracker import decompile_sid
 
-from unitracker import songio, tablepatch
-from unitracker.goattracker import lift
-from unitracker.reach import ReachabilityError, table_reads
-from unitracker.vm import SongPlayer
+from unitracker.format import songio, tablepatch
+from unitracker.lift.goattracker import lift
+from unitracker.player.reach import ReachabilityError, table_reads
+from unitracker.player.vm import SongPlayer
 
 
 def counter_song(width) -> dict:

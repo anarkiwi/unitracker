@@ -9,12 +9,13 @@ import itertools
 import re
 from dataclasses import dataclass
 
-from unitracker import songio
-from unitracker.codec import COMMAND_NAMES, ROW_KEYS, CodecError, evaluate, row_place
-from unitracker.eventins import written_as
-from unitracker.optimise import programs_of, view
-from unitracker.records import META_KEYS
-from unitracker.vm import PSEUDO
+from unitracker.format import songio
+from unitracker.format.codec import COMMAND_NAMES, ROW_KEYS, CodecError, evaluate, row_place
+from unitracker.format.events.instrument import written_as
+from unitracker.format.records import META_KEYS
+from unitracker.format.refs import view
+from unitracker.optimise import programs_of
+from unitracker.player.vm import PSEUDO
 
 VOCABULARY = "vocabulary redundancy"
 KEY = "non-orthogonal key"

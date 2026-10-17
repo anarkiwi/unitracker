@@ -1,31 +1,67 @@
 """Shared fixtures: the HVSC tunes the conformance tests lift."""
 
-import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from pygoattracker import (
+    Instrument,
+    Orderlist,
+    Pattern,
+    Player,
+    PlayPattern,
+    Row,
+    Song,
+    Subtune,
+    Table,
+    TypedSong,
+)
 from pygoattracker import constants as GT
-from pygoattracker import Instrument, Orderlist, Pattern, Player, PlayPattern, Row, Song
-from pygoattracker import Subtune, Table, TypedSong
-from pysidtracker.testing import oracle_grid, resolve_tune
+from pysidtracker.survey import file_oracle
+from pysidtracker.testing import resolve_tune
 from pysidwizard import parse_sid_song
 from pysidwizard.player import INST_WF_TABLE_POS
 
-from unitracker import backends, optimise
+from unitracker import optimise
+from unitracker.lift import backends
 
-METAL_WARRIOR = "MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid"
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
 
 
-@pytest.fixture(scope="session")
-def metal_warrior() -> Path:
-    """Path to the Metal Warrior Title Remix .sid (local $HVSC, cache, or mirror)."""
-    path = resolve_tune(METAL_WARRIOR, cache_dir=CACHE)
-    if path is None:
-        pytest.skip("HVSC tune unavailable")
-    return Path(path)
+def hvsc_tune(name: str, tune: str, doc: str):
+    """A session fixture ``name``: the path to HVSC ``tune`` (local $HVSC, cache, or mirror)."""
+
+    def fixture() -> Path:
+        path = resolve_tune(tune, cache_dir=CACHE)
+        if path is None:
+            pytest.skip("HVSC tune unavailable")
+        return Path(path)
+
+    fixture.__doc__ = doc
+    return pytest.fixture(scope="session", name=name)(fixture)
+
+
+metal_warrior = hvsc_tune(
+    "metal_warrior",
+    "MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid",
+    "Path to the Metal Warrior Title Remix .sid.",
+)
+crosseyed = hvsc_tune(
+    "crosseyed",
+    "MUSICIANS/I/Ilkke/Crosseyed.sid",
+    "Path to iLKke's Crosseyed .sid, a defMON replay.",
+)
+csillag = hvsc_tune(
+    "csillag",
+    "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
+    "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
+)
+
+
+def table(*rows) -> Table:
+    """A GoatTracker 2 table of ``(left, right)`` ``rows``."""
+    return Table(left=[r[0] for r in rows], right=[r[1] for r in rows])
 
 
 def mini_song(playroutine, tracks=None, phrases=None, **extra) -> dict:
@@ -42,30 +78,6 @@ def mini_song(playroutine, tracks=None, phrases=None, **extra) -> dict:
     return song
 
 
-CROSSEYED = "MUSICIANS/I/Ilkke/Crosseyed.sid"
-
-
-@pytest.fixture(scope="session")
-def crosseyed() -> Path:
-    """Path to iLKke's Crosseyed .sid, a defMON replay."""
-    path = resolve_tune(CROSSEYED, cache_dir=CACHE)
-    if path is None:
-        pytest.skip("HVSC tune unavailable")
-    return Path(path)
-
-
-CSILLAG = "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid"
-
-
-@pytest.fixture(scope="session")
-def csillag() -> Path:
-    """Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export."""
-    path = resolve_tune(CSILLAG, cache_dir=CACHE)
-    if path is None:
-        pytest.skip("HVSC tune unavailable")
-    return Path(path)
-
-
 def sw_fx(raw: bytes, rows: dict):
     """SID-Wizard tune ``raw``'s first subtune with each ``{(pattern, row): (fx, value)}`` set."""
     swm = parse_sid_song(raw, 1)
@@ -75,7 +87,7 @@ def sw_fx(raw: bytes, rows: dict):
     return swm
 
 
-def sw_table_byte(raw: bytes, instrument: int, table: str, offset: int, value: int) -> bytes:
+def sw_table_byte(raw: bytes, instrument: int, which: str, offset: int, value: int) -> bytes:
     """SID-Wizard tune ``raw`` with byte ``offset`` of instrument ``instrument``'s ``pw`` or
     ``filter`` table set to ``value``; the instruments lie in order in the file."""
     pos, instruments = -1, parse_sid_song(raw, 1).instruments[:instrument]
@@ -83,20 +95,16 @@ def sw_table_byte(raw: bytes, instrument: int, table: str, offset: int, value: i
         pos = raw.index(one.memory_image(), pos + 1)
     ins = instruments[-1]
     start = pos + INST_WF_TABLE_POS + len(ins.wf_table) + 1
-    if table == "filter":
+    if which == "filter":
         start += len(ins.pw_table) + 1
     out = bytearray(raw)
     out[start + offset] = value
     return bytes(out)
 
 
-def oracle(raw: bytes, name: str, frames: int):
-    """The sidtrace 6502 oracle's register grid of tune ``raw`` (Docker), cached by content."""
-    path = CACHE / "oracle" / f"{name}-{hashlib.sha256(raw).hexdigest()[:16]}.sid"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(raw)
-    grid = oracle_grid(path, oracle_cache=CACHE / "oracle", seconds=frames // 50 + 2, frames=frames)
-    return np.asarray(grid, dtype=np.uint8)[:, :25]
+def oracle(raw: bytes, frames: int):
+    """The 6502 oracle's register grid of tune ``raw``, cached by content under the tune cache."""
+    return np.asarray(file_oracle(raw, 1, frames, work=CACHE / "oracle")[1], dtype=np.uint8)
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
@@ -108,10 +116,6 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
     rows, a note as an offset from ``FIRSTNOTE`` or None for a rest.
     """
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-
-    def table(pairs):
-        return Table(left=[p[0] for p in pairs], right=[p[1] for p in pairs])
-
     instruments = instruments or [{"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
     rows = rows or [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 15
     pattern = Pattern(
@@ -125,10 +129,10 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
         subtunes=[Subtune([Orderlist([PlayPattern(k)]) for k in (0, 1, 1)])],
         instruments=[Instrument(**ins) for ins in instruments],
         patterns=[pattern, Pattern(rows=[Row(note=GT.KEYOFF)] + [Row()] * 15)],
-        wavetable=table(wave),
-        pulsetable=table(pulse),
-        filtertable=table(filt),
-        speedtable=table(speed),
+        wavetable=table(*wave),
+        pulsetable=table(*pulse),
+        filtertable=table(*filt),
+        speedtable=table(*speed),
     )
     build = SimpleNamespace(adparam=None, srparam=None, deftempo=None)
     info = SimpleNamespace(

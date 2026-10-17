@@ -11,8 +11,9 @@ from pathlib import Path
 
 import numpy as np
 
-from unitracker import backends, songio
-from unitracker.vm import SongPlayer, first_mismatch
+from unitracker.format import songio
+from unitracker.lift import backends
+from unitracker.player.vm import SongPlayer, first_mismatch
 
 
 def row(regs) -> str:

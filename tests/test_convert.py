@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 import sympy
 
-from unitracker import songio, xexpr
+from unitracker.format import songio, xexpr
 from unitracker.modfit import convert
 from unitracker.modfit import grammar as G
-from unitracker.modulation import Occurrence
-from unitracker.vm import SongPlayer
+from unitracker.player.modulation import Occurrence
+from unitracker.player.vm import SongPlayer
 
 V, PHI = G.V, G.PHI
 # A plain gated instrument whose hard restart turns the gate off two ticks ahead.

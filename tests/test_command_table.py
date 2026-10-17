@@ -7,10 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from unitracker import eventrestart, lifetime, songio
-from unitracker.codec import NONE, COMMAND_NAMES, ROW_KEYS, CodecError, CommandCodec
-from unitracker.codec import envelope_names
-from unitracker.records import record_types
+from unitracker.format import songio
+from unitracker.format.codec import (
+    COMMAND_NAMES,
+    NONE,
+    ROW_KEYS,
+    CodecError,
+    CommandCodec,
+    envelope_names,
+)
+from unitracker.format.events import lifetime, restart
+from unitracker.format.records import record_types
 
 DOC = Path(__file__).resolve().parents[1] / "docs" / "format.md"
 PLAYERS = sorted(
@@ -78,8 +85,8 @@ def accepted(pr: dict) -> dict:
         except CodecError:
             pass
         cells[name] = ", ".join(names)
-    if pr.get(eventrestart.NAME):
-        cells[eventrestart.NAME] = f"`@{eventrestart.NAME}`"
+    if pr.get(restart.NAME):
+        cells[restart.NAME] = f"`@{restart.NAME}`"
     cells.update({n: "0" for n in pr.get(lifetime.NAME) or {}})
     return cells
 

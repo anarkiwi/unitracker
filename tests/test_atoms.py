@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from unitracker.atoms import AtomError, format_atom, note_index, note_name, parse_atom, runs
+from unitracker.format.atoms import AtomError, format_atom, note_index, note_name, parse_atom, runs
 
 
 @pytest.mark.parametrize("note,name", [(0, "C0"), (24, "C2"), (46, "A#3"), (121, "C#10")])

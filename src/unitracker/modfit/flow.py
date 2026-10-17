@@ -7,8 +7,8 @@ plus the bits a constant part can set. Carries spread upwards, masks and shifts 
 import ast
 import functools
 
-from unitracker.records import record_types
-from unitracker.vm import PSEUDO, acc_mode
+from unitracker.format.records import record_types
+from unitracker.player.vm import PSEUDO, acc_mode
 
 BITS = 48
 ALL = (1 << BITS) - 1

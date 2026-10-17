@@ -3,7 +3,7 @@
 import pytest
 from pydefmon import DefmonPlayer
 
-from unitracker import backends
+from unitracker.lift import backends
 
 
 def test_detect_and_dispatch(crosseyed, metal_warrior):

@@ -6,8 +6,8 @@ field naming the program, and ``flag`` the header bit that keeps it (see docs/fo
 
 import numpy as np
 
-from unitracker.records import program_rows, ref_type
-from unitracker.vm import event_commands
+from unitracker.format.records import program_path, ref_type
+from unitracker.player.vm import event_commands
 
 NAME = "lifetime"
 NAMES = ("pulse", "filter")
@@ -125,9 +125,9 @@ class Lifetime:
             if target is None or value == self.rtypes[target].none:
                 continue
             out.add(target)
-            ttype = self.rtypes[target]
-            for prow in program_rows(ttype, records.get(target, {}), value):
-                out |= {ref_type(ttype, f, prow) for f in ttype.refs} - {None}
+            ttype, rows = self.rtypes[target], records.get(target, {})
+            for i in program_path(ttype, rows.get, value)[0] if ttype.chain is not None else ():
+                out |= {ref_type(ttype, f, rows[i]) for f in ttype.refs} - {None}
         return out
 
     def _flagged(self, tracks, phrases: dict, rows: dict):

@@ -6,14 +6,15 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from unitracker import backends, songio
+from unitracker.format import songio
+from unitracker.lift import backends
 from unitracker.modfit import grammar as G
 from unitracker.modfit.convert import CACHE, analyse, groups
 from unitracker.modfit.exprs import Result
 from unitracker.modfit.inherit import inherit
 from unitracker.modfit.phase import unproved_functions
-from unitracker.modulation import declared
-from unitracker.vm import SongPlayer
+from unitracker.player.modulation import declared
+from unitracker.player.vm import SongPlayer
 
 KEYS = ("freq", "pw", "cut")
 

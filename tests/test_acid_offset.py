@@ -6,10 +6,11 @@ import z3
 from pydefmon import DefmonPlayer
 from pysidtracker import SidImage
 
-from unitracker import defmon, songio
+from unitracker.format import songio
+from unitracker.format.songio import library
+from unitracker.lift import defmon
 from unitracker.modfit.form import Form
-from unitracker.songio import library
-from unitracker.vm import SongPlayer
+from unitracker.player.vm import SongPlayer
 
 TICKS = 95 + 2 * 1152 + 100
 

@@ -9,10 +9,12 @@ from conftest import sw_fx
 from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, SWMPlayer, Transpose
 from pysidwizard.features import features_for_driver
 
-from unitracker import backends, sidwizard, songio
-from unitracker.codec import Evaluator
-from unitracker.sidwizard import NO_DETUNE as KEEP, LiftError
-from unitracker.vm import SongPlayer
+from unitracker.format import songio
+from unitracker.format.codec import Evaluator
+from unitracker.lift import backends, sidwizard
+from unitracker.lift.sidwizard import NO_DETUNE as KEEP
+from unitracker.lift.sidwizard import LiftError
+from unitracker.player.vm import SongPlayer
 
 TICKS = 15000
 

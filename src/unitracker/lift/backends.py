@@ -39,16 +39,16 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
         subtune = _start_song(raw)
     backend = detect(raw)
     if backend == "defmon":
-        from unitracker import defmon  # pylint: disable=import-outside-toplevel
+        from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
 
         return defmon.lift(raw, subtune, expressions)
     if backend == "sidwizard":
-        from unitracker import sidwizard  # pylint: disable=import-outside-toplevel
+        from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
 
         return sidwizard.lift(raw, subtune, expressions)
     from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
 
-    from unitracker import goattracker  # pylint: disable=import-outside-toplevel
+    from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
 
     return goattracker.lift(decompile_sid(raw, subtune=subtune), expressions)
 

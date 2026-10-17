@@ -8,22 +8,23 @@ lives: a record site (a program's first row, an instrument field) or the event's
 import ast
 import copy
 import dataclasses
+import importlib.util
 import json
 import pickle
 from pathlib import Path
 
 import sympy
 
-from unitracker import reach
-from unitracker.codec import evaluate
+from unitracker.format.codec import evaluate
+from unitracker.format.records import chained, program_path, record_types
+from unitracker.format.songio import codecs
+from unitracker.format.xexpr import ExpressionError, source
 from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
-from unitracker.modulation import declared
-from unitracker.songio import codecs
-from unitracker.records import record_types
-from unitracker.vm import SongPlayer, first_mismatch, fold_empty
-from unitracker.xexpr import ExpressionError, source
+from unitracker.player import reach
+from unitracker.player.modulation import declared
+from unitracker.player.vm import SongPlayer, first_mismatch, fold_empty
 
 CACHE = Path("out/modfit/cache")
 IDENTITY = "v"
@@ -39,7 +40,10 @@ SOURCES = [
         "chipinv.py",
         "invariant.py",
     )
-] + [_HERE.parent / f for f in ("modulation.py", "vm.py", "records.py", "codec.py")]
+] + [
+    Path(importlib.util.find_spec(f"unitracker.{m}").origin)
+    for m in ("player.modulation", "player.vm", "format.records", "format.codec")
+]
 
 
 class ConversionError(ValueError):
@@ -300,18 +304,8 @@ def derive_all(ir: dict, obs: dict, cache: Path | None, workers=None) -> tuple:
 
 
 def _program(rows: dict, rtype, entry: int) -> tuple:
-    """``(row indices, loop position or None)`` of the program starting at ``entry``."""
-    path, pos, index = [], {}, entry
-    while index not in pos:
-        row = {**rtype.fields, **rows.get(index, {})}
-        pos[index] = len(path)
-        path.append(index)
-        if rtype.stop is not None and evaluate(rtype.stop, row):
-            return path, None
-        index = row[rtype.chain]
-        if rtype.none is not None and index == rtype.none:
-            return path, None
-    return path, pos[index]
+    """``(row indices, loop position or None)`` of a program, a missing row read as defaults."""
+    return program_path(rtype, lambda i: {**rtype.fields, **rows.get(i, {})}, entry)
 
 
 class Rewrite:  # pylint: disable=too-many-instance-attributes
@@ -370,14 +364,14 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             return None
         rows = self.records.get(name, {})
         path, loop = _program(rows, rtype, entry)
-        own = {f: v for f, v in rows.get(path[0], {}).items() if f != rtype.chain}
+        own = rtype.body(rows.get(path[0], {}))
         if rtype.expr is not None and len(path) == 1 and loop is None and own.get(rtype.expr):
             if all(v == rtype.default(f) for f, v in own.items() if f != rtype.expr):
                 return None
         for k, i in enumerate(path):
             place = {"first": int(k == 0), "last": int(loop is None and k + 1 == len(path))}
             if codec.encode({**rtype.fields, **rows.get(i, {})}, place) is None:
-                return k, {f: v for f, v in rows.get(i, {}).items() if f != rtype.chain}
+                return k, rtype.body(rows.get(i, {}))
         return None
 
     def check_shared(self, names: set) -> None:
@@ -398,16 +392,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     def _referenced(self, name: str) -> set:
         """The entries of record type ``name`` that records, phrases or pins reference."""
         rtype = self.rtypes[name]
-        out = set(rtype.pin)
-        for tname, rows in self.records.items():
-            ttype = self.rtypes.get(tname)
-            for row in rows.values() if ttype is not None else ():
-                full = {**ttype.fields, **row}
-                for field, targets in ttype.refs.items():
-                    if field == ttype.chain or field not in row:
-                        continue
-                    if any(t == name and (w is None or evaluate(w, full)) for t, w in targets):
-                        out.add(int(row[field]))
+        out = set(rtype.pin) | {int(row[field]) for row, field in self._referrers(name)}
         codes = self.commands(name)
         for events in self.ir["phrases"].values():
             out |= {int(c[1]) for e in events for c in _cmds(e) if int(c[0]) in codes}
@@ -481,7 +466,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         path, loop = _program(rows, rtype, index)
         out = []
         for k, i in enumerate(path):
-            row = {f: v for f, v in rows.get(i, {}).items() if f != rtype.chain}
+            row = rtype.body(rows.get(i, {}))
             for spec in specs:
                 row.update(self.cleared(spec, {**rtype.fields, **row}))
                 if k == 0:
@@ -519,30 +504,32 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     def allocate(self, rtype, rows: list, loop=None) -> int:
         """New rows of a record type, chained as a program when it is one; the first index."""
         table = self.records.setdefault(rtype.name, {})
-        start = max([rtype.first - 1, *table]) + 1
+        start = rtype.free(table)
         if start + len(rows) - 1 > rtype.max:
             raise ConversionError(f"{rtype.name}: more than {rtype.max} rows")
-        for k, row in enumerate(rows):
-            if rtype.chain is not None:
-                last = k + 1 == len(rows)
-                end = rtype.none if rtype.none is not None else 0
-                row = {**row, rtype.chain: (start + loop if loop is not None else end)
-                       if last else start + k + 1}  # fmt: skip
-            table[start + k] = row
+        chain = rtype.chain is not None
+        table.update(chained(rtype, rows, start, loop) if chain else dict(enumerate(rows, start)))
         return start
 
-    def redirect(self, where: tuple, new: int) -> None:
-        """Every reference to a record (other than a program's chain) to its rewritten copy."""
-        name, old = where
+    def _referrers(self, name: str):
+        """``(row, field)`` of each record field (other than a program's chain) that references
+        record type ``name``."""
         for tname, rows in self.records.items():
             rtype = self.rtypes.get(tname)
             for row in rows.values() if rtype is not None else ():
                 for field, targets in rtype.refs.items():
-                    if field == rtype.chain or row.get(field) != old:
+                    if field == rtype.chain or field not in row:
                         continue
                     full = {**rtype.fields, **row}
                     if any(t == name and (w is None or evaluate(w, full)) for t, w in targets):
-                        row[field] = new
+                        yield row, field
+
+    def redirect(self, where: tuple, new: int) -> None:
+        """Every reference to a record (other than a program's chain) to its rewritten copy."""
+        name, old = where
+        for row, field in self._referrers(name):
+            if row[field] == old:
+                row[field] = new
         commands = self.commands(name)
         for events in [*self.ir["phrases"].values(), list(self.events.values())]:
             for event in events:

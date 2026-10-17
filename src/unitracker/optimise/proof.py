@@ -5,9 +5,9 @@ import math
 
 import numpy as np
 
-from unitracker import reach
 from unitracker.optimise.model import ERRORS
-from unitracker.vm import SongPlayer, first_mismatch
+from unitracker.player import reach
+from unitracker.player.vm import SongPlayer, first_mismatch
 
 ENCODING = "cl100k_base"
 

@@ -7,8 +7,8 @@ import pytest
 import yaml
 from pygoattracker import decompile_sid
 
-from unitracker import songio
-from unitracker.codec import (
+from unitracker.format import songio
+from unitracker.format.codec import (
     COMMAND_NAMES,
     RETIRED_ROW_KEYS,
     ROW_KEYS,
@@ -24,12 +24,12 @@ from unitracker.codec import (
     route_value,
     written_value,
 )
-from unitracker.defmon import lift as lift_defmon
-from unitracker.goattracker import lift as lift_gt
-from unitracker.records import record_types
-from unitracker.sidwizard import lift as lift_sw
-from unitracker.vm import SongPlayer
-from unitracker.yamlstyle import parse
+from unitracker.format.records import record_types
+from unitracker.format.yamlstyle import parse
+from unitracker.lift.defmon import lift as lift_defmon
+from unitracker.lift.goattracker import lift as lift_gt
+from unitracker.lift.sidwizard import lift as lift_sw
+from unitracker.player.vm import SongPlayer
 
 GT = songio.library("goattracker2")
 DM = songio.library("defmon")

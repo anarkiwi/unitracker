@@ -33,14 +33,32 @@ unitracker-optimise song.yaml -o smaller.yaml [--report orthogonality.md]  # sam
 ```
 
 ```python
-from unitracker import songio
-from unitracker.vm import SongPlayer
+from unitracker.format import songio
+from unitracker.player.vm import SongPlayer
 
 player = SongPlayer(songio.load("song.yaml"))
 grid = player.render_grid(3000)            # (ticks, 25) SID register grid
 ```
 
 `python tools/token_report.py song.yaml` counts a document's tokens per section (needs the `dev` extras).
+
+`tools/oracle_hvsc.py` holds the renderers for pysidtracker's survey: `render` lifts each
+subtune, writes it, reads it back and plays it, `native` plays the backend's own player; both are
+compared with the sidtrace oracle (lift failures are `library_error` rows):
+
+```sh
+python -m pysidtracker.survey find $HVSC --out out/survey/tunes.csv --player 'goattracker|wizard|defmon'
+PYTHONPATH=tools python -m pysidtracker.survey run $HVSC out/survey/tunes.csv --work out/survey --render oracle_hvsc:render
+python -m pysidtracker.survey report out/survey/results.csv
+python -m pysidtracker.survey file tools/oracle_hvsc.py:native TUNE.sid --frames 3007   # one tune; :render for its document
+```
+
+## Layout
+
+`src/unitracker/`: `format/` (reading and writing documents, the shared vocabulary, event folds),
+`player/` (the generic player), `lift/` (detection and the three lifters), `modfit/` (proved
+modulation conversion), `optimise/` (smaller documents), `analysis/` (format studies),
+`playroutines/` (the library).
 
 ## Test
 

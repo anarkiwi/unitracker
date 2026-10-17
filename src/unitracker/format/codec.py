@@ -9,7 +9,7 @@ a reference ``("x", index)`` to the format's expression records, or a reference
 import keyword
 import re
 
-from unitracker.expr import ExprError, Resolver
+from unitracker.format.expr import ExprError, Resolver
 
 ROW_KEYS = (
     "wait",
@@ -491,7 +491,7 @@ def envelope_names(spec: dict) -> list:
 class CommandCodec:
     """A playroutine's command codes as shared names; an envelope command's internal code (see
     :func:`envelope_names`) as its name and byte. A code with no ``name`` has no written form of
-    its own: a document writes it through another record (see ``eventins``)."""
+    its own: a document writes it through another record (see ``format.events.instrument``)."""
 
     def __init__(self, spec: dict, rtypes: dict):
         self.entries, self.unnamed = [], {}

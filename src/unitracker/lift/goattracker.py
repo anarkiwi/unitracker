@@ -1,15 +1,12 @@
 """Lift a GoatTracker 2 tune (pygoattracker's decompiled .sid) to a unitracker song."""
 
-from importlib import resources
-
 import numpy as np
-import yaml
 from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
-from unitracker.songio import song_meta
+from unitracker.format.songio import library, song_meta
 from unitracker.modfit.convert import convert, window
-from unitracker.vm import SongPlayer, fold_empty
+from unitracker.player.vm import SongPlayer, fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
@@ -19,12 +16,6 @@ LEGATO = 17
 
 class LiftError(ValueError):
     """The tune uses something the GoatTracker 2 playroutine does not cover."""
-
-
-def load_playroutine() -> dict:
-    """The GoatTracker 2 playroutine definition."""
-    text = resources.files("unitracker").joinpath("playroutines/goattracker2.yaml").read_text()
-    return yaml.safe_load(text)
 
 
 class _Table:
@@ -357,7 +348,7 @@ def lift(dec, expressions: bool = True) -> dict:
     _check_build(info)
     song = dec.typed.to_song()
     build = info.build
-    playroutine = load_playroutine()
+    playroutine = library("goattracker2")
     adparam = C.DEFAULT_ADPARAM
     if build.adparam is not None:
         adparam = build.adparam << 8 | build.srparam

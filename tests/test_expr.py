@@ -2,7 +2,7 @@
 
 import pytest
 
-from unitracker.expr import ExprError, Resolver, parse
+from unitracker.format.expr import ExprError, Resolver, parse
 
 
 class Names(Resolver):

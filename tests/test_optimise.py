@@ -5,8 +5,10 @@ import copy
 import numpy as np
 import pytest
 
-from unitracker import backends, cli, optimise, songio
-from unitracker.vm import SongPlayer, first_mismatch
+from unitracker import cli, optimise
+from unitracker.format import songio
+from unitracker.lift import backends
+from unitracker.player.vm import SongPlayer, first_mismatch
 
 RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]"
 PULSE = "16*abs((φ - 32) % 128 - 64) + 512"

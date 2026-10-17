@@ -3,7 +3,9 @@
 from conftest import OPTIMISED
 from test_optimise import C1, I1, RUN, doc, run
 
-from unitracker import optimise, orthogonality, songio
+from unitracker import optimise
+from unitracker.analysis import orthogonality
+from unitracker.format import songio
 
 TOY = {
     "name": "toy",

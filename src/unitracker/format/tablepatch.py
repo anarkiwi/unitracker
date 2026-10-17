@@ -1,8 +1,8 @@
 """A song's ``playroutine.tables`` patch: its differences from the library, kept to what
 the song reads."""
 
-from unitracker.reach import ReachabilityError, table_reads
-from unitracker.yamlstyle import Flow, FlowMap
+from unitracker.format.yamlstyle import Flow, FlowMap
+from unitracker.player.reach import ReachabilityError, table_reads
 
 
 def table_diff(tables, defaults) -> dict:

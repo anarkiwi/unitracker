@@ -5,7 +5,7 @@ Usage: python tools/token_report.py SONG.yaml [...]   (needs tiktoken and tokeni
 
 import sys
 
-from unitracker.tokenstudy import SECTIONS, sections, tokenizers
+from unitracker.analysis.tokenstudy import SECTIONS, sections, tokenizers
 
 
 def report(path: str, name: str, split) -> str:

@@ -15,13 +15,13 @@ import typing
 import sympy
 import z3
 
+from unitracker.format.codec import Evaluator
 from unitracker.modfit import chipinv
 from unitracker.modfit import grammar as G
 from unitracker.modfit.flow import Writes
 from unitracker.modfit.form import INF, Form, Programs, atoms, lin, mk, record_data, show
 from unitracker.modfit.invariant import Slicer
-from unitracker.codec import Evaluator
-from unitracker.modulation import VALUE
+from unitracker.player.modulation import VALUE
 
 PHI_BOUND = 1 << 20
 FIRE = "_fire"

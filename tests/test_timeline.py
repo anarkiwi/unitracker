@@ -2,8 +2,8 @@
 
 import pytest
 
-from unitracker import timeline as tl
-from unitracker.timeline import END, TimelineError
+from unitracker.format import timeline as tl
+from unitracker.format.timeline import END, TimelineError
 
 
 def play(name, transpose=0, repeat=1):

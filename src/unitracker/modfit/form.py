@@ -9,7 +9,7 @@ import ast
 import z3
 
 from unitracker.modfit.flow import flow_of, parse
-from unitracker.vm import acc_mode
+from unitracker.player.vm import acc_mode
 
 INF = float("inf")
 BITS = 48

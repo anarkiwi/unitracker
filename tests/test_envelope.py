@@ -3,8 +3,9 @@
 import numpy as np
 import pytest
 
-from unitracker import envelope, songio
-from unitracker.vm import SongPlayer
+from unitracker.format import songio
+from unitracker.format.events import envelope
+from unitracker.player.vm import SongPlayer
 
 INS = """      ins:
         i1: {ad: 18, sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}

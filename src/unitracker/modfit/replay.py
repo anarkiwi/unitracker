@@ -1,14 +1,14 @@
 """A song played with its modulated cells driven by derived phase and value expressions.
 
 The playroutine's units start, fire and open occurrences as in the player
-(:mod:`unitracker.modulation`); ``derive`` gives each occurrence its derived expressions.
+(:mod:`unitracker.player.modulation`); ``derive`` gives each occurrence its derived expressions.
 """
 
 from tqdm import tqdm
 
 from unitracker.modfit import grammar as G
-from unitracker.modulation import Modulation, joined
-from unitracker.vm import SongPlayer
+from unitracker.player.modulation import Modulation, joined
+from unitracker.player.vm import SongPlayer
 
 G_value = joined  # pylint: disable=invalid-name
 

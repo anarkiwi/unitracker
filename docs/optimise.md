@@ -13,13 +13,13 @@ that need it skip without it). The documents are v1.15.
 ```sh
 unitracker-optimise song.yaml -o smaller.yaml [--passes hoist,commands] [--workers N] [--report orthogonality.md]
 unitracker-lift TUNE.sid -o song.yaml --optimise
-python -m unitracker.tokenstudy song.yaml ...     # the context-efficiency mock-ups below, as Markdown tables
-python -m unitracker.spelling song.yaml ...       # the note spellings below
+python -m unitracker.analysis.tokenstudy song.yaml ...     # the context-efficiency mock-ups below, as Markdown tables
+python -m unitracker.analysis.spelling song.yaml ...       # the note spellings below
 ```
 
 The code is the package `unitracker.optimise` (`proof`, `model`, `edits`, `passes`, `driver`,
-`describe`); the orthogonality report is `unitracker.orthogonality` ([orthogonality.md](orthogonality.md)
-for the three reference tunes) and the studies are `unitracker.tokenstudy` and `unitracker.spelling`.
+`describe`); the orthogonality report is `unitracker.analysis.orthogonality` ([orthogonality.md](orthogonality.md)
+for the three reference tunes) and the studies are `unitracker.analysis.tokenstudy` and `unitracker.analysis.spelling`.
 
 ## The proof
 
@@ -151,7 +151,7 @@ What the edits found, in brief (the full list is [orthogonality.md](orthogonalit
 
 ## Context-efficiency suggestions
 
-Measured by `python -m unitracker.tokenstudy` on the three optimised documents. Each suggestion
+Measured by `python -m unitracker.analysis.tokenstudy` on the three optimised documents. Each suggestion
 is a mock-up: the study rewrites the written structure (`songio.dumps(ir, respell=...)`), which the
 reader does not accept, so each is evidence for a format decision, not a format. Deltas are tokens
 against the optimised document; totals under each tokenizer, sections under `cl100k_base`.
@@ -240,7 +240,7 @@ reject both.
 
 ## Tokenization of notes and phrases
 
-Measured by `python -m unitracker.spelling` on the three optimised documents. Every spelling has
+Measured by `python -m unitracker.analysis.spelling` on the three optimised documents. Every spelling has
 an exact inverse (`spelling.absolute`), tested on every phrase: pitch is pitch, only the spelling
 changes. How the tokenizers split atoms:
 

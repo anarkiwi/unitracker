@@ -3,8 +3,9 @@
 import numpy as np
 import pytest
 
-from unitracker import lifetime, songio
-from unitracker.vm import SongPlayer
+from unitracker.format import songio
+from unitracker.format.events import lifetime
+from unitracker.player.vm import SongPlayer
 
 SW_INS = """      ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '2048 + 16*min(64, φ)'}

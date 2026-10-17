@@ -13,11 +13,9 @@ from importlib import resources
 
 import yaml
 
-from unitracker import envelope, eventfold, eventins, eventrestart, hints, inline, lifetime
-from unitracker import refkeys, retired
-from unitracker import timeline
-from unitracker.atoms import format_atom, parse_atom, runs
-from unitracker.codec import (
+from unitracker.format import hints, inline, refkeys, retired, timeline, xexpr
+from unitracker.format.atoms import format_atom, parse_atom, runs
+from unitracker.format.codec import (
     NONE,
     RETIRED,
     ROW_KEYS,
@@ -27,17 +25,17 @@ from unitracker.codec import (
     RowCodec,
     arg_text,
     is_expr,
-    row_place,
     note_text,
+    row_place,
     written_value,
 )
-from unitracker.modulation import declared
-from unitracker.records import EXPR, RowEval, record_types, ref_type
-from unitracker.tablepatch import table_diff, unread_dropped
-from unitracker.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
-from unitracker import xexpr
-from unitracker.xexpr import ExpressionError, text_of
-from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
+from unitracker.format.events import envelope, fold, instrument, lifetime, restart
+from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
+from unitracker.format.tablepatch import table_diff, unread_dropped
+from unitracker.format.xexpr import ExpressionError, text_of
+from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
+from unitracker.player.modulation import declared
+from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
 
 VERSION = "1.19"
 WIDTH = 100
@@ -132,7 +130,7 @@ class _Writer:
             name: {int(k): v for k, v in (rows or {}).items()}
             for name, rows in (ir.get("records") or {}).items()
         }
-        self.ins_type, self.ins_base = eventins.document(self.pr)
+        self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
         self.exprs = {int(k): str(v) for k, v in (ir.get("exprs") or {}).items()}
         canon = {}
@@ -152,9 +150,7 @@ class _Writer:
             self.pr, written, self.ir["tracks"], self.ir["phrases"], self.records.get(native, {})
         )
         self.records.update({native: rows} if native in self.records else {})
-        self.folds = eventfold.EventFolds(
-            self.pr, self.rtypes, self.codecs, self.commands, self.records
-        )
+        self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -177,22 +173,7 @@ class _Writer:
         """``(row indices, loop index or None)`` of the program starting at ``entry``."""
         key = (rtype.name, entry)
         if key not in self.programs:
-            path, pos, index = [], {}, entry
-            while True:
-                if index in pos:
-                    loop = pos[index]
-                    break
-                row = self._row(rtype, index)
-                pos[index] = len(path)
-                path.append(index)
-                if rtype.stop is not None and _RowEval(rtype).holds(rtype.stop, row):
-                    loop = None
-                    break
-                index = int(row.get(rtype.chain, rtype.default(rtype.chain)))
-                if rtype.none is not None and index == rtype.none:
-                    loop = None
-                    break
-            self.programs[key] = (path, loop)
+            self.programs[key] = program_path(rtype, lambda i: self._row(rtype, i), entry, _RowEval)
         return self.programs[key]
 
     def _refs(self, rtype, row):
@@ -257,10 +238,10 @@ class _Writer:
         return alias, compiled
 
     def _folded(self, arr):
-        """A compiled phrase with its event restarts and instruments named (see ``eventfold``)."""
+        """A compiled phrase with its event restarts and instruments named (see ``events.fold``)."""
         try:
             return self.folds.fold(arr, self.program)
-        except eventfold.FoldError as exc:
+        except fold.FoldError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
     # -- representations --
@@ -288,9 +269,7 @@ class _Writer:
         _refuse(retired.row(rtype, row, row, _RowEval(rtype).holds))
         _refuse(retired.unwritten(rtype, row))
         values = {}
-        for field in rtype.fields:
-            if field == rtype.chain:
-                continue
+        for field in rtype.own:
             value = int(row.get(field, rtype.default(field)))
             if field in refs:
                 values[field] = self.ref_value(refs[field])
@@ -301,7 +280,7 @@ class _Writer:
             raise SongFormatError(f"{rtype.written}: fields {sorted(unknown)} are not declared")
         if rtype.form == "map":
             return FlowMap(values)
-        fields = [f for f in rtype.fields if f != rtype.chain]
+        fields = rtype.own
         out = [values.get(f, rtype.default(f)) for f in fields]
         while out and fields[len(out) - 1] not in values:
             out.pop()
@@ -388,8 +367,8 @@ class _Writer:
         """A command as ``name:arg``, or None for no command."""
         if not (cmd or raw):
             return None
-        if cmd == eventrestart.CODE:
-            return f"{eventrestart.NAME}:@{self.names[(eventrestart.NAME, raw)]}"
+        if cmd == restart.CODE:
+            return f"{restart.NAME}:@{self.names[(restart.NAME, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
@@ -409,8 +388,8 @@ class _Writer:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             cmds = row[3:EVENT_COLUMNS]
             for cmd, arg in zip(cmds[::2], cmds[1::2]):
-                if cmd == eventrestart.CODE:
-                    yield (eventrestart.NAME, int(arg)), "command"
+                if cmd == restart.CODE:
+                    yield (restart.NAME, int(arg)), "command"
                     continue
                 target = self.commands.ref(int(cmd))
                 if target is not None and not self.commands.inline(int(cmd)):
@@ -584,7 +563,7 @@ class _Reader:
         self.doc = doc
         self.pr = self._playroutine(doc.get("playroutine"))
         self.rtypes = record_types(self.pr)
-        self.ins_type, self.ins_base = eventins.document(self.pr)
+        self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
         self.exprs = {}
         self.named_tables = set((declared(self.pr).get("tables") or {}))
@@ -594,9 +573,7 @@ class _Reader:
         self.records = {name: {} for name in self.rtypes}
         self.written = {rt.written: rt for rt in self.rtypes.values()}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
-        self.folds = eventfold.EventFolds(
-            self.pr, self.rtypes, self.codecs, self.commands, self.records
-        )
+        self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
 
     def _playroutine(self, spec) -> dict:
         if not isinstance(spec, dict):
@@ -709,7 +686,7 @@ class _Reader:
     @staticmethod
     def _list_row(rtype, codec, value, place) -> dict:
         """A list row's fields; a row the codec writes with shared keys has no list form."""
-        fields = [f for f in rtype.fields if f != rtype.chain]
+        fields = rtype.own
         if not isinstance(value, list) or len(value) > len(fields):
             raise SongFormatError(f"{rtype.written}: bad row {value!r}")
         row = dict(zip(fields, value))
@@ -722,29 +699,30 @@ class _Reader:
         if rtype.expr is not None and isinstance(value, (str, int)) and not isinstance(value, bool):
             start = self._alloc(rtype, 1)
             row = {rtype.expr: (EXPR, self.expr(value))}
-            row[rtype.chain] = rtype.none if rtype.none is not None else 0
-            self.pending.append((rtype, start, row))
+            self.pending.append((rtype, start, chained(rtype, [row], start)[start]))
             return start
         if not isinstance(value, list) or len(value) < 2:
             raise SongFormatError(f"{rtype.written}: a program is rows then end or loop")
         rows, term = value[:-1], value[-1]
         start = self._alloc(rtype, len(rows))
+        out = []
         for k, raw in enumerate(rows):
-            row = self._proto(rtype, raw, row_place(k, len(rows), term == timeline.END))
-            row[rtype.chain] = start + k + 1
-            self.pending.append((rtype, start + k, row))
-        last = self.pending[-1][2]
+            out.append(self._proto(rtype, raw, row_place(k, len(rows), term == timeline.END)))
+            self.pending.append((rtype, start + k, out[-1]))
         if term == timeline.END:
-            last[rtype.chain] = rtype.none if rtype.none is not None else 0
-            self._end(rtype, last, rows[-1], row_place(len(rows) - 1, len(rows), True))
-            if rtype.stop is not None:
-                plain = {f: v for f, v in last.items() if isinstance(v, int)}
-                if not _RowEval(rtype).holds(rtype.stop, plain):
-                    raise SongFormatError(f"{rtype.written}: a program can only end on a stop row")
+            loop = None
         elif isinstance(term, dict) and set(term) == {"loop"} and 0 <= term["loop"] < len(rows):
-            last[rtype.chain] = start + int(term["loop"])
+            loop = int(term["loop"])
         else:
             raise SongFormatError(f"{rtype.written}: bad program end {term!r}")
+        for row, linked in zip(out, chained(rtype, out, start, loop).values()):
+            row[rtype.chain] = linked[rtype.chain]
+        if loop is None:
+            self._end(rtype, out[-1], rows[-1], row_place(len(rows) - 1, len(rows), True))
+            if rtype.stop is not None:
+                plain = {f: v for f, v in out[-1].items() if isinstance(v, int)}
+                if not _RowEval(rtype).holds(rtype.stop, plain):
+                    raise SongFormatError(f"{rtype.written}: a program can only end on a stop row")
         return start
 
     def _end(self, rtype, last, written, place):
@@ -830,7 +808,7 @@ class _Reader:
         refs = {self.commands.ref(code) for code, _ in commands}
         keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"], refs)
         event.update({"keep": keep} if keep else {})
-        for code, index in [c for c in commands if c[0] == eventrestart.CODE]:
+        for code, index in [c for c in commands if c[0] == restart.CODE]:
             event["restart"] = index
             commands.remove([code, index])
         if len(commands) == 1:
@@ -842,18 +820,18 @@ class _Reader:
         return event
 
     def _unfolded(self, events: list, phrase: str) -> list:
-        """A phrase's events with its restarts and instruments unfolded (see ``eventfold``)."""
+        """A phrase's events with its restarts and instruments unfolded (see ``events.fold``)."""
         try:
             return self.folds.unfold(events, self._alloc)
-        except eventfold.FoldError as exc:
+        except fold.FoldError as exc:
             raise SongFormatError(f"{self.pr['name']}: phrase {phrase}: {exc}") from exc
 
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd in RETIRED:
             raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
-        if cmd == eventrestart.NAME and self.folds.held(cmd) and isinstance(arg, str):
-            return [eventrestart.CODE, self.lookup(arg[1:], eventrestart.NAME)]
+        if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
+            return [restart.CODE, self.lookup(arg[1:], restart.NAME)]
         row = isinstance(arg, tuple) and not self.commands.values(cmd)
         if row or (isinstance(arg, int) and self.commands.inline(cmd)):
             arg = self._inline(cmd, arg if isinstance(arg, tuple) else (arg,), atom)

@@ -5,7 +5,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker.songio import library
+from unitracker.format.songio import library
 
 
 @functools.lru_cache(maxsize=None)

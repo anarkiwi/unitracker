@@ -5,9 +5,9 @@ import functools
 
 import pytest
 
-from unitracker import songio
-from unitracker.codec import CodecError, RowCodec, written_value
-from unitracker.records import record_types
+from unitracker.format import songio
+from unitracker.format.codec import CodecError, RowCodec, written_value
+from unitracker.format.records import record_types
 
 
 @functools.cache

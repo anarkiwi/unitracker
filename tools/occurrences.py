@@ -9,7 +9,7 @@ cells asked for, its event instance and its text (None: no modulation).
 import argparse
 from pathlib import Path
 
-from unitracker import backends
+from unitracker.lift import backends
 from unitracker.modfit import convert
 
 

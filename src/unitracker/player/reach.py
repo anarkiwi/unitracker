@@ -2,7 +2,7 @@
 
 from tqdm import tqdm
 
-from unitracker.vm import SongPlayer
+from unitracker.player.vm import SongPlayer
 
 MAX_TICKS = 1_000_000
 
