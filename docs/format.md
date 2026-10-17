@@ -1,4 +1,4 @@
-# unitracker song format (v1.13)
+# unitracker song format (v1.14)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.13
+unitracker: 1.14
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.13`; readers reject any other version |
+| `unitracker` | `1.14`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -142,9 +142,14 @@ note[.instrument][!command:arg[!command:arg]][*steps]
 - `.i3` names the instrument. For defMON it names a sidTAB program.
 - `!run:@c1` is a named command with an argument: a number, `@name` for a command that
   references a record or an expression, or `none`. An event carries at most two commands,
-  in the order the player reads them (for SID-Wizard: instrument column, note column, FX
-  column), then `!pulse:0` and `!filter:0` (see Lifetime), which are not among the two.
-  Command names are the ones below.
+  its two slots, then `!pulse:0` and `!filter:0` (see Lifetime), which take no slot. The
+  first slot is the instrument column and the second the FX column, and an event that names
+  an instrument fills the instrument column with it, so its commands are the FX column's. A
+  command the player plays in one column takes either slot: SID-Wizard plays `!ad` and `!sr`
+  in the column of their slot (see Backends), and its `!freq`, `!legato:0` and `!run` in
+  their own. GoatTracker reads `!legato:0` from either slot and its other command from the
+  other, and defMON reads one command, so for them the slots are only an order. Command
+  names are the ones below.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
 
 ## Shared vocabulary
@@ -184,19 +189,16 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!restart:@r` | the note's hard restart, for a player whose instruments have none (see Hard restart) |
 | `!pulse:0`, `!filter:0` | the note does not restart the instrument's pulse / filter program (see Lifetime) |
 
-SID-Wizard's effect commands are its own: they have no identical shared form.
-
-| command | meaning |
-|---|---|
-| `!attack:n`, `!decay:n`, `!sustain:n`, `!release:n` | small FX $2x/$3x/$5x/$6x: one ADSR nibble |
-| `!iattack`, `!idecay`, `!isustain`, `!irelease` | the same small FX in the instrument column, which the player times differently |
+`!ad:n` and `!sr:n` are the byte the register takes. SID-Wizard sets them with a small FX
+that changes one nibble of the sounding instrument's byte, so it plays a byte that differs
+from that in at most one nibble (see Backends).
 
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
 (GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
-rejected on reading, naming the key or command and the player (`goattracker2: the player
-can't express !attack:1`); the writer refuses to write a value that would not read back
-(a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
+rejected on reading, naming the key or command and the player (`sidwizard: the player
+can't express !ad:255 over the instrument's ad 18`); the writer refuses to write a value that
+would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
 - **GoatTracker 2:** the wavetable command rows with no shared form (list rows `[w, n]`, see
   the GoatTracker 2 backend), the instrument keys `speed` and `vd` (the instrument vibrato, which
@@ -227,6 +229,10 @@ A note names the pitch it sounds, so SID-Wizard's per-instrument octave shift is
 notes: the instrument key `octave` is retired in v1.11 (`ins.octave is retired in v1.11: a
 note is written as the pitch it sounds`). A note is read as the player's note with no shift,
 which plays the same pitch.
+SID-Wizard's nibble commands `!attack`, `!decay`, `!sustain` and `!release` and their
+instrument-column forms `!iattack`, `!idecay`, `!isustain` and `!irelease` are retired in
+v1.14 (`!attack is retired in v1.14: write the envelope byte as !ad:n or !sr:n, in the event
+slot of its column`).
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
@@ -472,6 +478,8 @@ The writer produces one text per song:
 - equal expression texts share one definition;
 - runs of empty steps become `*steps`;
 - a playroutine's event restarts are written on their notes (see Hard restart);
+- a phrase whose envelope bytes differ between the places it plays is split into one
+  phrase per place (see the SID-Wizard backend), the inverse of the merge;
 - no-op commands are dropped.
 
 Writing what the reader returns gives the same bytes.
@@ -562,7 +570,10 @@ uses the first shape whose `when` holds and refuses a row that would not read ba
 shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or
 `x` for an expression), and for a plain argument optional `when`, `arg` (raw to written)
-and `raw` (written to raw), checked the same way.
+and `raw` (written to raw), checked the same way. An entry `{name: ad, nibble: s, slot: k}`
+is an envelope command: the code sets the nibble at shift `s` of the register `name` over
+the instrument's field `name`, played from event slot `k`, and is written as the byte it
+writes (see the SID-Wizard backend).
 
 A raw field given as `{search: [lo, hi]}` is the first value in that range whose row
 writes back as the written one. Codec expressions may read the song's tables and the
@@ -798,7 +809,23 @@ small FX ($7x) holds until the voice's next note, so on a note it becomes `!run`
 instrument's program with that chord inlined. `!run` plays in the instrument column on an
 event that names no instrument and in the FX column otherwise: the player times the two
 differently on a note's hard-restart ticks. A chord FX on a row that starts no note, and an
-FX-column chord on a note that names no instrument, are not covered. Note names are offset
+FX-column chord on a note that names no instrument, are not covered. An envelope small FX
+($2x-$6x: attack, decay, sustain, release; $12x-$16x from the instrument column) sets its
+nibble's override, which clears the other nibble's of that register and lasts until the
+voice's next note start, and writes both registers, each nibble from its override, else from
+the instrument; on a row that starts a note both columns run a tick later, the instrument
+column's first (an FX-column small FX ends the tick's FX), and the instrument column's also
+sets the carry into the frequency low byte on the ticks before the row applies while the WF
+program holds a row. The writer writes each as the byte it writes, `!ad:n` or `!sr:n` in the
+slot of its column, from the voice's instrument, found by walking each voice's plays twice
+through its loop; the reader plays each byte as the small FX that changes one nibble of the
+instrument's byte (the attack or sustain nibble when the byte is the instrument's). A phrase
+whose bytes, or small FX, differ between the places it plays becomes one phrase per place. An
+FX-column one alone on a row that starts no note is written in the first slot, which plays the
+same. Not covered: one on a voice with no instrument, one that writes the other register with
+another byte (after a row that selects an instrument without a note), an FX-column one alone
+on a note that names no instrument, and a play of a phrase that differs on its loop's passes.
+Note names are offset
 by one index: SID-Wizard index 49 is `C4`. The lifter
 requires each voice's first note to select an instrument: a note that selects none on a
 voice that has never had one has no instrument state to play. Table jumps, orderlist

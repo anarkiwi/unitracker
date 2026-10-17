@@ -367,9 +367,9 @@ Not expressible yet:
 | Keyword composition | Effect |
 | --- | --- |
 | SID-Wizard big FX $01 / $02 | `svib := $81`/`$82`; per tick `voff ± fm(arg, note+oct)` when `ci ≠ 0`, 0 when `arg = 0` |
-| SID-Wizard `!attack` | `aov := arg`, `dov := −1`, `sad := (arg << 4) \| (ins[ci].ad & 15)` when `ci ≠ 0` |
-| SID-Wizard `!iattack` … `!irelease` | setup and ticks equal the plain small FX on a row without a note |
-| SID-Wizard `!iattack` on a note row | `note_setup` test `… and pifx != 0` sets `carry` |
+| SID-Wizard small FX $2x (`!ad`, slot 1) | `aov := arg`, `dov := −1`, `sad := (arg << 4) \| (ins[ci].ad & 15)` when `ci ≠ 0` |
+| SID-Wizard small FX $12x-$16x (slot 0) | setup and ticks equal the plain small FX on a row without a note |
+| SID-Wizard small FX $12x on a note row | `note_setup` test `… and pifx != 0` sets `carry` |
 | GoatTracker `!ad` | `ad := arg` |
 | GoatTracker command 3 | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
 | defMON `!run2` | `rowB := arg`, `cntB := 0`; per tick `layer_b` runs the sidTAB row |

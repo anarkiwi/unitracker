@@ -11,7 +11,7 @@ RUN2 = 1
 
 def song(phrase, restart="[{hold: 3, ctrl: ^8}, {}, end]", sidtab="t1: [{ctrl: 64^1}, end]"):
     return f"""
-unitracker: 1.13
+unitracker: 1.14
 playroutine: {{ref: defmon}}
 song:
   - def:

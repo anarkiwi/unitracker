@@ -154,7 +154,7 @@ def items_fixture():
     return pool(
         {
             "goattracker2": {"freq", "ad", "sr", "mark"},
-            "sidwizard": {"freq", "attack", "iattack"},
+            "sidwizard": {"freq", "ad"},
         }
     )
 
@@ -169,15 +169,18 @@ def test_freq_has_no_native_effect_its_modulator_drives_the_cell(items):
 
 
 def test_attack_is_part_of_ad(items):
-    matches, v, reason = verdict(find(items, "sidwizard", "!attack"), items)
-    assert v == "partial" and [m.label for m in matches] == ["!iattack", "!ad"]
+    matches, v, reason = verdict(find(items, "sidwizard", "!ad", 0x20), items)
+    assert v == "partial" and [(m.pr, m.key[0]) for m in matches] == [
+        ("sidwizard", 0x120),
+        ("goattracker2", 5),
+    ]
     assert "AD:A vs AD (nibble vs byte)" in reason and "sticky override aov" in reason
 
 
 def test_iattack_differs_from_attack_on_note_rows(items):
-    matches, v, reason = verdict(find(items, "sidwizard", "!iattack"), items)
-    assert [m.label for m in matches] == ["!attack", "!ad"] and v == "partial"
-    assert reason.startswith("note row: procs.note_setup test")
+    matches, v, reason = verdict(find(items, "sidwizard", "!ad", 0x120), items)
+    assert [(m.pr, m.key[0]) for m in matches] == [("sidwizard", 0x20), ("goattracker2", 5)]
+    assert v == "partial" and reason.startswith("note row: procs.note_setup test")
     assert "pifx != 0" in reason
 
 

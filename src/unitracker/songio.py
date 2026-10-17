@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.13 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.14 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import eventrestart, hints, lifetime, refkeys, retired, timeline
+from unitracker import envelope, eventrestart, hints, lifetime, refkeys, retired, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -36,7 +36,7 @@ from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 
-VERSION = "1.13"
+VERSION = "1.14"
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -44,7 +44,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.13 format."""
+    """A document does not follow the unitracker v1.14 format."""
 
 
 @functools.cache
@@ -106,11 +106,11 @@ def _refuse(problem) -> None:
         raise SongFormatError(problem)
 
 
-def _lifetime(pr, call, *args):
-    """``call(*args)`` of a ``lifetime.Lifetime``, its errors the player's."""
+def _player(pr, call, *args):
+    """``call(*args)``, its lifetime and envelope errors the player's."""
     try:
         return call(*args)
-    except lifetime.LifetimeError as exc:
+    except (lifetime.LifetimeError, envelope.EnvelopeError) as exc:
         raise SongFormatError(f"{pr['name']}: {exc}") from exc
 
 
@@ -118,12 +118,11 @@ def _lifetime(pr, call, *args):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.13 document."""
+    """Turns the internal representation into a canonical v1.14 document."""
 
     # pylint: disable=too-many-instance-attributes
 
     def __init__(self, ir: dict):
-        self.ir = ir
         self.pr = ir["playroutine"]
         self.rtypes = record_types(self.pr)
         self.records = {
@@ -145,9 +144,10 @@ class _Writer:
         self.names = {}
         self.row = 0
         self.restarts = {}
+        self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         rows = self.records.get(self.ins_type, {})
         written = lifetime.Lifetime(self.pr, self.rtypes).written
-        self.kept, rows = _lifetime(self.pr, written, ir["tracks"], ir["phrases"] or {}, rows)
+        self.kept, rows = _player(self.pr, written, self.ir["tracks"], self.ir["phrases"], rows)
         self.records.update({self.ins_type: rows} if self.ins_type in self.records else {})
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
@@ -564,7 +564,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.13 document for internal-representation song ``ir``.
+    """A canonical v1.14 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -588,7 +588,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.13 document to the internal representation."""
+    """Expands a v1.14 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -837,7 +837,7 @@ class _Reader:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
         commands = [self.command(cmd, arg, atom) for cmd, arg in written]
         refs = {self.commands.ref(code) for code, _ in commands}
-        keep = _lifetime(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"], refs)
+        keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"], refs)
         event.update({"keep": keep} if keep else {})
         for code, index in [c for c in commands if c[0] == eventrestart.CODE]:
             event["restart"] = index
@@ -935,8 +935,8 @@ class _Reader:
         lengths = {name: len(compile_phrase(ev)) for name, ev in events.items()}
         voices = int(doc.get("voices", self.defaults.get("voices", 3)))
         tracks = timeline.from_rows(rows, doc.get("loop"), lengths, voices)
-        _lifetime(self.pr, self.lifetime.read, tracks, events, self.records, self.names)
-        return {
+        _player(self.pr, self.lifetime.read, tracks, events, self.records, self.names)
+        ir = {
             "unitracker": IR_VERSION,
             "meta": dict(doc.get("meta") or {}),
             "hints": dict(doc.get("hints") or {}),
@@ -949,6 +949,7 @@ class _Reader:
             "tracks": tracks,
             "phrases": events,
         }
+        return _player(self.pr, envelope.Envelope(self.pr, self.rtypes).read, ir, self.records)
 
     @staticmethod
     def _entry(entry):
@@ -963,7 +964,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.13 document."""
+    """The internal representation of a v1.14 document."""
     doc = parse(text)
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
@@ -973,13 +974,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.13 document at ``path``."""
+    """The internal representation of the v1.14 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.13 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.14 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

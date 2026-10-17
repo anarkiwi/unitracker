@@ -452,7 +452,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.13",
+        "unitracker": "1.14",
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -696,7 +696,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.13 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.14 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -742,15 +742,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     assert dm_cmds == {"run2", "restart"}
     sw_doc = parse(songio.dumps(lift_sw(csillag.read_bytes())))
     sw_cmds = vocabulary(sw_doc)
-    assert sw_cmds == {
-        "freq",
-        "attack",
-        "sustain",
-        "run",
-        "legato",
-        "isustain",
-        "irelease",
-    }
+    assert sw_cmds == {"freq", "ad", "sr", "run", "legato"}
     # A key two players both use is a shared key; every other key belongs to one player.
     keys = [_song_keys(d) - {"loop"} for d in (gt_doc, dm_doc, sw_doc)]
     for i, mine in enumerate(keys):
@@ -764,7 +756,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.13",
+                "unitracker": "1.14",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -806,7 +798,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.13
+unitracker: 1.14
 playroutine: {ref: defmon}
 song:
   - def:
@@ -898,7 +890,7 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.13
+unitracker: 1.14
 playroutine: {ref: sidwizard}
 song:
   - def:
