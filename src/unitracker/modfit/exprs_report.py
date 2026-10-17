@@ -144,13 +144,33 @@ def modulator_lines(names: Names, mod: Modulator) -> list:
     else:
         firings = sum(o.firings for o in mod.occurrences)
         lines.append(f"    replay: {firings} firings equal the native cell")
+    inh = mod.inherited
+    if inh is not None:
+        if inh.update is None:
+            lines.append(f"    inherited {', '.join(inh.cells)}: not one expression: {inh.reason}")
+        else:
+            what = "inputs" if inh.kind == "input" else "phase start offset from"
+            lines.append(f"    inherited ({what} {', '.join(inh.cells)}): {inh.proof}")
     if mod.canonical is not None:
         lines.append(f"    canonical: {mod.canonical}")
+        lines.append(f"    reads: {', '.join(reads(mod))}")
     elif len(mod.forms) > 1:
         lines.append(
             f"    canonical: none, {len(mod.forms)} expressions decided by {verdict_state(mod)}"
         )
     return lines
+
+
+def reads(mod: Modulator) -> list:
+    """What the canonical expression reads besides ``v``: the phase, the note, tables, inputs."""
+    a, f = mod.canonical_exprs
+    syms = {x.name for x in a.free_symbols | f.free_symbols}
+    out = ["φ"] if "φ" in syms else []
+    out += ["N"] if "N" in syms else []
+    calls = a.atoms(sympy.core.function.AppliedUndef) | f.atoms(sympy.core.function.AppliedUndef)
+    out += sorted({type(x).__name__ for x in calls})
+    out += [f"{c} (a cell read when it starts)" for c in sorted(syms - {"φ", "N", "v"})]
+    return out or ["v only"]
 
 
 def _start(r: Result) -> str:
@@ -196,7 +216,9 @@ def failures(reports: list) -> list:
         for m in rep.modulators:
             why = list(m.errors)
             why += [f"{p[0]}: {p[2]}" for r in m.live for p in r.derived.proof if not p[1]]
-            if m.canonical is None and not m.errors:
+            if m.inherited is not None and m.inherited.update is None:
+                why.append(f"inherited {', '.join(m.inherited.cells)}: {m.inherited.reason}")
+            elif m.canonical is None and not m.errors:
                 why.append(f"needs state that is no phase or modulator value: {len(m.forms)} "
                            f"expressions decided by {verdict_state(m)}")  # fmt: skip
             why += [f"replay differs {mismatch_text(o)}" for o in m.mismatches[:1]]
@@ -263,7 +285,9 @@ def report(
         "firing at φ. N is the voice's sounding note in format numbering, F(k) the player's",
         "frequency of note k, W the SID-Wizard speed table (exptab below 107, then frequencies).",
         "Proofs are z3 over 48-bit integers: every reachable control state's paths against f and",
-        "of f and a over the cycle, and g(φ + 1) = f(g(φ), φ + 1).",
+        "of f and a over the cycle, and g(φ + 1) = f(g(φ), φ + 1). A cell the previous",
+        "modulator left is an input of the expression, read when the modulator starts, or a",
+        "start offset of φ.",
         "",
     ]
     for rep in reports:

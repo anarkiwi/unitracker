@@ -2,6 +2,7 @@
 
 import random
 import re
+import types
 
 import numpy as np
 import pytest
@@ -10,8 +11,26 @@ import z3
 
 from unitracker.modfit import grammar as G
 from unitracker.modfit.cli import main
-from unitracker.modfit.exprs import Analysis, Names, analyse, document, dump, load, native_grid
-from unitracker.modfit.exprs_report import expression_document, leftovers
+from unitracker.modfit.exprs import (
+    Analysis,
+    Names,
+    analyse,
+    derive_task,
+    document,
+    driven_task,
+    dump,
+    keys_task,
+    load,
+    native_grid,
+    observe_task,
+)
+from unitracker.modfit.exprs_report import (
+    expression_document,
+    failures,
+    leftovers,
+    modulator_lines,
+)
+from unitracker.modfit.inherit import guarded, inherit
 from unitracker.modfit.form import Form
 from unitracker.modfit.orbit import deltas
 from unitracker.modfit.phase import Machine, derive, unproved_functions
@@ -277,3 +296,76 @@ def test_csillag_slide_reads_the_speed_table(csillag_song):
     assert labels["!mod:@m1"].canonical == "0; (v + W[N + 25]) % 65536"
     assert labels["i2 pulse"].canonical == "1; 2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048"
     assert "i2 vibrato" in rep.quiet
+
+
+# ---- inherited start values -------------------------------------------------------------
+
+
+def test_a_counted_start_cell_is_refused_as_an_input(mw):
+    machine = Machine(mw.ir, {"cell": "pulse", "fire": ["pulse_exec"]})
+    start = machine.start({"pptr": 1, "ptime": "ptime"})
+    with pytest.raises(ValueError, match="ptime counts"):
+        guarded(machine, {"ptime"}).explore(start)
+    d = derive(guarded(machine, {"ptime"}), start, None, GT_FREQ, {"ptime": "ptime"})
+    assert "counts" in d.error
+
+
+def _driven(path, ticks, inputs):
+    """``(grid, occurrences)`` of a tune with the given inherited expressions driven."""
+    occs = observe_task(str(path), ticks, None)
+    keys = {k for k, _ in keys_task(str(path), occs, None) if k is not None}
+    found = {k: derive_task(str(path), k, None) for k in keys}
+    live = {k: v for k, v in found.items() if not v[0].identity}
+    return driven_task(str(path), ticks, live, set(inputs), 0, None, inputs)
+
+
+def test_acid_direction_is_an_input_and_a_wrong_input_is_caught(crosseyed):
+    rep = analyse(crosseyed, workers=4)
+    acid = next(m for m in rep.modulators if m.label == "t6 acid")
+    assert acid.inherited.kind == "input" and acid.inherited.cells == ["sub"]
+    assert "sub" in acid.canonical and acid.proved and failures([rep]) == ["  none"]
+    text = "\n".join(modulator_lines(Names(rep.song), acid))
+    assert "inherited (inputs sub): proved for every value of sub" in text
+    assert "reads: φ, sub (a cell read when it starts)" in text
+    a, f = acid.canonical_exprs
+    sub = sympy.Symbol("sub", integer=True)
+    key = (acid.unit["name"], acid.label)
+    native = native_grid(load(crosseyed), rep.ticks)
+    grid, occs = _driven(crosseyed, rep.ticks, {key: (a, f)})
+    assert np.array_equal(grid, native)
+    assert not [o for o in occs if o.unit == key[0] and o.mismatch]
+    _, occs = _driven(crosseyed, rep.ticks, {key: (a, f.xreplace({sub: 1 - sub}))})
+    assert [o for o in occs if o.unit == key[0] and o.mismatch]
+
+
+def test_a_counted_inherited_cell_is_a_phase_offset(mw):
+    machine = Machine(mw.ir, {"cell": "pulse", "fire": ["pulse_exec"]})
+    nodes = machine.explore(machine.start({"pptr": 1, "ptime": 0})).nodes
+    same = [n for n in nodes[2:] if dict(n)["pptr"] == dict(nodes[2])["pptr"]][:3]
+    unit = {"name": "pulse", "cell": "pulse"}
+    live = [
+        types.SimpleNamespace(start=s, derived=derive(machine, s, None, GT_FREQ), start_value=None)
+        for s in same
+    ]
+    an = types.SimpleNamespace(machines={"pulse": machine}, freq=GT_FREQ)
+    got = inherit(an, types.SimpleNamespace(unit=unit, live=live))
+    assert got.kind == "phase" and got.cells == ["ptime"] and "ptime counts" in got.proof
+    assert f"φ0 = -ptime + {dict(same[0])['ptime']}" in got.proof
+    f = G.compiled(got.update[1], ("v", "phi", "N", "ptime"))
+    for s, r in zip(same, live):
+        want = G.compiled(r.derived.update[1])
+        assert [f(0, phi, 0, dict(s)["ptime"]) for phi in range(40)] == [
+            want(0, phi, 0) for phi in range(40)
+        ]
+
+
+def test_a_start_off_the_longest_run_is_no_phase_offset(mw):
+    machine = Machine(mw.ir, {"cell": "pulse", "fire": ["pulse_exec"]})
+    starts = [machine.start({"pptr": 2, "ptime": 7}), machine.start({"pptr": 3, "ptime": 5})]
+    live = [
+        types.SimpleNamespace(start=s, derived=derive(machine, s, None, GT_FREQ), start_value=None)
+        for s in starts
+    ]
+    an = types.SimpleNamespace(machines={"pulse": machine}, freq=GT_FREQ)
+    lost = inherit(an, types.SimpleNamespace(unit={"name": "pulse", "cell": "pulse"}, live=live))
+    assert lost.kind == "none" and lost.update is None and lost.reason

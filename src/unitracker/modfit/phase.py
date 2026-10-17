@@ -664,8 +664,8 @@ def _join(head: list, tail, start: int):
 class Prover:
     """z3 obligations of expressions against the player's paths of one unit."""
 
-    def __init__(self, machine: Machine, freq: dict):
-        self.machine, self.freq = machine, freq
+    def __init__(self, machine: Machine, freq: dict, extra: dict | None = None):
+        self.machine, self.freq, self.extra = machine, freq, dict(extra or {})
         self.form = machine.form
         self.offset = int(self.form.pr.get("note_offset", 0))
 
@@ -673,6 +673,7 @@ class Prover:
         """Symbols and functions of the grammar over one solver's atoms."""
         f = self.form
         env = {"v": smt.term(self.machine.cell), "N": smt.term("N"), "φ": phi}
+        env.update({name: smt.term(cell) for cell, name in self.extra.items()})
 
         def table(name):
             fn = z3.Function(f"idx_{name}", z3.BitVecSort(G.BITS), z3.BitVecSort(G.BITS))
@@ -827,7 +828,7 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
             states=len(graph.nodes), error="more than one phase: a state advances on two tests"
         )
     out = Derived(order=o, states=len(graph.nodes))
-    prover = Prover(machine, freq)
+    prover = Prover(machine, freq, extra)
     domain = (("v", 0, machine.mask), ("N", 0, (1 << machine.form.width["N"]) - 1))
     forms = value_forms(values, o, machine.mask)
     out.value = G.polar(G.shortest(forms), domain)
