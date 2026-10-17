@@ -72,8 +72,13 @@ def _named(w, tname: str, index: int) -> str:
     if key in w.names:
         return f"{w.names[key]}: {one_line(value)}"
     owners = [r for r in w.referrers.get(key, []) if isinstance(r, tuple)]
-    places = [f"{w.names.get(o, o)}.{f}" for o, f in owners if isinstance(o, tuple)]
-    return f"{', '.join(places) or tname}: {one_line(value)}"
+    places = [f"{_owner(w, o)}.{f}" for o, f in owners if isinstance(o, tuple)]
+    return f"{', '.join(places) or rtype.written}: {one_line(value)}"
+
+
+def _owner(w, key: tuple) -> str:
+    """A referring record's name, else its written type and index."""
+    return w.names.get(key) or f"{w.rtypes[key[0]].written} {key[1]}"
 
 
 def _phrase(w, name: str):
@@ -107,7 +112,8 @@ def describe(ir: dict, edit: tuple) -> tuple:
     try:
         w = writer(ir)
         if op == "merge":
-            return (args[0], _named(w, args[0], args[2]), _named(w, args[0], args[1]))
+            where = w.rtypes[args[0]].written
+            return (where, _named(w, args[0], args[2]), _named(w, args[0], args[1]))
         if op == "alias":
             keep, drop = (w.phrase_names[n] for n in args)
             return ("phrase", _phrase_name(drop), _phrase_name(keep))

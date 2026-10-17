@@ -58,7 +58,7 @@ def test_library_playroutines_have_no_dead_cells_or_procs():
 def test_vocabulary_lists_shapes_and_commands_no_row_reaches():
     ir = songio.loads(doc(I1, RUN, C1))
     found = texts(orthogonality.vocabulary([("toy", ir)]))
-    assert any(w.startswith("toy codec shape ctrltab[") and w.endswith("`{vol}`") for w, _ in found)
+    assert any(w.startswith("toy codec shape ctrl[") and w.endswith("`{vol}`") for w, _ in found)
     assert ("toy command `!tempo`", "no lifted event plays it") in found
     assert all("command `!run`" not in w for w, _ in found)
     uses = orthogonality.shape_uses(ir)

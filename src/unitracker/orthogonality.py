@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from unitracker import songio
 from unitracker.codec import COMMAND_NAMES, ROW_KEYS, CodecError, evaluate, row_place
+from unitracker.eventins import written_as
 from unitracker.optimise import programs_of, view
 from unitracker.records import META_KEYS
 from unitracker.vm import PSEUDO
@@ -443,13 +444,15 @@ def command_uses(ir: dict) -> dict:
                 try:
                     name = v.commands.encode(int(code), int(arg))[0]
                 except CodecError:
-                    name = next((n for c, (n, _) in v.nibbles.items() if c == code), str(code))
+                    name = written_as(ir["playroutine"], int(code)) or next(
+                        (n for c, (n, _) in v.nibbles.items() if c == code), str(code)
+                    )
                 out[name] = out.get(name, 0) + 1
     return out
 
 
 def _codec_keys(pr: dict) -> dict:
-    """``{(type, shape index): shared keys}`` of a playroutine's codec shapes."""
+    """``{(type, shape index): shared keys}`` of a playroutine's codec shapes, by native type."""
     out = {}
     for tname, spec in (pr.get("record_types") or {}).items():
         for k, shape in enumerate((spec or {}).get("codec") or []):
@@ -470,7 +473,7 @@ def vocabulary(songs: list) -> list:
         for k in ROW_KEYS
     }
     cmds = {
-        c: [n for n, pr in prs.items() if any(c == _cname(v) for v in _variants(pr))]
+        c: [n for n, pr in prs.items() if any(c == _cname(pr, k, v) for k, v in _variants(pr))]
         for c in COMMAND_NAMES
     }
     out = [
@@ -490,40 +493,49 @@ def vocabulary(songs: list) -> list:
         if not players and c != "restart"
     ]
     for label, ir in songs:
-        name = ir["playroutine"]["name"]
-        used = shape_uses(ir)
-        for (tname, k), shared in _codec_keys(ir["playroutine"]).items():
-            if not used.get((tname, k)):
-                out.append(
-                    Line(
-                        UNREACHABLE,
-                        name,
-                        f"{label} codec shape {tname}[{k}] `{{{', '.join(shared)}}}`",
-                        "no lifted row is written with it",
-                        "hand-written only: keep with a test, or retire",
-                    )
-                )
-        played = command_uses(ir)
-        for c in sorted({_cname(v) for v in _variants(ir["playroutine"])} - set(played)):
+        out += _unreached(label, ir)
+    return out
+
+
+def _unreached(label: str, ir: dict) -> list:
+    """Report lines for the codec shapes and commands no lifted row of song ``label`` plays."""
+    pr = ir["playroutine"]
+    used, rtypes, out = shape_uses(ir), view(ir).rtypes, []
+    for (tname, k), shared in _codec_keys(pr).items():
+        if not used.get((tname, k)):
+            shape = f"{rtypes[tname].written}[{k}] `{{{', '.join(shared)}}}`"
             out.append(
                 Line(
                     UNREACHABLE,
-                    name,
-                    f"{label} command `!{c}`",
-                    "no lifted event plays it",
-                    "hand-written only",
+                    pr["name"],
+                    f"{label} codec shape {shape}",
+                    "no lifted row is written with it",
+                    "hand-written only: keep with a test, or retire",
                 )
             )
+    played = command_uses(ir)
+    for c in sorted({_cname(pr, code, v) for code, v in _variants(pr)} - set(played)):
+        out.append(
+            Line(
+                UNREACHABLE,
+                pr["name"],
+                f"{label} command `!{c}`",
+                "no lifted event plays it",
+                "hand-written only",
+            )
+        )
     return out
 
 
 def _variants(pr: dict):
-    for variants in (pr.get("commands") or {}).values():
-        yield from variants if isinstance(variants, list) else [variants]
+    for code, variants in (pr.get("commands") or {}).items():
+        yield from (
+            (int(code), v) for v in (variants if isinstance(variants, list) else [variants])
+        )
 
 
-def _cname(variant: dict) -> str:
-    return str(variant["name"])
+def _cname(pr: dict, code: int, variant: dict) -> str:
+    return str(variant.get("name") or written_as(pr, code))
 
 
 # ---- the report ----------------------------------------------------------------------
