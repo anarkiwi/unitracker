@@ -53,6 +53,23 @@ python -m pysidtracker.survey report out/survey/results.csv
 python -m pysidtracker.survey file tools/oracle_hvsc.py:native TUNE.sid --frames 3007   # one tune; :render for its document
 ```
 
+## Triage
+
+Reuse these before writing a new tool; extend one rather than adding a near copy.
+
+| question | tool |
+|---|---|
+| does a lifted song play its native player? | `unitracker-play song.yaml --check TUNE.sid`; in code `SongPlayer.mismatch` |
+| where and on which register does it first differ? | `python tools/grid_diff.py song.yaml TUNE.sid --ticks 3007 [--from T --to T]` |
+| do the three reference tunes still round-trip and match? | `python tools/reference_check.py OUTDIR [--forbid KEY ...]` |
+| the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
+| why did a modulator not become an expression? | `python tools/occurrences.py TUNE.sid [--unit freq\|pw\|cut]`, `unitracker-modfit exprs` |
+| does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modfit.md](docs/modfit.md)) |
+| tokens per section of a document | `python tools/token_report.py song.yaml` |
+| dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report orthogonality.md` ([docs/orthogonality.md](docs/orthogonality.md)) |
+| lift failures over HVSC, by cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (above) |
+| a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `sw_fx`, `sw_table_byte`, `mini_song`, `table`, `hvsc_tune` |
+
 ## Layout
 
 `src/unitracker/`: `format/` (reading and writing documents, the shared vocabulary, event folds),
