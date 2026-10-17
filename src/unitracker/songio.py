@@ -17,6 +17,7 @@ from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
+    RETIRED,
     ROW_KEYS,
     CodecError,
     CommandCodec,
@@ -304,12 +305,13 @@ class _Writer:
         refs = dict(self._refs(rtype, row))
         if shared is not None:
             self._reads_back(codec, shared)
-            out = {}
+            out, number = {}, codec.expr_keys()
             for k, v in shared.items():
                 if k == "note":
                     v = Atom(note_text(*v))
                 elif is_expr(v):
                     v = self.ref_value(self.key(EXPR, v[1]))
+                    v = str(v) if number.get(k) else v
                 out[k] = v
             fields = _expr_fields(codec)
             out.update((f, self.ref_value(k)) for f, k in refs.items() if f not in fields)
@@ -785,6 +787,8 @@ class _Reader:
 
     def _define(self, tname, name, value):
         rtype = self.rtypes.get(tname)
+        if tname in RETIRED:
+            raise SongFormatError(f"record type {tname!r} is {RETIRED[tname]}")
         if rtype is None:
             raise SongFormatError(f"unknown record type {tname!r}")
         if rtype.fixed:
@@ -853,6 +857,8 @@ class _Reader:
 
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
+        if cmd in RETIRED:
+            raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
         if isinstance(arg, str) and arg != NONE:
             if arg[1:] not in self.names:
                 raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")

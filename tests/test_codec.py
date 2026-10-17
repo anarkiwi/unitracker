@@ -352,9 +352,13 @@ def test_freq_and_legato_commands(pr_name, code, arg, shared):
 def test_retired_and_unplayable_commands_are_refused(pr_name):
     pr, types = LIBS[pr_name]
     cmds = CommandCodec(pr["commands"], types)
-    for name, value in [("mod", 0), ("noteglide", 1), ("freq", 5), ("freq", ("pwtab", 1))]:
+    for name, value in [("noteglide", 1), ("freq", 5), ("freq", ("pwtab", 1))]:
         with pytest.raises(CodecError, match="can't express"):
             cmds.decode(name, value)
+    with pytest.raises(CodecError, match="retired in v1.5"):
+        cmds.decode("mod", 0)
+    with pytest.raises(CodecError, match="a byte"):
+        cmds.decode("freq", ("x", 256))
     for code in (1, 2, 3, 632):
         with pytest.raises(CodecError, match="no shared name"):
             cmds.encode(code, 1)

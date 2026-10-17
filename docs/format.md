@@ -197,7 +197,9 @@ can't express !notevib:1`); the writer refuses to write a value that would not r
 
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
-using them is rejected (`unknown record type 'mod'`, `can't express !noteglide:0`).
+using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
+`can't express !noteglide:0`). A command's argument is a byte: `!freq:@x` names one of the
+first 255 expressions, else the reader refuses it.
 
 ## Modulators
 
@@ -210,6 +212,7 @@ filter cutoff) by an integer expression evaluated at each of the unit's firings.
 |---|---|
 | `12` | an integer |
 | `a + b`, `a - b`, `a * b`, `-a` | integer arithmetic, unbounded |
+| `a // b` | floored division: rounds toward minus infinity |
 | `a % b` | floored modulo: the result has the sign of `b` |
 | `abs(a)`, `min(a, b)`, `max(a, b)` | |
 | `[a op b]` | Iverson bracket of one comparison: 1 when it holds, else 0; `op` is `==`, `!=`, `<`, `<=`, `>` or `>=` |
@@ -262,8 +265,8 @@ result floor-divided by `s`. GoatTracker's filter cell holds the top 8 bits of t
 | an event's `!freq:@x1`, naming an `x` definition | GoatTracker, SID-Wizard |
 
 A key that also takes a plain value (`cut` in a GoatTracker or SID-Wizard filter row)
-reads an integer as that value and a string as an expression; elsewhere an integer is a
-constant expression. An expression that contains a comma is quoted inside a YAML flow
+reads an integer as that value and a string as an expression (`cut: '1024'` is the
+constant expression, written back quoted); elsewhere an integer is a constant expression. An expression that contains a comma is quoted inside a YAML flow
 map: `pw: '2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048'`.
 
 ### Legato

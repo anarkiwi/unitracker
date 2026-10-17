@@ -485,7 +485,10 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 and [legato["command"], 0] not in cmds
             ):
                 cmds.insert(0, [legato["command"], 0])
-            cmds.append([spec["command"], self.x(text or IDENTITY)])
+            index = self.x(text or IDENTITY)
+            if index > 0xFF:
+                raise ConversionError(f"!freq names expression {index}: an argument is a byte")
+            cmds.append([spec["command"], index])
             _set_cmds(ev, cmds)
 
     # -- phrases and tracks --

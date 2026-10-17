@@ -106,11 +106,15 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
     "old,new,match",
     [
         ("unitracker: 1.5", "unitracker: 1.4", "not a unitracker v1.5 document"),
-        ("      x:\n", "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n", "type 'mod'"),
-        ("-!freq:@x1, -!freq:@x1,", "-!mod:@m1, -!freq:@x1,", "unknown name 'm1'"),
+        (
+            "      x:\n",
+            "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
+            "'mod' is retired",
+        ),
+        ("-!freq:@x1, -!freq:@x1,", "-!mod:@m1, -!freq:@x1,", "!mod is retired in v1.5"),
         ("-!freq:@x1, -!freq:@x1,", "-!noteglide:0, -!freq:@x1,", "can't express !noteglide"),
         ("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]", "keys"),
-        ("x1: (v + 300) % 65536", "x1: v // 2", "outside the grammar"),
+        ("x1: (v + 300) % 65536", "x1: v / 2", "outside the grammar"),
         ("x1: (v + 300) % 65536", "x1: W[N]", "unknown table 'W'"),
         ("x1: (v + 300) % 65536", "x1: '[0 < v < 9]'", "not one comparison"),
         ("x1: (v + 300) % 65536", "x1: sqrt(v)", "calls no grammar function"),
@@ -133,6 +137,42 @@ def test_expressions_compile_to_the_grammar_semantics():
         xexpr.text_of(True)
     with pytest.raises(xexpr.ExpressionError, match="takes 2"):
         xexpr.source("min(v)")
+
+
+def test_floor_division_floors_toward_minus_infinity():
+    f = xexpr.compile_expr("φ // 30 - v // 4", {"_T": {}})
+    assert [f(-5, phi, 0) for phi in (0, 29, 30, 61)] == [2, 2, 3, 4]
+
+
+@pytest.mark.parametrize("key,value", [("cut", 1024), ("cut", 0)])
+def test_a_constant_expression_in_a_filter_row_reads_back_as_written(key, value):
+    ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: "
+    rows = f"[{{{key}: '{value}', resfilt: 193, mode: 16}}, {{{key}: 512}}, end]"
+    text = songio.dumps(
+        songio.loads(
+            GT_SONG.replace(
+                "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9,", ins + rows + ",", 1
+            )
+        )
+    )
+    assert f"{key}: '{value}'" in text and f"{key}: 512" in text
+    assert songio.dumps(songio.loads(text)) == text
+
+
+def test_sidwizard_constant_cut_expression_reads_back_as_written():
+    ins = "freq: '[φ >= 2]*W[N + 25]'"
+    rows = ins + ", filter: [{cut: '1024', mode: 16}, {cut: 512, mode: 32}, end]"
+    text = songio.dumps(songio.loads(SW_SONG.replace(ins, rows, 1)))
+    assert "cut: '1024'" in text and "cut: 512" in text
+    assert songio.dumps(songio.loads(text)) == text
+
+
+def test_a_command_naming_an_expression_past_a_byte_is_refused():
+    many = "".join(f"        y{k}: {k}\n" for k in range(300))
+    text = GT_SONG.replace("      x:\n", "      x:\n" + many, 1)
+    text = text.replace("-!freq:@x1, -!freq:@x1", "-!freq:@y1, -!freq:@y299", 1)
+    with pytest.raises(songio.SongFormatError, match="argument is a byte"):
+        songio.loads(text)
 
 
 def test_a_selected_expression_must_exist():

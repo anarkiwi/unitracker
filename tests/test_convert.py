@@ -80,6 +80,21 @@ def test_a_filter_sweep_is_written_in_cutoff_units():
     assert not np.array_equal(regs(songio.loads(one_cell_off), 200), want)
 
 
+def test_a_looping_sweep_with_a_drift_is_written_with_floor_division():
+    ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: [{cut: 1024, "
+    ir = gt_ir("[C4.i1*16, D4*16]", ins + "resfilt: 193, mode: 16}, end]}")
+    ft = ir["records"]["filttab"]
+    ft[1]["next"], ft[2], ft[3] = 2, {"l": 20, "r": 3, "next": 3}, {"l": 10, "r": 255, "next": 2}
+    want = regs(ir, 400)
+    out = convert.convert(ir, cache=None, workers=1)
+    (text,) = out["exprs"].values()
+    assert "φ // 30" in text
+    written = songio.dumps(out)
+    assert np.array_equal(regs(songio.loads(written), 400), want)
+    slower = written.replace("φ // 30", "φ // 31")
+    assert not np.array_equal(regs(songio.loads(slower), 400), want)
+
+
 def test_the_player_floors_a_scaled_expression_to_the_cell():
     ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: [{cut: "
     ir = gt_ir("[C4.i1*8]", ins + "'1024 + 12*min(φ, 6)', resfilt: 193, mode: 16}, end]}")
