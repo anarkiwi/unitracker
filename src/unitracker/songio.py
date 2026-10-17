@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import eventrestart, timeline
+from unitracker import eventrestart, retired, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -42,17 +42,6 @@ WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-RETIRED_KEYS = {"registers": "retired in v1.6: the player starts from a zeroed SID"}
-_RESTART = "retired in v1.8: write the hard restart as the instrument's restart program"
-RETIRED_FIELDS = {"gt": _RESTART, "fw": _RESTART, "hrad": _RESTART, "hrsr": _RESTART}
-RETIRED_FIELDS["firstctrl"] = _RESTART
-RETIRED_FIELDS["chord"] = (
-    "retired in v1.9: a chord is the instrument's `ctrl` program of relative notes"
-)
-RETIRED_FIELDS["arpspeed"] = (
-    "retired in v1.9: write the arp speed as the `ctrl` program rows' `hold`"
-)
-RETIRED_BITS = {"flags": (0x0F, _RESTART)}
 
 
 class SongFormatError(ValueError):
@@ -123,12 +112,10 @@ def _expr_fields(codec) -> set:
     return {k["expr"] for shape in codec.shapes for k in shape.keys.values() if "expr" in k}
 
 
-def _retired_row(rtype, row: dict, shown) -> None:
-    """Raise, naming it, for a raw row form the format has retired."""
-    plain = {k: v for k, v in row.items() if isinstance(v, int)}
-    for when, why in rtype.retired.items():
-        if _RowEval(rtype).holds(when, plain):
-            raise SongFormatError(f"{rtype.name}: row {shown!r} is {why}")
+def _refuse(problem) -> None:
+    """Raise for a retired form's reason, if there is one."""
+    if problem is not None:
+        raise SongFormatError(problem)
 
 
 def _ref_type(rtype, field, row):
@@ -137,15 +124,6 @@ def _ref_type(rtype, field, row):
         if when is None or _RowEval(rtype).holds(when, row):
             return target
     return None
-
-
-def _retired(rtype, value: dict) -> None:
-    """Raise, naming it, for a field or flag bit the format has retired."""
-    for key in RETIRED_FIELDS.keys() & value.keys():
-        raise SongFormatError(f"{rtype.name}.{key} is {RETIRED_FIELDS[key]}")
-    for key, (mask, why) in RETIRED_BITS.items():
-        if isinstance(value.get(key), int) and value[key] & mask:
-            raise SongFormatError(f"{rtype.name}.{key} bits {mask:#04x} are {why}")
 
 
 # ---- writing -----------------------------------------------------------------------
@@ -333,7 +311,7 @@ class _Writer:
             return self._shared_row(codec, shared, refs, place)
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
-        _retired_row(rtype, row, row)
+        _refuse(retired.row(rtype, row, row, _RowEval(rtype).holds))
         values = {}
         for field in rtype.fields:
             if field == rtype.chain:
@@ -685,7 +663,7 @@ class _Reader:
         codec = self.codecs.get(rtype.name)
         decoded = set()
         if isinstance(value, dict):
-            _retired(rtype, value)
+            _refuse(retired.fields(rtype, value))
         if codec is not None and isinstance(value, dict):
             row, decoded = self._decoded(codec, rtype, value, place)
         elif rtype.form == "map":
@@ -694,7 +672,7 @@ class _Reader:
             row = dict(value)
         else:
             row = self._list_row(rtype, codec, value, place)
-        _retired_row(rtype, row, value)
+        _refuse(retired.row(rtype, row, value, _RowEval(rtype).holds))
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
@@ -981,8 +959,7 @@ def loads(text: str) -> dict:
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
-    for key in RETIRED_KEYS.keys() & doc.keys():
-        raise SongFormatError(f"{key} is {RETIRED_KEYS[key]}")
+    _refuse(retired.document(doc))
     return _Reader(doc).read()
 
 

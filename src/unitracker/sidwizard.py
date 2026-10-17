@@ -350,6 +350,33 @@ def _commands(event: dict) -> list:
     return [event["command"]] if "command" in event else []
 
 
+def _gliding(event: dict, glide: bool) -> bool:
+    """Whether a note glide is pending after ``event``: a note-column glide sets it, and a
+    note (which slides) or another pitch effect ends it."""
+    codes = {code for code, _ in _commands(event)}
+    if NOTE_COLUMN | NOTE_GLIDE in codes:
+        return True
+    if isinstance(event.get("note"), int) or codes & {*BIG_FX, NOTE_COLUMN | NOTE_FX}:
+        return False
+    return glide
+
+
+def _chord_targets(event: dict, ins: int, glide: bool, waves: Waves) -> dict:
+    """``{command position: WF program}`` for each chord FX of ``event``, played on ``ins``."""
+    cmds = _commands(event)
+    starts = isinstance(event.get("note"), int) and [LEGATO, 0] not in cmds and not glide
+    out = {}
+    for j, (code, number) in enumerate(cmds):
+        if code not in (CHORD_FX, INST_COLUMN | CHORD_FX):
+            continue
+        if not starts:
+            raise LiftError("a chord FX on a row that starts no note is not covered")
+        if code == CHORD_FX and "instrument" not in event:
+            raise LiftError("an FX-column chord on a note without an instrument")
+        out[j] = waves.entry(ins, number)
+    return out
+
+
 def chord_runs(tracks, phrases, waves: Waves) -> None:
     """Each chord FX as ``!run`` of the WF program its note starts.
 
@@ -366,23 +393,10 @@ def chord_runs(tracks, phrases, waves: Waves) -> None:
         for play in trk["plays"] + (trk["plays"][loop:] if loop is not None else []):
             for k, event in enumerate(phrases[play["phrase"]]):
                 ins = event.get("instrument", ins)
-                cmds = _commands(event)
-                starts = isinstance(event.get("note"), int) and [LEGATO, 0] not in cmds
-                for j, (code, number) in enumerate(cmds):
-                    if code not in (CHORD_FX, INST_COLUMN | CHORD_FX):
-                        continue
-                    if not starts or glide:
-                        raise LiftError("a chord FX on a row that starts no note is not covered")
-                    if code == CHORD_FX and "instrument" not in event:
-                        raise LiftError("an FX-column chord on a note without an instrument")
-                    target = waves.entry(ins, number)
+                for j, target in _chord_targets(event, ins, glide, waves).items():
                     if runs.setdefault((play["phrase"], k, j), target) != target:
                         raise LiftError("a chord FX's note plays different instruments")
-                codes = {code for code, _ in cmds}
-                if NOTE_COLUMN | NOTE_GLIDE in codes:
-                    glide = True
-                elif isinstance(event.get("note"), int) or codes & {*BIG_FX, NOTE_COLUMN | NOTE_FX}:
-                    glide = False
+                glide = _gliding(event, glide)
     for (name, k, j), target in runs.items():
         _commands(phrases[name][k])[j][:] = [CHORD_FX, target]
 
