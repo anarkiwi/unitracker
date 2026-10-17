@@ -202,3 +202,26 @@ def test_a_clone_without_a_naming_event_is_refused():
     occs[1].instance = None
     with pytest.raises(convert.ConversionError, match="no event selects"):
         convert.Rewrite(ir, obs, ["1024 + φ", "3000 + φ"]).run()
+
+
+def test_a_referenced_program_no_start_proves_is_a_named_lift_error():
+    ir = gt_ir("[C4.i1*4, D4*4]")
+    ir["phrases"]["p1"][0]["command"] = [9, 1]
+    ir["records"]["pulsetab"] = {1: {"l": 0x88, "r": 0, "next": 2}, 2: {"l": 16, "r": 4}}
+    obs = {"occurrences": [], "events": {}, "plays": [[0], [0], [0]]}
+    with pytest.raises(convert.ConversionError, match=r"pulsetab program 1: row 1 .*'l': 16"):
+        convert.Rewrite(ir, obs, []).run()
+    ir["records"]["pulsetab"][2] = {"l": 0x89, "r": 0}
+    assert convert.Rewrite(ir, obs, []).run()["records"]["pulsetab"][2]["l"] == 0x89
+
+
+def test_an_unproved_start_names_its_program_and_start():
+    an = convert.Analysis(gt_ir("[C4.i1*4, D4*4]"))
+    occ = occurrence("pulse", (0, 0, 0), {"pptr": 3}, 0, (3,))
+    occ.tick, occ.key, occ.error = 40, None, "no phase"
+    with pytest.raises(
+        convert.ConversionError, match=r"pulse program pulsetab 3, start \[pptr 3\]"
+    ):
+        convert.group_texts(an, [occ], {})
+    freq = occurrence("command", (0, 0, 0), {"command": 1, "cmddata": 2}, 0, (1, 2))
+    assert convert.diagnosis(an.unit("command"), freq).startswith("command program the event's")

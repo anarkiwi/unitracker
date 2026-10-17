@@ -668,7 +668,11 @@ internal representation with the native modulations. The conversion
 period more, derives and proves each occurrence's expression from its start, and writes
 it at the unit's site. Within a unit and label the occurrences share one closed form,
 else one recurrence, else each start keeps its own. The rewritten song must play the
-native register grid exactly over that window; otherwise the lift fails.
+native register grid exactly over that window; otherwise the lift fails. A start whose
+expression is not proved fails the lift, naming the unit, its program and the start
+(`pulse program pulsetab 3, start [pptr 3] at tick 40: not proved: ...`), and so does a
+pulse or filter program the song references whose rows keep no shared form because no
+start proves its expression.
 
 ## Backends
 

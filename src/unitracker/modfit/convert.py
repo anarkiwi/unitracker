@@ -200,6 +200,23 @@ def with_carried(an: Analysis, occ, d, pair: tuple) -> tuple:
     return sympy.Integer(1), pair[1] - c * G.lt(G.PHI, 1)
 
 
+def site_of(spec: dict, occ) -> tuple | None:
+    """``(record, index)`` where unit ``spec`` writes an occurrence's expression, or None for
+    its event's command."""
+    site = spec.get("site")
+    if site is None or ("when" in site and not evaluate(site["when"], occ.start)):
+        return None
+    return site["record"], evaluate(site["index"], occ.start)
+
+
+def diagnosis(spec: dict, occ) -> str:
+    """The unit, program and start of an occurrence, as a lift error names them."""
+    where = site_of(spec, occ)
+    program = f"{where[0]} {where[1]}" if where else f"the event's !{spec['key']}"
+    cells = ", ".join(f"{c} {v}" for c, v in zip(spec.get("label") or [], occ.label))
+    return f"{occ.unit} program {program}, start [{cells}] at tick {occ.tick}"
+
+
 def group_texts(an: Analysis, occs: list, found: dict) -> list:
     """Each occurrence's expression text (None: no modulation), by the canonical rule.
 
@@ -209,11 +226,11 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
     # pylint: disable=too-many-locals
     for occ in occs:
         if occ.key is None:
-            raise ConversionError(f"{occ.unit} at tick {occ.tick}: {occ.error}")
+            raise ConversionError(f"{diagnosis(an.unit(occ.unit), occ)}: {occ.error}")
         d, _ = found[occ.key]
         if d.error or not d.exact:
             raise ConversionError(
-                f"{occ.unit} at tick {occ.tick}: not proved: {d.error or d.proof}"
+                f"{diagnosis(an.unit(occ.unit), occ)}: not proved: {d.error or d.proof}"
             )
     out = [None] * len(occs)
     for members in groups(occs).values():
@@ -301,10 +318,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
 
     def site(self, occ):
         """``(record, index)`` of the record an occurrence's expression is written in, or None."""
-        spec = self.units[occ.unit].get("site")
-        if spec is None or ("when" in spec and not evaluate(spec["when"], occ.start)):
-            return None
-        return spec["record"], evaluate(spec["index"], occ.start)
+        return site_of(self.units[occ.unit], occ)
 
     def run(self) -> dict:
         """The rewritten internal song."""
@@ -321,9 +335,61 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         self.event_sites()
         self.phrases()
         self.ir["exprs"] = {i: t for t, i in self.exprs.items()}
+        self.check_shared({s["record"] for u in self.units.values() if (s := u.get("site"))})
         return self.ir
 
     # -- record sites --
+    def _unshared(self, name: str, entry: int) -> tuple | None:
+        """``(row position, row)`` of the first row of program ``entry`` that has no shared
+        form, or None."""
+        rtype, codec = self.rtypes[name], self.codecs.get(name)
+        if rtype.chain is None or codec is None:
+            return None
+        rows = self.records.get(name, {})
+        path, loop = _program(rows, rtype, entry)
+        own = {f: v for f, v in rows.get(path[0], {}).items() if f != rtype.chain}
+        if rtype.expr is not None and len(path) == 1 and loop is None and own.get(rtype.expr):
+            if all(v == rtype.default(f) for f, v in own.items() if f != rtype.expr):
+                return None
+        for k, i in enumerate(path):
+            place = {"first": int(k == 0), "last": int(loop is None and k + 1 == len(path))}
+            if codec.encode({**rtype.fields, **rows.get(i, {})}, place) is None:
+                return k, {f: v for f, v in rows.get(i, {}).items() if f != rtype.chain}
+        return None
+
+    def check_shared(self, names: set) -> None:
+        """Raise, naming the program and row, for a program of a site type the rewritten song
+        references whose rows have no shared form: no start proved an expression for it."""
+        for name in sorted(n for n in names if self.rtypes[n].chain is not None):
+            units = [
+                n for n, u in self.units.items() if (u.get("site") or {}).get("record") == name
+            ]
+            for entry in sorted(self._referenced(name)):
+                bad = self._unshared(name, entry)
+                if bad is not None:
+                    raise ConversionError(
+                        f"{name} program {entry}: row {bad[0]} {bad[1]} has no shared form, "
+                        f"and no start of {', '.join(units)} proves its expression"
+                    )
+
+    def _referenced(self, name: str) -> set:
+        """The entries of record type ``name`` that records, phrases or pins reference."""
+        rtype = self.rtypes[name]
+        out = set(rtype.pin)
+        for tname, rows in self.records.items():
+            ttype = self.rtypes.get(tname)
+            for row in rows.values() if ttype is not None else ():
+                full = {**ttype.fields, **row}
+                for field, targets in ttype.refs.items():
+                    if field == ttype.chain or field not in row:
+                        continue
+                    if any(t == name and (w is None or evaluate(w, full)) for t, w in targets):
+                        out.add(int(row[field]))
+        codes = self.commands(name)
+        for events in self.ir["phrases"].values():
+            out |= {int(c[1]) for e in events for c in _cmds(e) if int(c[0]) in codes}
+        return out - ({rtype.none} if rtype.none is not None else set())
+
     def record_site(self, where: tuple, by_unit: dict) -> None:
         """Write a record's units' expressions; a unit with several gets one copy per text."""
         texts = {u: {t: o for t, o in got.items() if t is not None} for u, got in by_unit.items()}
