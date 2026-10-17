@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.5 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.6 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -34,15 +34,16 @@ from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
 from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 
-VERSION = 1.5
+VERSION = 1.6
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+RETIRED_KEYS = {"registers": "retired in v1.6: the player starts from a zeroed SID"}
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.5 format."""
+    """A document does not follow the unitracker v1.6 format."""
 
 
 @functools.cache
@@ -164,7 +165,7 @@ _Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.or
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.5 document."""
+    """Turns the internal representation into a canonical v1.6 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -530,18 +531,12 @@ class _Writer:
         return {**pr, "tables": diff} if diff else pr
 
     def environment(self) -> dict:
-        """``clock``, ``voices`` and ``registers`` where they differ from the defaults."""
+        """``clock`` and ``voices`` where they differ from the defaults."""
         defaults = self.pr.get("defaults") or {}
         env = {}
         for key in ("clock", "voices"):
             if key in self.ir and self.ir[key] != defaults.get(key):
                 env[key] = FlowMap(self.ir[key]) if isinstance(self.ir[key], dict) else self.ir[key]
-        regs = [int(x) for x in self.ir.get("registers") or []]
-        default_regs = [int(x) for x in defaults.get("registers") or [0] * 25]
-        if regs and regs != default_regs:
-            env["registers"] = FlowMap(
-                {i: v for i, (v, d) in enumerate(zip(regs, default_regs)) if v != d}
-            )
         return env
 
 
@@ -592,7 +587,7 @@ def _unread_dropped(diff: dict, ir: dict) -> dict:
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.5 document for internal-representation song ``ir``.
+    """A canonical v1.6 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -616,7 +611,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.5 document to the internal representation."""
+    """Expands a v1.6 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -896,16 +891,12 @@ class _Reader:
         lengths = {name: len(compile_phrase(ev)) for name, ev in events.items()}
         voices = int(doc.get("voices", self.defaults.get("voices", 3)))
         tracks = timeline.from_rows(rows, doc.get("loop"), lengths, voices)
-        regs = list(self.defaults.get("registers") or [0] * 25)
-        for i, v in (doc.get("registers") or {}).items():
-            regs[int(i)] = int(v)
         return {
             "unitracker": IR_VERSION,
             "meta": dict(doc.get("meta") or {}),
             "hints": dict(doc.get("hints") or {}),
             "clock": dict(doc.get("clock") or self.defaults.get("clock") or {}),
             "voices": voices,
-            "registers": regs,
             "tables": self.tables,
             "playroutine": self.pr,
             "records": {k: v for k, v in self.records.items() if v},
@@ -927,21 +918,23 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.5 document."""
+    """The internal representation of a v1.6 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
+    for key in RETIRED_KEYS.keys() & doc.keys():
+        raise SongFormatError(f"{key} is {RETIRED_KEYS[key]}")
     return _Reader(doc).read()
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.5 document at ``path``."""
+    """The internal representation of the v1.6 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.5 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.6 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

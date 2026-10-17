@@ -134,20 +134,21 @@ def group_lines(conv, an, key: tuple, members: list, places: dict) -> list:
 
 
 def song_lines(song: Song, workers) -> tuple:
-    """``(report lines, v1.5 text)`` of one song."""
+    """``(report lines, song text)`` of one song."""
     conv = analyse(song.ir, CACHE, workers)
     an = conv.analysis
     text = songio.dumps(conv.out)
     ticks = TICKS[song.player]
-    ours = SongPlayer(songio.loads(text)).render_grid(ticks)
-    exact = np.array_equal(ours, native_grid(song, ticks))
+    exact = SongPlayer(songio.loads(text)).mismatch(native_grid(song, ticks)) is None
     lines = [f"## {song.path.stem} ({song.player})"]
     occs = conv.obs["occurrences"]
     lines.append(f"  occurrences {len(occs)} over {conv.ticks} ticks (to the state's recurrence "
                  f"and one period more); expressions {len(conv.out['exprs'])}")  # fmt: skip
     lines.append("  the rewritten song plays the native song's register grid exactly over them")
     same = "equal to" if exact else "DIFFERENT from"
-    lines.append(f"  read back from its v1.5 text, {ticks} ticks are {same} the native player's")
+    lines.append(
+        f"  read back from its v{songio.VERSION} text, {ticks} ticks are {same} the native player's"
+    )
     unproved = unproved_functions(song.ir, declared(song.ir["playroutine"]))
     if unproved:
         lines.append(f"  named-table functions NOT equal: {unproved}")

@@ -1,4 +1,4 @@
-"""v1.5 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.6 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -24,7 +24,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.5
+unitracker: 1.6
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -105,7 +105,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.5", "unitracker: 1.4", "not a unitracker v1.5 document"),
+        ("unitracker: 1.6", "unitracker: 1.5", "not a unitracker v1.6 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
@@ -193,23 +193,24 @@ def lifted(path):
     return raw, songio.dumps(backends.lift(raw))
 
 
-def grid_of(text, ticks):
-    return SongPlayer(songio.loads(text)).render_grid(ticks)
-
-
 def native(raw, ticks):
     return np.asarray(backends.native_player(raw).render_grid(ticks), dtype=np.uint8)
+
+
+def mismatch(text, theirs):
+    """The first ``(tick, register)`` where the song text plays unlike the native grid."""
+    return SongPlayer(songio.loads(text)).mismatch(theirs)
 
 
 def test_metal_warrior_one_off_expression_and_dropped_legato_break_the_grid(metal_warrior):
     raw, text = lifted(metal_warrior)
     want = native(raw, 3840)
-    assert np.array_equal(grid_of(text, 3840), want)
+    assert mismatch(text, want) is None
     assert "x1: (v + 32) % 65536" in text and "C4!legato:0!freq:@x2" in text
     off = text.replace("x1: (v + 32) % 65536", "x1: (v + 33) % 65536")
-    assert not np.array_equal(grid_of(off, 3840), want)
+    assert mismatch(off, want) is not None
     dropped = text.replace("C4!legato:0!freq:@x2", "C4!freq:@x2", 1)
-    assert not np.array_equal(grid_of(dropped, 3840), want)
+    assert mismatch(dropped, want) is not None
 
 
 def test_csillag_wrong_delay_constant_breaks_the_grid(csillag):
@@ -217,15 +218,13 @@ def test_csillag_wrong_delay_constant_breaks_the_grid(csillag):
     gate = "'[φ >= 15]*((-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33]) % 65536)'"
     assert gate in text
     later = text.replace(gate, gate.replace("[φ >= 15]", "[φ >= 14]"))
-    ticks = 2304 * 6
-    assert not np.array_equal(grid_of(later, ticks), native(raw, ticks))
+    assert mismatch(later, native(raw, 2304 * 6)) is not None
 
 
 def test_crosseyed_wrong_carried_constant_breaks_the_grid(crosseyed):
     raw, text = lifted(crosseyed)
-    ticks = 95 + 2 * 1152 + 100
-    want = native(raw, ticks)
-    assert np.array_equal(grid_of(text, ticks), want)
+    want = native(raw, 95 + 2 * 1152 + 100)
+    assert mismatch(text, want) is None
     carried = "16*[φ >= 1]"
     assert carried in text
-    assert not np.array_equal(grid_of(text.replace(carried, "8*[φ >= 1]"), ticks), want)
+    assert mismatch(text.replace(carried, "8*[φ >= 1]"), want) is not None

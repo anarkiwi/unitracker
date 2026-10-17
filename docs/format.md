@@ -1,4 +1,4 @@
-# unitracker song format (v1.5)
+# unitracker song format (v1.6)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.5
+unitracker: 1.6
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -52,11 +52,11 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.5`; readers reject any other version |
+| `unitracker` | `1.6`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
-| `clock`, `voices`, `registers` | only where they differ from the playroutine's `defaults`; `registers` is `{index: value}` |
+| `clock`, `voices` | only where they differ from the playroutine's `defaults` |
 | `song` | the timeline: a list of rows |
 | `loop` | the row the song loops to, or `~` to end |
 
@@ -332,7 +332,8 @@ The library holds one definition per player build:
 ```yaml
 name: str
 constants: {name: int}
-defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3, registers: [25 ints]}
+defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3}
+onset: started   # the voice cell that is 1 once the voice's registers hold its first note
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
 note_offset: 0                            # frequency-table index of format note 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
@@ -539,6 +540,15 @@ value.
 $15 $16 $17 $18,  then for each voice v (base 7v): +2 +3 +6 +5 +0 +1 +4
 ```
 
+### Checking against the native player
+
+The player starts from a zeroed SID. `unitracker-play --check` compares a voice's seven
+registers with the native player's from the tick the voice's `onset` cell first reads 1,
+and the filter and volume registers (`$D415`-`$D418`) from the earliest onset. What a
+native player writes before then is its own initialisation, not the song's, and the
+format does not carry it: a song's text carries only what the composer's rows and
+definitions imply.
+
 ## The internal representation
 
 `unitracker.songio.loads` expands a document to the dict `SongPlayer` runs
@@ -595,9 +605,9 @@ between, ticking the voices in the player's reverse order. An instrument is its 
 `octave`, `firstctrl`), its WF/arp, pulse and filter programs (`ctrl`, `pw`, `filter`)
 and its pitch expression (`freq`). WF rows use `ctrl` and `note`; pulse set rows `pw`;
 filter set rows `mode`, `cut` and `res`; chords are programs of `note` offsets that loop
-or end. Note names are offset by one index: SID-Wizard index 49 is `C4`. Before a
-voice's first note the player walks instrument 1's header as WF rows; the lifter
-requires each voice's first note to select an instrument, so the walk reads only its
-first two rows. Table jumps, orderlist transposes, tempo and volume commands,
+or end. Note names are offset by one index: SID-Wizard index 49 is `C4`. The lifter
+requires each voice's first note to select an instrument: a note that selects none on a
+voice that has never had one has no instrument state to play. Table jumps, orderlist
+transposes, tempo and volume commands,
 multispeed, other player builds and the effects not listed above are not covered yet;
 the lifter names what it meets.

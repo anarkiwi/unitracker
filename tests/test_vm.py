@@ -5,7 +5,7 @@ import pytest
 
 from conftest import mini_song
 from unitracker.expr import ExprError
-from unitracker.vm import Cursor, SongError, SongPlayer, compile_phrase
+from unitracker.vm import Cursor, SongError, SongPlayer, compile_phrase, first_mismatch
 
 
 def run(playroutine, ticks=1, **kw):
@@ -266,13 +266,74 @@ def test_expression_scope_errors(text, match):
         ({"tracks": [{"plays": []}]}, "no plays"),
         ({"tracks": [{"plays": [{"phrase": "a"}], "loop": 3}]}, "loop index"),
         ({"voices": 2}, "one track"),
-        ({"registers": [0]}, "registers"),
         ({"unitracker": 1}, "expanded"),
     ],
 )
 def test_song_errors(song_kw, match):
     with pytest.raises(SongError, match=match):
         SongPlayer(mini_song({}, **song_kw))
+
+
+def differing(**cells):
+    """Two zero grids, ours with ``cells`` (``t<tick>_<register>``) set."""
+    theirs = np.zeros((8, 25), dtype=np.uint8)
+    ours = theirs.copy()
+    for key in cells:
+        tick, reg = (int(x) for x in key[1:].split("_"))
+        ours[tick, reg] = 1
+    return ours, theirs
+
+
+def test_first_mismatch_counts_a_voice_from_its_start():
+    ours, theirs = differing(t1_0=1, t4_8=1)
+    assert first_mismatch(ours, theirs, [2, 3, None]) == (4, 8)
+    ours, theirs = differing(t1_0=1, t2_6=1)
+    assert first_mismatch(ours, theirs, [2, 3, None]) == (2, 6)
+    assert first_mismatch(ours, theirs, [3, 3, None]) is None
+
+
+def test_first_mismatch_skips_a_voice_that_never_starts():
+    ours, theirs = differing(t0_14=1, t7_20=1)
+    assert first_mismatch(ours, theirs, [0, 0, None]) is None
+    assert first_mismatch(ours, theirs, [0, 0, 5]) == (7, 20)
+    assert first_mismatch(ours, theirs, [None, None, None]) is None
+
+
+def test_first_mismatch_counts_the_globals_from_the_earliest_start():
+    ours, theirs = differing(t1_24=1, t3_21=1)
+    assert first_mismatch(ours, theirs, [6, 2, None]) == (3, 21)
+    assert first_mismatch(ours, theirs, [6, 1, None]) == (1, 24)
+    assert first_mismatch(ours, theirs, [None, None, None]) is None
+
+
+def test_first_mismatch_of_equal_grids_is_none():
+    ours, theirs = differing()
+    assert first_mismatch(ours, theirs, [0, 0, 0]) is None
+    assert first_mismatch(theirs, theirs.copy(), [0, 3, 5]) is None
+
+
+def test_starts_are_every_voice_at_tick_zero_without_an_onset_cell():
+    player = run({}, ticks=3)
+    assert player.starts == [0]
+
+
+def test_starts_record_the_tick_each_voice_s_onset_cell_first_reads_one():
+    playroutine = {
+        "voice": {"started": {"width": 1}},
+        "onset": "started",
+        "tick": [
+            {
+                "for_voices": [
+                    {"fetch": True},
+                    {"if": "ev_kind == 1", "then": [{"set": {"started": 1}}]},
+                ]
+            }
+        ],
+    }
+    tracks = [{"plays": [{"phrase": name}], "loop": 0} for name in "abc"]
+    phrases = {"a": [{}, {"note": 24}], "b": [{"note": 24}], "c": [{}]}
+    player = run(playroutine, ticks=6, voices=3, tracks=tracks, phrases=phrases)
+    assert player.starts == [2, 1, None]
 
 
 def test_tables_read_zero_out_of_range():

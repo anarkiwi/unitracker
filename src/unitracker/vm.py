@@ -574,10 +574,10 @@ class SongPlayer:
         )
         self._entry = (namespace["f_init"], namespace["f_tick"], namespace["f_ghost"])
         self.modulation = _Driven(self, exprs) if exprs else None
-        regs = song.get("registers") or [0] * REG_COUNT
-        if len(regs) != REG_COUNT:
-            raise SongError(f"registers must have {REG_COUNT} values")
-        self.regs = [int(r) & 0xFF for r in regs]
+        onset = pr.get("onset")
+        self._onset = gen.vindex[onset] if onset else None
+        self.starts: list[int | None] = [None] * len(song["tracks"])
+        self.regs = [0] * REG_COUNT
         self.ticks = 0
 
     def _reader(self, tables):
@@ -621,6 +621,9 @@ class SongPlayer:
         first = self.ticks == 0
         writes = [(r, out[r]) for r in CANONICAL_ORDER if first or out[r] != self.regs[r]]
         self.regs = out
+        for voice, cells in enumerate(self.voice_cells):
+            if self.starts[voice] is None and (self._onset is None or cells[self._onset]):
+                self.starts[voice] = self.ticks
         self.ticks += 1
         return writes
 
@@ -637,6 +640,10 @@ class SongPlayer:
             grid[i] = self.regs
         return grid
 
+    def mismatch(self, theirs: np.ndarray) -> tuple[int, int] | None:
+        """Render as many ticks as ``theirs`` has; the first mismatch (see ``first_mismatch``)."""
+        return first_mismatch(self.render_grid(len(theirs)), theirs, self.starts)
+
     def render_wav(self, path, seconds: float, model: str = "8580", progress: bool = False):
         """Render ``seconds`` to a WAV file through an emulated SID."""
         from pysidtracker.audio import render_wav  # pylint: disable=import-outside-toplevel
@@ -649,6 +656,25 @@ class SongPlayer:
             self.iter_flushes(n), total=n, desc="render", unit="tick", disable=not progress
         )
         return render_wav(flushes, path, model=model, cycles_per_frame=cycles, clock_frequency=hz)
+
+
+def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[int, int] | None:
+    """The first ``(tick, register)`` where two register grids differ in the song's own state.
+
+    A voice's registers count from the tick its first note starts (``starts``, from
+    :attr:`SongPlayer.starts`; a voice that never starts has none), the filter and volume
+    registers from the earliest start. What a player writes before then is its own
+    initialisation, not the song's. None when the grids agree.
+    """
+    mask = np.zeros(ours.shape, dtype=bool)
+    begun = [s for s in starts if s is not None]
+    for voice, start in enumerate(starts):
+        if start is not None:
+            mask[start:, 7 * voice : 7 * voice + 7] = True
+    if begun:
+        mask[min(begun) :, 7 * len(starts) :] = True
+    bad = np.argwhere((ours != theirs) & mask)
+    return (int(bad[0][0]), int(bad[0][1])) if len(bad) else None
 
 
 class _Stepper:

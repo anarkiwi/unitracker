@@ -140,9 +140,6 @@ def test_build_and_header_checks():
     bad = SimpleNamespace(frame_speed=2, sid_init=bytes([1] + [0] * 24), instruments=[])
     with pytest.raises(LiftError, match="light player build, multispeed, init-routine"):
         sidwizard.check_build(bad, SimpleNamespace(name="light"))
-    ins = SimpleNamespace(control=0xFE, attack=0, decay=0)
-    with pytest.raises(LiftError, match="jump"):
-        sidwizard.header_rows_walkable(ins)
     marked = SimpleNamespace(filter_table=bytes([0xFF]))
     with pytest.raises(LiftError, match="unfiltered"):
         sidwizard.instrument_record(marked, sidwizard.Tables(), {})
@@ -176,10 +173,7 @@ def test_a_reference_past_the_instruments_plays_the_emptyinstrument_record(csill
     SongPlayer(ir).render_grid(20)
 
 
-def test_initial_registers_and_frequency_tables():
-    assert sidwizard.initial_registers(b"") == [0] * 24 + [0x0F]
-    assert sidwizard.initial_registers(bytes(25)) == [0] * 25
-    assert sidwizard.initial_registers(bytes([7, 8])) == [7, 8] + [0] * 22 + [0x0F]
+def test_frequency_tables():
     bare = SimpleNamespace(freq_lo_image=b"", freq_hi_image=b"", freq_table_tail=b"")
     lo, hi = sidwizard.freq(bare, features_for_driver(0))
     assert len(lo) == len(hi) == 256

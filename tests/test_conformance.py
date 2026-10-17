@@ -1,4 +1,4 @@
-"""Lifted songs, written as v1.5 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.6 text and read back, play identically to their native players."""
 
 import numpy as np
 import pytest
@@ -19,10 +19,9 @@ def test_metal_warrior_two_loops_exact(metal_warrior, embed):
     text = songio.dumps(lift(dec), embed=embed)
     song = songio.loads(text)
     assert songio.dumps(song, embed=embed) == text
-    ours = SongPlayer(song).render_grid(2 * LOOP_TICKS)
     theirs = np.asarray(dec.player().render_grid(2 * LOOP_TICKS), dtype=np.uint8)
     assert len(np.unique(theirs, axis=0)) > 1000
-    np.testing.assert_array_equal(ours, theirs)
+    assert SongPlayer(song).mismatch(theirs) is None
 
 
 def test_flushes_rebuild_the_grid(metal_warrior):
@@ -43,10 +42,9 @@ def test_crosseyed_intro_and_two_loops_exact(crosseyed, embed):
     song = songio.loads(text)
     assert songio.dumps(song, embed=embed) == text
     n = 95 + 2 * 1152 + 100
-    ours = SongPlayer(song).render_grid(n)
     theirs = np.asarray(DefmonPlayer(raw).render_grid(n), dtype=np.uint8)
     assert len(np.unique(theirs, axis=0)) > 500
-    np.testing.assert_array_equal(ours, theirs)
+    assert SongPlayer(song).mismatch(theirs) is None
 
 
 CSILLAG_LOOP = 2304 * 6
@@ -59,10 +57,9 @@ def test_csillag_loop_exact(csillag, embed):
     song = songio.loads(text)
     assert songio.dumps(song, embed=embed) == text
     n = CSILLAG_LOOP + 600
-    ours = SongPlayer(song).render_grid(n)
     theirs = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n), dtype=np.uint8)
     assert len(np.unique(theirs, axis=0)) > 5000
-    np.testing.assert_array_equal(ours, theirs)
+    assert SongPlayer(song).mismatch(theirs) is None
 
 
 def test_lift_is_deterministic(metal_warrior, crosseyed, csillag):

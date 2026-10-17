@@ -470,7 +470,3 @@ Reference-song table programs (`sweeps.txt`):
 
 Instruments are numbered as in the song file read back (tunes are lifted and written
 canonically first).
-
-The SID-Wizard header walk (before the first note `wf_row` reads instrument 1's header as
-WF rows) gives `ins.ad` a `CTRL` role and `ins.hrad`, `ins.hrsr`, `ins.sr` a `FREQ` role.
-
