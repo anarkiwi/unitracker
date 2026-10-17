@@ -39,7 +39,7 @@ loop: ~
 GT_SONG = doc(
     "goattracker2, constants: {deftempo: 6}",
     """      ins:
-        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, pw: 1024 + 16*min(3, φ)}
+        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, pw: '1024 + 16*min(3, φ)'}
       x:
         x1: (v + 300) % 65536
         x2: F(N)""",
@@ -52,25 +52,25 @@ def test_goattracker_freq_command_pulse_expression_and_legato():
     c4, d4 = GT["ftab"][48], GT["ftab"][50]
     assert moves(freq) == [c4] + [300] * 12 + [d4 - c4 - 3600]
     assert moves(pulse)[:4] == [1024, 16, 16, 16]
-    assert set(ctrl[2:28]) == {65}
+    assert set(ctrl[9:34]) == {65}
     dropped = GT_SONG.replace("D4!legato:0!freq:@x2", "D4!freq:@x2")
-    assert 64 in set(voice0(dropped, 34)[2][2:28])
+    assert {64, 9} <= set(voice0(dropped, 34)[2][9:34])
 
 
 def test_constant_and_text_expressions_read_back_as_written():
     song = songio.loads(GT_SONG)
     assert sorted(song["exprs"].values()) == ["(v + 300) % 65536", "1024 + 16*min(3, φ)", "F(N)"]
     text = songio.dumps(song)
-    assert "pw: 1024 + 16*min(3, φ)" in text and "!legato:0!freq:@x2" in text
+    assert "pw: '1024 + 16*min(3, φ)'" in text and "!legato:0!freq:@x2" in text
     assert songio.dumps(songio.loads(text)) == text
-    const = songio.loads(text.replace("pw: 1024 + 16*min(3, φ)", "pw: 2048"))
+    const = songio.loads(text.replace("pw: '1024 + 16*min(3, φ)'", "pw: 2048"))
     assert "2048" in const["exprs"].values() and "pw: 2048" in songio.dumps(const)
 
 
 SW_SONG = doc(
     "sidwizard",
     """      ins:
-        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: 2048 + 2*min(4, φ),
+        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '2048 + 2*min(4, φ)',
           freq: '[φ >= 2]*W[N + 25]'}""",
     "[C4.i1*4, -!freq:@x1*4]",
     "      x:\n        x1: (v - 7) % 65536\n",
@@ -109,7 +109,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
         ("      x:\n", "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n", "type 'mod'"),
         ("-!freq:@x1, -!freq:@x1,", "-!mod:@m1, -!freq:@x1,", "unknown name 'm1'"),
         ("-!freq:@x1, -!freq:@x1,", "-!noteglide:0, -!freq:@x1,", "can't express !noteglide"),
-        ("pw: 1024 + 16*min(3, φ)", "pw: [{pw: 1024}, {step: 16, for: 3}, end]", "keys"),
+        ("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]", "keys"),
         ("x1: (v + 300) % 65536", "x1: v // 2", "outside the grammar"),
         ("x1: (v + 300) % 65536", "x1: W[N]", "unknown table 'W'"),
         ("x1: (v + 300) % 65536", "x1: '[0 < v < 9]'", "not one comparison"),
@@ -176,7 +176,7 @@ def test_csillag_wrong_delay_constant_breaks_the_grid(csillag):
     raw, text = lifted(csillag)
     gate = "'[φ >= 15]*((-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33]) % 65536)'"
     assert gate in text
-    later = text.replace(gate, gate.replace("[φ >= 15]", "[φ >= 16]"))
+    later = text.replace(gate, gate.replace("[φ >= 15]", "[φ >= 14]"))
     ticks = 2304 * 6
     assert not np.array_equal(grid_of(later, ticks), native(raw, ticks))
 
