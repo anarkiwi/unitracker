@@ -7,6 +7,8 @@ the command's record type; the program's last row, on the note's first tick, is 
 
 import numpy as np
 
+from unitracker.codec import CodecError, row_place
+
 CODE = -1
 NAME = "restart"
 
@@ -34,6 +36,44 @@ def fold(arr: np.ndarray, code: int, restart_of) -> np.ndarray:
             out[prev] = 0
             row[slot : slot + 2] = (CODE, index)
     return out
+
+
+def restart_rows(rows: list, target, rtype, codec, gap: int) -> list | None:
+    """The raw rows of the restart a program's ``rows`` (of type ``target``) make ``gap`` steps
+    before a note, or None when the program sets another field or doesn't fit."""
+    fields = [f for f in rtype.fields if f != rtype.chain]
+    other = [f for f in target.fields if f not in fields and f != target.chain]
+    if any(r[f] != target.default(f) for r in rows for f in other):
+        return None
+    rows = [{f: r[f] for f in fields} for r in rows]
+    rows[-1].update({f: target.default(f) for f in target.end})
+    try:
+        shared = [codec.encode(r, row_place(k, len(rows) + 1, True)) for k, r in enumerate(rows)]
+        if None in shared:
+            return None
+        rest = gap - sum(s.get("hold", 1) for s in shared[:-1])
+        if rest < 1:
+            return None
+        shared[-1] = {k: v for k, v in shared[-1].items() if k != "hold"}
+        shared[-1].update({"hold": rest} if rest != 1 else {})
+        shared.append({})
+        return [codec.decode(s, row_place(k, len(shared), True)) for k, s in enumerate(shared)]
+    except CodecError:
+        return None
+
+
+def lookahead(path: list, target, codec) -> tuple[list, int]:
+    """``(rows, steps)``: a restart's raw ``path`` as the rows of the program it runs, the last
+    one ending it, and the steps their holds put it before the note."""
+    ahead = path[:-1]
+    if not ahead:
+        raise RestartError("a restart needs a row before its note")
+    holds = [
+        codec.encode(r, row_place(k, len(path), True)).get("hold", 1) for k, r in enumerate(ahead)
+    ]
+    rows = [dict(r) for r in ahead]
+    rows[-1].update(target.end)
+    return rows, sum(holds)
 
 
 def unfold(events: list, code: int, program) -> list:

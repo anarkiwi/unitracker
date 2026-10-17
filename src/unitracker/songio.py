@@ -24,16 +24,18 @@ from unitracker.codec import (
     Evaluator,
     RowCodec,
     is_expr,
+    row_place,
     note_text,
     written_value,
 )
 from unitracker.expr import ExprError, Resolver
 from unitracker.modulation import declared
-from unitracker.reach import ReachabilityError, table_reads
 from unitracker.records import EXPR, record_types
+from unitracker.tablepatch import table_diff, unread_dropped
 from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
 from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
+from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap
 
 VERSION = 1.8
 WIDTH = 100
@@ -123,11 +125,6 @@ def _ref_type(rtype, field, row):
     return None
 
 
-def _place(k: int, count: int, ends: bool) -> dict:
-    """The position of row ``k`` of a program of ``count`` rows that ends or loops."""
-    return {"first": int(k == 0), "last": int(ends and k == count - 1)}
-
-
 def _retired(rtype, value: dict) -> None:
     """Raise, naming it, for a field or flag bit the format has retired."""
     for key in RETIRED_FIELDS.keys() & value.keys():
@@ -138,49 +135,6 @@ def _retired(rtype, value: dict) -> None:
 
 
 # ---- writing -----------------------------------------------------------------------
-
-
-class Flow(list):
-    """A list written in flow style."""
-
-
-class FlowMap(dict):
-    """A mapping written in flow style."""
-
-
-class Atom(str):
-    """A plain scalar written as is: event atoms, names, entries."""
-
-
-class _Dumper(yaml.SafeDumper):
-    """Block structure, flow leaves, and atoms as unquoted plain scalars."""
-
-    def increase_indent(self, flow=False, indentless=False):
-        return super().increase_indent(flow, False)
-
-    def choose_scalar_style(self):
-        if self.event.style == "A":
-            return ""
-        return super().choose_scalar_style()
-
-
-_SIGNED = re.compile(r"^[+-]\d+$")
-
-
-def _atom(dumper, data):
-    if data in ("off", "on"):
-        tag = "tag:yaml.org,2002:bool"
-    elif _SIGNED.match(data):
-        tag = "tag:yaml.org,2002:int"
-    else:
-        tag = "tag:yaml.org,2002:str"
-    return dumper.represent_scalar(tag, str(data), style="A")
-
-
-_Dumper.add_representer(Flow, lambda d, x: d.represent_sequence("tag:yaml.org,2002:seq", x, True))
-_Dumper.add_representer(FlowMap, lambda d, x: d.represent_mapping("tag:yaml.org,2002:map", x, True))
-_Dumper.add_representer(Atom, _atom)
-_Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.org,2002:null", "~"))
 
 
 class _Writer:
@@ -324,30 +278,16 @@ class _Writer:
         target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
         rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
         path, loop = self.program(target, entry)
-        fields = [f for f in rtype.fields if f != rtype.chain]
+        if loop is not None:
+            return None
         rows = [{**target.fields, **self._row(target, i)} for i in path]
-        if loop is not None or any(
-            r[f] != d
-            for r in rows
-            for f, d in target.fields.items()
-            if f not in fields + [target.chain]
-        ):
+        raws = eventrestart.restart_rows(rows, target, rtype, codec, gap)
+        if raws is None:
             return None
-        rows = [{f: r[f] for f in fields} for r in rows]
-        rows[-1].update({f: target.default(f) for f in target.end})
-        try:
-            shared = [codec.encode(r, _place(k, len(rows) + 1, True)) for k, r in enumerate(rows)]
-            if None in shared:
-                return None
-            rest = gap - sum(s.get("hold", 1) for s in shared[:-1])
-            if rest < 1:
-                return None
-            shared[-1] = {k: v for k, v in shared[-1].items() if k != "hold"}
-            shared[-1].update({"hold": rest} if rest != 1 else {})
-            shared.append({})
-            raws = [codec.decode(s, _place(k, len(shared), True)) for k, s in enumerate(shared)]
-        except CodecError:
-            return None
+        return self._restart_entry(rtype, raws)
+
+    def _restart_entry(self, rtype, raws: list) -> int:
+        """The entry index of the restart of raw rows ``raws``, allocated on first use."""
         key = tuple(tuple(sorted(r.items())) for r in raws)
         if key not in self.restarts:
             table = self.records.setdefault(rtype.name, {})
@@ -434,7 +374,7 @@ class _Writer:
             ):
                 return self.ref_value(self.key(EXPR, int(row[rtype.expr])))
         rows = [
-            self.row_value(rtype, self._row(rtype, i), _place(k, len(path), loop is None))
+            self.row_value(rtype, self._row(rtype, i), row_place(k, len(path), loop is None))
             for k, i in enumerate(path)
         ]
         rows.append(Atom("end") if loop is None else FlowMap(loop=loop))
@@ -612,7 +552,7 @@ class _Writer:
         consts = {k: v for k, v in (self.pr.get("constants") or {}).items() if libc.get(k) != v}
         if consts:
             pr["constants"] = FlowMap(consts)
-        diff = _unread_dropped(_table_diff(tables, lib.get("tables") or {}), self.ir)
+        diff = unread_dropped(table_diff(tables, lib.get("tables") or {}), self.ir)
         return {**pr, "tables": diff} if diff else pr
 
     def environment(self) -> dict:
@@ -634,43 +574,6 @@ def _transpose_key(arr):
     return norm.tobytes() + str(norm.shape).encode(), shift
 
 
-def _table_diff(tables, defaults) -> dict:
-    """Tables as sparse ``{index: value}`` differences from the library defaults."""
-    out = {}
-    for name, values in tables.items():
-        base = [int(x) for x in defaults.get(name) or []]
-        if len(base) != len(values):
-            out[name] = Flow(values)
-            continue
-        diff = FlowMap({i: v for i, (v, d) in enumerate(zip(values, base)) if v != d})
-        if diff:
-            out[name] = diff
-    return out
-
-
-def _unread_dropped(diff: dict, ir: dict) -> dict:
-    """``diff`` without the patch entries the song never reads.
-
-    An entry no reachable tick reads cannot change the output, so the reader's library
-    default stands in for it. If reachability can't be established the patch is kept whole.
-    """
-    if not diff:
-        return diff
-    try:
-        reads = table_reads(ir)[0]
-    except ReachabilityError:
-        return diff
-    out = {}
-    for name, values in diff.items():
-        if isinstance(values, Flow):
-            out[name] = values
-            continue
-        kept = FlowMap({i: v for i, v in values.items() if i in reads.get(name, ())})
-        if kept:
-            out[name] = kept
-    return out
-
-
 def dumps(ir: dict, embed: bool = False) -> str:
     """A canonical v1.8 document for internal-representation song ``ir``.
 
@@ -689,7 +592,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
     doc.update(writer.environment())
     doc["song"] = rows
     doc["loop"] = loop
-    return yaml.dump(doc, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
+    return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
 
 
 # ---- reading -----------------------------------------------------------------------
@@ -841,13 +744,13 @@ class _Reader:
         rows, term = value[:-1], value[-1]
         start = self._alloc(rtype, len(rows))
         for k, raw in enumerate(rows):
-            row = self._proto(rtype, raw, _place(k, len(rows), term == timeline.END))
+            row = self._proto(rtype, raw, row_place(k, len(rows), term == timeline.END))
             row[rtype.chain] = start + k + 1
             self.pending.append((rtype, start + k, row))
         last = self.pending[-1][2]
         if term == timeline.END:
             last[rtype.chain] = rtype.none if rtype.none is not None else 0
-            self._end(rtype, last, rows[-1], _place(len(rows) - 1, len(rows), True))
+            self._end(rtype, last, rows[-1], row_place(len(rows) - 1, len(rows), True))
             if rtype.stop is not None:
                 plain = {f: v for f, v in last.items() if isinstance(v, int)}
                 if not _RowEval(rtype).holds(rtype.stop, plain):
@@ -947,7 +850,7 @@ class _Reader:
         return event
 
     def _event_restart(self, tname: str) -> bool:
-        """Whether record type ``tname`` holds event restarts, which the reader plays as commands."""
+        """Whether type ``tname`` holds event restarts, which the reader plays as commands."""
         return tname == eventrestart.NAME and bool(self.pr.get(eventrestart.NAME))
 
     def _unfolded(self, events: list, phrase: str) -> list:
@@ -971,19 +874,18 @@ class _Reader:
             while entry != rtype.none:
                 path.append({f: v for f, v in rows[entry].items() if f != rtype.chain})
                 entry = rows[entry][rtype.chain]
-            ahead = path[:-1]
-            if not ahead:
-                raise SongFormatError(f"{self.pr['name']}: a restart needs a row before its note")
-            holds = [
-                codec.encode(r, _place(k, len(path), True)).get("hold", 1)
-                for k, r in enumerate(ahead)
-            ]
+            try:
+                ahead, steps = eventrestart.lookahead(path, target, codec)
+            except eventrestart.RestartError as exc:
+                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
             start = self._alloc(target, len(ahead))
             for k, row in enumerate(ahead):
                 last = k + 1 == len(ahead)
-                row = {**row, target.chain: 0 if last else start + k + 1}
-                self.records[target.name][start + k] = {**row, **(target.end if last else {})}
-            self.played[index] = (start, sum(holds))
+                self.records[target.name][start + k] = {
+                    **row,
+                    target.chain: 0 if last else start + k + 1,
+                }
+            self.played[index] = (start, steps)
         return self.played[index]
 
     def command(self, cmd, arg, atom) -> list[int]:

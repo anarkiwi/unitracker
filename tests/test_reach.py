@@ -5,7 +5,7 @@ import pytest
 import yaml
 from pygoattracker import decompile_sid
 
-from unitracker import songio
+from unitracker import songio, tablepatch
 from unitracker.goattracker import lift
 from unitracker.reach import ReachabilityError, table_reads
 from unitracker.vm import SongPlayer
@@ -75,7 +75,7 @@ def test_writer_keeps_whole_patch_without_recurrence(metal_warrior, monkeypatch)
     def unreachable(_ir):
         raise ReachabilityError("no recurrence")
 
-    monkeypatch.setattr(songio, "table_reads", unreachable)
+    monkeypatch.setattr(tablepatch, "table_reads", unreachable)
     ir = patched(metal_warrior)
     patch = yaml.safe_load(songio.dumps(ir))["playroutine"]["tables"]["ftab"]
     assert {0, 24} <= set(patch)

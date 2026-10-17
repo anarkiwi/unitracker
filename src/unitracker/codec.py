@@ -199,6 +199,11 @@ _FORMS = {
 }
 
 
+def row_place(k: int, count: int, ends: bool) -> dict:
+    """The position of row ``k`` of a program of ``count`` rows that ends or loops."""
+    return {"first": int(k == 0), "last": int(ends and k == count - 1)}
+
+
 def written_value(key: str, value):
     """A shared key's value as written: notes, routes and masked controls in their text forms."""
     return _FORMS[key][1](value) if key in _FORMS else value
@@ -333,15 +338,23 @@ class RowCodec:
                 env[env_name(key)] = norm[key]
         return env
 
-    def _try(self, shape, norm, place) -> tuple[dict | None, str]:
+    @staticmethod
+    def _unfit(shape, norm) -> str | None:
+        """Why a written row's keys can't take ``shape``, or None."""
         extra = set(norm) - set(shape.keys) - set(shape.keep)
         if extra:
-            return None, f"keys {sorted(extra)}"
+            return f"keys {sorted(extra)}"
         for key, value in norm.items():
             if is_expr(value) and "expr" not in shape.keys.get(key, {}):
-                return None, f"{key} holds no expression here"
+                return f"{key} holds no expression here"
             if key == "ctrl" and isinstance(value, tuple) and "eor" not in shape.keys["ctrl"]:
-                return None, "ctrl holds no mask here"
+                return "ctrl holds no mask here"
+        return None
+
+    def _try(self, shape, norm, place) -> tuple[dict | None, str]:
+        unfit = self._unfit(shape, norm)
+        if unfit is not None:
+            return None, unfit
         env = self._env(shape, norm)
         raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
