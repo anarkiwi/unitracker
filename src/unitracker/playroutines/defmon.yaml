@@ -168,7 +168,6 @@ global:
   astep: {width: 16}
   sub: {width: 1}
   cf: {width: 8}
-  o16: {width: 8}
   o17: {width: 8}
   o18: {width: 8}
   vi: {width: 8}
@@ -209,16 +208,15 @@ procs:
   # $1022 SID band: this call writes the state the previous call left.
   latch:
     - set: {o_flo: flo, o_fhi: fhi, o_pw: pw, o_ctrl: "ctrl ^ eor", o_ad: ad, o_sr: sr}
-  # $10B5 ACID cutoff: CLC then ADC adds the step, or SBC adds its complement (step + 1 less);
-  # bit 16 of acc is the carry, which the cutoff adds; a negative high byte saturates.
+  # $10B5 ACID accumulator: CLC then ADC adds the step, or SBC adds its complement (step + 1
+  # less); bit 16 of acc is the carry; a negative high byte saturates to the floor.
   acid_step:
     - set: {acc: "(acc & 0xFFFF) + ((0xFFFF - astep) if sub else astep)"}
     - if: "(acc & 0xFFFF) > 0x7FFF"
       then: [{set: {acc: "((acc >= 0x10000) << 16) + (floor << 8) + (acc & 0xFF)"}}]
+  # $10CA the cutoff byte: the high byte plus the offset and the carry, wrapped to 8 bits.
   acid_out:
-    - set: {cf: "((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)"}
-    - set: {o16: "floor if (cf >= 0x80 or cf < floor) else cf"}
-    - {if: dbl, then: [{set: {o16: "o16 << 1"}}]}
+    - set: {cf: "(acc >> 8) + cp + (acc >> 16)"}
   # $117F pattern event: arm the sidcall layers, latch a note.
   pattern:
     - fetch: true
@@ -320,7 +318,7 @@ tick:
   - call: play
 
 ghost:
-  global: {0x16: o16, 0x17: o17, 0x18: o18}
+  global: {0x16: "(floor if cf >= 0x80 or cf < floor else cf) << dbl", 0x17: o17, 0x18: o18}
   voice:
     0: o_flo
     1: o_fhi
@@ -375,10 +373,6 @@ modulators:
       scope: global
       key: cut
       cell: acc
-      chip:
-        width: 11
-        value: "(floor if ((((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)) >= 0x80 or (((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)) < floor) else (((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000))) << dbl << 3"
-        store: {acc: "((value >> 3 >> dbl) - cp) << 8"}
       fire: [layer_b, acid_step]
       pre: procs.layer_b
       post: procs.acid_step

@@ -267,11 +267,13 @@ writes `$D417` in one of three ways: `{res: r, route: m}` with bit 3 of `m` clea
 byte; `{res: r, route: + m}` with bit 3 of `m` set keeps the routing and adds the voice and
 `m`; `route: '-'` removes the voice and keeps the resonance.
 
-`cut` is the 11-bit cutoff in every player. A defMON ACID program is written as its row's
-`cut` expression, so the sidTAB column `acid` has no written form. The column `cp`, an
-offset the replay adds to the ACID accumulator's high byte, stays: with it the cutoff
-next to the model floor depends on the accumulator's low byte and carry, which a `cut`
-expression over `v` cannot read.
+`cut` is the 11-bit cutoff in GoatTracker and SID-Wizard. In defMON it is the ACID
+accumulator: bits 8-15 are the cutoff byte, bits 0-7 its fraction and bit 16 the carry of
+the last step. The playroutine writes `$D416` as the cutoff byte plus the carry and the
+offset `cp`, wrapped to 8 bits, raised to the model floor when it is below the floor or
+above $7F, and doubled on the SID model that needs it. A defMON ACID program is written as
+its row's `cut` expression, so the sidTAB column `acid` has no written form; the column `cp`
+stays.
 
 The sidTAB columns `fv` (`mode`), `re` (`res` and `route`) and `acid` (`cut`) and the row key
 `resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`).

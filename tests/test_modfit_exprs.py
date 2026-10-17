@@ -20,7 +20,7 @@ from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.form import Form
 from unitracker.modfit.orbit import deltas
 from unitracker.modfit import chipinv
-from unitracker.modfit.phase import Machine, Prover, derive, unproved_functions
+from unitracker.modfit.phase import Machine, derive, unproved_functions
 from unitracker.modfit.replay import Replay
 from unitracker.songio import library
 from unitracker.vm import SongPlayer
@@ -303,49 +303,24 @@ def general_forms(conv) -> list:
     return out
 
 
-def test_acid_carries_its_hidden_carry_and_clamp_in_as_a_start_constant(crosseyed):
+def test_acid_is_its_accumulator_so_its_starts_carry_nothing_in(crosseyed):
     conv = analyse(load(crosseyed).ir, workers=4)
     an, seen = conv.analysis, set()
-    floor = an.ir["playroutine"]["constants"]["floor"]
     for occ in conv.obs["occurrences"]:
         d = conv.found[occ.key][0] if occ.unit == "acid B" else None
         if d is None or d.identity:
             continue
-        acc, cp = occ.start["acc"], occ.start["cp"]
-        cf = ((acc & 0xFFFF) >> 8) + cp + (acc >> 16)
-        rising = convert.carried(an, occ, d.phase, d.value)
-        hidden = 8 * (max(cf, floor) - cf) + 8 * (acc >> 16)
-        assert rising in (0, hidden)
-        seen.add((rising, hidden))
-    assert {(0, 0), (8, 8), (16, 16)} <= seen
+        assert d.exact and d.invariant is None
+        assert occ.v_in == occ.start["acc"]
+        assert convert.carried(an, occ, d.phase, d.value) == 0
+        seen.add((occ.start["sub"], occ.start["astep"]))
+    assert {(0, 0x0A00), (1, 0x0200)} <= seen
 
 
-RISE = "v + (-8*(v // 8) - 64)*[v >= 944] + 80"
-
-
-def test_acid_rises_are_proved_under_an_invariant_and_falls_are_not(crosseyed):
-    # pylint: disable=too-many-locals
+def test_pulse_recurrences_are_proved_under_the_chip_invariants(crosseyed):
     conv = analyse(load(crosseyed).ir, workers=4)
-    acid = {k: d for k, (d, _) in conv.found.items() if k[0] == "acid B" and not d.identity}
-    proved = {G.text(d.value) for d in acid.values() if d.invariant.ok}
-    assert proved == {RISE}
-    held = "not (acc & 65535 > 32767)"
-    assert all(d.invariant.glob == (held,) for d in acid.values())
-    for d in acid.values():
-        if not d.invariant.ok:
-            acc = int(re.search(r"acc=(\d+)", d.invariant.why).group(1))
-            assert acc >> 16 or acc & 0xFF
-    key = next(k for k, d in acid.items() if G.text(d.value) == RISE)
-    machine = conv.analysis.machines["acid B"]
-    graph = machine.explore(key[1])
-    chk = chipinv.Checker(machine, graph)
-    inv = [*acid[key].invariant.glob, *acid[key].invariant.unit]
-    prover = Prover(machine, DM_FREQ)
-    cls, seq = [0] * len(graph.nodes), [0]
-    rise = acid[key].value
-    assert chipinv.recurrence(chk, inv, cls, seq, rise, prover) is None
-    assert chipinv.recurrence(chk, inv, cls, seq, rise + 8, prover)
-    assert chipinv.recurrence(chk, [], cls, seq, rise, prover)
+    pulse = [d for k, (d, _) in conv.found.items() if k[0] == "pulse A" and not d.identity]
+    assert pulse and all(d.exact and d.invariant.ok and d.invariant.unit for d in pulse)
 
 
 def test_comparisons_are_found_with_their_negations():
