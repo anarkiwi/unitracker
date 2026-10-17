@@ -322,7 +322,7 @@ bounce units and the sweep specs. An orbit spec gives the period cell or
 | GT `record_types.filttab.each` → `filtercutoff` | `accumulate`, step `row.r` |
 | SID-Wizard `procs.tick_pw` → `pwhi:pwlo` | one fused 16-bit `accumulate` over both carries, step `b + 65280·[b ≥ 128]`; `s8(b)` proved under the sweep guard |
 | SID-Wizard `procs.tick_filt` → `vfhi:vflo:3` | 11-bit `accumulate`, step `s8(flttab[fpos].b)`; set rows `8·b` |
-| defMON `procs.acid` → `acc` | refuted under the invariant `acc < 32768` (the reload reads the stepped cell) |
+| defMON `procs.acid_step` → `acc` | no single accumulator, with the offset `cp` or without |
 | defMON `procs.acid` → `acc`, given | `accumulate`, `max: 0x7FFF`, `clamp: false`, `on_bound: acc := 512 + (acc & 255)`: proved |
 
 Each vibrato below is a single reflect accumulator, verified against the original over
@@ -355,8 +355,9 @@ Not expressible yet:
 
 - defMON's pulse bounds depend on the high byte (`(pw >> 8) == 0x0F`); its bounce orbit is
   below.
-- defMON's ACID reload `(floor << 8) | (acc & 0xFF)` reads the stepped cell; the candidate
-  reloads are cell-free, so the fit is refuted even under `acc < 32768`.
+- defMON's ACID reload `(floor << 8) | (acc & 0xFF)` reads the stepped cell, which the step
+  takes out of and back into the offset `cp`; the candidate reloads are cell-free, so no
+  single accumulator fits.
 
 | Pair | Source |
 | --- | --- |

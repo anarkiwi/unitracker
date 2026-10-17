@@ -86,6 +86,12 @@ def test_the_offset_is_folded_into_the_cut_expressions(offset):
     assert SongPlayer(song).mismatch(native) is None
 
 
+def test_an_offset_outside_the_acid_program_fails_naming_its_row(crosseyed):
+    raw = patched(crosseyed.read_bytes(), {2: {"cp": 0x10}})
+    with pytest.raises(songio.SongFormatError, match=r"sidtab: row \{.*'cp': 16.*\} has no shared"):
+        songio.dumps(defmon.lift(raw))
+
+
 def replay(z: dict, wrap: bool = True) -> tuple:
     """``(accumulator, $D416 before the doubling)`` after the replay's $10B5-$10D4 code, in its
     8-bit add-with-carry, from the folded accumulator ``acc`` and the offset ``cp``; without

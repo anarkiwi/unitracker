@@ -45,6 +45,7 @@ RETIRED_ROW_KEYS = {
     "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
     "wgl": "retired in v1.8: write the control mask as `ctrl: ^n`",
     "af": "retired in v1.11: write the pitch offset as the row's `freq` expression",
+    "cp": "retired in v1.12: the ACID offset is part of the program's `cut` expression",
 }
 COMMAND_NAMES = (
     "run",

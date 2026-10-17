@@ -1,4 +1,4 @@
-# unitracker song format (v1.11)
+# unitracker song format (v1.12)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.11
+unitracker: 1.12
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.11`; readers reject any other version |
+| `unitracker` | `1.12`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -200,7 +200,6 @@ can't express !attack:1`); the writer refuses to write a value that would not re
   the GoatTracker 2 backend), the instrument keys `speed` and `vd` (the instrument vibrato, which
   runs on every step without a command) and the record type `speedtab`, which they, `!funk`
   and the wavetable commands $F1-$F4 name.
-- **defMON:** the sidTAB column `cp`.
 - **SID-Wizard:** the instrument key `flags` (bits 6 and 7 of the header's control byte:
   keeping the pulse and filter programs across notes).
 
@@ -276,10 +275,14 @@ high byte only on the way to `$D416`, is part of the accumulator: its high byte 
 offset, wrapped to 8 bits as the replay's add-with-carry wraps it, so the cutoff byte is
 exact for every offset. A defMON ACID program, and a layer-B program that sets `cp`, is
 written as its row's `cut` expression, its steps and saturation test carrying the offset as
-constants; the sidTAB column `acid` has no written form.
+constants; the sidTAB columns `acid` and `cp` have no written form, and `ginit` holds no
+offset (the replay's init clears it). A `cp` on a layer-A row has no form, so the lifter
+refuses it, naming the row.
 
-The sidTAB columns `fv` (`mode`), `re` (`res` and `route`) and `acid` (`cut`) and the row key
-`resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`).
+The sidTAB columns `fv` (`mode`), `re` (`res` and `route`), `acid` and `cp` (`cut`) and the
+row key `resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`, `cp is retired in
+v1.12`).
+
 ### Hard restart
 
 A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last
@@ -365,7 +368,7 @@ the unit to the playroutine's own firing.
 |---|---|
 | `freq` | the 16-bit voice frequency word (GoatTracker); in defMON and SID-Wizard, the 16-bit offset the player adds to the note's frequency |
 | `pw` | the pulse width: 12 bits (GoatTracker), the 16-bit pair `pwhi:pwlo` (SID-Wizard), a 16-bit cell whose low 12 bits are the register (defMON) |
-| `cut` | the 11-bit cutoff (GoatTracker, SID-Wizard); defMON's 17-bit ACID accumulator |
+| `cut` | the 11-bit cutoff (GoatTracker, SID-Wizard); defMON's 17-bit ACID accumulator, the offset `cp` in its high byte (see Filter) |
 
 A unit with `scale: s` keeps its value in a cell that holds the chip value divided by
 `s`: the player evaluates the expression with `v` as the cell times `s` and stores the
@@ -741,8 +744,8 @@ fields as follows:
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk
 order: `dl` is `hold` (a frozen row ends its program), `wgh` and `wgl` are `ctrl` and its
 mask (`ctrl: 64^1`), `tr` is
-`note`, the row's pitch, pulse and ACID modulators are `freq`, `pw` and `cut`, and the
-other columns keep their names. Note names are offset by 24 indices: defMON index 48
+`note`, the row's pitch, pulse and ACID modulators are `freq`, `pw` and `cut` (the ACID
+offset `cp` part of `cut`, see Filter), and the other columns keep their names. Note names are offset by 24 indices: defMON index 48
 is `C2`. The replay probes `$D41B` at init to tell the SID models apart; the result
 becomes the playroutine constants `floor` and `dbl`. The ghost masks pulse-width high
 to a nibble, as the reference grid does.
