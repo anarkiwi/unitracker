@@ -1,10 +1,13 @@
-"""What the format has retired: document keys, record fields, and the raw row forms a record
-type declares. Each check returns the reason a reader gives, or None.
+"""What the format has retired: document keys, record fields (``field``, or ``type.field`` for
+one record type's), and the raw row forms a record type declares. Each check returns the reason a
+reader gives, or None.
 """
 
 _RESTART = "retired in v1.8: write the hard restart as the instrument's restart program"
 _VIBRATO = "retired in v1.11: write the vibrato as the instrument's `freq` expression"
 _INS_VIBRATO = "retired in v1.16: write the vibrato as the instrument's `freq` expression"
+_FREQ = "retired in v1.17: write the voice's frequency as `freq`, its offset from its note's"
+_INIT = "retired in v1.17: the replay's init sets it"
 KEYS = {"registers": "retired in v1.6: the player starts from a zeroed SID"}
 FIELDS = {
     "gt": _RESTART,
@@ -21,6 +24,14 @@ FIELDS = {
     "octave": "retired in v1.11: a note is written as the pitch it sounds",
     "flags": "retired in v1.13: its bits are the instrument's restart program, its `freq`"
     " expression, and a note's `!pulse:0` and `!filter:0`",
+    "vinit.flo": _FREQ,
+    "vinit.fhi": _FREQ,
+    "vinit.tbase": "retired in v1.17: write the voice's note as `note`",
+    **{
+        f"vinit.{f}": _INIT
+        for f in ("ad", "sr", "ctrl", "af", "ps", "rowA", "cntA", "rowB", "cntB")
+    },
+    **{f"ginit.{f}": _INIT for f in ("res", "route", "mode", "acc", "astep")},
 }
 
 
@@ -33,8 +44,10 @@ def document(doc: dict) -> str | None:
 
 def fields(rtype, value: dict) -> str | None:
     """The reason a written record's field is refused."""
-    for key in sorted(FIELDS.keys() & value.keys()):
-        return f"{rtype.written}.{key} is {FIELDS[key]}"
+    for key in sorted(value):
+        why = FIELDS.get(f"{rtype.written}.{key}", FIELDS.get(key))
+        if why is not None:
+            return f"{rtype.written}.{key} is {why}"
     return None
 
 

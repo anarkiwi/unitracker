@@ -126,7 +126,7 @@ def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
     }
     assert "restart" not in ir["records"]
     grid = SongPlayer(ir).render_grid(8)
-    assert grid[1:, 4].tolist() == [65, 72, 72, 72, 65, 65, 65]
+    assert grid[1:, 4].tolist() == [0, 8, 8, 8, 65, 65, 65]
 
 
 def test_a_layer_b_program_before_a_note_is_folded():

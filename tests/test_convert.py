@@ -277,7 +277,7 @@ def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, 
     assert np.array_equal(regs(back, 120), want)
 
 
-DM_VOICE = "{cntA: 255, cntB: 255}"
+DM_VOICE = "{}"
 DM_AF = f"""
 unitracker: 1.17
 playroutine: {{ref: defmon}}

@@ -141,10 +141,12 @@ retired in v1.17: write the record type as `ctrl``).
   (`!freq:@x1`): `x: {x1: (v + 32) % 65536}`. An expression no command names is written
   where it is used.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
-  are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
-  with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
-  `pw`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`), and an omitted field
-  is 0.
+  are defined in the first row: `vinit: {0: {note: =36, pw: 256, freq: 2227}, ...}`. They use
+  the shared keys with their row meaning wherever one fits, and an omitted field is 0. defMON's
+  `vinit` writes the voice's `note` (`=n`, the note its relative rows add to), `pw`, and `freq`,
+  its frequency registers as the offset from that note's frequency (omitted: the note's
+  frequency), and keeps the slide accumulator `sacc`; `ginit` keeps `sub`, the ACID step's
+  direction (see the defMON backend).
 
 ## Events
 
@@ -342,7 +344,7 @@ A player's codec rejects what the player can't set:
 |---|---|---|---|
 | GoatTracker 2 | filter parameter rows set both, `route` as a mask | parameter rows, bits 4-6 | `!vol` |
 | SID-Wizard | filter set rows set `res`; `route` is rejected | set rows, bits 4-6 | not covered |
-| defMON | see below; `ginit` sets both, `route` as a mask | sidTAB rows and `ginit`, bits 4-7 | fixed at 15; `!vol` is rejected |
+| defMON | see below | sidTAB rows, bits 4-7 | fixed at 15; `!vol` is rejected |
 
 GoatTracker's `!resfilt:n` stays one command: the player sets both nibbles with one code,
 and `!resfilt:0` also stops the filter program. SID-Wizard writes no routing in a row: it
@@ -362,7 +364,7 @@ offset, wrapped to 8 bits as the replay's add-with-carry wraps it, so the cutoff
 exact for every offset. A defMON ACID program, and a layer-B program that sets `cp`, is
 written as its row's `cut` expression, its steps and saturation test carrying the offset as
 constants; the sidTAB columns `acid` and `cp` have no written form, and `ginit` holds no
-offset (the replay's init clears it). A `cp` on a layer-A row has no form, so the lifter
+offset (the replay's init clears it and the accumulator). A `cp` on a layer-A row has no form, so the lifter
 refuses it, naming the row.
 
 The sidTAB columns `fv` (`mode`), `re` (`res` and `route`), `acid` and `cp` (`cut`) and the
@@ -896,6 +898,20 @@ offset `cp` part of `cut`, see Filter), and the other columns keep their names. 
 is `C2`. The replay probes `$D41B` at init to tell the SID models apart; the result
 becomes the playroutine constants `floor` and `dbl`. The ghost masks pulse-width high
 to a nibble, as the reference grid does.
+
+The replay's init ($1522) clears `$D417`, `$D418`'s filter bits, the ACID accumulator and step,
+and each voice's envelope, control register and mask, pitch mode, pulse step, sounding note and
+layer rows, and freezes both layers; the playroutine's init does the same, and the lifter
+refuses a tune whose init leaves another value, naming the cell. What the module carries
+through init is the song's initial state: each voice's pulse cell, frequency registers, slide
+accumulator and the note its relative rows add to (`vinit`: `pw`, `freq`, `sacc`, `note`), and
+the ACID step's direction (`ginit`: `sub`, 1 when the replay's ACID step subtracts, its SBC, and
+0 when it adds, its ADC), which the replay's own ACID firing reads until a layer-B program sets
+the cutoff. The replay's names for these and the cells its init sets are retired in v1.17
+(`vinit.tbase is retired in v1.17: write the voice's note as `note``, `vinit.cntA is retired in
+v1.17: the replay's init sets it`). The frequency registers sound only on a voice whose first
+note is on the first tick, which latches them before the note; the slide accumulator only under
+a slide a layer-A program starts before the voice's first note.
 
 **SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
 applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking

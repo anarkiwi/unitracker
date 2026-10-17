@@ -126,41 +126,31 @@ record_types:
                 then: [{set: {astep: "row.acid & 0x3FFF", sub: 1}}]
                 else: [{set: {astep: "row.acid & 0x7FFF", sub: 0}}]
             else: [{set: {acc: "(row.acid + cp * 256) & 0xFFFF", astep: 0}}]
-  # Each voice's state as init leaves it; a layer's row is a reference while its counter runs.
+  # Each voice's state the module carries through init ($1522 sets the other cells): its pulse
+  # cell, its frequency registers, written as the offset from its note's frequency, its slide
+  # accumulator, and the note relative rows add to.
   vinit:
     fixed: true
     form: map
-    fields: [pw, flo, fhi, sr, ad, ctrl, wgl, sacc, af, ps, note, tbase, rowA, cntA, rowB, cntB]
+    fields: [pw, flo, fhi, sacc, tbase]
     codec:
       - keys:
-          ctrl: {value: ctrl, omit: "ctrl == 0", eor: {value: wgl, omit: "wgl == 0"}}
-          note: {value: note, abs: "1", omit: "note == 0"}
-          ad: {value: ad, omit: "ad == 0"}
-          sr: {value: sr, omit: "sr == 0"}
           # The written width is the 12-bit cell; a cell over $0FFF has no form that reads back.
           pw: {value: "pw if pw <= 0x0FFF else pw + 0x10000", omit: "pw == 0"}
-        keep: [flo, fhi, sacc, af, ps, tbase, rowA, cntA, rowB, cntB]
+          note: {value: tbase, abs: "1", omit: "tbase == 0"}
+          freq: {value: "((((fhi << 8) | flo) - nfreq(tbase) + 0x8000) & 0xFFFF) - 0x8000", omit: "((fhi << 8) | flo) == nfreq(tbase)"}
+        keep: [sacc]
         raw:
-          ctrl: "ctrl if has_ctrl else 0"
-          wgl: "eor if has_eor else 0"
-          note: "note if has_note else 0"
-          ad: "ad if has_ad else 0"
-          sr: "sr if has_sr else 0"
           pw: "pw if has_pw else 0"
-    refs:
-      rowA: {type: sidtab, when: "cntA < 0x80"}
-      rowB: {type: sidtab, when: "cntB < 0x80"}
+          tbase: "note if has_note else 0"
+          flo: "(nfreq(note if has_note else 0) + (freq if has_freq else 0)) & 0xFF"
+          fhi: "((nfreq(note if has_note else 0) + (freq if has_freq else 0)) >> 8) & 0xFF"
+  # The ACID step's direction the module carries through init ($10B8): sub 1 steps the accumulator
+  # down (SBC), 0 up (ADC). Init clears the filter registers and the accumulator.
   ginit:
     fixed: true
     form: map
-    fields: [resfilt, fv, acc, astep, sub]
-    codec:
-      - keys:
-          res: {value: "resfilt >> 4", omit: "resfilt < 0x10"}
-          route: {value: "resfilt & 0x0F", omit: "(resfilt & 0x0F) == 0"}
-          mode: {value: "fv & 0xF0", omit: "fv < 0x10"}
-        keep: [acc, astep, sub]
-        raw: {resfilt: "((res & 0x0F) << 4) | (route & 0x0F)", fv: mode}
+    fields: [sub]
 functions:
   nfreq:
     args: [n]
@@ -301,30 +291,18 @@ init:
   - set: {vi: 0}
   - for_voices:
       - set: {detune: vi, rbit: "1 << vi", rmask: "0xFF ^ (1 << vi)"}
+      # $1522: the envelope, control, pitch mode, pulse step, note and layer rows are 0 and both
+      # layers frozen; the module carries the rest.
       - set:
           pw: "vinit[vi].pw"
           flo: "vinit[vi].flo"
           fhi: "vinit[vi].fhi"
-          ad: "vinit[vi].ad"
-          sr: "vinit[vi].sr"
-          ctrl: "vinit[vi].ctrl"
-          eor: "vinit[vi].wgl"
-          mode: "vinit[vi].af"
           sacc: "vinit[vi].sacc"
-          ps: "vinit[vi].ps"
-          note: "vinit[vi].note"
           tbase: "vinit[vi].tbase"
-          rowA: "vinit[vi].rowA"
-          cntA: "vinit[vi].cntA"
-          rowB: "vinit[vi].rowB"
-          cntB: "vinit[vi].cntB"
+          cntA: 0xFF
+          cntB: 0xFF
       - set: {vi: "vi + 1"}
-  - set:
-      res: "ginit[0].resfilt"
-      fv: "ginit[0].fv"
-      acc: "ginit[0].acc"
-      astep: "ginit[0].astep"
-      sub: "ginit[0].sub"
+  - set: {sub: "ginit[0].sub"}
   - call: play
 
 tick:

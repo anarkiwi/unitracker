@@ -109,6 +109,12 @@ VOICE_STATE = (
     ("rowB", 0x1382, None),
     ("cntB", 0x1373, None),
 )
+# The voice cells the replay's init ($1522) sets, with their values; the module carries the rest.
+VOICE_SET = {
+    **dict.fromkeys(("sr", "ad", "ctrl", "wgl", "af", "ps", "note", "rowA", "rowB"), 0),
+    "cntA": 0xFF,
+    "cntB": 0xFF,
+}
 
 
 class LiftError(ValueError):
@@ -136,7 +142,8 @@ def _word(mem, lo, hi):
 
 
 def voice_init(mem) -> dict:
-    """Each voice's state as init leaves it, as ``vinit`` records."""
+    """Each voice's state the module carries through init, as ``vinit`` records; the cells init
+    sets (:data:`VOICE_SET`) must hold the playroutine's values."""
     out = {}
     for v, off in enumerate(VOICE_OFFSETS):
         if (mem[0x101F + off], mem[0x1020 + off], mem[0x1021 + off]) != (
@@ -148,27 +155,31 @@ def voice_init(mem) -> dict:
         rec = {}
         for cell, lo, hi in VOICE_STATE:
             rec[cell] = mem[lo + off] if hi is None else _word(mem, lo + off, hi + off)
-        out[v] = rec
+            if rec[cell] != VOICE_SET.get(cell, rec[cell]):
+                raise LiftError(f"init leaves voice {v}'s {cell} at ${rec[cell]:02X}")
+        out[v] = {cell: value for cell, value in rec.items() if cell not in VOICE_SET}
     return out
 
 
 def global_init(mem) -> dict:
-    """The filter, volume and ACID state as init leaves it, as the ``ginit`` record.
+    """The ACID step's direction the module carries through init, as the ``ginit`` record.
 
-    The build's init zeroes the ACID offset ``cp``; the accumulator holds any later offset, so
-    an init that leaves another is refused."""
+    The build's init zeroes the filter registers, the accumulator, its step and its offset ``cp``
+    (the accumulator holds any later offset), so an init that leaves another value is refused."""
     ops = {mem[0x10B8], mem[0x10BF]}
     if len(ops) != 1 or not ops <= {0xE9, 0x69}:
         raise LiftError("ACID opcodes are not a matching SBC/ADC pair")
-    if mem[0x10CA]:
-        raise LiftError(f"init leaves the ACID offset cp at ${mem[0x10CA]:02X}, not 0")
-    return {
+    cleared = {
+        "the ACID offset cp": mem[0x10CA],
         "resfilt": mem[0x10AA],
         "fv": mem[0x10AF],
         "acc": _word(mem, 0x10B6, 0x10BE),
         "astep": _word(mem, 0x10B9, 0x10C0),
-        "sub": int(mem[0x10B8] == 0xE9),
     }
+    for cell, value in cleared.items():
+        if value:
+            raise LiftError(f"init leaves {cell} at ${value:02X}, not 0")
+    return {"sub": int(mem[0x10B8] == 0xE9)}
 
 
 def model_constants(mem) -> dict:
@@ -364,13 +375,6 @@ def structure(mem, subtune):
     return tracks, phrases, seeds
 
 
-def _seeds(vinit, seeds) -> set:
-    """Pattern-armed rows plus each voice's initial rows whose counters run."""
-    for rec in vinit.values():
-        seeds.update(rec[r] for r, c in (("rowA", "cntA"), ("rowB", "cntB")) if rec[c] < 0x80)
-    return seeds
-
-
 def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     """A unitracker song dict for a defMON replay ``.sid``.
 
@@ -402,7 +406,7 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
         "records": {
             "vinit": vinit,
             "ginit": {0: global_init(mem)},
-            "sidtab": sidtab_records(mem, _seeds(vinit, seeds)),
+            "sidtab": sidtab_records(mem, seeds),
         },
         "tracks": tracks,
         "phrases": phrases,

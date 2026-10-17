@@ -25,7 +25,7 @@ def test_parameter_cell_carries_only_its_call_site(roles):
 def test_carry_test_steers_no_value(roles):
     dm = roles["defmon"]
     assert dm.role("fc") == {}
-    assert dm.role("vinit.sacc") == dm.role("vinit.note") == {"FREQ": FREQ}
+    assert dm.role("vinit.sacc") == dm.role("vinit.tbase") == {"FREQ": FREQ}
     assert dm.role("ps") == {"PW": PW}
 
 
