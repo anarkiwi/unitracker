@@ -380,11 +380,10 @@ class RowCodec:
         if unfit is not None:
             return None, unfit
         env = self._env(shape, {k: v for k, v in norm.items() if k not in shape.refs})
-        refs = {shape.keys[k]["field"]: v[1] for k, v in norm.items() if k in shape.refs}
         raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
         raw.update({shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)})
-        raw.update(refs)
+        raw.update({shape.keys[k]["field"]: v[1] for k, v in norm.items() if k in shape.refs})
         field, values = shape.search or (None, [None])
         problem = "no shape"
         for value in values:

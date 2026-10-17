@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import eventrestart, retired, timeline
+from unitracker import eventrestart, refkeys, retired, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -382,7 +382,7 @@ class _Writer:
         refs = self.referrers.get(key, [])
         if key[0] == EXPR:
             return "command" not in refs
-        if any(self._named_ref(r) for r in refs):
+        if any(refkeys.named_ref(self.codecs, r) for r in refs):
             return False
         rtype = self.rtypes[key[0]]
         if rtype.expr is not None and "command" not in refs:
@@ -395,13 +395,6 @@ class _Writer:
             and isinstance(refs[0][0], tuple)
             and refs[0][0][0] == self.ins_type
         )
-
-    def _named_ref(self, referrer) -> bool:
-        """Whether a referrer is a row key that names its record, as a command does."""
-        if not (isinstance(referrer, tuple) and isinstance(referrer[0], tuple)):
-            return False
-        codec = self.codecs.get(referrer[0][0])
-        return codec is not None and any(f == referrer[1] for f, _ in codec.ref_keys().values())
 
     def atoms(self, arr) -> Flow:
         """A phrase's rows as atoms."""
@@ -698,7 +691,7 @@ class _Reader:
                 target is not None
                 and self.rtypes[target].expr
                 and isinstance(val, (str, int))
-                and not self._is_name(val, target)
+                and not refkeys.is_name(self.names, self.rtypes, val, target)
             ):
                 row[field] = self._program(self.rtypes[target], val)
             elif isinstance(val, str):
@@ -725,41 +718,12 @@ class _Reader:
             for k, v in value.items()
             if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
         }
-        names = self._ref_keys(codec, value)
         try:
+            names = refkeys.placeholders(self.names, self.rtypes, codec, value)
             row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
-        except CodecError as exc:
+        except ValueError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         return {**row, **named, **names}, set(row)
-
-    def _ref_keys(self, codec, value: dict) -> dict:
-        """``{raw field: ("name", name)}`` of a row's reference keys, each key in ``value`` set
-        to its type's first index to decode with: a name resolves once every one is defined."""
-        names = {}
-        for key, (field, types) in codec.ref_keys().items():
-            if key in value:
-                kind = self._named_type(value[key], types)
-                names[field] = ("name", value[key])
-                value[key] = (kind, self.rtypes[kind].first)
-        return names
-
-    def _is_name(self, value, tname: str) -> bool:
-        """Whether ``value`` names a ``tname``: defined as one, or not yet defined and of its
-        name form (its prefix and a number)."""
-        if not isinstance(value, str):
-            return False
-        if value in self.names:
-            return self.names[value][0] == tname
-        return re.fullmatch(f"{re.escape(self.rtypes[tname].prefix)}[0-9]+", value) is not None
-
-    def _named_type(self, name, types: set) -> str:
-        """The one of record ``types`` a reference key's ``name`` names."""
-        kinds = [t for t in sorted(types) if self._is_name(name, t)]
-        if len(kinds) != 1:
-            raise SongFormatError(
-                f"{self.pr['name']}: {name!r} names no {' or '.join(sorted(types))}"
-            )
-        return kinds[0]
 
     @staticmethod
     def _list_row(rtype, codec, value, place) -> dict:
