@@ -88,7 +88,7 @@ def test_the_offset_is_folded_into_the_cut_expressions(offset):
 
 def test_an_offset_outside_the_acid_program_fails_naming_its_row(crosseyed):
     raw = patched(crosseyed.read_bytes(), {2: {"cp": 0x10}})
-    with pytest.raises(songio.SongFormatError, match=r"sidtab: row \{.*'cp': 16.*\} has no shared"):
+    with pytest.raises(songio.SongFormatError, match=r"ctrl: row \{.*'cp': 16.*\} has no shared"):
         songio.dumps(defmon.lift(raw))
 
 

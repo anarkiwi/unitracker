@@ -12,6 +12,7 @@ def build_mem():
             mem[addr + i] = 0 if tok == "??" else int(tok, 16)
     for v, off in enumerate(dm.VOICE_OFFSETS):
         mem[0x101F + off], mem[0x1020 + off], mem[0x1021 + off] = v, 1 << v, 0xFF ^ (1 << v)
+        mem[0x12E0 + off] = mem[0x1373 + off] = 0xFF
     mem[0x10B8] = mem[0x10BF] = 0xE9
     mem[0x10D4] = 0xEA
     mem[0x10D9] = 0x80
@@ -28,10 +29,15 @@ def test_check_build():
 
 def test_voice_init():
     mem = build_mem()
-    mem[0x1023 + 0x31], mem[0x1025 + 0x31] = 0x40, 0x08
-    mem[0x12E0 + 0x62] = 0xFF
+    mem[0x1023 + 0x31], mem[0x1025 + 0x31], mem[0x12ED + 0x62] = 0x40, 0x08, 60
     recs = dm.voice_init(mem)
-    assert recs[1]["pw"] == 0x0840 and recs[2]["cntA"] == 0xFF and recs[0]["note"] == 0
+    assert recs[1]["pw"] == 0x0840 and recs[2]["tbase"] == 60
+    assert set(recs[0]) == {"pw", "flo", "fhi", "sacc", "tbase"}
+    for cell, addr in (("note", 0x137F), ("cntB", 0x1373)):
+        mem[addr] ^= 1
+        with pytest.raises(dm.LiftError, match=f"init leaves voice 0's {cell} at"):
+            dm.voice_init(mem)
+        mem[addr] ^= 1
     mem[0x101F + 0x62] = 7
     with pytest.raises(dm.LiftError, match="voice 2"):
         dm.voice_init(mem)
@@ -39,14 +45,11 @@ def test_voice_init():
 
 def test_global_init_and_model():
     mem = build_mem()
-    mem[0x10B6], mem[0x10BE], mem[0x10B9], mem[0x10C0] = 0x34, 0x12, 0x02, 0x01
-    assert dm.global_init(mem) == {
-        "resfilt": 0,
-        "fv": 0,
-        "acc": 0x1234,
-        "astep": 0x0102,
-        "sub": 1,
-    }
+    assert dm.global_init(mem) == {"sub": 1}
+    mem[0x10B6], mem[0x10BE] = 0x34, 0x12
+    with pytest.raises(dm.LiftError, match=r"init leaves acc at \$1234, not 0"):
+        dm.global_init(mem)
+    mem[0x10B6] = mem[0x10BE] = 0
     mem[0x10B8] = mem[0x10BF] = 0x69
     assert dm.global_init(mem)["sub"] == 0
     mem[0x10CA] = 0x07

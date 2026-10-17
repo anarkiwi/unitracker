@@ -388,7 +388,7 @@ def test_defmon_note_column_round_trips_every_byte_and_the_offset_has_no_form():
         assert c.decode(written({"tr": byte}, c))["tr"] == byte
     for byte in range(0x80):
         assert c.encode({"af": byte}) is None
-    with pytest.raises(CodecError, match="sidtab: af is retired in v1.11"):
+    with pytest.raises(CodecError, match="ctrl: af is retired in v1.11"):
         c.decode({"af": 12})
 
 
@@ -452,11 +452,9 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.16",
+        "unitracker": "1.17",
         "playroutine": {"ref": "defmon"},
-        "song": [
-            {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
-        ],
+        "song": [{"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}],
     }
     with pytest.raises(songio.SongFormatError, match="can't end a program"):
         songio.loads(yaml.safe_dump(doc))
@@ -501,9 +499,11 @@ def test_command_rejections():
     with pytest.raises(CodecError, match="no shared name"):
         cmds.encode(4, 1)
     dm = CommandCodec(DM["commands"], DM_TYPES)
-    assert dm.encode(1, 4) == ("run2", ("sidtab", 4))
-    with pytest.raises(CodecError, match="can't express"):
-        dm.decode("run2", "none")
+    assert dm.ref(1) == "sidtab" and dm.ref(2) is None
+    with pytest.raises(CodecError, match="has no shared name"):
+        dm.encode(1, 4)
+    with pytest.raises(CodecError, match="!run2 is retired in v1.17"):
+        dm.decode("run2", ("sidtab", 4))
 
 
 @pytest.mark.parametrize(
@@ -600,16 +600,8 @@ def test_note_offsets_follow_the_frequency_tables():
         assert midi(word) == index - SW["note_offset"] + 12
 
 
-PROGRAM_TYPES = {
-    "goattracker2": {
-        "ctrl": "ctrltab",
-        "pw": "pulsetab",
-        "filter": "filttab",
-        "restart": "restart",
-    },
-    "sidwizard": {"ctrl": "wftab", "pw": "pwtab", "filter": "flttab", "restart": "restart"},
-}
 INS_KEYS = {
+    "defmon": {"ctrl", "filter"},
     "goattracker2": {"ad", "sr", "ctrl", "pw", "filter", "freq", "restart"},
     "sidwizard": {
         "ad",
@@ -621,7 +613,6 @@ INS_KEYS = {
         "freq",
     },
 }
-DM_KEEP = {"af", "ps"}
 # Player-specific keys a program row may carry besides the shared ones.
 ROW_KEEP = {"defmon": {"cp"}}
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
@@ -632,10 +623,11 @@ ROW_KEEP = {"defmon": {"cp"}}
 SHARED_OUTSIDE_ROWS = {
     ("goattracker2", "ins"): {"ad", "sr", "ctrl", "pw", "filter", "freq"},
     ("sidwizard", "ins"): {"ad", "sr", "ctrl", "pw", "filter", "freq"},
-    ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
-    ("defmon", "ginit"): {"res", "route", "mode"},
+    ("defmon", "ins"): {"ctrl", "filter"},
+    ("defmon", "vinit"): {"note", "pw", "freq"},
+    ("defmon", "ginit"): set(),
 }
-PROGRAMS = ("ctrltab", "pulsetab", "filttab", "sidtab", "wftab", "pwtab", "flttab", "restart")
+PROGRAMS = ("ctrl", "pw", "filter", "restart")
 INS_FORMS = {
     "ctrl": (list, str),
     "pw": (list, str, int),
@@ -643,8 +635,8 @@ INS_FORMS = {
     "freq": (str, int),
 }
 INIT_KEYS = {
-    "vinit": {"flo", "fhi", "sacc", "tbase", "rowA", "cntA", "rowB", "cntB"} | DM_KEEP,
-    "ginit": {"acc", "astep", "sub"},
+    "vinit": {"sacc"},
+    "ginit": {"sub"},
 }
 
 
@@ -661,7 +653,8 @@ def _check_rows(name, rows, keep, exprs=frozenset()):
         assert not isinstance(row, list), (name, row)
 
 
-def _check_program(pr_name, tname, value):
+def _check_program(pr_name, shared, value):
+    tname = next(n for n, t in LIBS[pr_name][1].items() if t.written == shared)
     exprs = set(codec(pr_name, tname).expr_keys())
     _check_rows(tname, value, ROW_KEEP.get(pr_name, set()), exprs)
 
@@ -684,9 +677,10 @@ def _check_def(pr_name, tname, value):
     if tname == "ins":
         assert set(value) <= INS_KEYS[pr_name]
         _check_shared_outside_rows(pr_name, tname, value)
-        for key, rtype in PROGRAM_TYPES[pr_name].items():
+        rtypes = LIBS[pr_name][1]
+        for key, refs in rtypes["ins"].refs.items():
             if isinstance(value.get(key), list):
-                _check_program(pr_name, rtype, value[key])
+                _check_program(pr_name, rtypes[refs[0][0]].written, value[key])
     elif tname in INIT_KEYS:
         assert set(value) <= INIT_KEYS[tname] | SHARED_OUTSIDE_ROWS[(pr_name, tname)], value
         _check_shared_outside_rows(pr_name, tname, value)
@@ -699,7 +693,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.16 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.17 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -742,7 +736,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     assert gt_cmds == {"run", "freq", "legato", "tempo"}
     dm_doc = parse(songio.dumps(lift_defmon(crosseyed.read_bytes())))
     dm_cmds = vocabulary(dm_doc)
-    assert dm_cmds == {"run2", "restart"}
+    assert dm_cmds == {"restart"}
     sw_doc = parse(songio.dumps(lift_sw(csillag.read_bytes())))
     sw_cmds = vocabulary(sw_doc)
     assert sw_cmds == {"freq", "ad", "sr", "run", "legato"}
@@ -759,7 +753,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.16",
+                "unitracker": "1.17",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -777,43 +771,32 @@ def defmon_doc(vinit, ginit):
     )
 
 
-def test_defmon_init_reads_back_its_written_program_name():
-    ir = songio.loads(
-        yaml.safe_dump(
-            {
-                "unitracker": "1.16",
-                "playroutine": {"ref": "defmon"},
-                "song": [
-                    {
-                        "def": {
-                            "sidtab": {"t1": [{"ctrl": 65, "hold": 4}, {"ctrl": 64}, "end"]},
-                            "vinit": {0: {"rowA": "t1"}},
-                            "phrase": {"p1": ["-*4"]},
-                        },
-                        "play": ["p1"] * 3,
-                    }
-                ],
-                "loop": 0,
-            }
-        )
-    )
-    assert (ir["records"]["vinit"][0]["rowA"], ir["records"]["vinit"][0]["cntA"]) == (0, 0)
-    text = songio.dumps(ir)
-    assert "rowA: t1" in text and songio.dumps(songio.loads(text)) == text
+def nfreq(note):
+    return DM["tables"]["note_lo"][note] | DM["tables"]["note_hi"][note] << 8
 
 
-def test_defmon_init_keys_mean_what_they_mean_in_rows():
-    ir = defmon_doc(
-        {"pw": 0x0567, "ctrl": "65^1", "ad": 0x12, "sr": 0x34, "note": "=36"},
-        {"res": 15, "route": 1, "mode": 0x30},
-    )
-    voice = ir["records"]["vinit"][0]
-    assert (voice["pw"], voice["ctrl"], voice["wgl"], voice["note"]) == (0x0567, 0x41, 1, 60)
+@pytest.mark.parametrize("freq", [3, -5, 0])
+def test_defmon_init_keys_mean_what_they_mean_in_rows(freq):
+    ir = defmon_doc({"pw": 0x0567, "note": "=36", **({"freq": freq} if freq else {})}, {"sub": 1})
+    voice, word = ir["records"]["vinit"][0], nfreq(60) + freq
+    assert (voice["pw"], voice["tbase"], voice["flo"] | voice["fhi"] << 8) == (0x0567, 60, word)
+    assert ir["records"]["ginit"][0] == {"sub": 1}
     grid = SongPlayer(ir).render_grid(2)
-    assert list(grid[0][2:7]) == [0x67, 0x05, 0x41 ^ 1, 0x12, 0x34]
-    assert (grid[0][0x17], grid[0][0x18]) == (0xF1, 0x3F)
-    word = DM["tables"]["note_lo"][60] | DM["tables"]["note_hi"][60] << 8
-    assert int(grid[1][0]) | int(grid[1][1]) << 8 == word
+    assert list(grid[0][0:4]) == [word & 0xFF, word >> 8, 0x67, 0x05]
+    text = songio.dumps(ir)
+    assert f"0: {{note: =36, pw: 1383{f', freq: {freq}' if freq else ''}}}" in text
+    assert songio.dumps(songio.loads(text)) == text
+
+
+def test_defmon_init_frequency_is_an_offset_that_wraps():
+    ir = defmon_doc({}, {})
+    voice = ir["records"]["vinit"][0]
+    assert voice["flo"] | voice["fhi"] << 8 == nfreq(0)
+    voice.update(flo=0xFF, fhi=0xFF, tbase=0)
+    assert f"freq: {0xFFFF - nfreq(0) - 0x10000}" in songio.dumps(ir)
+    voice.update(flo=0, fhi=0, tbase=100)
+    text = songio.dumps(ir)
+    assert f"freq: -{nfreq(100)}" in text and songio.dumps(songio.loads(text)) == text
 
 
 @pytest.mark.parametrize(
@@ -826,18 +809,17 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {ref: defmon}
 song:
   - def:
-      vinit: {0: {cntA: 255, cntB: 255}, 1: {cntA: 255, cntB: 255}, 2: {cntA: 255, cntB: 255}}
-      ginit: {0: {res: 2, route: 3}}
-      sidtab:
-        t1: [{res: 15, route: + 8}, end]
-        t2: [{route: '-'}, end]
+      ins:
+        i1: {ctrl: [{res: 2, route: 3}, end]}
+        i2: {ctrl: [{res: 15, route: + 8}, end]}
+        i3: {ctrl: [{route: '-'}, end]}
       phrase:
         p1: [-*8]
-        p2: [-.t1*4, -.t2*4]
+        p2: [-.i1*2, -.i2*4, -.i3*2]
     play: [p1, p2, p1]
 loop: 0
 """
@@ -849,12 +831,35 @@ def test_defmon_routes_relative_to_the_programs_voice():
     assert "route: + 8" in text and "route: '-'" in text
     assert songio.dumps(songio.loads(text)) == text
     d417 = [int(r[0x17]) for r in SongPlayer(ir).render_grid(10)]
-    assert list(dict.fromkeys(d417)) == [0x23, 0xF8 | 0x03 | 2, 0xF8 | 0x01]
+    assert list(dict.fromkeys(d417)) == [0, 0x23, 0xF8 | 0x03 | 2, 0xF8 | 0x01]
 
 
-def test_defmon_init_refuses_the_retired_mode_column():
-    with pytest.raises(songio.SongFormatError, match="ginit: fv is retired in v1.7"):
-        defmon_doc({}, {"fv": 0x30})
+@pytest.mark.parametrize(
+    "record,fields,match",
+    [
+        (
+            "vinit",
+            {"flo": 3},
+            "vinit.flo is retired in v1.17: write the voice's frequency as `freq`",
+        ),
+        ("vinit", {"fhi": 3}, "vinit.fhi is retired in v1.17"),
+        (
+            "vinit",
+            {"tbase": 60},
+            "vinit.tbase is retired in v1.17: write the voice's note as `note`",
+        ),
+        ("vinit", {"rowA": "c1"}, "vinit.rowA is retired in v1.17: the replay's init sets it"),
+        ("vinit", {"ctrl": 65}, "vinit.ctrl is retired in v1.17: the replay's init sets it"),
+        ("vinit", {"af": 12}, "vinit.af is retired in v1.17"),
+        ("ginit", {"res": 2}, "ginit.res is retired in v1.17: the replay's init sets it"),
+        ("ginit", {"acc": 2}, "ginit.acc is retired in v1.17"),
+        ("ginit", {"fv": 0x30}, "ginit: unknown field 'fv'"),
+    ],
+)
+def test_defmon_init_refuses_what_the_replays_init_sets(record, fields, match):
+    vinit, ginit = (fields, {}) if record == "vinit" else ({}, fields)
+    with pytest.raises(songio.SongFormatError, match=match):
+        defmon_doc(vinit, ginit)
 
 
 def test_writer_refuses_an_init_cell_with_no_written_form(crosseyed):
@@ -918,17 +923,17 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {ref: sidwizard}
 song:
   - def:
       ins:
         i1: {ad: 1, sr: 240, ctrl: [{hold: 2, ctrl: 17, note: +0}, {hold: 2, ctrl: 17, note: +3}, {
             loop: 0}]}
-      wftab:
-        w1: [{hold: 3, ctrl: 17, note: +4}, {hold: 3, ctrl: 17, note: +7}, {loop: 0}]
+      ctrl:
+        c1: [{hold: 3, ctrl: 17, note: +4}, {hold: 3, ctrl: 17, note: +7}, {loop: 0}]
       phrase:
-        p1: [C4.i1*4, C4!run:@w1*4]
+        p1: [C4.i1*4, C4!run:@c1*4]
     play: [p1, p1, p1]
 loop: 0
 """
@@ -957,18 +962,18 @@ def test_sidwizard_chords_are_ctrl_programs_started_by_run():
     "old,new,match",
     [
         (
-            "      wftab:",
-            "      chordtab: {ch1: [{note: +0}, {loop: 0}]}\n      wftab:",
+            "      ctrl:",
+            "      chordtab: {ch1: [{note: +0}, {loop: 0}]}\n      ctrl:",
             "chordtab",
         ),
         ("i1: {ad: 1,", "i1: {chord: 1, ad: 1,", "ins.chord is retired in v1.9"),
         ("i1: {ad: 1,", "i1: {arpspeed: 1, ad: 1,", "ins.arpspeed is retired in v1.9"),
-        ("C4!run:@w1", "C4!chord:@w1", "!chord is retired in v1.9"),
-        ("C4!run:@w1", "C4!ichord:@w1", "!ichord is retired in v1.9"),
+        ("C4!run:@c1", "C4!chord:@c1", "!chord is retired in v1.9"),
+        ("C4!run:@c1", "C4!ichord:@c1", "!ichord is retired in v1.9"),
         (
             "{hold: 3, ctrl: 17, note: +7}",
             "[17, 127]",
-            r"wftab: row \[17, 127\] is retired in v1.9",
+            r"ctrl: row \[17, 127\] is retired in v1.9",
         ),
     ],
 )

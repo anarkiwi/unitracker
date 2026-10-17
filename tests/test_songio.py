@@ -1,4 +1,4 @@
-"""The v1.16 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.17 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 
@@ -288,7 +288,7 @@ def test_retired_raw_rows_are_refused_both_ways():
 
 
 LIST_SONG = """
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {{ref: {pr}}}
 song:
   - def:
@@ -306,52 +306,81 @@ WAVE = r"retired in v1\.15: write the row with the shared keys"
 @pytest.mark.parametrize(
     "pr,tname,row,match",
     [
-        ("goattracker2", "pulsetab", "[32, 16]", rf"pulsetab: row \[32, 16\] is {SWEEP}"),
-        ("goattracker2", "filttab", "[5, 1]", "filttab: row .* is retired in v1.10"),
+        ("goattracker2", "pulsetab", "[32, 16]", rf"pw: row \[32, 16\] is {SWEEP}"),
+        ("goattracker2", "filttab", "[5, 1]", "filter: row .* is retired in v1.10"),
         ("goattracker2", "ctrltab", "[65, 128]", "write row .* with shared keys"),
         ("goattracker2", "ctrltab", "[0xF5, 9]", "with shared keys"),
-        ("goattracker2", "ctrltab", "[0xF7, 65]", rf"ctrltab: row \[247, 65\] is {WAVE}"),
+        ("goattracker2", "ctrltab", "[0xF7, 65]", rf"ctrl: row \[247, 65\] is {WAVE}"),
         ("goattracker2", "ctrltab", "[0xF9]", r"write row \[249\] with shared keys"),
-        ("goattracker2", "ctrltab", "[0xF2]", rf"ctrltab: row \[242\] is {WAVE}"),
+        ("goattracker2", "ctrltab", "[0xF2]", rf"ctrl: row \[242\] is {WAVE}"),
         ("sidwizard", "pwtab", "[16, 4]", SWEEP),
-        ("sidwizard", "flttab", "[16, 4]", "flttab: row .* is retired in v1.10"),
+        ("sidwizard", "flttab", "[16, 4]", "filter: row .* is retired in v1.10"),
         ("sidwizard", "wftab", "[2, 5, 0, 2]", "with shared keys"),
         ("sidwizard", "wftab", "[65, 5, 255]", r"retired in v1\.10: write the row with the shared"),
         ("sidwizard", "wftab", "[2, 5, 0, 1]", r"retired in v1\.10"),
     ],
 )
 def test_reader_rejects_retired_list_rows(pr, tname, row, match):
-    prefix = songio.record_types(songio.library(pr))[tname].prefix
-    text = LIST_SONG.format(pr=pr, tname=tname, name=prefix, row=row)
+    rtype = songio.record_types(songio.library(pr))[tname]
+    text = LIST_SONG.format(pr=pr, tname=rtype.written, name=rtype.prefix, row=row)
     with pytest.raises(SongFormatError, match=match):
         songio.loads(text)
 
 
+@pytest.mark.parametrize(
+    "pr,old,new",
+    [
+        ("goattracker2", "ctrltab", "ctrl"),
+        ("goattracker2", "pulsetab", "pw"),
+        ("goattracker2", "filttab", "filter"),
+        ("sidwizard", "wftab", "ctrl"),
+        ("sidwizard", "pwtab", "pw"),
+        ("sidwizard", "flttab", "filter"),
+        ("defmon", "sidtab", "ctrl"),
+    ],
+)
+def test_reader_refuses_a_players_own_record_type_name(pr, old, new):
+    text = LIST_SONG.format(pr=pr, tname=old, name="c", row="{ctrl: 65}")
+    with pytest.raises(
+        SongFormatError,
+        match=f"record type '{old}' is retired in v1.17: write the record type as `{new}`",
+    ):
+        songio.loads(text)
+    rtype = songio.record_types(songio.library(pr))[old]
+    assert (rtype.written, rtype.prefix) == (new, "pw" if new == "pw" else new[0])
+
+
+def test_a_pulse_program_name_is_not_a_phrase_name():
+    text = LIST_SONG.format(pr="goattracker2", tname="pw", name="pw", row="{pw: 2048}")
+    text = text.replace("p1: [off]", "p1: [off!run:@pw1]")
+    out = songio.dumps(songio.loads(text))
+    assert "pw1: [{pw: 2048}, end]" in out and "p1: [off!run:@pw1]" in out
+    assert songio.dumps(songio.loads(out)) == out
+    with pytest.raises(SongFormatError, match="name 'p1' defined twice"):
+        songio.loads(text.replace("pw1", "p1"))
+
+
 def test_writer_refuses_a_wavetable_row_without_a_shared_form():
-    ir = songio.loads(
-        LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="{ctrl: 65}")
-    )
+    ir = songio.loads(LIST_SONG.format(pr="goattracker2", tname="ctrl", name="c", row="{ctrl: 65}"))
     ir["records"].update(ins={1: {"ctrl": 1}}, ctrltab={1: {"w": 0xF1, "n": 1, "next": 0}})
     ir["phrases"]["p1"] = [{"note": 30, "instrument": 1}]
-    with pytest.raises(SongFormatError, match=rf"ctrltab: row .* is {WAVE}"):
+    with pytest.raises(SongFormatError, match=rf"ctrl: row .* is {WAVE}"):
         songio.dumps(ir)
 
 
 def test_writer_refuses_a_list_row_the_format_retired():
-    ir = songio.loads(
-        LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="{ctrl: 65}")
-    )
+    ir = songio.loads(LIST_SONG.format(pr="goattracker2", tname="ctrl", name="c", row="{ctrl: 65}"))
     ir["records"].update(ins={1: {"ctrl": 1, "pw": 1}}, pulsetab={1: {"l": 32, "r": 16, "next": 0}})
     ir["phrases"]["p1"] = [{"note": 30, "instrument": 1}]
-    with pytest.raises(SongFormatError, match=rf"pulsetab: row .* is {SWEEP}"):
+    with pytest.raises(SongFormatError, match=rf"pw: row .* is {SWEEP}"):
         songio.dumps(ir)
 
 
 def test_the_version_is_its_text():
-    text = LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="{ctrl: 65}")
-    assert songio.dumps(songio.loads(text)).startswith("unitracker: 1.16\n")
-    with pytest.raises(SongFormatError, match=r"not a unitracker v1\.16 document"):
-        songio.loads(text.replace("1.16", "1.1", 1))
+    text = LIST_SONG.format(pr="goattracker2", tname="ctrl", name="c", row="{ctrl: 65}")
+    assert songio.dumps(songio.loads(text)).startswith("unitracker: 1.17\n")
+    with pytest.raises(SongFormatError, match=r"not a unitracker v1\.17 document"):
+        songio.loads(text.replace("1.17", "1.1", 1))
 
 
 def test_reader_rejects_rows_beyond_max_and_bad_stop():

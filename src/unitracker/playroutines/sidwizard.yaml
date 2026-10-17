@@ -81,7 +81,7 @@ record_types:
   # arp speed. A hold row lasts w ticks after its first whatever its h, which paces the
   # program only once it ends; the lifter makes h equal w. A chord is the program's own rows.
   wftab:
-    prefix: w
+    writes_as: ctrl
     none: 0
     chain: next
     fields: {w: 0, a: 128, d: 0, h: 0, next: 0}
@@ -113,6 +113,7 @@ record_types:
   # Pulse row: a $80+ sets the width from (a & $7F, b); otherwise a ticks of a signed b sweep.
   # k is the keyboard-track amount; x the expression a program of that one row is.
   pwtab:
+    writes_as: pw
     prefix: pw
     none: 0
     chain: next
@@ -130,7 +131,7 @@ record_types:
   # otherwise a ticks of a signed b cutoff sweep. k is the keyboard-track amount; x an
   # expression driving the cutoff from this row.
   flttab:
-    prefix: f
+    writes_as: filter
     none: 0
     chain: next
     expr: x

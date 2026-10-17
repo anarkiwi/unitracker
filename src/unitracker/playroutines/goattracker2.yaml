@@ -79,7 +79,7 @@ record_types:
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
   # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
   ctrltab:
-    prefix: c
+    writes_as: ctrl
     none: 0
     chain: next
     # A list row: a wavetable command with no shared form, which the lifter names.
@@ -158,6 +158,7 @@ record_types:
   # Pulsetable row: l $80+ sets the width from (l & $0F, r); otherwise l ticks of a signed r sweep.
   # x: the expression a program of that one row is (see modulators).
   pulsetab:
+    writes_as: pw
     prefix: pw
     none: 0
     chain: next
@@ -176,7 +177,7 @@ record_types:
   # Filtertable row: l $80+ sets the mode and r, the $D417 byte (and cut, a cutoff the player
   # reads from the following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
   filttab:
-    prefix: f
+    writes_as: filter
     none: 0
     chain: next
     expr: x

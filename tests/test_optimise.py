@@ -14,7 +14,7 @@ PULSE = "16*abs((φ - 32) % 128 - 64) + 512"
 
 def doc(ins: str, phrase: str, defs: str = "", steps: int = 8, extra: str = "") -> str:
     """A three-voice GoatTracker 2 document: voice 1 plays ``phrase``, the others rest."""
-    return f"""unitracker: 1.16
+    return f"""unitracker: 1.17
 playroutine: {{ref: goattracker2}}
 meta: {{title: t, author: a, released: r}}
 song:
@@ -79,7 +79,7 @@ def test_trace_rows_repeat_from_the_recurrence():
     assert ref.row(2999) == tuple(grid[2999])
 
 
-C1 = "      ctrltab:\n        c1: [{ctrl: 33, note: +0}, end]\n"
+C1 = "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
 RUN = "[C4.i1!run:@c1*2, D4!run:@c1*2, E4!run:@c1*2, F4!run:@c1*2]"
 
 
@@ -123,7 +123,7 @@ TWO_RUNS = "[C4.i1!run:@c1*2, D4!run:@c2*2, E4!run:@c1*2, F4!run:@c2*2]"
 
 
 def programs(second: str) -> str:
-    return f"      ctrltab:\n        c1: [{{ctrl: 33, note: +0}}, end]\n        c2: {second}\n"
+    return f"      ctrl:\n        c1: [{{ctrl: 33, note: +0}}, end]\n        c2: {second}\n"
 
 
 def test_programs_merge_when_they_play_alike():
@@ -303,7 +303,7 @@ def test_cli_optimises_and_reports(tmp_path, capsys):
     assert "!ad" not in out.read_text(encoding="utf-8")
     assert "E4!ad:9*2" in report.read_text(encoding="utf-8")
     assert cli.optimise_main([str(song), "--passes", "fields", "--workers", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.16")
+    assert capsys.readouterr().out.startswith("unitracker: 1.17")
     with pytest.raises(SystemExit):
         cli.optimise_main([str(song), "--passes", "nosuch"])
 

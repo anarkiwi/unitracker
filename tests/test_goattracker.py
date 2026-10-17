@@ -208,13 +208,13 @@ def test_lift_document(metal_warrior):
 
 
 COMMANDS_SONG = """
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {ref: goattracker2, constants: {deftempo: 6}}
 song:
   - def:
-      pulsetab:
+      pw:
         pw1: [{pw: 2048}, end]
-      filttab:
+      filter:
         f1: [{cut: 512, res: 3, route: 1, mode: 16}, end]
       ins:
         i1: {sr: 240, pw: pw1, ctrl: [{ctrl: 65, note: +0}, {ad: 25}, {sr: 200}, {run: pw1},
@@ -244,7 +244,7 @@ def test_wavetable_commands_are_their_shared_keys():
 
 
 def test_a_wavetable_command_names_a_program_of_its_kind():
-    with pytest.raises(songio.SongFormatError, match="'i1' names no filttab or pulsetab"):
+    with pytest.raises(songio.SongFormatError, match="'i1' names no filter or pw"):
         songio.loads(COMMANDS_SONG.replace("{run: pw1}", "{run: i1}"))
 
 

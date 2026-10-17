@@ -35,6 +35,11 @@ _ENVELOPE = (
     "retired in v1.14: write the envelope byte as `!ad:n` or `!sr:n`, in the event slot of"
     " its column"
 )
+SHARED_TYPES = {
+    "ctrl": ("ctrltab", "wftab", "sidtab"),
+    "pw": ("pulsetab", "pwtab"),
+    "filter": ("filttab", "flttab"),
+}
 RETIRED = {
     "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
     " row's `pw`, `cut` or `freq`)",
@@ -43,12 +48,18 @@ RETIRED = {
     "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
     "notevib": "retired in v1.11: write the vibrato as `!freq:@x`",
     "vib": "retired in v1.11: write the vibrato as `!freq:@x`",
+    "run2": "retired in v1.17: name the program as the `filter` of the event's instrument",
     "speedtab": "retired in v1.16: a vibrato or slide is a `freq` expression, and `!funk` writes"
     " its tempos (`!funk:6/7`)",
     **dict.fromkeys(
         ("attack", "decay", "sustain", "release", "iattack", "idecay", "isustain", "irelease"),
         _ENVELOPE,
     ),
+    **{
+        name: f"retired in v1.17: write the record type as `{shared}`"
+        for shared, names in SHARED_TYPES.items()
+        for name in names
+    },
 }
 RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
@@ -61,7 +72,6 @@ RETIRED_ROW_KEYS = {
 }
 COMMAND_NAMES = (
     "run",
-    "run2",
     "ad",
     "sr",
     "ctrl",
@@ -428,7 +438,7 @@ class RowCodec:
         naming what the player can't express."""
         for key in written:
             if key in RETIRED_ROW_KEYS and not any(key in s.keep for s in self.shapes):
-                raise CodecError(f"{self.rtype.name}: {key} is {RETIRED_ROW_KEYS[key]}")
+                raise CodecError(f"{self.rtype.written}: {key} is {RETIRED_ROW_KEYS[key]}")
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:
@@ -437,7 +447,8 @@ class RowCodec:
                 return raw
             problems.append(problem)
         raise CodecError(
-            f"{self.rtype.name}: the player can't express row {written!r} ({'; '.join(problems)})"
+            f"{self.rtype.written}: the player can't express row {written!r}"
+            f" ({'; '.join(problems)})"
         )
 
     def check_end(self, raw: dict, written: dict, place: dict | None = None) -> None:
@@ -453,7 +464,7 @@ class RowCodec:
             or {k: v for k, v in enc.items() if k not in exprs}
             != {k: v for k, v in norm.items() if k not in exprs}
         ):
-            raise CodecError(f"{self.rtype.name}: row {written!r} can't end a program")
+            raise CodecError(f"{self.rtype.written}: row {written!r} can't end a program")
 
 
 def envelope_names(spec: dict) -> list:
@@ -465,21 +476,24 @@ def envelope_names(spec: dict) -> list:
 
 class CommandCodec:
     """A playroutine's command codes as shared names; an envelope command's internal code (see
-    :func:`envelope_names`) as its name and byte."""
+    :func:`envelope_names`) as its name and byte. A code with no ``name`` has no written form of
+    its own: a document writes it through another record (see ``eventins``)."""
 
     def __init__(self, spec: dict, rtypes: dict):
-        self.entries = []
+        self.entries, self.unnamed = [], {}
         for code, variants in (spec or {}).items():
             for var in variants if isinstance(variants, list) else [variants]:
-                name = str(var["name"])
-                if name not in COMMAND_NAMES:
-                    raise CodecError(f"{name!r} is not a shared command name")
-                if "nibble" in var:
-                    continue
+                name = str(var.get("name", f"command {code}"))
                 ref = var.get("ref")
                 if ref is not None and ref not in rtypes:
-                    raise CodecError(f"command {name} references unknown type {ref!r}")
-                self.entries.append((int(code), name, ref, var))
+                    raise CodecError(f"{name} references unknown type {ref!r}")
+                if "name" not in var:
+                    self.unnamed[int(code)] = ref
+                    continue
+                if name not in COMMAND_NAMES:
+                    raise CodecError(f"{name!r} is not a shared command name")
+                if "nibble" not in var:
+                    self.entries.append((int(code), name, ref, var))
         self.entries += [(ENVELOPE - k, n, None, {}) for k, n in enumerate(envelope_names(spec))]
         self.rtypes = rtypes
 
@@ -488,7 +502,7 @@ class CommandCodec:
         for ecode, _, ref, _ in self.entries:
             if ecode == code and ref is not None:
                 return ref
-        return None
+        return self.unnamed.get(code)
 
     def inline(self, key: int | str) -> str | None:
         """The record type whose row a command (a code or a name) writes as its argument."""

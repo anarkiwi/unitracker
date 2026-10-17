@@ -142,11 +142,12 @@ What the edits found, in brief (the full list is [orthogonality.md](orthogonalit
   pulse program `pw: 0` and a `freq: 0` on instruments are unheard; an `on!ad:208` repeats the
   byte its note's instrument already plays; and 49 instrument names repeat the voice's
   instrument. 109 more expression merges and 15 more hoists are proved but write more tokens.
-- **Crosseyed.** `t7` plays as `t5`: their ACID expressions differ only in accumulator bits the
-  replay never writes to `$D416`. `t3`'s last row is unreached and `t8`'s loop was unrolled once. The
-  initial voice frequency and `tbase` in `vinit` are overwritten before any voice starts; a
-  `!run2:@t6` on the step after a note that already armed `t6` plays nothing, and neither does the
-  restart `r2`, whose lookahead row only sets the control mask 0.
+- **Crosseyed.** The layer-B program `c2` plays as `i7`'s `filter`: their ACID expressions
+  differ only in accumulator bits the replay never writes to `$D416`. The last row of `i3`'s `ctrl`
+  program is unreached and `i9`'s loop was unrolled once. The initial `note` and `freq` in `vinit`
+  are overwritten before any voice starts; an empty step that re-arms the layer-B program its note's
+  instrument `i6` already armed plays nothing, and neither does the restart `r2`, whose lookahead
+  row only sets the control mask 0.
 
 ## Context-efficiency suggestions
 

@@ -1,4 +1,4 @@
-"""v1.16 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.17 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -128,12 +128,12 @@ def test_the_writer_refuses_the_goattracker_instrument_vibrato(fields, match):
 @pytest.mark.parametrize(
     "row,match",
     [
-        ("{ctrl: 64, wgl: 1}", "sidtab: wgl is retired in v1.8: write"),
-        ("{ctrl: 64, af: 12}", "sidtab: af is retired in v1.11: write the pitch offset"),
+        ("{ctrl: 64, wgl: 1}", "ctrl: wgl is retired in v1.8: write"),
+        ("{ctrl: 64, af: 12}", "ctrl: af is retired in v1.11: write the pitch offset"),
     ],
 )
 def test_the_reader_names_the_retired_sidtab_columns(row, match):
-    text = doc("defmon", f"      sidtab:\n        t1: [{row}, end]", "[C4.t1]")
+    text = doc("defmon", f"      ins:\n        i1: {{ctrl: [{row}, end]}}", "[C4.i1]")
     with pytest.raises(songio.SongFormatError, match=match):
         songio.loads(text)
 
@@ -202,9 +202,9 @@ def test_sidwizard_instrument_freq_and_pulse_and_a_freq_command():
 
 DM_SONG = doc(
     "defmon",
-    """      sidtab:
-        t1: [{ctrl: 65, pw: 256 + 10*φ, freq: (v - 139) % 65536}, end]""",
-    "[C4.t1*8]",
+    """      ins:
+        i1: {ctrl: [{ctrl: 65, pw: 256 + 10*φ, freq: (v - 139) % 65536}, end]}""",
+    "[C4.i1*8]",
     "      vinit: {0: {}, 1: {}, 2: {}}\n      ginit: {0: {}}\n",
 )
 
@@ -218,7 +218,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.16", "unitracker: 1.8", "not a unitracker v1.16 document"),
+        ("unitracker: 1.17", "unitracker: 1.8", "not a unitracker v1.17 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

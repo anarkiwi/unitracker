@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.16 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.17 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -13,7 +13,8 @@ from importlib import resources
 
 import yaml
 
-from unitracker import envelope, eventrestart, hints, inline, lifetime, refkeys, retired
+from unitracker import envelope, eventfold, eventins, eventrestart, hints, inline, lifetime
+from unitracker import refkeys, retired
 from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
@@ -37,7 +38,7 @@ from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 
-VERSION = "1.16"
+VERSION = "1.17"
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -45,7 +46,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.16 format."""
+    """A document does not follow the unitracker v1.17 format."""
 
 
 @functools.cache
@@ -119,7 +120,7 @@ def _player(pr, call, *args):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.16 document."""
+    """Turns the internal representation into a canonical v1.17 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -130,9 +131,7 @@ class _Writer:
             name: {int(k): v for k, v in (rows or {}).items()}
             for name, rows in (ir.get("records") or {}).items()
         }
-        inst = self.pr.get("instrument") or {}
-        self.ins_type = inst.get("type")
-        self.ins_base = int(inst.get("base", 0))
+        self.ins_type, self.ins_base = eventins.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
         self.exprs = {int(k): str(v) for k, v in (ir.get("exprs") or {}).items()}
         canon = {}
@@ -144,13 +143,17 @@ class _Writer:
         self.programs = {}
         self.names = {}
         self.row = 0
-        self.restarts = {}
         self.phrase_names = {}
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
-        rows = self.records.get(self.ins_type, {})
+        native = (self.pr.get("instrument") or {}).get("type")
         written = lifetime.Lifetime(self.pr, self.rtypes).written
-        self.kept, rows = _player(self.pr, written, self.ir["tracks"], self.ir["phrases"], rows)
-        self.records.update({self.ins_type: rows} if self.ins_type in self.records else {})
+        self.kept, rows = _player(
+            self.pr, written, self.ir["tracks"], self.ir["phrases"], self.records.get(native, {})
+        )
+        self.records.update({native: rows} if native in self.records else {})
+        self.folds = eventfold.EventFolds(
+            self.pr, self.rtypes, self.codecs, self.commands, self.records
+        )
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -166,7 +169,7 @@ class _Writer:
         if index in rows:
             return rows[index]
         if rtype.templates:
-            raise SongFormatError(f"{rtype.name} row {index} is referenced but not defined")
+            raise SongFormatError(f"{rtype.written} row {index} is referenced but not defined")
         return {}
 
     def program(self, rtype, entry):
@@ -253,26 +256,11 @@ class _Writer:
         return alias, compiled
 
     def _folded(self, arr):
-        """A compiled phrase with its event restarts on their notes (see ``eventrestart``)."""
-        spec = self.pr.get(eventrestart.NAME)
-        if not spec:
-            return arr
-        return eventrestart.fold(arr, int(spec["command"]), self._restart_of)
-
-    def _restart_of(self, entry: int, gap: int):
-        """The restart index of program ``entry`` run ``gap`` steps before a note, or None."""
-        target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
-        rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
-        path, loop = self.program(target, entry)
-        if loop is not None:
-            return None
-        rows = [{**target.fields, **self._row(target, i)} for i in path]
-        raws = eventrestart.restart_rows(rows, target, rtype, codec, gap)
-        if raws is None:
-            return None
-        return eventrestart.entry_of(
-            raws, rtype, self.records.setdefault(rtype.name, {}), self.restarts
-        )
+        """A compiled phrase with its event restarts and instruments named (see ``eventfold``)."""
+        try:
+            return self.folds.fold(arr, self.program)
+        except eventfold.FoldError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
     # -- representations --
 
@@ -295,7 +283,7 @@ class _Writer:
         if shared is not None:
             return self._shared_row(codec, shared, refs, place)
         if codec is not None and rtype.form == "map":
-            raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
+            raise SongFormatError(f"{rtype.written}: row {row} has no shared-vocabulary form")
         _refuse(retired.row(rtype, row, row, _RowEval(rtype).holds))
         _refuse(retired.unwritten(rtype, row))
         values = {}
@@ -309,7 +297,7 @@ class _Writer:
                 values[field] = value
         unknown = set(row) - set(rtype.fields)
         if unknown:
-            raise SongFormatError(f"{rtype.name}: fields {sorted(unknown)} are not declared")
+            raise SongFormatError(f"{rtype.written}: fields {sorted(unknown)} are not declared")
         if rtype.form == "map":
             return FlowMap(values)
         fields = [f for f in rtype.fields if f != rtype.chain]
@@ -465,7 +453,7 @@ class _Writer:
         defs = [{} for _ in range(count)]
         for name, indices in fixed.items():
             rtype = self.rtypes[name]
-            defs[0].setdefault(name, {}).update(
+            defs[0].setdefault(rtype.written, {}).update(
                 {i: self.row_value(rtype, self._row(rtype, i)) for i in indices}
             )
         for key in self.post:
@@ -478,7 +466,7 @@ class _Writer:
                 value = self.program_value(key)
             else:
                 value = self.row_value(rtype, self._row(rtype, key[1]))
-            defs[self.first_row[key]].setdefault(key[0], {})[Atom(self.names[key])] = value
+            defs[self.first_row[key]].setdefault(rtype.written, {})[Atom(self.names[key])] = value
         for i, (base, r) in enumerate(phrase_row.items(), start=1):
             defs[r].setdefault(PHRASE, {})[Atom(f"p{i}")] = self.atoms(compiled[base])
         return defs
@@ -561,7 +549,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False, respell=None) -> str:
-    """A canonical v1.16 document for internal-representation song ``ir``.
+    """A canonical v1.17 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference;
     ``respell(doc)`` rewrites the written structure before it is dumped (spelling studies).
@@ -587,7 +575,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
 
 
 class _Reader:
-    """Expands a v1.16 document to the internal representation."""
+    """Expands a v1.17 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -595,9 +583,7 @@ class _Reader:
         self.doc = doc
         self.pr = self._playroutine(doc.get("playroutine"))
         self.rtypes = record_types(self.pr)
-        inst = self.pr.get("instrument") or {}
-        self.ins_type = inst.get("type")
-        self.ins_base = int(inst.get("base", 0))
+        self.ins_type, self.ins_base = eventins.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
         self.exprs = {}
         self.named_tables = set((declared(self.pr).get("tables") or {}))
@@ -605,8 +591,11 @@ class _Reader:
         self.names = {}
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
-        self.played = {}
+        self.written = {rt.written: rt for rt in self.rtypes.values()}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
+        self.folds = eventfold.EventFolds(
+            self.pr, self.rtypes, self.codecs, self.commands, self.records
+        )
 
     def _playroutine(self, spec) -> dict:
         if not isinstance(spec, dict):
@@ -636,7 +625,7 @@ class _Reader:
     def _alloc(self, rtype, count) -> int:
         start = self.next_index[rtype.name]
         if start + count - 1 > rtype.max:
-            raise SongFormatError(f"{rtype.name}: more than {rtype.max} rows")
+            raise SongFormatError(f"{rtype.written}: more than {rtype.max} rows")
         self.next_index[rtype.name] = start + count
         return start
 
@@ -664,14 +653,14 @@ class _Reader:
             row, decoded = self._decoded(codec, rtype, value, place)
         elif rtype.form == "map":
             if not isinstance(value, dict):
-                raise SongFormatError(f"{rtype.name}: a row must be a mapping")
+                raise SongFormatError(f"{rtype.written}: a row must be a mapping")
             row = dict(value)
         else:
             row = self._list_row(rtype, codec, value, place)
             _refuse(retired.row(rtype, row, value, _RowEval(rtype).holds))
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
-                raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
+                raise SongFormatError(f"{rtype.written}: unknown field {field!r}")
             if field in decoded:
                 continue
             plain = {k: v for k, v in row.items() if isinstance(v, int)}
@@ -691,10 +680,10 @@ class _Reader:
                 plain = {k: v for k, v in row.items() if isinstance(v, int)}
                 target = ref_type(rtype, field, plain, _RowEval)
                 if target is None or self.rtypes[target].chain is None:
-                    raise SongFormatError(f"{rtype.name}.{field} cannot hold a program")
+                    raise SongFormatError(f"{rtype.written}.{field} cannot hold a program")
                 row[field] = self._program(self.rtypes[target], val)
             elif not isinstance(val, int) or isinstance(val, bool):
-                raise SongFormatError(f"{rtype.name}.{field}: bad value {val!r}")
+                raise SongFormatError(f"{rtype.written}.{field}: bad value {val!r}")
         return row
 
     def _decoded(self, codec, rtype, value: dict, place) -> tuple:
@@ -721,10 +710,10 @@ class _Reader:
         """A list row's fields; a row the codec writes with shared keys has no list form."""
         fields = [f for f in rtype.fields if f != rtype.chain]
         if not isinstance(value, list) or len(value) > len(fields):
-            raise SongFormatError(f"{rtype.name}: bad row {value!r}")
+            raise SongFormatError(f"{rtype.written}: bad row {value!r}")
         row = dict(zip(fields, value))
         if codec is not None and codec.encode(row, place) is not None:
-            raise SongFormatError(f"{rtype.name}: write row {value!r} with shared keys")
+            raise SongFormatError(f"{rtype.written}: write row {value!r} with shared keys")
         return row
 
     def _program(self, rtype, value) -> int:
@@ -736,7 +725,7 @@ class _Reader:
             self.pending.append((rtype, start, row))
             return start
         if not isinstance(value, list) or len(value) < 2:
-            raise SongFormatError(f"{rtype.name}: a program is rows then end or loop")
+            raise SongFormatError(f"{rtype.written}: a program is rows then end or loop")
         rows, term = value[:-1], value[-1]
         start = self._alloc(rtype, len(rows))
         for k, raw in enumerate(rows):
@@ -750,11 +739,11 @@ class _Reader:
             if rtype.stop is not None:
                 plain = {f: v for f, v in last.items() if isinstance(v, int)}
                 if not _RowEval(rtype).holds(rtype.stop, plain):
-                    raise SongFormatError(f"{rtype.name}: a program can only end on a stop row")
+                    raise SongFormatError(f"{rtype.written}: a program can only end on a stop row")
         elif isinstance(term, dict) and set(term) == {"loop"} and 0 <= term["loop"] < len(rows):
             last[rtype.chain] = start + int(term["loop"])
         else:
-            raise SongFormatError(f"{rtype.name}: bad program end {term!r}")
+            raise SongFormatError(f"{rtype.written}: bad program end {term!r}")
         return start
 
     def _end(self, rtype, last, written, place):
@@ -772,17 +761,18 @@ class _Reader:
             except CodecError as exc:
                 raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
-    def _define(self, tname, name, value):
-        rtype = self.rtypes.get(tname)
-        if tname in RETIRED:
-            raise SongFormatError(f"record type {tname!r} is {RETIRED[tname]}")
+    def _define(self, written, name, value):
+        rtype = self.written.get(written)
+        if written in RETIRED:
+            raise SongFormatError(f"record type {written!r} is {RETIRED[written]}")
         if rtype is None:
-            raise SongFormatError(f"unknown record type {tname!r}")
+            raise SongFormatError(f"unknown record type {written!r}")
+        tname = rtype.name
         if rtype.fixed:
             self.pending.append((rtype, int(name), self._proto(rtype, value)))
             return
         if not isinstance(name, str) or not _ONE.match(name):
-            raise SongFormatError(f"{tname}: bad name {name!r}")
+            raise SongFormatError(f"{written}: bad name {name!r}")
         if name in self.names:
             raise SongFormatError(f"name {name!r} defined twice")
         if tname == EXPR:
@@ -801,6 +791,7 @@ class _Reader:
             raise SongFormatError(f"unknown name {name!r}")
         kind, index = self.names[name]
         if kind != tname:
+            kind, tname = self.rtypes[kind].written, self.rtypes[tname].written
             raise SongFormatError(f"{name!r} is a {kind}, not a {tname}")
         return index
 
@@ -814,11 +805,11 @@ class _Reader:
                     plain = {k: v for k, v in row.items() if isinstance(v, int)}
                     target = ref_type(rtype, field, plain, _RowEval)
                     if target is None:
-                        raise SongFormatError(f"{rtype.name}.{field} is not a reference here")
+                        raise SongFormatError(f"{rtype.written}.{field} is not a reference here")
                     val = self.lookup(val[1], target)
                 out[field] = int(val)
             if index in self.records[rtype.name]:
-                raise SongFormatError(f"{rtype.name} row {index} defined twice")
+                raise SongFormatError(f"{rtype.written} row {index} defined twice")
             self.records[rtype.name][index] = out
 
     def event(self, atom) -> dict:
@@ -849,40 +840,18 @@ class _Reader:
             event["steps"] = parsed["steps"]
         return event
 
-    def _event_restart(self, tname: str) -> bool:
-        """Whether type ``tname`` holds event restarts, which the reader plays as commands."""
-        return tname == eventrestart.NAME and bool(self.pr.get(eventrestart.NAME))
-
     def _unfolded(self, events: list, phrase: str) -> list:
-        """A phrase's events with each restart played before its note (see ``eventrestart``)."""
-        restarts = [e for e in events if "restart" in e]
-        if not restarts:
-            return events
+        """A phrase's events with its restarts and instruments unfolded (see ``eventfold``)."""
         try:
-            return eventrestart.unfold(
-                events, int(self.pr[eventrestart.NAME]["command"]), self._played
-            )
-        except eventrestart.RestartError as exc:
+            return self.folds.unfold(events, self._alloc)
+        except eventfold.FoldError as exc:
             raise SongFormatError(f"{self.pr['name']}: phrase {phrase}: {exc}") from exc
-
-    def _played(self, index: int) -> tuple:
-        """``(entry, steps)``: the program event restart ``index`` runs, and how far ahead."""
-        if index not in self.played:
-            target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
-            rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
-            try:
-                self.played[index] = eventrestart.played(
-                    index, self.records, (rtype, target), codec, self._alloc
-                )
-            except eventrestart.RestartError as exc:
-                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        return self.played[index]
 
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd in RETIRED:
             raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
-        if cmd == eventrestart.NAME and self._event_restart(cmd) and isinstance(arg, str):
+        if cmd == eventrestart.NAME and self.folds.held(cmd) and isinstance(arg, str):
             return [eventrestart.CODE, self.lookup(arg[1:], eventrestart.NAME)]
         if isinstance(arg, tuple) or (isinstance(arg, int) and self.commands.inline(cmd)):
             arg = self._inline(cmd, arg if isinstance(arg, tuple) else (arg,), atom)
@@ -943,7 +912,7 @@ class _Reader:
             "voices": voices,
             "tables": self.tables,
             "playroutine": self.pr,
-            "records": {k: v for k, v in self.records.items() if v and not self._event_restart(k)},
+            "records": {k: v for k, v in self.records.items() if v and not self.folds.held(k)},
             "exprs": self.exprs,
             "tracks": tracks,
             "phrases": events,
@@ -963,7 +932,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.16 document."""
+    """The internal representation of a v1.17 document."""
     doc = parse(text)
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
@@ -973,13 +942,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.16 document at ``path``."""
+    """The internal representation of the v1.17 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.16 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.17 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

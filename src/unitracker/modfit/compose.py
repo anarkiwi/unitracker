@@ -17,6 +17,7 @@ from unitracker.modfit.flow import Liveness, action_lists, flow_of, persistent, 
 from unitracker.modfit.flow import names as names_of
 from unitracker.modfit.form import Form, is_cond
 from unitracker.modfit.flow import Writes
+from unitracker.eventins import written_as
 from unitracker.records import record_types
 
 ARG = "arg"
@@ -35,11 +36,12 @@ def bind(doc, code: int):
 
 
 def keywords(pr: dict) -> list:
-    """``[(code, name, when)]`` of a playroutine's ``commands`` map, variants in order."""
+    """``[(code, name, when)]`` of a playroutine's ``commands`` map, variants in order; a code
+    with no name of its own is named by the instrument key it is written as."""
     out = []
     for code, entry in (pr.get("commands") or {}).items():
         for e in entry if isinstance(entry, list) else [entry]:
-            out.append((int(code), e["name"], e.get("when")))
+            out.append((int(code), e.get("name") or written_as(pr, int(code)), e.get("when")))
     return out
 
 

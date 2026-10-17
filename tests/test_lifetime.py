@@ -12,7 +12,7 @@ SW_INS = """      ins:
 """
 GT_INS = """      x:
         x1: '1024 + 16*min(3, φ)'
-      pulsetab:
+      pw:
         pw1: '2048 + 16*min(3, φ)'
       ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(3, φ)',
@@ -24,7 +24,7 @@ GT_INS = """      x:
 
 def song(pr, defs, phrases, rows="    play: [p1, p1, p1]\n", loop="~"):
     phrase = "".join(f"        {name}: [{atoms}]\n" for name, atoms in phrases.items())
-    return f"""unitracker: 1.16
+    return f"""unitracker: 1.17
 playroutine: {{ref: {pr}}}
 song:
   - def:
@@ -154,9 +154,9 @@ def test_goattracker_refuses_the_command_on_a_note_that_starts_the_program(old, 
 
 
 def test_defmon_refuses_the_commands():
-    defs = "      sidtab:\n        t1: [{ctrl: 65}, end]\n"
+    defs = "      ins:\n        i1: {ctrl: [{ctrl: 65}, end]}\n"
     for command in ("pulse", "filter"):
-        text = song("defmon", defs, {"p1": f"C4.t1!{command}:0"})
+        text = song("defmon", defs, {"p1": f"C4.i1!{command}:0"})
         with pytest.raises(
             songio.SongFormatError, match=f"defmon: the player can't express !{command}:0"
         ):

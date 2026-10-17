@@ -7,115 +7,149 @@ Written by `unitracker-optimise --report`: the optimiser's edits the register gr
 - goattracker2 · metal_warrior i3: `X.i3!run:@c1` ≡ `X.i3 with i3 + {ctrl: c1}`. *canonicalise: a command every note of an instrument carries is a field*
 - goattracker2 · metal_warrior i3: `X.i3!run:@c2` ≡ `X.i3 with i3 + {ctrl: c2}`. *canonicalise: a command every note of an instrument carries is a field*
 - goattracker2 · metal_warrior i3: `X.i3!run:@c3` ≡ `X.i3 with i3 + {ctrl: c3}`. *canonicalise: a command every note of an instrument carries is a field*
+- goattracker2 · metal_warrior i4 (not kept): `X.i4!freq:@x1` ≡ `X.i4 with i4 + {freq: x1}`. *canonicalise: a command every note of an instrument carries is a field*
+- goattracker2 · metal_warrior i5 (not kept): `X.i5!freq:@x1` ≡ `X.i5 with i5 + {freq: x1}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i10 (not kept): `X.i10!freq:@x22` ≡ `X.i10 with i10 + {freq: x22}`. *canonicalise: a command every note of an instrument carries is a field*
-- sidwizard · csillag i10 (not kept): `X.i10!freq:@x23` ≡ `X.i10 with i10 + {freq: x23}`. *canonicalise: a command every note of an instrument carries is a field*
-- sidwizard · csillag i10 (not kept): `X.i10!freq:@x8` ≡ `X.i10 with i10 + {freq: x8}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i10 (not kept): `X.i10!sr:39` ≡ `X.i10 with i10 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i2: `X.i2!sr:72` ≡ `X.i2 with i2 + {sr: 72}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i3 (not kept): `X.i3!ad:208` ≡ `X.i3 with i3 + {ad: 208}`. *canonicalise: a command every note of an instrument carries is a field*
-- sidwizard · csillag i6 (not kept): `X.i6!freq:@x4` ≡ `X.i6 with i6 + {freq: x4}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i6 (not kept): `X.i6!sr:23` ≡ `X.i6 with i6 + {sr: 23}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i6 (not kept): `X.i6!sr:39` ≡ `X.i6 with i6 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
-- sidwizard · csillag i7 (not kept): `X.i7!freq:@x4` ≡ `X.i7 with i7 + {freq: x4}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i7 (not kept): `X.i7!sr:23` ≡ `X.i7 with i7 + {sr: 23}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i7 (not kept): `X.i7!sr:39` ≡ `X.i7 with i7 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i9 (not kept): `X.i9!freq:@x22` ≡ `X.i9 with i9 + {freq: x22}`. *canonicalise: a command every note of an instrument carries is a field*
-- sidwizard · csillag i9 (not kept): `X.i9!freq:@x23` ≡ `X.i9 with i9 + {freq: x23}`. *canonicalise: a command every note of an instrument carries is a field*
-- sidwizard · csillag i9 (not kept): `X.i9!freq:@x8` ≡ `X.i9 with i9 + {freq: x8}`. *canonicalise: a command every note of an instrument carries is a field*
 - sidwizard · csillag i9 (not kept): `X.i9!sr:39` ≡ `X.i9 with i9 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
 
 ## Non-orthogonal key
 
-- defmon · crosseyed p10[2]: `D#4.t7!restart:@r2*12` ≡ `D#4.t7*12`. *canonicalise: the writer drops a command its context already plays*
-- defmon · crosseyed p5[1]: `C2.t4!run2:@t6*12` ≡ `C2.t4!run2:@t6*24`. *canonicalise: the writer drops a command its context already plays*
-- defmon · crosseyed p8[2]: `D#4.t7!restart:@r2*36` ≡ `D#4.t7*36`. *canonicalise: the writer drops a command its context already plays*
-- defmon · crosseyed t1[0]: `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, pw: 256, freq: (v - 139) % 65536}` ≡ `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, freq: (v - 139) % 65536}`. *codec rule: a program row key the context already gives is left out*
-- defmon · crosseyed t1[0]: `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, pw: 256, freq: (v - 139) % 65536}` ≡ `{hold: 2, ctrl: 64^1, sr: 246, pw: 256, freq: (v - 139) % 65536}`. *codec rule: a program row key the context already gives is left out*
-- defmon · crosseyed t4[0]: `{hold: 2, ctrl: 64^1, note: +0, ad: 1, sr: 152, pw: 2048}` ≡ `{hold: 2, ctrl: 64^1, ad: 1, sr: 152, pw: 2048}`. *codec rule: a program row key the context already gives is left out*
-- defmon · crosseyed t4[1]: `{ctrl: ^0, note: +0}` ≡ `{ctrl: ^0}`. *codec rule: a program row key the context already gives is left out*
-- defmon · crosseyed t7[0]: `{hold: 2, ctrl: 16^3, note: +24, ad: 0, sr: 249, pw: 2048}` ≡ `{hold: 2, ctrl: 16^3, note: +24, ad: 0, sr: 249}`. *codec rule: a program row key the context already gives is left out*
-- defmon · crosseyed vinit 0.fhi: `fhi: 17` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 0.flo: `flo: 103` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 0.tbase: `tbase: 60` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 1.fhi: `fhi: 4` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 1.flo: `flo: 91` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 1.tbase: `tbase: 48` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 2.fhi: `fhi: 15` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 2.flo: `flo: 131` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
-- defmon · crosseyed vinit 2.tbase: `tbase: 70` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed c1[0]: `{hold: 2, ctrl: 64^1, note: +0, ad: 1, sr: 152, pw: 2048}` ≡ `{hold: 2, ctrl: 64^1, ad: 1, sr: 152, pw: 2048}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed c1[1]: `{ctrl: ^0, note: +0}` ≡ `{ctrl: ^0}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed i1.ctrl[0]: `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, pw: 256, freq: (v - 139) % 65536}` ≡ `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, freq: (v - 139) % 65536}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed i1.ctrl[0]: `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, pw: 256, freq: (v - 139) % 65536}` ≡ `{hold: 2, ctrl: 64^1, sr: 246, pw: 256, freq: (v - 139) % 65536}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed i8.ctrl[0]: `{hold: 2, ctrl: 16^3, note: +24, ad: 0, sr: 249, pw: 2048}` ≡ `{hold: 2, ctrl: 16^3, note: +24, ad: 0, sr: 249}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed p10[2]: `D#4.i9!restart:@r2*12` ≡ `D#4.i9*12`. *canonicalise: the writer drops a command its context already plays*
+- defmon · crosseyed p5[1]: `C2.i6*12` ≡ `C2.i6*24`. *canonicalise: the writer drops a command its context already plays*
+- defmon · crosseyed p8[2]: `D#4.i9!restart:@r2*36` ≡ `D#4.i9*36`. *canonicalise: the writer drops a command its context already plays*
+- defmon · crosseyed vinit 0.freq: `4385` ≡ `33`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 0.freq (not kept): `2227` ≡ `-2125`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 0.freq (not kept): `2227` ≡ `2124`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 0.freq (not kept): `33` ≡ `-70`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 0.freq (not kept): `4385` ≡ `4282`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 0.note: `note: =36` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.freq: `1045` ≡ `21`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.freq (not kept): `1045` ≡ `954`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.freq (not kept): `1` ≡ `-1023`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.freq (not kept): `1` ≡ `-90`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.freq (not kept): `21` ≡ `-70`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.note: `note: =24` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.freq: `3901` ≡ `61`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.freq (not kept): `2` ≡ `-129`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.freq (not kept): `2` ≡ `-3838`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.freq (not kept): `3901` ≡ `3770`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.freq (not kept): `61` ≡ `-70`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.note: `note: =46` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
 - goattracker2 · metal_warrior i1.ctrl[0], i1.ctrl[1], i2.ctrl[0], i2.ctrl[1], i3.ctrl[1], i4.ctrl[1], i5.ctrl[0], i5.ctrl[1], i6.ctrl[0], i6.ctrl[1]: `{ctrl: 9, note: +0}` ≡ `{note: +0}`. *codec rule: a program row key the context already gives is left out*
 - goattracker2 · metal_warrior i2.ctrl[6]: `{ctrl: 128, note: =68}` ≡ `{note: =68}`. *codec rule: a program row key the context already gives is left out*
-- goattracker2 · metal_warrior p15[10]: `F5!legato:0!freq:@x2` ≡ `F5!legato:0`. *canonicalise: the writer drops a command its context already plays*
 - goattracker2 · metal_warrior p15[3]: `C5.i5*2` ≡ `C5*2`. *canonicalise: name an instrument only where the voice changes it*
 - goattracker2 · metal_warrior p1[0], p4[0], p10[0]: `C2.i1*3` ≡ `C2*3`. *canonicalise: name an instrument only where the voice changes it*
 - goattracker2 · metal_warrior p5[1]: `G4.i3*3` ≡ `G4*3`. *canonicalise: name an instrument only where the voice changes it*
 - goattracker2 · metal_warrior p6[10], p6[28], p12[10], p12[28]: `-!freq:@x2` ≡ `-!freq:@x2*3`. *canonicalise: the writer drops a command its context already plays*
 - goattracker2 · metal_warrior p6[27]: `G4!legato:0!freq:@x2` ≡ `G4!legato:0!freq:@x2*2`. *canonicalise: the writer drops a command its context already plays*
-- goattracker2 · metal_warrior p6[9], p12[9]: `A#4!legato:0!freq:@x2` ≡ `A#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
 - goattracker2 · metal_warrior p7[0], p13[0]: `G#1.i1*3` ≡ `G#1*3`. *canonicalise: name an instrument only where the voice changes it*
 - goattracker2 · metal_warrior p8[1], p14[1]: `D#5.i4*3` ≡ `D#5*3`. *canonicalise: name an instrument only where the voice changes it*
-- goattracker2 · metal_warrior p9[10], p12[27], p15[20]: `C5!legato:0!freq:@x2` ≡ `C5!legato:0`. *canonicalise: the writer drops a command its context already plays*
 - goattracker2 · metal_warrior p9[11], p9[12], p9[21], p15[11], p15[12], p15[21]: `-!freq:@x2` ≡ `-!freq:@x2*2`. *canonicalise: the writer drops a command its context already plays*
-- goattracker2 · metal_warrior p9[20]: `D5!legato:0!freq:@x2` ≡ `D5!legato:0`. *canonicalise: the writer drops a command its context already plays*
 - goattracker2 · metal_warrior p9[3]: `C4.i5*2` ≡ `C4*2`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag i4.pw: `pw: 0` ≡ `-`. *canonicalise: an instrument field with no effect where it plays is left out*
 - sidwizard · csillag i6.freq: `freq: 0` ≡ `-`. *canonicalise: an instrument field with no effect where it plays is left out*
 - sidwizard · csillag i7.ctrl[1]: `{ctrl: 65, note: +0}` ≡ `{note: +0}`. *codec rule: a program row key the context already gives is left out*
+- sidwizard · csillag p11[18]: `on!ad:208` ≡ `on!ad:208*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p11[2]: `A#1!legato:0!freq:@x3` ≡ `A#1!legato:0!freq:@x3*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p11[3], p11[4], p38[36], p38[37]: `-!freq:@x3` ≡ `-!freq:@x3*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p11[6], p11[7], p11[8], p11[9], p11[10], p11[11], p11[12], p11[13], p11[14], p11[15], p11[16], p11[19], p11[20], p11[21], p11[22], p11[23], p11[24]: `-!freq:@x4` ≡ `-!freq:@x4*2`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p12[0], p20[0], p20[12], p26[0], p26[12], p28[0], p28[12], p29[0], p29[12], p31[0], p31[12]: `C2.i5*4` ≡ `C2*4`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p12[10]: `A#1.i5*4` ≡ `A#1*4`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p12[7], p26[8], p28[8], p29[8]: `C2.i5*2` ≡ `C2*2`. *canonicalise: name an instrument only where the voice changes it*
-- sidwizard · csillag p13[2], p13[10]: `on!ad:208*4` ≡ `on*4`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p13[5], p13[13], p19[23], p33[17], p34[1]: `G4!legato:0!freq:@x1` ≡ `G4!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p13[6], p13[14], p34[5], p34[11], p34[14]: `A#4!legato:0!freq:@x1` ≡ `A#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[2], p13[12]: `on!ad:208*4` ≡ `on*4`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[5], p13[15], p18[8], p18[11], p19[14], p19[34], p33[8], p33[22], p34[1], p34[43] (not kept), p34[41] (not kept), p34[40]: `G4!legato:0!freq:@x1` ≡ `G4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[6], p13[16], p34[5], p34[11], p34[14]: `A#4!legato:0!freq:@x1` ≡ `A#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[7], p13[17], p17[17], p18[14], p18[27], p19[6], p19[28], p33[31] (not kept), p34[46] (not kept), p33[27], p34[44] (not kept), p34[43]: `off!freq:@x1` ≡ `off`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[7], p13[17], p17[17], p18[27], p19[6], p19[28], p33[31] (not kept), p33[27]: `off!freq:@x1` ≡ `off!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[8], p13[18], p17[18], p18[4], p18[5], p18[12], p19[36], p33[11], p33[12], p33[24], p33[25], p33[26] (not kept), p33[27] (not kept), p33[28], p33[29], p33[32] (not kept), p33[33] (not kept), p34[44] (not kept), p33[20], p33[21], p33[22], p33[23], p34[42] (not kept), p34[41]: `-!freq:@x1` ≡ `-!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p14[0], p16[10]: `G1.i5*4` ≡ `G1*4`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p14[10], p16[0]: `G#1.i5*4` ≡ `G#1*4`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p14[7]: `G1.i5*2` ≡ `G1*2`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p16[7]: `G#1.i5*2` ≡ `G#1*2`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p17[0]: `G#3.i7*3` ≡ `G#3*3`. *canonicalise: name an instrument only where the voice changes it*
-- sidwizard · csillag p17[13], p18[15], p19[6], p19[18], p34[30]: `D#4!legato:0!freq:@x1*2` ≡ `D#4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p17[14]: `D4!legato:0!freq:@x1` ≡ `D4!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p17[8], p18[25], p19[1], p19[11]: `D4!legato:0!freq:@x1*2` ≡ `D4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p17[14], p18[25], p19[9], p19[26], p33[36] (not kept), p34[2], p34[37] (not kept), p33[32], p34[35] (not kept), p34[34]: `D#4!legato:0!freq:@x1` ≡ `D#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p17[14], p18[25], p19[9], p19[26], p34[37] (not kept), p34[35] (not kept), p34[34]: `D#4!legato:0!freq:@x1` ≡ `D#4!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p17[8], p17[16], p18[3], p18[45], p19[1], p19[17]: `D4!legato:0!freq:@x1` ≡ `D4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p17[8], p18[3], p18[45], p19[1], p19[17]: `D4!legato:0!freq:@x1` ≡ `D4!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p18[0]: `G3.i7*2` ≡ `G3*2`. *canonicalise: name an instrument only where the voice changes it*
-- sidwizard · csillag p18[3]: `D4!legato:0!freq:@x1*4` ≡ `D4!legato:0*4`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p18[5], p19[9]: `G4!legato:0!freq:@x1*2` ≡ `G4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p18[7], p34[33]: `G4!legato:0!freq:@x1*3` ≡ `G4!legato:0*3`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[19], p22[6]: `G4!legato:0!freq:@x5` ≡ `G4!legato:0!freq:@x5*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[20], p18[21], p18[22], p22[7], p22[8], p22[30], p22[31], p25[33], p25[34]: `-!freq:@x5` ≡ `-!freq:@x5*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[32]: `F4!legato:0!freq:@x6` ≡ `F4!legato:0!freq:@x6*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[34], p18[35], p18[36], p18[39], p18[40], p18[41], p19[38], p19[39], p19[40], p22[10], p22[11], p22[12], p22[13], p22[16], p22[17], p22[18], p22[19], p22[20], p22[21], p22[33], p22[34], p22[35], p22[36], p22[39], p22[40], p22[41], p22[42], p25[36], p25[37], p25[38], p25[39], p25[42], p25[43], p25[44], p25[45], p25[46], p25[47]: `-!freq:@x7` ≡ `-!freq:@x7*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[38]: `off!freq:@x7` ≡ `off!freq:@x7*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[38]: `off!freq:@x7` ≡ `off`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[8], p18[11], p19[14], p33[8] (not kept), p34[43] (not kept), p34[41] (not kept), p34[40]: `G4!legato:0!freq:@x1` ≡ `G4!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p19[0]: `D#4.i7*2` ≡ `D#4*2`. *canonicalise: name an instrument only where the voice changes it*
-- sidwizard · csillag p19[15]: `G3!legato:0!freq:@x1` ≡ `G3!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p19[16]: `G#3!legato:0!freq:@x1` ≡ `G#3!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p19[24]: `G#4!legato:0!freq:@x1*3` ≡ `G#4!legato:0*3`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p19[3]: `G3!legato:0!freq:@x1*2` ≡ `G3!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p19[7], p34[31]: `F4!legato:0!freq:@x1*2` ≡ `F4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[11], p33[23] (not kept), p34[39] (not kept), p34[37] (not kept), p34[36]: `F4!legato:0!freq:@x1` ≡ `F4!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[11], p33[23], p34[7], p34[39] (not kept), p34[37] (not kept), p34[36]: `F4!legato:0!freq:@x1` ≡ `F4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[19]: `off!freq:@x8` ≡ `off!freq:@x8*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[24]: `G#3!legato:0!freq:@x1` ≡ `G#3!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[31]: `off!freq:@x9` ≡ `off!freq:@x9*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[35], p33[10], p34[19], p34[35] (not kept), p34[33] (not kept), p34[32]: `G#4!legato:0!freq:@x1` ≡ `G#4!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[35], p33[10], p34[6], p34[15], p34[19], p34[35] (not kept), p34[33] (not kept), p34[32]: `G#4!legato:0!freq:@x1` ≡ `G#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[43]: `A#4!legato:0!freq:@x10` ≡ `A#4!legato:0!freq:@x10*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[44]: `-!freq:@x10` ≡ `-!freq:@x10*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[46], p19[47], p19[48], p19[49], p25[10], p25[11], p25[12], p25[13], p25[16], p25[17], p25[18], p25[19], p25[20], p25[21], p38[10], p38[11], p38[12], p38[13], p38[16], p38[17], p38[18], p38[19], p38[20], p38[21]: `-!freq:@x11` ≡ `-!freq:@x11*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[4]: `G3!legato:0!freq:@x1` ≡ `G3!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[4], p19[23]: `G3!legato:0!freq:@x1` ≡ `G3!legato:0`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p21[0], p21[16], p30[0], p30[8], p30[16], p30[24]: `C4.i2*2` ≡ `C4*2`. *canonicalise: name an instrument only where the voice changes it*
-- sidwizard · csillag p22[9]: `D#5.i7*4` ≡ `D#5*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p22[15], p22[38], p25[15], p25[41], p38[15], p38[44]: `off!sr:108` ≡ `off!sr:108*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p22[23]: `D#5.i7*4` ≡ `D#5*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p22[29]: `G5!legato:0!freq:@x5` ≡ `G5!legato:0!freq:@x5*2`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p23[0], p32[0]: `A#1.i5*6` ≡ `A#1*6`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p24[0]: `A#3.i2*2` ≡ `A#3*2`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p25[0], p38[0]: `C5.i7` ≡ `C5`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p25[1], p38[1]: `D5!legato:0!freq:@x12` ≡ `D5!legato:0!freq:@x12*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p25[23], p38[23]: `F4.i7` ≡ `F4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p25[24], p38[24]: `G4!legato:0!freq:@x12` ≡ `G4!legato:0!freq:@x12*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p25[2], p25[25], p38[2], p38[25]: `-!freq:@x12` ≡ `-!freq:@x12*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p25[32]: `A#4!legato:0!freq:@x5` ≡ `A#4!legato:0!freq:@x5*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p25[4], p33[17], p34[16], p34[26] (not kept), p34[33] (not kept), p38[4], p34[31] (not kept), p34[30]: `C5!legato:0!freq:@x1` ≡ `C5!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p25[6], p38[6]: `F4*5` ≡ `F4*10`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p25[9], p38[9]: `F4.i7` ≡ `F4`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p2[8], p5[0], p27[8]: `C4.i2*4` ≡ `C4*4`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p31[8], p32[18]: `A#1.i5*2` ≡ `A#1*2`. *canonicalise: name an instrument only where the voice changes it*
-- sidwizard · csillag p33[13], p34[16], p34[28]: `C5!legato:0!freq:@x1*2` ≡ `C5!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p33[18] (not kept): `F4!legato:0!freq:@x1*8` ≡ `F4!legato:0*8`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p33[21], p34[2]: `D#4!legato:0!freq:@x1` ≡ `D#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p33[22], p34[3]: `C4!legato:0!freq:@x1` ≡ `C4!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p33[23]: `A#3!legato:0!freq:@x1` ≡ `A#3!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p33[9]: `G#4!legato:0!freq:@x1*4` ≡ `G#4!legato:0*4`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[17], p34[4], p34[10], p34[13], p34[16], p34[26], p34[33] (not kept), p34[31] (not kept), p34[30]: `C5!legato:0!freq:@x1` ≡ `C5!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[37] (not kept), p34[3], p33[33]: `C4!legato:0!freq:@x1` ≡ `C4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[38] (not kept), p33[34]: `A#3!legato:0!freq:@x1` ≡ `A#3!legato:0`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p34[0]: `G#4.i9` ≡ `G#4`. *canonicalise: name an instrument only where the voice changes it*
-- sidwizard · csillag p34[18], p34[29]: `G#4!legato:0!freq:@x1*2` ≡ `G#4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p34[25]: `D#5!legato:0!freq:@x1*2` ≡ `D#5!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p34[32]: `F#4!legato:0!freq:@x1*2` ≡ `F#4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p34[4], p34[10], p34[13]: `C5!legato:0!freq:@x1` ≡ `C5!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p34[6], p34[15]: `G#4!legato:0!freq:@x1` ≡ `G#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p34[7]: `F4!legato:0!freq:@x1` ≡ `F4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[28] (not kept), p34[31] (not kept), p34[26], p34[29]: `D#5!legato:0!freq:@x1` ≡ `D#5!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[28] (not kept), p34[31] (not kept), p34[26], p34[29] (not kept): `D#5!legato:0!freq:@x1` ≡ `D#5!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[41] (not kept), p34[39] (not kept), p34[38]: `F#4!legato:0!freq:@x1` ≡ `F#4!legato:0!freq:@x1*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[41] (not kept), p34[39] (not kept), p34[38]: `F#4!legato:0!freq:@x1` ≡ `F#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p34[9], p34[12]: `D5!legato:0!freq:@x1` ≡ `D5!legato:0`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p36[7]: `D#4!run:@w3!sr:139` ≡ `D#4!run:@w3`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p36[7]: `D#4!run:@c3!sr:139` ≡ `D#4!run:@c3`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p37[5]: `off!sr:125*14` ≡ `off*14`. *canonicalise: the writer drops a command its context already plays*
-- sidwizard · csillag p38[10]: `G4!legato:0!freq:@x12*2` ≡ `G4!legato:0!freq:@x12*3`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p38[28]: `off!freq:@x13` ≡ `off`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p38[31]: `A#3!legato:0!freq:@x14` ≡ `A#3!legato:0!freq:@x14*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p38[32], p38[33]: `-!freq:@x14` ≡ `-!freq:@x14*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p38[35]: `C4!legato:0!freq:@x3` ≡ `C4!legato:0!freq:@x3*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p38[39], p38[40], p38[41], p38[42], p38[45], p38[46], p38[47], p38[48], p38[49], p38[50], p38[51]: `-!freq:@x15` ≡ `-!freq:@x15*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p3[1], p3[2], p3[3], p3[4], p3[5], p3[6], p3[7], p3[8], p3[9], p3[10], p3[11], p3[12], p3[13], p3[14], p3[15], p3[16], p3[17], p3[18], p3[19], p3[20], p3[21], p3[22], p3[23], p3[24], p3[25], p3[26], p3[27], p3[28], p3[29], p3[30], p3[31], p3[32], p3[33], p3[34], p3[35], p3[38], p3[39], p3[40], p3[41], p3[42], p3[43], p3[44], p3[45], p3[46], p3[47], p3[48], p3[49], p3[50], p3[51], p9[1], p9[2], p9[3], p9[4], p9[5], p9[6], p9[7], p9[8], p9[9], p9[10], p9[11], p9[12], p9[13], p9[14], p9[15], p9[16], p9[17], p9[18], p9[19], p9[20], p9[21], p9[22], p9[23], p9[24], p9[25], p9[26], p9[27], p9[28], p9[29], p9[30], p9[33], p9[34], p9[35], p9[36], p9[37], p9[38], p9[39], p9[40], p9[41], p9[42], p9[43], p9[44], p9[45], p9[46], p9[47], p9[48], p9[49], p9[50], p9[51], p9[52], p9[53], p9[54], p9[55], p9[56], p9[57], p9[58], p9[59], p9[60], p9[61], p9[62]: `-!freq:@x2` ≡ `-!freq:@x2*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p3[37]: `off!sr:253` ≡ `off!sr:253*2`. *canonicalise: the writer drops a command its context already plays*
 - sidwizard · csillag p6[0]: `C3.i3*7` ≡ `C3*7`. *canonicalise: name an instrument only where the voice changes it*
 - sidwizard · csillag p8[8], p8[16], p8[24]: `C3.i2*2` ≡ `C3*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p9[0]: `on!freq:@x2` ≡ `on!freq:@x2*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p9[0]: `on!freq:@x2` ≡ `on`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p9[32]: `off!freq:@x2` ≡ `off!freq:@x2*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p9[32]: `off!freq:@x2` ≡ `off`. *canonicalise: the writer drops a command its context already plays*
 
 ## VM dead state
 
+- defmon · field `ins.ctrl`: never read by the VM. *read by the format's program walk, not by the player*
+- defmon · field `ins.filter`: never read by the VM. *read by the format's program walk, not by the player*
 - defmon · field `restart.ad`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
 - defmon · field `restart.dl`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
 - defmon · field `restart.next`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
@@ -129,19 +163,19 @@ Written by `unitracker-optimise --report`: the optimiser's edits the register gr
 
 - defmon · crosseyed codec shape restart[0] `{ad, ctrl, hold, sr}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
 - defmon · crosseyed codec shape restart[1] `{}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[10] `{cut}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[11] `{vol}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[1] `{freq}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[2] `{ad}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[3] `{sr}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[4] `{run}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[5] `{run}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[6] `{res, route}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[7] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[8] `{filter}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape ctrltab[9] `{filter, res, route}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape filttab[1] `{cut}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- goattracker2 · metal_warrior codec shape pulsetab[0] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[10] `{cut}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[11] `{vol}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[1] `{freq}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[2] `{ad}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[3] `{sr}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[4] `{run}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[5] `{run}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[6] `{res, route}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[7] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[8] `{filter}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrl[9] `{filter, res, route}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape filter[1] `{cut}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape pw[0] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
 - goattracker2 · metal_warrior command `!ad`: no lifted event plays it. *hand-written only*
 - goattracker2 · metal_warrior command `!ctrl`: no lifted event plays it. *hand-written only*
 - goattracker2 · metal_warrior command `!cut`: no lifted event plays it. *hand-written only*
@@ -151,29 +185,29 @@ Written by `unitracker-optimise --report`: the optimiser's edits the register gr
 - goattracker2 · metal_warrior command `!sr`: no lifted event plays it. *hand-written only*
 - goattracker2 · metal_warrior command `!vol`: no lifted event plays it. *hand-written only*
 - goattracker2 · metal_warrior command `!vtempo`: no lifted event plays it. *hand-written only*
-- sidwizard · csillag codec shape pwtab[0] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
-- sidwizard · csillag codec shape wftab[1] `{freq, hold, note}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- sidwizard · csillag codec shape ctrl[1] `{freq, hold, note}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- sidwizard · csillag codec shape pw[0] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
 
 ## Song redundancy
 
-- defmon · crosseyed sidtab: `t7: [{cut: (-[(v - 513) % 65536 >= 32768]*(v % 65536) + [(v - 513) % 65536 >= 32768]*((-65536*[v % 65536 >= 513] + (v - 1) % 256 + 512) % 131072) - 65023*[(v - 513) % 65536 >= 32768] + v % 65536 + 48639)*[φ >= 1] + 16384, res: 15, route: 7, mode: 16}, end]` ≡ `t5: [{cut: (-[(v - 513) % 65536 >= 32768]*(v % 65536) + [(v - 513) % 65536 >= 32768]*((-65536*[v % 65536 >= 513] + (v - 1) % 256 + 512) % 131072) - 65023*[(v - 513) % 65536 >= 32768] + v % 65536 - 16896)*[φ >= 1] + 81919, res: 15, route: 7, mode: 16}, end]`. *optimiser: one record for two that play alike*
-- defmon · crosseyed t3[1]: `{hold: 3, ctrl: 128^0, note: =28}` ≡ `{ctrl: 128^0, note: =28}`. *optimiser: rows no start reaches drop*
-- defmon · crosseyed t7[3]: `{hold: 2, ctrl: ^2, note: +0}` ≡ `{loop: 1}`. *optimiser: a loop is written with its shortest cycle*
-- sidwizard · csillag ins: `i8: {sr: 103, ctrl: w4, pw: min(112, φ) + 128, freq: (v - W[N + 33]*[φ >= 21] + 2*W[N + 33]*[φ >= 21]*[(φ + 1) % 8 >= 4]) % 65536, restart: r1}` ≡ `i7: {sr: 103, ctrl: w4, pw: min(112, φ) + 128, freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536), restart: r1}`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x17: v` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
-- sidwizard · csillag x: `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- defmon · crosseyed ctrl: `c2: [{cut: (-[(v - 513) % 65536 >= 32768]*(v % 65536) + [(v - 513) % 65536 >= 32768]*((-65536*[v % 65536 >= 513] + (v - 1) % 256 + 512) % 131072) - 65023*[(v - 513) % 65536 >= 32768] + v % 65536 - 16896)*[φ >= 1] + 81919, res: 15, route: 7, mode: 16}, end]` ≡ `i7.filter: [{cut: (-[(v - 513) % 65536 >= 32768]*(v % 65536) + [(v - 513) % 65536 >= 32768]*((-65536*[v % 65536 >= 513] + (v - 1) % 256 + 512) % 131072) - 65023*[(v - 513) % 65536 >= 32768] + v % 65536 + 48639)*[φ >= 1] + 16384, res: 15, route: 7, mode: 16}, end]`. *optimiser: one record for two that play alike*
+- defmon · crosseyed i3.ctrl[1]: `{hold: 3, ctrl: 128^0, note: =28}` ≡ `{ctrl: 128^0, note: =28}`. *optimiser: rows no start reaches drop*
+- defmon · crosseyed i9.ctrl[3]: `{hold: 2, ctrl: ^2, note: +0}` ≡ `{loop: 1}`. *optimiser: a loop is written with its shortest cycle*
+- sidwizard · csillag ins: `i8: {sr: 103, ctrl: c4, pw: min(112, φ) + 128, freq: (v - W[N + 33]*[φ >= 21] + 2*W[N + 33]*[φ >= 21]*[(φ + 1) % 8 >= 4]) % 65536, restart: r1}` ≡ `i7: {sr: 103, ctrl: c4, pw: min(112, φ) + 128, freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536), restart: r1}`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x17: v` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `pw 2.x: 0`. *optimiser: one record for two that play alike*
 - sidwizard · csillag x (not kept): `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)` ≡ `x2: [v + W[N + 17] < 65537]*[v >= 32768]*((v + W[N + 17] + 1) % 65536) + [v < 32768]*[v >= 1]*[v > W[N + 17]]*((v - W[N + 17] - 1) % 65536)`. *optimiser: one record for two that play alike*
 - sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
 - sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
@@ -283,4 +317,3 @@ Written by `unitracker-optimise --report`: the optimiser's edits the register gr
 - sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
 - sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
 - sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
-

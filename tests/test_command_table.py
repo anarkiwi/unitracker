@@ -1,4 +1,5 @@
-"""The per-player command table in docs/format.md, generated from the playroutines' commands."""
+"""The per-player command and `ctrl` row key tables in docs/format.md, generated from the
+playroutines' commands and codecs."""
 
 from importlib import resources
 from pathlib import Path
@@ -6,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from unitracker import eventrestart, lifetime, songio
-from unitracker.codec import NONE, COMMAND_NAMES, CodecError, CommandCodec, envelope_names
+from unitracker.codec import NONE, COMMAND_NAMES, ROW_KEYS, CodecError, CommandCodec
+from unitracker.codec import envelope_names
 from unitracker.records import record_types
 
 DOC = Path(__file__).resolve().parents[1] / "docs" / "format.md"
@@ -16,6 +18,7 @@ PLAYERS = sorted(
     if p.name.endswith(".yaml")
 )
 HEADER = f"| command | {' | '.join(f'`{p}`' for p in PLAYERS)} |"
+KEYS_HEADER = f"| `ctrl` row key | {' | '.join(f'`{p}`' for p in PLAYERS)} |"
 ABSENT = "—"
 
 
@@ -46,7 +49,7 @@ def accepted(pr: dict) -> dict:
             refs.setdefault(name, []).append("/".join(["0-255"] * len(fields)))
             continue
         if ref is not None:
-            refs.setdefault(name, []).append(f"`@{ref}`")
+            refs.setdefault(name, []).append(f"`@{rtypes[ref].written}`")
             continue
         for arg in range(256):
             try:
@@ -80,10 +83,39 @@ def table() -> list[str]:
     return rows
 
 
-def documented() -> list[str]:
-    """The command table's lines as docs/format.md has them."""
+def key_forms(pr: dict, written: str = "ctrl") -> dict:
+    """``{key: text}``: the forms each row key takes in the playroutine's ``written`` programs."""
+    rtypes = record_types(pr)
+    rtype = next(t for t in rtypes.values() if t.written == written)
+    forms = {}
+    for shape in rtype.codec:
+        for key, spec in (shape.get("keys") or {}).items():
+            spec = spec if isinstance(spec, dict) else {"value": spec}
+            found = forms.setdefault(key, {})
+            found.update(dict.fromkeys(["value"] if "value" in spec else []))
+            found.update(dict.fromkeys(["`^n`"] if "eor" in spec else []))
+            found.update(dict.fromkeys(["`+ m`, `-`"] if "rel" in spec else []))
+            found.update(dict.fromkeys(["expression"] if "expr" in spec else []))
+            found.update(dict.fromkeys([f"`{NONE}`"] if spec.get("none") else []))
+            found.update(
+                dict.fromkeys([f"`{rtypes[spec['ref']].written}` name"] if "ref" in spec else [])
+            )
+    return {k: ", ".join(v) for k, v in forms.items()}
+
+
+def key_table() -> list[str]:
+    """The `ctrl` row key table's lines, one row per key some player's `ctrl` program takes."""
+    cells = {p: key_forms(songio.library(p)) for p in PLAYERS}
+    rows = [KEYS_HEADER, f"|---|{'---|' * len(PLAYERS)}"]
+    for key in (k for k in ROW_KEYS if any(k in c for c in cells.values())):
+        rows.append(f"| `{key}` | {' | '.join(cells[p].get(key, ABSENT) for p in PLAYERS)} |")
+    return rows
+
+
+def documented(header: str = HEADER) -> list[str]:
+    """The lines of the table under ``header`` as docs/format.md has them."""
     lines = DOC.read_text().splitlines()
-    start = lines.index(HEADER) if HEADER in lines else len(lines)
+    start = lines.index(header) if header in lines else len(lines)
     end = next((k for k in range(start, len(lines)) if not lines[k].startswith("|")), len(lines))
     return lines[start:end]
 
@@ -91,6 +123,12 @@ def documented() -> list[str]:
 def test_the_documented_command_table_is_the_playroutines():
     expected = table()
     assert documented() == expected, "\n".join(expected)
+
+
+def test_the_documented_ctrl_key_table_is_the_playroutines():
+    expected = key_table()
+    assert documented(KEYS_HEADER) == expected, "\n".join(expected)
+    assert key_forms(songio.library("goattracker2"))["run"] == "`pw` name, `filter` name"
 
 
 @pytest.mark.parametrize(
