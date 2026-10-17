@@ -1,4 +1,4 @@
-# unitracker song format (v1.14)
+# unitracker song format (v1.15)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.14
+unitracker: 1.15
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.14`; readers reject any other version |
+| `unitracker` | `1.15`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -202,8 +202,8 @@ would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftover
 
 - **GoatTracker 2:** the wavetable command rows with no shared form (list rows `[w, n]`, see
   the GoatTracker 2 backend), the instrument keys `speed` and `vd` (the instrument vibrato, which
-  runs on every step without a command) and the record type `speedtab`, which they, `!funk`
-  and the wavetable commands $F1-$F4 name.
+  runs on every step without a command) and the record type `speedtab`, which they and `!funk`
+  name.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -406,7 +406,7 @@ result floor-divided by `s`. GoatTracker's filter cell holds the top 8 bits of t
 
 | place | players |
 |---|---|
-| a program row's `pw`, `cut` or `freq` | defMON sidTAB rows (`freq`, `pw`, `cut`); GoatTracker filter parameter rows and SID-Wizard filter set rows (`cut`) |
+| a program row's `pw`, `cut` or `freq` | defMON sidTAB rows (`freq`, `pw`, `cut`); GoatTracker filter parameter rows and SID-Wizard filter set rows (`cut`); GoatTracker wavetable step rows (`freq`) |
 | an instrument's `pw` or `filter` program, written as the one expression | GoatTracker, SID-Wizard |
 | an instrument's `freq`: the pitch expression a note starting the instrument runs | SID-Wizard |
 | an event's `!freq:@x1`, naming an `x` definition | GoatTracker, SID-Wizard |
@@ -429,12 +429,21 @@ command 17); SID-Wizard writes instrument column $3F.
 | `command` | `freq` | `freq` | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, or a wavetable row plays a note | `!freq:@x` (command 16) |
 | `pulse` | `pw` | `pulse` | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:@pw` or a wavetable `$F9` sets the program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `filtercutoff`, `scale: 8`, global | each filter-program tick | an instrument, `!run:@f`, `!resfilt:0` or a wavetable `$FA`/`$FB` sets the program | the program's first row (instrument `filter`) |
+| `wave` | `freq` | `freq` | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
 
 A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence
 (`φ` keeps counting); a different one, or a step with another or no command, starts the
 next. Commands 1-4 and the instrument vibrato are the unit's own firings; a lifted song
 writes the commands' modulations as `!freq`, and the instrument vibrato's on the step of a
 note, whose later steps without a command keep the instrument's `speed`.
+
+A wavetable row's `freq` is one firing: the portamento, toneporta or vibrato step ($F1-$F4)
+the row runs, with its speed and the voice's state at the run resolved (a realtime speed reads
+the note the frequency base came from, a term of `N`). It is read as a portamento step of
+speed 0, which leaves the frequency alone, so the step sets nothing but the frequency: a row
+whose runs need different expressions (a vibrato step met on different phases) fails the lift,
+naming the row; one whose step's other effects (a vibrato's phase, a toneporta's arrival) the
+song hears fails it too.
 
 ### SID-Wizard
 
@@ -676,7 +685,8 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start |
 | `mirror` | a cell that takes the expression's value when it held the playroutine's |
 | `label` | the cells that group a unit's occurrences for the lifter |
-| `site` | where the lifter writes the expression: `{record, index, field, clear, first, when}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command) |
+| `relative` | cells a start reads as `N` plus their offset from the note (GoatTracker's `lastnote`) |
+| `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the format does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
 | `command` | the command code that names an expression (`!freq`) |
 | `commands` | the native command codes the lifter replaces by `command` |
@@ -760,8 +770,8 @@ wavetable command row runs the pattern command of its low nibble, and the tick's
 effect does not run, as on a note row; the commands with a shared form are written with its key:
 $F5 `ad`, $F6 `sr`, $F9 and $FA `run` (the pulse or filter program), $FB `res` and `route`
 (but $FB 00, which also stops the filter program), $FC `cut` and $FD `vol` (below $10). A
-wavetable jump is the program's `loop`. $F1-$F4 (one portamento, toneporta or vibrato
-step at the row's speed), $F7 (a `ctrl` that, unlike a waveform row's, stops the tick's continuous effect),
+wavetable jump is the program's `loop`. $F1-$F4 (one portamento, toneporta or vibrato step)
+are the row's `freq` (see Modulators). $F7 (a `ctrl` that, unlike a waveform row's, stops the tick's continuous effect),
 $F0, $F8 and $FE (which the playroutine stops on), $F9 00 and $FA 00 (which `run: none`
 can't tell apart), $FB 00 and $FD $10-$FF have no shared form.
 

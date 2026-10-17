@@ -243,11 +243,12 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
             shared = first.update
         elif len(recur) == 1 and live:
             shared = (first.phase, first.value)
+        once = bool((an.unit(occs[members[0]].unit).get("site") or {}).get("row"))
         for i in members:
             d = found[occs[i].key][0]
             if not d.identity:
                 a, f = with_carried(an, occs[i], d, shared or d.update)
-                out[i] = checked(d, a, f)
+                out[i] = G.text(f.subs(G.PHI, 0)) if once else checked(d, a, f)
     tables = set((declared(an.ir["playroutine"]).get("tables") or {}))
     for text in {t for t in out if t is not None}:
         try:
@@ -392,14 +393,27 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         return out - ({rtype.none} if rtype.none is not None else set())
 
     def record_site(self, where: tuple, by_unit: dict) -> None:
-        """Write a record's units' expressions; a unit with several gets one copy per text."""
-        texts = {u: {t: o for t, o in got.items() if t is not None} for u, got in by_unit.items()}
+        """Write a record's units' expressions; a unit with several gets one copy per text.
+
+        A unit whose site is a program row writes every start's text there, the identity too.
+        """
+        rowed = {u for u in by_unit if self.units[u]["site"].get("row")}
+        texts = {
+            u: {(IDENTITY if t is None and u in rowed else t): o for t, o in got.items()}
+            for u, got in by_unit.items()
+        }
+        texts = {u: {t: o for t, o in got.items() if t is not None} for u, got in texts.items()}
         texts = {u: got for u, got in texts.items() if got and not self.native(where, u, got)}
         if not texts:
             return
         many = [u for u, got in texts.items() if len(got) > 1]
         if len(many) > 1:
             raise ConversionError(f"{where}: units {many} each need several expressions")
+        if set(many) & rowed:
+            raise ConversionError(
+                f"{where[0]} row {where[1]}: its runs need several {self.units[many[0]]['key']}"
+                f" expressions: {', '.join(sorted(texts[many[0]]))}"
+            )
         single = {u: next(iter(got)) for u, got in texts.items() if u not in many}
         if not many:
             self.redirect(where, self.written(where, single))
@@ -417,9 +431,9 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         that the format writes as they are."""
         name, index = where
         rtype, rows = self.rtypes[name], self.records.get(name, {})
-        if rtype.chain is None or not all(_integer(t) for t in texts):
-            return False
         spec = self.units[unit]["site"]
+        if rtype.chain is None or spec.get("row") or not all(_integer(t) for t in texts):
+            return False
         path, _ = _program(rows, rtype, index)
         full = [{**rtype.fields, **rows.get(i, {})} for i in path]
         if not any(self.effective(rtype, {**r, **self.cleared(spec, r)}) for r in full):
@@ -433,7 +447,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         name, index = where
         rtype, rows = self.rtypes[name], self.records.setdefault(name, {})
         specs = [self.units[u]["site"] for u in texts]
-        if rtype.chain is None:
+        if rtype.chain is None or all(s.get("row") for s in specs):
             row = dict(rows.get(index, {}))
             for unit, spec in zip(texts, specs):
                 if index not in rtype.pin:

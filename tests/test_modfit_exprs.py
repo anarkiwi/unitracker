@@ -272,7 +272,7 @@ def test_cli_writes_the_report(tmp_path, metal_warrior):
           "--after", str(tmp_path), "--workers", "4"])  # fmt: skip
     text = out.read_text()
     assert "## Metal_Warrior_Title_Remix (goattracker2)" in text and "## Tokens" in text
-    assert "read back from its v1.14 text, 7680 ticks are equal to" in text
+    assert "read back from its v1.15 text, 7680 ticks are equal to" in text
     assert "written (" in text and "(v + 32) % 65536" in text
     assert "Metal_Warrior_Title_Remix: - / - / " in text
 

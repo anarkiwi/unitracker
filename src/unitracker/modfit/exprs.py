@@ -121,6 +121,10 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
             if c in machine.reads or c in machine.control:
                 if self.evaluate(machine, t, n) == occ.start.get(c):
                     values[c] = t
+        for c in unit.get("relative") or []:
+            if c not in lay and (c in machine.reads or c in machine.control):
+                k = int(occ.start[c]) - n
+                values[c] = ("lin", k, (("N", 1),)) if k else "N"
         v0 = lay.get(machine.cell)
         if v0 is not None and self.evaluate(machine, v0, n) != occ.v:
             v0 = None

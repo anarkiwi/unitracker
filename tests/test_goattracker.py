@@ -16,8 +16,11 @@ from pygoattracker.model import (
 )
 
 import numpy as np
+import yaml
+from conftest import gt_tune
 
 from unitracker import goattracker as gt, songio
+from unitracker.modfit.convert import ConversionError
 from unitracker.vm import SongPlayer
 
 
@@ -205,7 +208,7 @@ def test_lift_document(metal_warrior):
 
 
 COMMANDS_SONG = """
-unitracker: 1.14
+unitracker: 1.15
 playroutine: {ref: goattracker2, constants: {deftempo: 6}}
 song:
   - def:
@@ -243,3 +246,35 @@ def test_wavetable_commands_are_their_shared_keys():
 def test_a_wavetable_command_names_a_program_of_its_kind():
     with pytest.raises(songio.SongFormatError, match="'i1' names no filttab or pulsetab"):
         songio.loads(COMMANDS_SONG.replace("{run: pw1}", "{run: i1}"))
+
+
+SPEEDS = [(0, 0x20), (0x80, 1), (0x02, 0x10)]
+TWO_NOTES = [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 7 + [(31, 1, 0, 0)] + [(None, 0, 0, 0)] * 7
+
+
+def lifted(dec, native, ticks=400) -> str:
+    """The canonical text of a synthetic tune's lift, asserting it plays as the native player."""
+    text = songio.dumps(gt.lift(dec))
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    theirs = np.asarray(native.render_grid(ticks), dtype=np.uint8)
+    assert SongPlayer(song).mismatch(theirs) is None
+    return text
+
+
+def test_wavetable_steps_are_their_rows_freq():
+    steps = [(0x41, 0), (0xF4, 3), (0xF4, 3), (0xF3, 1), (0xF2, 2), (0xF1, 1), (0x41, 0x80)]
+    text = lifted(*gt_tune(steps + [(0xFF, 7)], rows=TWO_NOTES, speed=SPEEDS))
+    rows = yaml.safe_load(text)["song"][0]["def"]["ins"]["i1"]["ctrl"]
+    assert rows[1:3] == [{"freq": "(v + 16) % 65536"}] * 2
+    assert rows[4:6] == [
+        {"freq": "(v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2) % 65536"},
+        {"freq": "(v + 32) % 65536"},
+    ]
+    assert all(isinstance(r, dict) for r in rows) and "speedtab" not in text
+
+
+def test_a_wavetable_step_on_changing_phases_is_named():
+    dec, _ = gt_tune([(0x41, 0), (0xF4, 3), (0xFF, 2)], speed=SPEEDS)
+    with pytest.raises(ConversionError, match="ctrltab row 2: its runs need several freq"):
+        gt.lift(dec)

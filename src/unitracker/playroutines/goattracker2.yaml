@@ -79,12 +79,13 @@ record_types:
     prefix: c
     none: 0
     chain: next
-    fields: [w, n, next]
+    fields: [w, n, next, x]
     refs:
       n:
         - {type: speedtab, when: "w >= 0xF1 and w <= 0xF4"}
         - {type: pulsetab, when: "w == 0xF9"}
         - {type: filttab, when: "w == 0xFA"}
+      x: x
     codec:
       - when: "w < 0xF0"
         keys:
@@ -94,6 +95,11 @@ record_types:
         raw:
           w: "((ctrl | 0xE0) if ctrl < 0x10 else ctrl) if has_ctrl else wait"
           n: "((note | 0x80) if note_abs else (note & 0x7F)) if has_note else 0x80"
+      # A portamento, toneporta or vibrato step ($F1-$F4) is the row's one-firing freq
+      # expression, read as a portamento step of speed 0, which leaves the frequency alone.
+      - when: "w == 0xF1 and n == 0 and x != 0"
+        keys: {freq: {expr: x}}
+        raw: {w: 0xF1, n: 0}
       # Commands with a shared form, run as the pattern command of the same number: $F5/$F6
       # set the envelope, $F9/$FA start the pulse/filter program, $FB sets $D417 (0 also
       # stops the filter program), $FC the cutoff, $FD the volume (below $10).
@@ -121,8 +127,10 @@ record_types:
     do:
       - if: "row.w >= 0xF0"
         then:
-          - set: {arg: row.n}
-          - run: {record: wavecmd, index: "row.w & 0x0F", field: do}
+          - set: {arg: row.n, wc: "row.w & 0x0F"}
+          - if: "wc >= 1 and wc <= 4"
+            then: [{call: wstart}, {call: wstep}]
+            else: [{run: {record: wavecmd, index: wc, field: do}}]
           - set: {skip: 1}
           - return: true
       - if: "row.w >= 0xE0"
@@ -241,6 +249,7 @@ voice:
   fetchtick: {width: 1}
   hr: {width: 8}
   arg: {width: 8}
+  wc: {width: 8}
   n: {width: 8}
   T: {width: 16}
   vcmp: {width: 8}
@@ -315,6 +324,11 @@ records:
     14: {do: [{set: {state: 1}}]}
 
 procs:
+  # A wavetable step ($F1-$F4): wstart starts the wave unit, wstep is its one firing.
+  wstart:
+    - set: {wc: wc}
+  wstep:
+    - run: {record: wavecmd, index: wc, field: do}
   wnote:
     - set: {freq: "ftab[n]", vibtime: 0, lastnote: n, skip: 1}
   porta_reached:
@@ -485,6 +499,18 @@ modulators:
       hooks:
         - {at: records.tick0.do, key: [command, cmddata]}
         - {at: record_types.ctrltab.do, written: [lastnote]}
+    - name: wave
+      key: freq
+      cell: freq
+      chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
+      fire: [{run: {record: wavecmd, index: wc, field: do}}]
+      pre: procs.wstep
+      label: [wcur]
+      x: "ctrltab[wcur].x"
+      relative: [lastnote]
+      site: {record: ctrltab, index: wcur, field: x, row: true, clear: {w: 0xF1, n: 0}}
+      hooks:
+        - {at: procs.wstart, written: [wc]}
     - name: pulse
       key: pw
       cell: pulse

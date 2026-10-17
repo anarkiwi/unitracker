@@ -34,6 +34,7 @@ def round_trip(pr_name: str, name: str, raw: dict) -> dict:
         ({"w": 0xFB, "n": 0xC1}, {"res": 12, "route": 1}),
         ({"w": 0xFC, "n": 0x80}, {"cut": 1024}),
         ({"w": 0xFD, "n": 9}, {"vol": 9}),
+        ({"w": 0xF1, "n": 0, "x": 2}, {"freq": ("x", 2)}),
     ],
 )
 def test_goattracker_wave_commands_are_shared_row_keys(raw, shared):
@@ -45,7 +46,14 @@ def test_goattracker_wave_commands_are_shared_row_keys(raw, shared):
 @pytest.mark.parametrize(
     "raw",
     [{"w": 0xF0 + c, "n": 1} for c in (0, 1, 2, 3, 4, 7, 8, 14)]
-    + [{"w": 0xF9, "n": 0}, {"w": 0xFA, "n": 0}, {"w": 0xFB, "n": 0}, {"w": 0xFD, "n": 0x10}],
+    + [
+        {"w": 0xF1, "n": 0},
+        {"w": 0xF2, "n": 0, "x": 1},
+        {"w": 0xF9, "n": 0},
+        {"w": 0xFA, "n": 0},
+        {"w": 0xFB, "n": 0},
+        {"w": 0xFD, "n": 0x10},
+    ],
 )
 def test_goattracker_wave_commands_without_a_shared_form(raw):
     assert row_codec("goattracker2", "ctrltab").encode(raw) is None
