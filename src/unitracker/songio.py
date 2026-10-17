@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import timeline
+from unitracker import eventrestart, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -210,6 +210,7 @@ class _Writer:
         self.programs = {}
         self.names = {}
         self.row = 0
+        self.restarts = {}
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -297,7 +298,10 @@ class _Writer:
 
         Phrases equal up to a transpose share the first-used one as their base.
         """
-        compiled = {name: compile_phrase(ev) for name, ev in (self.ir["phrases"] or {}).items()}
+        compiled = {
+            name: self._folded(compile_phrase(ev))
+            for name, ev in (self.ir["phrases"] or {}).items()
+        }
         bases, alias = {}, {}
         for row in rows:
             for entry in row:
@@ -307,6 +311,51 @@ class _Writer:
                 base, base_shift = bases.setdefault(key, (entry[0], shift))
                 alias[entry[0]] = (base, shift - base_shift)
         return alias, compiled
+
+    def _folded(self, arr):
+        """A compiled phrase with its event restarts on their notes (see ``eventrestart``)."""
+        spec = self.pr.get(eventrestart.NAME)
+        if not spec:
+            return arr
+        return eventrestart.fold(arr, int(spec["command"]), self._restart_of)
+
+    def _restart_of(self, entry: int, gap: int):
+        """The restart index of program ``entry`` run ``gap`` steps before a note, or None."""
+        target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
+        rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
+        path, loop = self.program(target, entry)
+        fields = [f for f in rtype.fields if f != rtype.chain]
+        rows = [{**target.fields, **self._row(target, i)} for i in path]
+        if loop is not None or any(
+            r[f] != d
+            for r in rows
+            for f, d in target.fields.items()
+            if f not in fields + [target.chain]
+        ):
+            return None
+        rows = [{f: r[f] for f in fields} for r in rows]
+        rows[-1].update({f: target.default(f) for f in target.end})
+        try:
+            shared = [codec.encode(r, _place(k, len(rows) + 1, True)) for k, r in enumerate(rows)]
+            if None in shared:
+                return None
+            rest = gap - sum(s.get("hold", 1) for s in shared[:-1])
+            if rest < 1:
+                return None
+            shared[-1] = {k: v for k, v in shared[-1].items() if k != "hold"}
+            shared[-1].update({"hold": rest} if rest != 1 else {})
+            shared.append({})
+            raws = [codec.decode(s, _place(k, len(shared), True)) for k, s in enumerate(shared)]
+        except CodecError:
+            return None
+        key = tuple(tuple(sorted(r.items())) for r in raws)
+        if key not in self.restarts:
+            table = self.records.setdefault(rtype.name, {})
+            self.restarts[key] = start = max([rtype.first - 1, *table]) + 1
+            for k, raw in enumerate(raws):
+                nxt = start + k + 1 if k + 1 < len(raws) else rtype.none
+                table[start + k] = {**raw, rtype.chain: nxt}
+        return self.restarts[key]
 
     # -- representations --
 
@@ -426,6 +475,8 @@ class _Writer:
         """A command as ``name:arg``, or None for no command."""
         if not (cmd or raw):
             return None
+        if cmd == eventrestart.CODE:
+            return f"{eventrestart.NAME}:@{self.names[(eventrestart.NAME, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
@@ -441,6 +492,9 @@ class _Writer:
             if row[2]:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             for cmd, arg in zip(row[3::2], row[4::2]):
+                if cmd == eventrestart.CODE:
+                    yield (eventrestart.NAME, int(arg)), "command"
+                    continue
                 target = self.commands.ref(int(cmd))
                 if target is not None:
                     none = self.rtypes[target].none
@@ -660,6 +714,7 @@ class _Reader:
         self.names = {}
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
+        self.played = {}
 
     def _playroutine(self, spec) -> dict:
         if not isinstance(spec, dict):
@@ -880,6 +935,9 @@ class _Reader:
         if len(parsed["commands"]) > MAX_COMMANDS:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
         commands = [self.command(cmd, arg, atom) for cmd, arg in parsed["commands"]]
+        for code, index in [c for c in commands if c[0] == eventrestart.CODE]:
+            event["restart"] = index
+            commands.remove([code, index])
         if len(commands) == 1:
             event["command"] = commands[0]
         elif commands:
@@ -888,10 +946,52 @@ class _Reader:
             event["steps"] = parsed["steps"]
         return event
 
+    def _event_restart(self, tname: str) -> bool:
+        """Whether record type ``tname`` holds event restarts, which the reader plays as commands."""
+        return tname == eventrestart.NAME and bool(self.pr.get(eventrestart.NAME))
+
+    def _unfolded(self, events: list, phrase: str) -> list:
+        """A phrase's events with each restart played before its note (see ``eventrestart``)."""
+        restarts = [e for e in events if "restart" in e]
+        if not restarts:
+            return events
+        try:
+            return eventrestart.unfold(
+                events, int(self.pr[eventrestart.NAME]["command"]), self._played
+            )
+        except eventrestart.RestartError as exc:
+            raise SongFormatError(f"{self.pr['name']}: phrase {phrase}: {exc}") from exc
+
+    def _played(self, index: int) -> tuple:
+        """``(entry, steps)``: the program event restart ``index`` runs, and how far ahead."""
+        if index not in self.played:
+            rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
+            target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
+            path, rows, entry = [], self.records[rtype.name], index
+            while entry != rtype.none:
+                path.append({f: v for f, v in rows[entry].items() if f != rtype.chain})
+                entry = rows[entry][rtype.chain]
+            ahead = path[:-1]
+            if not ahead:
+                raise SongFormatError(f"{self.pr['name']}: a restart needs a row before its note")
+            holds = [
+                codec.encode(r, _place(k, len(path), True)).get("hold", 1)
+                for k, r in enumerate(ahead)
+            ]
+            start = self._alloc(target, len(ahead))
+            for k, row in enumerate(ahead):
+                last = k + 1 == len(ahead)
+                row = {**row, target.chain: 0 if last else start + k + 1}
+                self.records[target.name][start + k] = {**row, **(target.end if last else {})}
+            self.played[index] = (start, sum(holds))
+        return self.played[index]
+
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd in RETIRED:
             raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
+        if cmd == eventrestart.NAME and self._event_restart(cmd) and isinstance(arg, str):
+            return [eventrestart.CODE, self.lookup(arg[1:], eventrestart.NAME)]
         if isinstance(arg, str) and arg != NONE:
             if arg[1:] not in self.names:
                 raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
@@ -925,7 +1025,10 @@ class _Reader:
         """The internal representation."""
         doc = self.doc
         phrases, rows = self._collect(doc.get("song"))
-        events = {name: [self.event(a) for a in atoms] for name, atoms in phrases.items()}
+        events = {
+            name: self._unfolded([self.event(a) for a in atoms], name)
+            for name, atoms in phrases.items()
+        }
         lengths = {name: len(compile_phrase(ev)) for name, ev in events.items()}
         voices = int(doc.get("voices", self.defaults.get("voices", 3)))
         tracks = timeline.from_rows(rows, doc.get("loop"), lengths, voices)
@@ -937,7 +1040,7 @@ class _Reader:
             "voices": voices,
             "tables": self.tables,
             "playroutine": self.pr,
-            "records": {k: v for k, v in self.records.items() if v},
+            "records": {k: v for k, v in self.records.items() if v and not self._event_restart(k)},
             "exprs": self.exprs,
             "tracks": tracks,
             "phrases": events,

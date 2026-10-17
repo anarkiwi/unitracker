@@ -51,6 +51,7 @@ COMMAND_NAMES = (
     "freq",
     "vib",
     "mark",
+    "restart",
     # Player-specific: SID-Wizard.
     "attack",
     "decay",

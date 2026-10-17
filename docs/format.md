@@ -177,6 +177,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!legato:0` | the event's note does not retrigger (see Legato) |
 | `!vib:@s` | GoatTracker vibrato at the speed of `speedtab` row `s` |
 | `!mark:n` | a timing mark that changes no sound |
+| `!restart:@r` | the note's hard restart, for a player whose instruments have none (see Hard restart) |
 
 SID-Wizard's effect commands are its own: they have no identical shared form.
 
@@ -248,9 +249,10 @@ The sidTAB columns `fv` (`mode`), `re` (`res` and `route`) and `acid` (`cut`) an
 `resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`).
 ### Hard restart
 
-An instrument's `restart` is a program (record type `restart`, prefix `r`) anchored to its
-notes: the last row applies on the note's first tick, and each earlier row that many ticks
-before it as the rows after it hold. A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`:
+A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last
+row applies on the note's first tick, and each earlier row its `hold` ticks before the row
+after it. A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. GoatTracker and SID-Wizard
+instruments name theirs (`restart: r1`); a defMON note names its own (`C3.t2!restart:@r1`):
 
 ```yaml
 restart:
@@ -266,10 +268,22 @@ row's place in its program is part of its shape, see Codecs):
 |---|---|---|
 | GoatTracker 2 | exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n, gate: 1}` (n $01-$FD, the first wave), `{gate: g}`, or `{}` |
 | SID-Wizard | at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform), or `{}` |
+| defMON | one or more: `hold`, `ctrl`, `ad`, `sr` and the sidTAB column `wgl` | `{}` |
 
 GoatTracker reads the voice's next step its instrument's gate timer ahead of each note, and an
 instrument without a restart reads it on the note's first tick. A GoatTracker note keeps the
 gate as the restart left it, so its first-tick row sets it; a SID-Wizard note sets it itself.
+
+defMON has no instrument restart: composers run a short sidTAB program on layer B on the
+empty steps before a note. The playroutine declares this with `restart: {command: 1}`, and
+the format writes it as the note's restart. On reading, a note's `!restart:@r` becomes
+`!run2` of a sidTAB program of the lookahead rows (the last one frozen, holding until the
+note), on the step their holds put before the note, which must be empty; the writer folds
+every such `!run2` back: one alone on its step, followed only by empty steps up to a note
+with a free command slot, running a program that ends, sets no column but `dl`, `wgh`,
+`wgl`, `ad` and `sr`, and fits in the steps. The note's own sidTAB program starts on its
+first tick, so the restart's last row is empty. A step is one tick in defMON, so `hold`
+counts both.
 
 ## Modulators
 
@@ -391,6 +405,7 @@ The writer produces one text per song:
   the transpose moves into the play entry;
 - equal expression texts share one definition;
 - runs of empty steps become `*steps`;
+- a playroutine's event restarts are written on their notes (see Hard restart);
 - no-op commands are dropped.
 
 Writing what the reader returns gives the same bytes.
@@ -407,6 +422,7 @@ onset: started   # the voice cell that is 1 once the voice's registers hold its 
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
 note_offset: 0                            # frequency-table index of format note 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
+restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
@@ -660,7 +676,7 @@ tick the replay applies it. The playroutine fetches every tick and maps the even
 fields as follows:
 
 - `.t3` is the sidTAB program sidcall layer A starts;
-- `!run2:@t5` arms layer B;
+- `!run2:@t5` arms layer B, and `!restart:@r1` arms it on the steps before the note;
 - the note is a GATE_N note.
 
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk

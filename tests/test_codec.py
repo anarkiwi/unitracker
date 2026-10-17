@@ -702,7 +702,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     assert gt_cmds == {"run", "freq", "legato", "tempo"}
     dm_doc = yaml.safe_load(songio.dumps(lift_defmon(crosseyed.read_bytes())))
     dm_cmds = vocabulary(dm_doc)
-    assert dm_cmds == {"run2"}
+    assert dm_cmds == {"run2", "restart"}
     sw_doc = yaml.safe_load(songio.dumps(lift_sw(csillag.read_bytes())))
     sw_cmds = vocabulary(sw_doc)
     assert sw_cmds == {
@@ -721,7 +721,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
         for j, theirs in enumerate(keys):
             if i != j:
                 assert mine & theirs <= set(ROW_KEYS) | {"filter", "restart"}
-    assert not keys[2] & (set(COMMAND_NAMES) - {"chord"} - set(ROW_KEYS))
+    assert not keys[2] & (set(COMMAND_NAMES) - {"chord", "restart"} - set(ROW_KEYS))
 
 
 def defmon_doc(vinit, ginit):
