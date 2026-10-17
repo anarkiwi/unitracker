@@ -46,7 +46,7 @@ def accepted(pr: dict) -> dict:
             refs.setdefault(name, []).append("/".join(["0-255"] * len(fields)))
             continue
         if ref is not None:
-            refs.setdefault(name, []).append(f"`@{ref}`")
+            refs.setdefault(name, []).append(f"`@{rtypes[ref].written}`")
             continue
         for arg in range(256):
             try:

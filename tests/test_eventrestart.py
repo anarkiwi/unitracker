@@ -9,13 +9,13 @@ from unitracker.vm import SongPlayer, compile_phrase
 RUN2 = 1
 
 
-def song(phrase, restart="[{hold: 3, ctrl: ^8}, {}, end]", sidtab="t1: [{ctrl: 64^1}, end]"):
+def song(phrase, restart="[{hold: 3, ctrl: ^8}, {}, end]", sidtab="c1: [{ctrl: 64^1}, end]"):
     return f"""
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {{ref: defmon}}
 song:
   - def:
-      sidtab:
+      ctrl:
         {sidtab}
       restart:
         r1: {restart}
@@ -110,7 +110,7 @@ def test_unfold_refuses_a_restart_without_room(events, match):
 
 
 def test_a_restart_reads_as_run2_before_its_note_and_writes_back():
-    text = songio.dumps(songio.loads(song("[-*4, C3.t1!restart:@r1*8]")))
+    text = songio.dumps(songio.loads(song("[-*4, C3.c1!restart:@r1*8]")))
     ir = songio.loads(text)
     assert songio.dumps(ir) == text
     assert "!restart:@r1" in text and "run2" not in text
@@ -133,20 +133,20 @@ def test_a_written_run2_before_a_note_is_folded():
     text = songio.dumps(
         songio.loads(
             song(
-                "[-, -!run2:@t2*3, C3.t1*8]",
-                sidtab="t1: [{ctrl: 64^1}, end]\n        t2: [{ctrl: ^8}, end]",
+                "[-, -!run2:@c2*3, C3.c1*8]",
+                sidtab="c1: [{ctrl: 64^1}, end]\n        c2: [{ctrl: ^8}, end]",
             )
         )
     )
-    assert "[-*4, C3.t1!restart:@r1*8]" in text and "r1: [{hold: 3, ctrl: ^8}, {}, end]" in text
+    assert "[-*4, C3.c1!restart:@r1*8]" in text and "r1: [{hold: 3, ctrl: ^8}, {}, end]" in text
 
 
 @pytest.mark.parametrize(
     "phrase,restart,match",
     [
-        ("[-*2, C3.t1!restart:@r1*8]", None, "3 empty steps"),
-        ("[-*4, C3.t1!restart:@r1*8]", "[{}, end]", "a row before its note"),
-        ("[-*4, C3.t1!restart:@r1*8]", "[{hold: 3}, {ctrl: 9}, end]", "can't express row"),
+        ("[-*2, C3.c1!restart:@r1*8]", None, "3 empty steps"),
+        ("[-*4, C3.c1!restart:@r1*8]", "[{}, end]", "a row before its note"),
+        ("[-*4, C3.c1!restart:@r1*8]", "[{hold: 3}, {ctrl: 9}, end]", "can't express row"),
     ],
 )
 def test_the_reader_refuses_a_restart_it_cannot_play(phrase, restart, match):
@@ -156,6 +156,6 @@ def test_the_reader_refuses_a_restart_it_cannot_play(phrase, restart, match):
 
 
 def test_an_instrument_restart_player_has_no_event_restart():
-    text = song("[-*4, C3.t1!restart:@r1*8]").replace("defmon", "goattracker2")
+    text = song("[-*4, C3.c1!restart:@r1*8]").replace("defmon", "goattracker2")
     with pytest.raises(songio.SongFormatError):
         songio.loads(text)

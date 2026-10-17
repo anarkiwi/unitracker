@@ -4,7 +4,7 @@ import pytest
 from conftest import mini_song
 
 from unitracker.expr import ExprError
-from unitracker.records import RecordType, RecordTypeError
+from unitracker.records import RecordType, RecordTypeError, record_types
 from unitracker.vm import SongPlayer
 
 
@@ -29,6 +29,31 @@ def test_defaults_and_refs():
 def test_bad_declarations(spec, match):
     with pytest.raises(RecordTypeError, match=match):
         RecordType("r", spec)
+
+
+def test_a_type_is_written_under_its_shared_name_and_prefix():
+    rtype = RecordType("wavetab", {"writes_as": "ctrl"})
+    assert (rtype.name, rtype.written, rtype.prefix) == ("wavetab", "ctrl", "c")
+    assert RecordType("wavetab", {"writes_as": "ctrl", "prefix": "w"}).prefix == "w"
+
+
+@pytest.mark.parametrize(
+    "specs,match",
+    [
+        ({"a": {"writes_as": "ctrl"}, "b": {"writes_as": "ctrl"}}, "share one written name"),
+        ({"a": {"writes_as": "x"}}, "share one written name"),
+        ({"pw": {}, "pulse": {"writes_as": "pw", "prefix": "q"}}, "share one written name"),
+        ({"a": {"prefix": "c"}, "b": {"writes_as": "ctrl"}}, "share one prefix name"),
+    ],
+)
+def test_written_names_and_prefixes_are_each_one_types(specs, match):
+    with pytest.raises(RecordTypeError, match=match):
+        record_types({"record_types": specs})
+
+
+def test_fixed_types_may_share_a_prefix():
+    rtypes = record_types({"record_types": {"vinit": {"fixed": True}, "vstate": {"fixed": True}}})
+    assert rtypes["vinit"].prefix == rtypes["vstate"].prefix == "v"
 
 
 def test_row_outside_a_template():

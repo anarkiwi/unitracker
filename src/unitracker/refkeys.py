@@ -35,7 +35,8 @@ def placeholders(names: dict, rtypes: dict, codec, value: dict) -> dict:
             continue
         kinds = [t for t in sorted(types) if is_name(names, rtypes, value[key], t)]
         if len(kinds) != 1:
-            raise ValueError(f"{value[key]!r} names no {' or '.join(sorted(types))}")
+            written = sorted(rtypes[t].written for t in types)
+            raise ValueError(f"{value[key]!r} names no {' or '.join(written)}")
         out[field] = ("name", value[key])
         value[key] = (kinds[0], rtypes[kinds[0]].first)
     return out

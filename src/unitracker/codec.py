@@ -35,6 +35,11 @@ _ENVELOPE = (
     "retired in v1.14: write the envelope byte as `!ad:n` or `!sr:n`, in the event slot of"
     " its column"
 )
+SHARED_TYPES = {
+    "ctrl": ("ctrltab", "wftab", "sidtab"),
+    "pw": ("pulsetab", "pwtab"),
+    "filter": ("filttab", "flttab"),
+}
 RETIRED = {
     "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
     " row's `pw`, `cut` or `freq`)",
@@ -49,6 +54,11 @@ RETIRED = {
         ("attack", "decay", "sustain", "release", "iattack", "idecay", "isustain", "irelease"),
         _ENVELOPE,
     ),
+    **{
+        name: f"retired in v1.17: write the record type as `{shared}`"
+        for shared, names in SHARED_TYPES.items()
+        for name in names
+    },
 }
 RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
@@ -428,7 +438,7 @@ class RowCodec:
         naming what the player can't express."""
         for key in written:
             if key in RETIRED_ROW_KEYS and not any(key in s.keep for s in self.shapes):
-                raise CodecError(f"{self.rtype.name}: {key} is {RETIRED_ROW_KEYS[key]}")
+                raise CodecError(f"{self.rtype.written}: {key} is {RETIRED_ROW_KEYS[key]}")
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:
@@ -437,7 +447,8 @@ class RowCodec:
                 return raw
             problems.append(problem)
         raise CodecError(
-            f"{self.rtype.name}: the player can't express row {written!r} ({'; '.join(problems)})"
+            f"{self.rtype.written}: the player can't express row {written!r}"
+            f" ({'; '.join(problems)})"
         )
 
     def check_end(self, raw: dict, written: dict, place: dict | None = None) -> None:
@@ -453,7 +464,7 @@ class RowCodec:
             or {k: v for k, v in enc.items() if k not in exprs}
             != {k: v for k, v in norm.items() if k not in exprs}
         ):
-            raise CodecError(f"{self.rtype.name}: row {written!r} can't end a program")
+            raise CodecError(f"{self.rtype.written}: row {written!r} can't end a program")
 
 
 def envelope_names(spec: dict) -> list:

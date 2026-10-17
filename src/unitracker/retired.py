@@ -34,7 +34,7 @@ def document(doc: dict) -> str | None:
 def fields(rtype, value: dict) -> str | None:
     """The reason a written record's field is refused."""
     for key in sorted(FIELDS.keys() & value.keys()):
-        return f"{rtype.name}.{key} is {FIELDS[key]}"
+        return f"{rtype.written}.{key} is {FIELDS[key]}"
     return None
 
 
@@ -44,7 +44,7 @@ def row(rtype, raw: dict, shown, holds) -> str | None:
     plain = {k: v for k, v in raw.items() if isinstance(v, int)}
     for when, why in rtype.retired.items():
         if holds(when, plain):
-            return f"{rtype.name}: row {shown!r} is {why}"
+            return f"{rtype.written}: row {shown!r} is {why}"
     return None
 
 
@@ -52,5 +52,5 @@ def unwritten(rtype, raw: dict) -> str | None:
     """The reason raw row ``raw`` has no written form: it holds retired data."""
     for field in sorted(FIELDS.keys() & rtype.fields.keys()):
         if int(raw.get(field, rtype.default(field))) != rtype.default(field):
-            return f"{rtype.name}.{field} has no written form: it is {FIELDS[field]}"
+            return f"{rtype.written}.{field} has no written form: it is {FIELDS[field]}"
     return None

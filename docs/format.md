@@ -1,4 +1,4 @@
-# unitracker song format (v1.16)
+# unitracker song format (v1.17)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -26,7 +26,7 @@ song:
             {ctrl: 65, note: +0}, end], pw: 16*abs((φ - 32) % 128 - 64) + 512, filter: [{cut: 1024, res: 12,
               route: 1, mode: 16}, end], restart: r1}
         ...
-      ctrltab:
+      ctrl:
         c1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0}, {wait: 1,
             note: +5}, {wait: 1, note: +8}, {wait: 1, note: +0}, {loop: 4}]
       phrase:
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.16`; readers reject any other version |
+| `unitracker` | `1.17`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -99,10 +99,28 @@ and `loop` is the row where that state first occurred.
 ## Definitions
 
 `def` maps a record type, `x`, or `phrase` to `{name: value}`. Names are the record
-type's prefix and a number, given in first-use order (`i1`, `i2`, ..., `w1`, ...;
-expressions `x1`, ...; phrases `p1`, ...). The reader allocates each type's indices in
-definition order from the type's `first` index, so a name stands for whatever index the
-playroutine needs.
+type's prefix and a number, given in first-use order (`i1`, `i2`, ..., `c1`, ...;
+expressions `x1`, ...; phrases `p1`, ...). Phrases have names of their own: a play entry
+names a phrase, and everything else names a record, so the phrase `p1` and the pulse program
+`p1` are two names. The reader allocates each type's indices in definition order from the
+type's `first` index, so a name stands for whatever index the playroutine needs.
+
+Every player writes its records under the same record types, whatever its own tables are
+called (each playroutine's `record_types` entry names the type it is written as, see Record
+types):
+
+| record type | prefix | holds | GoatTracker 2 | SID-Wizard | defMON |
+|---|---|---|---|---|---|
+| `ins` | `i` | an instrument | `ins` | `ins` | — |
+| `ctrl` | `c` | a control program: waveform, notes, and in defMON any column | `ctrltab` (wavetable) | `wftab` (WF/arp table) | `sidtab` (sidTAB) |
+| `pw` | `p` | a pulse program | `pulsetab` | `pwtab` | — |
+| `filter` | `f` | a filter program | `filttab` | `flttab` | — |
+| `restart` | `r` | a hard restart (see Hard restart) | `restart` | `restart` | `restart` |
+
+A sidTAB row writes any register, so defMON's one program table is its `ctrl` programs; a
+GoatTracker or SID-Wizard pulse or filter table, which drives one unit, is that unit's
+program type. The transcriptions' own names are retired in v1.17 (`record type 'sidtab' is
+retired in v1.17: write the record type as `ctrl``).
 
 - **Rows** use the shared row keys (see Shared vocabulary) wherever the playroutine's
   codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
@@ -201,8 +219,8 @@ a command the player refuses by name (`sidwizard: the player can't express !temp
 
 | command | `defmon` | `goattracker2` | `sidwizard` |
 |---|---|---|---|
-| `!run` | — | `@ctrltab`, `@pulsetab`, `@filttab` | `@wftab`, `none` |
-| `!run2` | `@sidtab` | — | — |
+| `!run` | — | `@ctrl`, `@pw`, `@filter` | `@ctrl`, `none` |
+| `!run2` | `@ctrl` | — | — |
 | `!ad` | — | 0-255 | 0-255, at most one nibble from the instrument's |
 | `!sr` | — | 0-255 | 0-255, at most one nibble from the instrument's |
 | `!ctrl` | — | 0-255 | — |
@@ -236,12 +254,12 @@ one player's own.
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
 rejected, naming them (`ins.gt is retired in v1.8: write the hard restart as the
-instrument's restart program`, `sidtab: wgl is retired in v1.8`). The list rows of
+instrument's restart program`, `ctrl: wgl is retired in v1.8`). The list rows of
 GoatTracker's pulse and filter tables and SID-Wizard's pulse, filter and WF tables are retired
-in v1.10 (`pulsetab: row [32, 16] is retired in v1.10: a sweep, stall or keyboard-tracked row
+in v1.10 (`pw: row [32, 16] is retired in v1.10: a sweep, stall or keyboard-tracked row
 is its program's expression`): such a row is part of its program's `pw` or `cut` expression,
 which the lifter proves or fails on (see Lifting). GoatTracker's wavetable list rows are retired in
-v1.15 (`ctrltab: row [242] is retired in v1.15: write the row with the shared keys`): a wavetable
+v1.15 (`ctrl: row [242] is retired in v1.15: write the row with the shared keys`): a wavetable
 command row is written with its shared keys or lifts as a row that has them, else the lift fails
 naming it (see the GoatTracker 2 backend), and no program row is a list. A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
 no mask here`).
@@ -332,7 +350,7 @@ v1.12`).
 A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last
 row applies on the note's first tick, and each earlier row its `hold` ticks before the row
 after it. A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. GoatTracker and SID-Wizard
-instruments name theirs (`restart: r1`); a defMON note names its own (`C3.t2!restart:@r1`):
+instruments name theirs (`restart: r1`); a defMON note names its own (`C3.c2!restart:@r1`):
 
 ```yaml
 restart:
@@ -510,7 +528,7 @@ filter.
 `af` below $80 adds a fixed offset to the note's frequency: the step `S[k]` (the table
 `S`, size 256) of note `k` = `N + 24 + af`. A lifted program writes it as its first row's
 `freq` expression, `S[N + 36]` for `af` 12, which plays in the slide mode with the same
-offset; the sidTAB column `af` is retired in v1.11 (`sidtab: af is retired in v1.11`).
+offset; the sidTAB column `af` is retired in v1.11 (`ctrl: af is retired in v1.11`).
 A program that changes the pitch mode after its first row, or sets `af` below $80 under
 relative-note rows, is not covered: the slide mode drops the voice's detune before the
 change, and the offset of a relative note reads the note base.
@@ -567,7 +585,8 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 |---|---|
 | `fields` | a list of names, or `{name: default}`; a missing field reads as its default |
 | `form` | `list` (default) or `map` |
-| `prefix` | the name prefix |
+| `writes_as` | the record type a document writes it as (default: its own name; see Definitions) |
+| `prefix` | the name prefix (default: the first letter of the written name) |
 | `chain` | the field holding the next row: the type is a table of programs |
 | `none` | the index that means "no row"; references equal to it are plain numbers |
 | `stop` | an expression over a row's fields after which a program ends |
@@ -590,7 +609,7 @@ GoatTracker's control-program rows, for example, decode their bytes in the templ
 
 ```yaml
 ctrltab:
-  prefix: c
+  writes_as: ctrl
   none: 0
   chain: next
   fields: [w, n, next]
@@ -613,7 +632,7 @@ written under their own names; a kept reference is written as a name). A key wit
 is written as the expression when that field is set; a key with both `value` and `expr`
 reads an integer as a value and a string as an expression. A key given as
 `{ref: type, field: f}` is the reference raw field `f` holds, written as the record's name
-(`run: pw1`); the reader takes the shape whose `ref` is the type the name has. A key given as
+(`run: p1`); the reader takes the shape whose `ref` is the type the name has. A key given as
 `{none: true}` is written `none` (`pw: none`) and reads only from `none`. The writer
 uses the first shape whose `when` holds and refuses a row that would not read back; a `map` row no
 shape fits is an error. The reader accepts a written row only if encoding its inverse
@@ -831,8 +850,8 @@ becomes one phrase per voice, all of the same length in ticks, with each event o
 tick the replay applies it. The playroutine fetches every tick and maps the event
 fields as follows:
 
-- `.t3` is the sidTAB program sidcall layer A starts;
-- `!run2:@t5` arms layer B, and `!restart:@r1` arms it on the steps before the note;
+- `.c3` is the sidTAB program sidcall layer A starts;
+- `!run2:@c5` arms layer B, and `!restart:@r1` arms it on the steps before the note;
 - the note is a GATE_N note.
 
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk

@@ -47,7 +47,7 @@ record_types:
   # sidTAB row: dl holds the row dl + 1 ticks ($80+ freezes the layer); each column, -1 when
   # absent, applies in the replay's bitmap-walk order ($16B0).
   sidtab:
-    prefix: t
+    writes_as: ctrl
     chain: next
     stop: "dl >= 0x80"
     form: map

@@ -19,9 +19,9 @@ INS = (
 
 
 def gt_ir(phrase: str, ins: str = INS + "}"):
-    """A one-voice goattracker2 song read from v1.16 text, the other voices silent."""
+    """A one-voice goattracker2 song read from v1.17 text, the other voices silent."""
     text = f"""
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {{ref: goattracker2, constants: {{deftempo: 6}}}}
 song:
   - def:
@@ -244,9 +244,9 @@ def test_an_unproved_start_names_its_program_and_start():
 
 
 def sw_ir(phrase: str):
-    """A one-voice sidwizard song read from v1.16 text, the other voices silent."""
+    """A one-voice sidwizard song read from v1.17 text, the other voices silent."""
     text = f"""
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {{ref: sidwizard}}
 song:
   - def:
@@ -279,17 +279,17 @@ def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, 
 
 DM_VOICE = "{cntA: 255, cntB: 255}"
 DM_AF = f"""
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {{ref: defmon}}
 song:
   - def:
       vinit: {{0: {DM_VOICE}, 1: {DM_VOICE}, 2: {DM_VOICE}}}
       ginit: {{0: {{}}}}
-      sidtab:
-        t1: [{{ctrl: 65, hold: 4}}, {{ctrl: 64}}, end]
-        t2: [{{ctrl: 65, hold: 3}}, {{ctrl: 64}}, end]
+      ctrl:
+        c1: [{{ctrl: 65, hold: 4}}, {{ctrl: 64}}, end]
+        c2: [{{ctrl: 65, hold: 3}}, {{ctrl: 64}}, end]
       phrase:
-        p1: [C4.t1*12, E4*12, G4.t2*12, A4.t1*12]
+        p1: [C4.c1*12, E4*12, G4.c2*12, A4.c1*12]
     play: [p1, p1, p1]
 loop: ~
 """

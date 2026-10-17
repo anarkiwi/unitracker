@@ -208,16 +208,16 @@ def test_lift_document(metal_warrior):
 
 
 COMMANDS_SONG = """
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {ref: goattracker2, constants: {deftempo: 6}}
 song:
   - def:
-      pulsetab:
-        pw1: [{pw: 2048}, end]
-      filttab:
+      pw:
+        p1: [{pw: 2048}, end]
+      filter:
         f1: [{cut: 512, res: 3, route: 1, mode: 16}, end]
       ins:
-        i1: {sr: 240, pw: pw1, ctrl: [{ctrl: 65, note: +0}, {ad: 25}, {sr: 200}, {run: pw1},
+        i1: {sr: 240, pw: p1, ctrl: [{ctrl: 65, note: +0}, {ad: 25}, {sr: 200}, {run: p1},
             {run: f1},
             {res: 12, route: 2}, {cut: 1024}, {vol: 9}, end]}
       phrase:
@@ -239,13 +239,13 @@ def test_wavetable_commands_are_their_shared_keys():
     assert (last[5], last[6], last[2] | last[3] << 8) == (25, 200, 2048)
     assert (last[22], last[23], last[24]) == (128, 0xC2, 0x10 | 9)
     text = songio.dumps(ir)
-    assert "{run: pw1}, {run: f1}" in text and songio.dumps(songio.loads(text)) == text
+    assert "{run: p1}, {run: f1}" in text and songio.dumps(songio.loads(text)) == text
     assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(20), grid)
 
 
 def test_a_wavetable_command_names_a_program_of_its_kind():
-    with pytest.raises(songio.SongFormatError, match="'i1' names no filttab or pulsetab"):
-        songio.loads(COMMANDS_SONG.replace("{run: pw1}", "{run: i1}"))
+    with pytest.raises(songio.SongFormatError, match="'i1' names no filter or pw"):
+        songio.loads(COMMANDS_SONG.replace("{run: p1}", "{run: i1}"))
 
 
 SPEEDS = [(0, 0x20), (0x80, 1), (0x02, 0x10)]

@@ -18,6 +18,7 @@ META_KEYS = {
     "end",
     "expr",
     "retired",
+    "writes_as",
 }
 EXPR = "x"
 
@@ -30,7 +31,7 @@ class RecordType:
     """One ``record_types`` entry of a playroutine (see docs/format.md).
 
     Keys other than :data:`META_KEYS` are templates: action lists run for a row,
-    which they read as ``row.<field>``.
+    which they read as ``row.<field>``. ``written`` is the record type a document names.
     """
 
     # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -41,7 +42,8 @@ class RecordType:
         if isinstance(fields, list):
             fields = {f: 0 for f in fields}
         self.fields = {str(k): int(v) for k, v in fields.items()}
-        self.prefix = str(spec.get("prefix", name[0]))
+        self.written = str(spec.get("writes_as", name))
+        self.prefix = str(spec.get("prefix", self.written[0]))
         self.chain = spec.get("chain")
         self.none = spec.get("none")
         self.stop = spec.get("stop")
@@ -81,13 +83,22 @@ class RecordType:
 def record_types(playroutine: dict) -> dict:
     """``{name: RecordType}`` for a playroutine's ``record_types``, and the format's expressions.
 
-    The expression type ``x`` holds modulator expressions (see docs/format.md).
+    The expression type ``x`` holds modulator expressions (see docs/format.md). Each type has its
+    own written name, and each type a document names by number its own prefix.
     """
     specs = playroutine.get("record_types") or {}
     if EXPR in specs:
         raise RecordTypeError(f"{EXPR!r} is the format's expression type")
     out = {name: RecordType(name, spec or {}) for name, spec in specs.items()}
     out[EXPR] = RecordType(EXPR, {"prefix": EXPR, "none": 0, "max": 0xFFFF})
+    for attr in ("written", "prefix"):
+        owners = {}
+        for rtype in out.values():
+            if attr == "written" or not rtype.fixed:
+                owners.setdefault(getattr(rtype, attr), []).append(rtype.name)
+        clash = [names for names in owners.values() if len(names) > 1]
+        if clash:
+            raise RecordTypeError(f"record types {clash[0]} share one {attr} name")
     return out
 
 

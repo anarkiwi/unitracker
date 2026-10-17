@@ -388,7 +388,7 @@ def test_defmon_note_column_round_trips_every_byte_and_the_offset_has_no_form():
         assert c.decode(written({"tr": byte}, c))["tr"] == byte
     for byte in range(0x80):
         assert c.encode({"af": byte}) is None
-    with pytest.raises(CodecError, match="sidtab: af is retired in v1.11"):
+    with pytest.raises(CodecError, match="ctrl: af is retired in v1.11"):
         c.decode({"af": 12})
 
 
@@ -452,11 +452,9 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.16",
+        "unitracker": "1.17",
         "playroutine": {"ref": "defmon"},
-        "song": [
-            {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
-        ],
+        "song": [{"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}],
     }
     with pytest.raises(songio.SongFormatError, match="can't end a program"):
         songio.loads(yaml.safe_dump(doc))
@@ -600,15 +598,6 @@ def test_note_offsets_follow_the_frequency_tables():
         assert midi(word) == index - SW["note_offset"] + 12
 
 
-PROGRAM_TYPES = {
-    "goattracker2": {
-        "ctrl": "ctrltab",
-        "pw": "pulsetab",
-        "filter": "filttab",
-        "restart": "restart",
-    },
-    "sidwizard": {"ctrl": "wftab", "pw": "pwtab", "filter": "flttab", "restart": "restart"},
-}
 INS_KEYS = {
     "goattracker2": {"ad", "sr", "ctrl", "pw", "filter", "freq", "restart"},
     "sidwizard": {
@@ -635,7 +624,7 @@ SHARED_OUTSIDE_ROWS = {
     ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
     ("defmon", "ginit"): {"res", "route", "mode"},
 }
-PROGRAMS = ("ctrltab", "pulsetab", "filttab", "sidtab", "wftab", "pwtab", "flttab", "restart")
+PROGRAMS = ("ctrl", "pw", "filter", "restart")
 INS_FORMS = {
     "ctrl": (list, str),
     "pw": (list, str, int),
@@ -661,7 +650,8 @@ def _check_rows(name, rows, keep, exprs=frozenset()):
         assert not isinstance(row, list), (name, row)
 
 
-def _check_program(pr_name, tname, value):
+def _check_program(pr_name, shared, value):
+    tname = next(n for n, t in LIBS[pr_name][1].items() if t.written == shared)
     exprs = set(codec(pr_name, tname).expr_keys())
     _check_rows(tname, value, ROW_KEEP.get(pr_name, set()), exprs)
 
@@ -684,9 +674,9 @@ def _check_def(pr_name, tname, value):
     if tname == "ins":
         assert set(value) <= INS_KEYS[pr_name]
         _check_shared_outside_rows(pr_name, tname, value)
-        for key, rtype in PROGRAM_TYPES[pr_name].items():
+        for key in PROGRAMS:
             if isinstance(value.get(key), list):
-                _check_program(pr_name, rtype, value[key])
+                _check_program(pr_name, key, value[key])
     elif tname in INIT_KEYS:
         assert set(value) <= INIT_KEYS[tname] | SHARED_OUTSIDE_ROWS[(pr_name, tname)], value
         _check_shared_outside_rows(pr_name, tname, value)
@@ -699,7 +689,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.16 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.17 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -759,7 +749,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.16",
+                "unitracker": "1.17",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -781,13 +771,13 @@ def test_defmon_init_reads_back_its_written_program_name():
     ir = songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.16",
+                "unitracker": "1.17",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
                         "def": {
-                            "sidtab": {"t1": [{"ctrl": 65, "hold": 4}, {"ctrl": 64}, "end"]},
-                            "vinit": {0: {"rowA": "t1"}},
+                            "ctrl": {"c1": [{"ctrl": 65, "hold": 4}, {"ctrl": 64}, "end"]},
+                            "vinit": {0: {"rowA": "c1"}},
                             "phrase": {"p1": ["-*4"]},
                         },
                         "play": ["p1"] * 3,
@@ -799,7 +789,7 @@ def test_defmon_init_reads_back_its_written_program_name():
     )
     assert (ir["records"]["vinit"][0]["rowA"], ir["records"]["vinit"][0]["cntA"]) == (0, 0)
     text = songio.dumps(ir)
-    assert "rowA: t1" in text and songio.dumps(songio.loads(text)) == text
+    assert "rowA: c1" in text and songio.dumps(songio.loads(text)) == text
 
 
 def test_defmon_init_keys_mean_what_they_mean_in_rows():
@@ -826,18 +816,18 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {ref: defmon}
 song:
   - def:
       vinit: {0: {cntA: 255, cntB: 255}, 1: {cntA: 255, cntB: 255}, 2: {cntA: 255, cntB: 255}}
       ginit: {0: {res: 2, route: 3}}
-      sidtab:
-        t1: [{res: 15, route: + 8}, end]
-        t2: [{route: '-'}, end]
+      ctrl:
+        c1: [{res: 15, route: + 8}, end]
+        c2: [{route: '-'}, end]
       phrase:
         p1: [-*8]
-        p2: [-.t1*4, -.t2*4]
+        p2: [-.c1*4, -.c2*4]
     play: [p1, p2, p1]
 loop: 0
 """
@@ -918,17 +908,17 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.16
+unitracker: 1.17
 playroutine: {ref: sidwizard}
 song:
   - def:
       ins:
         i1: {ad: 1, sr: 240, ctrl: [{hold: 2, ctrl: 17, note: +0}, {hold: 2, ctrl: 17, note: +3}, {
             loop: 0}]}
-      wftab:
-        w1: [{hold: 3, ctrl: 17, note: +4}, {hold: 3, ctrl: 17, note: +7}, {loop: 0}]
+      ctrl:
+        c1: [{hold: 3, ctrl: 17, note: +4}, {hold: 3, ctrl: 17, note: +7}, {loop: 0}]
       phrase:
-        p1: [C4.i1*4, C4!run:@w1*4]
+        p1: [C4.i1*4, C4!run:@c1*4]
     play: [p1, p1, p1]
 loop: 0
 """
@@ -957,18 +947,18 @@ def test_sidwizard_chords_are_ctrl_programs_started_by_run():
     "old,new,match",
     [
         (
-            "      wftab:",
-            "      chordtab: {ch1: [{note: +0}, {loop: 0}]}\n      wftab:",
+            "      ctrl:",
+            "      chordtab: {ch1: [{note: +0}, {loop: 0}]}\n      ctrl:",
             "chordtab",
         ),
         ("i1: {ad: 1,", "i1: {chord: 1, ad: 1,", "ins.chord is retired in v1.9"),
         ("i1: {ad: 1,", "i1: {arpspeed: 1, ad: 1,", "ins.arpspeed is retired in v1.9"),
-        ("C4!run:@w1", "C4!chord:@w1", "!chord is retired in v1.9"),
-        ("C4!run:@w1", "C4!ichord:@w1", "!ichord is retired in v1.9"),
+        ("C4!run:@c1", "C4!chord:@c1", "!chord is retired in v1.9"),
+        ("C4!run:@c1", "C4!ichord:@c1", "!ichord is retired in v1.9"),
         (
             "{hold: 3, ctrl: 17, note: +7}",
             "[17, 127]",
-            r"wftab: row \[17, 127\] is retired in v1.9",
+            r"ctrl: row \[17, 127\] is retired in v1.9",
         ),
     ],
 )
