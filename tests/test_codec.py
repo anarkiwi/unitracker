@@ -499,9 +499,11 @@ def test_command_rejections():
     with pytest.raises(CodecError, match="no shared name"):
         cmds.encode(4, 1)
     dm = CommandCodec(DM["commands"], DM_TYPES)
-    assert dm.encode(1, 4) == ("run2", ("sidtab", 4))
-    with pytest.raises(CodecError, match="can't express"):
-        dm.decode("run2", "none")
+    assert dm.ref(1) == "sidtab" and dm.ref(2) is None
+    with pytest.raises(CodecError, match="has no shared name"):
+        dm.encode(1, 4)
+    with pytest.raises(CodecError, match="!run2 is retired in v1.17"):
+        dm.decode("run2", ("sidtab", 4))
 
 
 @pytest.mark.parametrize(
@@ -599,6 +601,7 @@ def test_note_offsets_follow_the_frequency_tables():
 
 
 INS_KEYS = {
+    "defmon": {"ctrl", "filter"},
     "goattracker2": {"ad", "sr", "ctrl", "pw", "filter", "freq", "restart"},
     "sidwizard": {
         "ad",
@@ -621,6 +624,7 @@ ROW_KEEP = {"defmon": {"cp"}}
 SHARED_OUTSIDE_ROWS = {
     ("goattracker2", "ins"): {"ad", "sr", "ctrl", "pw", "filter", "freq"},
     ("sidwizard", "ins"): {"ad", "sr", "ctrl", "pw", "filter", "freq"},
+    ("defmon", "ins"): {"ctrl", "filter"},
     ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
     ("defmon", "ginit"): {"res", "route", "mode"},
 }
@@ -674,9 +678,10 @@ def _check_def(pr_name, tname, value):
     if tname == "ins":
         assert set(value) <= INS_KEYS[pr_name]
         _check_shared_outside_rows(pr_name, tname, value)
-        for key in PROGRAMS:
+        rtypes = LIBS[pr_name][1]
+        for key, refs in rtypes["ins"].refs.items():
             if isinstance(value.get(key), list):
-                _check_program(pr_name, key, value[key])
+                _check_program(pr_name, rtypes[refs[0][0]].written, value[key])
     elif tname in INIT_KEYS:
         assert set(value) <= INIT_KEYS[tname] | SHARED_OUTSIDE_ROWS[(pr_name, tname)], value
         _check_shared_outside_rows(pr_name, tname, value)
@@ -732,7 +737,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     assert gt_cmds == {"run", "freq", "legato", "tempo"}
     dm_doc = parse(songio.dumps(lift_defmon(crosseyed.read_bytes())))
     dm_cmds = vocabulary(dm_doc)
-    assert dm_cmds == {"run2", "restart"}
+    assert dm_cmds == {"restart"}
     sw_doc = parse(songio.dumps(lift_sw(csillag.read_bytes())))
     sw_cmds = vocabulary(sw_doc)
     assert sw_cmds == {"freq", "ad", "sr", "run", "legato"}
@@ -822,12 +827,12 @@ song:
   - def:
       vinit: {0: {cntA: 255, cntB: 255}, 1: {cntA: 255, cntB: 255}, 2: {cntA: 255, cntB: 255}}
       ginit: {0: {res: 2, route: 3}}
-      ctrl:
-        c1: [{res: 15, route: + 8}, end]
-        c2: [{route: '-'}, end]
+      ins:
+        i1: {ctrl: [{res: 15, route: + 8}, end]}
+        i2: {ctrl: [{route: '-'}, end]}
       phrase:
         p1: [-*8]
-        p2: [-.c1*4, -.c2*4]
+        p2: [-.i1*4, -.i2*4]
     play: [p1, p2, p1]
 loop: 0
 """

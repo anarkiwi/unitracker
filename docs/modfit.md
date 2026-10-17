@@ -372,7 +372,7 @@ Not expressible yet:
 | SID-Wizard small FX $12x on a note row | `note_setup` test `… and pifx != 0` sets `carry` |
 | GoatTracker `!ad` | `ad := arg` |
 | GoatTracker command 3 | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
-| defMON `!run2` | `rowB := arg`, `cntB := 0`; per tick `layer_b` runs the sidTAB row |
+| defMON command 1 (`ins.filter`) | `rowB := arg`, `cntB := 0`; per tick `layer_b` runs the sidTAB row |
 
 The keyword and field table is written by `unitracker-modfit keywords` (one row per keyword
 or field: signature, matches, verdict, reason).

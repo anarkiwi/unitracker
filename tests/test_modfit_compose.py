@@ -203,7 +203,7 @@ def test_cli_command_and_keywords(tmp_path):
     main(["--out", str(out), "keywords", "defmon"])
     rows = out.read_text().splitlines()
     assert rows[0].startswith("keyword/field | playroutine") and any(
-        r.startswith("!run2") for r in rows
+        r.startswith("!ins.filter") for r in rows
     )
 
 

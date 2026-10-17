@@ -13,7 +13,8 @@ from importlib import resources
 
 import yaml
 
-from unitracker import envelope, eventrestart, hints, inline, lifetime, refkeys, retired
+from unitracker import envelope, eventfold, eventins, eventrestart, hints, inline, lifetime
+from unitracker import refkeys, retired
 from unitracker import timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
@@ -130,9 +131,7 @@ class _Writer:
             name: {int(k): v for k, v in (rows or {}).items()}
             for name, rows in (ir.get("records") or {}).items()
         }
-        inst = self.pr.get("instrument") or {}
-        self.ins_type = inst.get("type")
-        self.ins_base = int(inst.get("base", 0))
+        self.ins_type, self.ins_base = eventins.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
         self.exprs = {int(k): str(v) for k, v in (ir.get("exprs") or {}).items()}
         canon = {}
@@ -144,13 +143,17 @@ class _Writer:
         self.programs = {}
         self.names = {}
         self.row = 0
-        self.restarts = {}
         self.phrase_names = {}
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
-        rows = self.records.get(self.ins_type, {})
+        native = (self.pr.get("instrument") or {}).get("type")
         written = lifetime.Lifetime(self.pr, self.rtypes).written
-        self.kept, rows = _player(self.pr, written, self.ir["tracks"], self.ir["phrases"], rows)
-        self.records.update({self.ins_type: rows} if self.ins_type in self.records else {})
+        self.kept, rows = _player(
+            self.pr, written, self.ir["tracks"], self.ir["phrases"], self.records.get(native, {})
+        )
+        self.records.update({native: rows} if native in self.records else {})
+        self.folds = eventfold.EventFolds(
+            self.pr, self.rtypes, self.codecs, self.commands, self.records
+        )
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -253,26 +256,11 @@ class _Writer:
         return alias, compiled
 
     def _folded(self, arr):
-        """A compiled phrase with its event restarts on their notes (see ``eventrestart``)."""
-        spec = self.pr.get(eventrestart.NAME)
-        if not spec:
-            return arr
-        return eventrestart.fold(arr, int(spec["command"]), self._restart_of)
-
-    def _restart_of(self, entry: int, gap: int):
-        """The restart index of program ``entry`` run ``gap`` steps before a note, or None."""
-        target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
-        rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
-        path, loop = self.program(target, entry)
-        if loop is not None:
-            return None
-        rows = [{**target.fields, **self._row(target, i)} for i in path]
-        raws = eventrestart.restart_rows(rows, target, rtype, codec, gap)
-        if raws is None:
-            return None
-        return eventrestart.entry_of(
-            raws, rtype, self.records.setdefault(rtype.name, {}), self.restarts
-        )
+        """A compiled phrase with its event restarts and instruments named (see ``eventfold``)."""
+        try:
+            return self.folds.fold(arr, self.program)
+        except eventfold.FoldError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
     # -- representations --
 
@@ -595,9 +583,7 @@ class _Reader:
         self.doc = doc
         self.pr = self._playroutine(doc.get("playroutine"))
         self.rtypes = record_types(self.pr)
-        inst = self.pr.get("instrument") or {}
-        self.ins_type = inst.get("type")
-        self.ins_base = int(inst.get("base", 0))
+        self.ins_type, self.ins_base = eventins.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
         self.exprs = {}
         self.named_tables = set((declared(self.pr).get("tables") or {}))
@@ -606,8 +592,10 @@ class _Reader:
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
         self.written = {rt.written: rt for rt in self.rtypes.values()}
-        self.played = {}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
+        self.folds = eventfold.EventFolds(
+            self.pr, self.rtypes, self.codecs, self.commands, self.records
+        )
 
     def _playroutine(self, spec) -> dict:
         if not isinstance(spec, dict):
@@ -852,40 +840,18 @@ class _Reader:
             event["steps"] = parsed["steps"]
         return event
 
-    def _event_restart(self, tname: str) -> bool:
-        """Whether type ``tname`` holds event restarts, which the reader plays as commands."""
-        return tname == eventrestart.NAME and bool(self.pr.get(eventrestart.NAME))
-
     def _unfolded(self, events: list, phrase: str) -> list:
-        """A phrase's events with each restart played before its note (see ``eventrestart``)."""
-        restarts = [e for e in events if "restart" in e]
-        if not restarts:
-            return events
+        """A phrase's events with its restarts and instruments unfolded (see ``eventfold``)."""
         try:
-            return eventrestart.unfold(
-                events, int(self.pr[eventrestart.NAME]["command"]), self._played
-            )
-        except eventrestart.RestartError as exc:
+            return self.folds.unfold(events, self._alloc)
+        except eventfold.FoldError as exc:
             raise SongFormatError(f"{self.pr['name']}: phrase {phrase}: {exc}") from exc
-
-    def _played(self, index: int) -> tuple:
-        """``(entry, steps)``: the program event restart ``index`` runs, and how far ahead."""
-        if index not in self.played:
-            target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
-            rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
-            try:
-                self.played[index] = eventrestart.played(
-                    index, self.records, (rtype, target), codec, self._alloc
-                )
-            except eventrestart.RestartError as exc:
-                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        return self.played[index]
 
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd in RETIRED:
             raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
-        if cmd == eventrestart.NAME and self._event_restart(cmd) and isinstance(arg, str):
+        if cmd == eventrestart.NAME and self.folds.held(cmd) and isinstance(arg, str):
             return [eventrestart.CODE, self.lookup(arg[1:], eventrestart.NAME)]
         if isinstance(arg, tuple) or (isinstance(arg, int) and self.commands.inline(cmd)):
             arg = self._inline(cmd, arg if isinstance(arg, tuple) else (arg,), atom)
@@ -946,7 +912,7 @@ class _Reader:
             "voices": voices,
             "tables": self.tables,
             "playroutine": self.pr,
-            "records": {k: v for k, v in self.records.items() if v and not self._event_restart(k)},
+            "records": {k: v for k, v in self.records.items() if v and not self.folds.held(k)},
             "exprs": self.exprs,
             "tracks": tracks,
             "phrases": events,

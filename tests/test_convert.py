@@ -285,11 +285,11 @@ song:
   - def:
       vinit: {{0: {DM_VOICE}, 1: {DM_VOICE}, 2: {DM_VOICE}}}
       ginit: {{0: {{}}}}
-      ctrl:
-        c1: [{{ctrl: 65, hold: 4}}, {{ctrl: 64}}, end]
-        c2: [{{ctrl: 65, hold: 3}}, {{ctrl: 64}}, end]
+      ins:
+        i1: {{ctrl: [{{ctrl: 65, hold: 4}}, {{ctrl: 64}}, end]}}
+        i2: {{ctrl: [{{ctrl: 65, hold: 3}}, {{ctrl: 64}}, end]}}
       phrase:
-        p1: [C4.c1*12, E4*12, G4.c2*12, A4.c1*12]
+        p1: [C4.i1*12, E4*12, G4.i2*12, A4.i1*12]
     play: [p1, p1, p1]
 loop: ~
 """

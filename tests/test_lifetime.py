@@ -154,9 +154,9 @@ def test_goattracker_refuses_the_command_on_a_note_that_starts_the_program(old, 
 
 
 def test_defmon_refuses_the_commands():
-    defs = "      ctrl:\n        c1: [{ctrl: 65}, end]\n"
+    defs = "      ins:\n        i1: {ctrl: [{ctrl: 65}, end]}\n"
     for command in ("pulse", "filter"):
-        text = song("defmon", defs, {"p1": f"C4.c1!{command}:0"})
+        text = song("defmon", defs, {"p1": f"C4.i1!{command}:0"})
         with pytest.raises(
             songio.SongFormatError, match=f"defmon: the player can't express !{command}:0"
         ):

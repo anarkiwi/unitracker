@@ -111,7 +111,7 @@ types):
 
 | record type | prefix | holds | GoatTracker 2 | SID-Wizard | defMON |
 |---|---|---|---|---|---|
-| `ins` | `i` | an instrument | `ins` | `ins` | — |
+| `ins` | `i` | an instrument | `ins` | `ins` | none: the pair of sidTAB programs an event arms (see the defMON backend) |
 | `ctrl` | `c` | a control program: waveform, notes, and in defMON any column | `ctrltab` (wavetable) | `wftab` (WF/arp table) | `sidtab` (sidTAB) |
 | `pw` | `p` | a pulse program | `pulsetab` | `pwtab` | — |
 | `filter` | `f` | a filter program | `filttab` | `flttab` | — |
@@ -157,7 +157,8 @@ note[.instrument][!command:arg[!command:arg]][*steps]
 - `note` is a note name such as `C2`, `A#3` or `C10`, `-` for no note, `off` (gate off)
   or `on` (gate on). Names are real pitch: `C2` is 65.4 Hz in every song, whatever
   index the player's frequency table gives it (see `note_offset`).
-- `.i3` names the instrument. For defMON it names a sidTAB program.
+- `.i3` names the instrument. A defMON instrument names the sidTAB programs the event
+  arms (see the defMON backend).
 - `!run:@c1` is a named command with an argument: a number, `@name` for a command that
   references a record or an expression, `none`, or values joined by `/` for a command that
   carries its record's row (`!funk:6/7`). An event carries at most two commands,
@@ -196,7 +197,6 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | command | meaning |
 |---|---|
 | `!run:@x` | start program `x` in the slot its kind implies; `!run:none` stops it |
-| `!run2:@x` | start program `x` in slot 2, for players with generic slots |
 | `!ad:`, `!sr:`, `!ctrl:` | set the register |
 | `!resfilt:n` | set `$D417` whole, `n = 16*res + route` |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
@@ -220,7 +220,6 @@ a command the player refuses by name (`sidwizard: the player can't express !temp
 | command | `defmon` | `goattracker2` | `sidwizard` |
 |---|---|---|---|
 | `!run` | — | `@ctrl`, `@pw`, `@filter` | `@ctrl`, `none` |
-| `!run2` | `@ctrl` | — | — |
 | `!ad` | — | 0-255 | 0-255, at most one nibble from the instrument's |
 | `!sr` | — | 0-255 | 0-255, at most one nibble from the instrument's |
 | `!ctrl` | — | 0-255 | — |
@@ -245,7 +244,8 @@ one tick, and its arranger and pattern counters are lifted as the timeline (see 
 
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
-(GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
+(GoatTracker's `ctrl: [...]` or `ctrl: c1`), `filter` the program that drives the filter, and
+`restart` the hard restart (see Hard restart). A row or command a player can't express is
 rejected on reading, naming the key or command and the player (`sidwizard: the player
 can't express !ad:255 over the instrument's ad 18`); the writer refuses to write a value that
 would not read back (a defMON pulse cell over `$0FFF`). No key, command or record type is
@@ -291,6 +291,30 @@ keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a 
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
 `can't express !noteglide:0`). A command's argument is a byte: `!freq:@x` names one of the
 first 255 expressions, else the reader refuses it.
+
+### Control programs
+
+A `ctrl` program's rows take the keys below in each player, in the forms given: a value,
+a mask (`^n`), a routing edit (`+ m`, `-`), an expression, `none`, or a program's name. A
+sidTAB row writes any register, so defMON's `ctrl` rows take the most keys.
+
+| `ctrl` row key | `defmon` | `goattracker2` | `sidwizard` |
+|---|---|---|---|
+| `wait` | — | value | — |
+| `hold` | value | — | value |
+| `ctrl` | value, `^n` | value | value |
+| `note` | value | value | value |
+| `ad` | value | value | — |
+| `sr` | value | value | — |
+| `pw` | expression | `none` | — |
+| `cut` | expression | value | — |
+| `res` | value | value | — |
+| `route` | value, `+ m`, `-` | value | — |
+| `mode` | value | — | — |
+| `freq` | expression | expression | value |
+| `run` | — | `pw` name, `filter` name | — |
+| `filter` | — | `none` | — |
+| `vol` | — | value | — |
 
 ### Chords
 
@@ -374,10 +398,11 @@ gate as the restart left it, so its first-tick row sets it; a SID-Wizard note se
 
 defMON has no instrument restart: composers run a short sidTAB program on layer B on the
 empty steps before a note. The playroutine declares this with `restart: {command: 1}`, and
-the format writes it as the note's restart. On reading, a note's `!restart:@r` becomes
-`!run2` of a sidTAB program of the lookahead rows (the last one frozen, holding until the
-note), on the step their holds put before the note, which must be empty; the writer folds
-every such `!run2` back: one alone on its step, followed only by empty steps up to a note
+the format writes it as the note's restart. On reading, a note's `!restart:@r` becomes a
+layer-B start (the event command an instrument's `filter` is) of a sidTAB program of the
+lookahead rows (the last one frozen, holding until the note), on the step their holds put
+before the note, which must be empty; the writer folds every such start back, before it names
+the events' instruments: one alone on its step, followed only by empty steps up to a note
 with a free command slot, running a program that ends, sets no column but `dl`, `wgh`,
 `wgl`, `ad` and `sr`, and fits in the steps. The note's own sidTAB program starts on its
 first tick, so the restart's last row is empty. A step is one tick in defMON, so `hold`
@@ -396,7 +421,7 @@ the program, `flag` the header bit that keeps it), and each player maps them as 
 |---|---|
 | SID-Wizard | control bits 6 and 7 of the instrument header: the writer puts the command on every note that starts an instrument with the bit set and names none; the reader sets the bit from those notes, and refuses an instrument some of whose such notes carry it and others not, and a note that names an instrument, which restarts both programs |
 | GoatTracker 2 | the absence of a pointer: a note starts the instrument's `pw` and `filter` programs, and its wavetable `run` rows ($F9, $FA) start them where the composer put them; the reader accepts the command on a note whose instrument has neither (and that runs no such program itself), the writer leaves it out |
-| defMON | refused: a sidTAB program is armed per event (`!run2`) |
+| defMON | refused: an instrument's programs start on every event that names it |
 
 A note played under instruments of which some keep a program and others restart it has no
 written form. A legato note restarts nothing, so the command adds nothing there.
@@ -850,9 +875,18 @@ becomes one phrase per voice, all of the same length in ticks, with each event o
 tick the replay applies it. The playroutine fetches every tick and maps the event
 fields as follows:
 
-- `.c3` is the sidTAB program sidcall layer A starts;
-- `!run2:@c5` arms layer B, and `!restart:@r1` arms it on the steps before the note;
+- `.i3` names the instrument: its `ctrl` is the sidTAB program sidcall layer A starts (the
+  event's instrument column), its `filter` the one layer B starts (the event's command), and a
+  layer the instrument leaves out keeps running;
+- `!restart:@r1` arms layer B on the steps before the note;
 - the note is a GATE_N note.
+
+The writer names one instrument per pair of programs the events arm (`{ctrl: c1, filter: c2}`,
+`{filter: c2}` on an event that arms only layer B), so `C2.i4` and `-.i5` are a note and an empty
+step arming them. Layer B is the filter's: its ACID step drives the cutoff, and only a layer-B
+row's `cut` is the ACID unit's (see Filter). An instrument holds no other key (`ins: unknown
+field 'pw'`), arms at least one program, and the command `!run2` is retired in v1.17
+(`!run2 is retired in v1.17: name the program as the `filter` of the event's instrument`).
 
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk
 order: `dl` is `hold` (a frozen row ends its program), `wgh` and `wgl` are `ctrl` and its

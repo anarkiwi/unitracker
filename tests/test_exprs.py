@@ -133,7 +133,7 @@ def test_the_writer_refuses_the_goattracker_instrument_vibrato(fields, match):
     ],
 )
 def test_the_reader_names_the_retired_sidtab_columns(row, match):
-    text = doc("defmon", f"      ctrl:\n        c1: [{row}, end]", "[C4.c1]")
+    text = doc("defmon", f"      ins:\n        i1: {{ctrl: [{row}, end]}}", "[C4.i1]")
     with pytest.raises(songio.SongFormatError, match=match):
         songio.loads(text)
 
@@ -202,9 +202,9 @@ def test_sidwizard_instrument_freq_and_pulse_and_a_freq_command():
 
 DM_SONG = doc(
     "defmon",
-    """      ctrl:
-        c1: [{ctrl: 65, pw: 256 + 10*φ, freq: (v - 139) % 65536}, end]""",
-    "[C4.c1*8]",
+    """      ins:
+        i1: {ctrl: [{ctrl: 65, pw: 256 + 10*φ, freq: (v - 139) % 65536}, end]}""",
+    "[C4.i1*8]",
     "      vinit: {0: {}, 1: {}, 2: {}}\n      ginit: {0: {}}\n",
 )
 
