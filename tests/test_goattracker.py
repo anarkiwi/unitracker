@@ -342,12 +342,18 @@ def vibrato_lift(delay: int, rows: list, second: dict | None = None) -> tuple[di
 
 
 @pytest.mark.parametrize(
-    "delay,phase", [(0, "[(φ - 2) % 8 >= 4]"), (3, "[φ >= 2]"), (40, "[φ >= 38]")]
+    "delay,phase", [(1, "[(φ - 2) % 8 >= 4]"), (3, "[φ >= 2]"), (40, "[φ >= 38]")]
 )
 def test_the_instrument_vibrato_is_the_instrument_freq(delay, phase):
     rows = [(24, 1, 0, 0)] + [REST] * 7 + [(31, 1, 0, 0), REST, (36, 1, 0, 0)] + [REST] * 5
     ins, atoms = vibrato_lift(delay, rows)
     assert phase in ins["i1"]["freq"] and not any("!" in a for a in atoms)
+
+
+def test_a_zero_vibrato_delay_is_no_vibrato():
+    rows = [(24, 1, 0, 0)] + [REST] * 7 + [(31, 1, 0, 0)] + [REST] * 7
+    ins, atoms = vibrato_lift(0, rows)
+    assert "freq" not in ins["i1"] and atoms == ["C2.i1*8", "G2.i1*8"]
 
 
 def test_a_vibrato_resumed_after_a_command_is_each_steps_freq():
@@ -357,7 +363,7 @@ def test_a_vibrato_resumed_after_a_command_is_each_steps_freq():
 
 
 def test_an_instrument_change_resumes_the_new_instruments_vibrato():
-    second = {**VIBRATO, "vibrato_param": 2}
+    second = {**VIBRATO, "vibrato_param": 2, "vibrato_delay": 1}
     rows = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 2, 0, 0)] + [REST] * 3 + [(36, 2, 0, 0)]
     ins, atoms = vibrato_lift(3, rows + [REST] * 7, second)
     assert "F((N + 1) % 128)" in ins["i2"]["freq"] and "[φ >= 2]" in ins["i1"]["freq"]

@@ -207,6 +207,10 @@ record_types:
         else: [{set: {filtercutoff: row.r}}]
     each: [{accumulate: filtercutoff, step: row.r}]
 functions:
+  # The speed-table row of instrument i's vibrato: none with a zero delay, as the player packs it.
+  vibspeed:
+    args: [i]
+    expr: "ins[i].speed if ins[i].vd else 0"
   # The row of restart program r on the note's first tick: its last.
   hrnote:
     args: [r]
@@ -275,7 +279,7 @@ voice:
 records:
   # Pattern command at tick 0 (gplay.c / player.s mt_tick0_*), argument newcmddata.
   tick0:
-    0: {do: [{set: {command: 0, cmddata: "ins[ii].speed"}}]}
+    0: {do: [{set: {command: 0, cmddata: "vibspeed(ii)"}}]}
     1: {do: [{set: {vibtime: 0, command: 1, cmddata: newcmddata}}]}
     2: {do: [{set: {vibtime: 0, command: 2, cmddata: newcmddata}}]}
     3: {do: [{set: {command: 3, cmddata: newcmddata}}]}
@@ -405,7 +409,7 @@ procs:
         - set: {ftime: "ftime - 1"}
         - {if: "ftime == 0", then: [{set: {fptr: "filttab[fptr].next"}}]}
   new_note_init:
-    - set: {note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "ins[ii].speed", fired: 0}
+    - set: {note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "vibspeed(ii)", fired: 0}
     - {if: legato, then: [{return: true}]}
     - set: {hr: "hrnote(ins[ii].restart)"}
     - if: "restart[hr].ctrl >= 0"
