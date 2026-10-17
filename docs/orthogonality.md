@@ -1,0 +1,286 @@
+# Orthogonality and redundancy
+
+Written by `unitracker-optimise --report`: the optimiser's edits the register grid proves (kept, or proved but not kept when they write more tokens), the playroutines' dead state found statically, and the vocabulary no lifted row reaches. One line per finding: player · place: the two forms; *the proposed resolution*. Places and names are those of the document each edit was proved on, which the optimiser renumbers as it goes.
+
+## Vocabulary redundancy
+
+- goattracker2 · metal_warrior i3: `X.i3!run:@c1` ≡ `X.i3 with i3 + {ctrl: c1}`. *canonicalise: a command every note of an instrument carries is a field*
+- goattracker2 · metal_warrior i3: `X.i3!run:@c2` ≡ `X.i3 with i3 + {ctrl: c2}`. *canonicalise: a command every note of an instrument carries is a field*
+- goattracker2 · metal_warrior i3: `X.i3!run:@c3` ≡ `X.i3 with i3 + {ctrl: c3}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i10 (not kept): `X.i10!freq:@x22` ≡ `X.i10 with i10 + {freq: x22}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i10 (not kept): `X.i10!freq:@x23` ≡ `X.i10 with i10 + {freq: x23}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i10 (not kept): `X.i10!freq:@x8` ≡ `X.i10 with i10 + {freq: x8}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i10 (not kept): `X.i10!sr:39` ≡ `X.i10 with i10 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i2: `X.i2!sr:72` ≡ `X.i2 with i2 + {sr: 72}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i3 (not kept): `X.i3!ad:208` ≡ `X.i3 with i3 + {ad: 208}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i6 (not kept): `X.i6!freq:@x4` ≡ `X.i6 with i6 + {freq: x4}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i6 (not kept): `X.i6!sr:23` ≡ `X.i6 with i6 + {sr: 23}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i6 (not kept): `X.i6!sr:39` ≡ `X.i6 with i6 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i7 (not kept): `X.i7!freq:@x4` ≡ `X.i7 with i7 + {freq: x4}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i7 (not kept): `X.i7!sr:23` ≡ `X.i7 with i7 + {sr: 23}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i7 (not kept): `X.i7!sr:39` ≡ `X.i7 with i7 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i9 (not kept): `X.i9!freq:@x22` ≡ `X.i9 with i9 + {freq: x22}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i9 (not kept): `X.i9!freq:@x23` ≡ `X.i9 with i9 + {freq: x23}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i9 (not kept): `X.i9!freq:@x8` ≡ `X.i9 with i9 + {freq: x8}`. *canonicalise: a command every note of an instrument carries is a field*
+- sidwizard · csillag i9 (not kept): `X.i9!sr:39` ≡ `X.i9 with i9 + {sr: 39}`. *canonicalise: a command every note of an instrument carries is a field*
+
+## Non-orthogonal key
+
+- defmon · crosseyed p10[2]: `D#4.t7!restart:@r2*12` ≡ `D#4.t7*12`. *canonicalise: the writer drops a command its context already plays*
+- defmon · crosseyed p5[1]: `C2.t4!run2:@t6*12` ≡ `C2.t4!run2:@t6*24`. *canonicalise: the writer drops a command its context already plays*
+- defmon · crosseyed p8[2]: `D#4.t7!restart:@r2*36` ≡ `D#4.t7*36`. *canonicalise: the writer drops a command its context already plays*
+- defmon · crosseyed t1[0]: `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, pw: 256, freq: (v - 139) % 65536}` ≡ `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, freq: (v - 139) % 65536}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed t1[0]: `{hold: 2, ctrl: 64^1, ad: 0, sr: 246, pw: 256, freq: (v - 139) % 65536}` ≡ `{hold: 2, ctrl: 64^1, sr: 246, pw: 256, freq: (v - 139) % 65536}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed t4[0]: `{hold: 2, ctrl: 64^1, note: +0, ad: 1, sr: 152, pw: 2048}` ≡ `{hold: 2, ctrl: 64^1, ad: 1, sr: 152, pw: 2048}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed t4[1]: `{ctrl: ^0, note: +0}` ≡ `{ctrl: ^0}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed t7[0]: `{hold: 2, ctrl: 16^3, note: +24, ad: 0, sr: 249, pw: 2048}` ≡ `{hold: 2, ctrl: 16^3, note: +24, ad: 0, sr: 249}`. *codec rule: a program row key the context already gives is left out*
+- defmon · crosseyed vinit 0.fhi: `fhi: 17` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 0.flo: `flo: 103` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 0.tbase: `tbase: 60` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.fhi: `fhi: 4` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.flo: `flo: 91` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 1.tbase: `tbase: 48` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.fhi: `fhi: 15` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.flo: `flo: 131` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- defmon · crosseyed vinit 2.tbase: `tbase: 70` ≡ `-`. *codec rule: the lifter leaves out initial state the song overwrites unheard*
+- goattracker2 · metal_warrior i1.ctrl[0], i1.ctrl[1], i2.ctrl[0], i2.ctrl[1], i3.ctrl[1], i4.ctrl[1], i5.ctrl[0], i5.ctrl[1], i6.ctrl[0], i6.ctrl[1]: `{ctrl: 9, note: +0}` ≡ `{note: +0}`. *codec rule: a program row key the context already gives is left out*
+- goattracker2 · metal_warrior i2.ctrl[6]: `{ctrl: 128, note: =68}` ≡ `{note: =68}`. *codec rule: a program row key the context already gives is left out*
+- goattracker2 · metal_warrior p15[10]: `F5!legato:0!freq:@x2` ≡ `F5!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- goattracker2 · metal_warrior p15[3]: `C5.i5*2` ≡ `C5*2`. *canonicalise: name an instrument only where the voice changes it*
+- goattracker2 · metal_warrior p1[0], p4[0], p10[0]: `C2.i1*3` ≡ `C2*3`. *canonicalise: name an instrument only where the voice changes it*
+- goattracker2 · metal_warrior p5[1]: `G4.i3*3` ≡ `G4*3`. *canonicalise: name an instrument only where the voice changes it*
+- goattracker2 · metal_warrior p6[10], p6[28], p12[10], p12[28]: `-!freq:@x2` ≡ `-!freq:@x2*3`. *canonicalise: the writer drops a command its context already plays*
+- goattracker2 · metal_warrior p6[27]: `G4!legato:0!freq:@x2` ≡ `G4!legato:0!freq:@x2*2`. *canonicalise: the writer drops a command its context already plays*
+- goattracker2 · metal_warrior p6[9], p12[9]: `A#4!legato:0!freq:@x2` ≡ `A#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- goattracker2 · metal_warrior p7[0], p13[0]: `G#1.i1*3` ≡ `G#1*3`. *canonicalise: name an instrument only where the voice changes it*
+- goattracker2 · metal_warrior p8[1], p14[1]: `D#5.i4*3` ≡ `D#5*3`. *canonicalise: name an instrument only where the voice changes it*
+- goattracker2 · metal_warrior p9[10], p12[27], p15[20]: `C5!legato:0!freq:@x2` ≡ `C5!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- goattracker2 · metal_warrior p9[11], p9[12], p9[21], p15[11], p15[12], p15[21]: `-!freq:@x2` ≡ `-!freq:@x2*2`. *canonicalise: the writer drops a command its context already plays*
+- goattracker2 · metal_warrior p9[20]: `D5!legato:0!freq:@x2` ≡ `D5!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- goattracker2 · metal_warrior p9[3]: `C4.i5*2` ≡ `C4*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag i4.pw: `pw: 0` ≡ `-`. *canonicalise: an instrument field with no effect where it plays is left out*
+- sidwizard · csillag i6.freq: `freq: 0` ≡ `-`. *canonicalise: an instrument field with no effect where it plays is left out*
+- sidwizard · csillag i7.ctrl[1]: `{ctrl: 65, note: +0}` ≡ `{note: +0}`. *codec rule: a program row key the context already gives is left out*
+- sidwizard · csillag p12[0], p20[0], p20[12], p26[0], p26[12], p28[0], p28[12], p29[0], p29[12], p31[0], p31[12]: `C2.i5*4` ≡ `C2*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p12[10]: `A#1.i5*4` ≡ `A#1*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p12[7], p26[8], p28[8], p29[8]: `C2.i5*2` ≡ `C2*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p13[2], p13[10]: `on!ad:208*4` ≡ `on*4`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[5], p13[13], p19[23], p33[17], p34[1]: `G4!legato:0!freq:@x1` ≡ `G4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p13[6], p13[14], p34[5], p34[11], p34[14]: `A#4!legato:0!freq:@x1` ≡ `A#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p14[0], p16[10]: `G1.i5*4` ≡ `G1*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p14[10], p16[0]: `G#1.i5*4` ≡ `G#1*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p14[7]: `G1.i5*2` ≡ `G1*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p16[7]: `G#1.i5*2` ≡ `G#1*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p17[0]: `G#3.i7*3` ≡ `G#3*3`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p17[13], p18[15], p19[6], p19[18], p34[30]: `D#4!legato:0!freq:@x1*2` ≡ `D#4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p17[14]: `D4!legato:0!freq:@x1` ≡ `D4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p17[8], p18[25], p19[1], p19[11]: `D4!legato:0!freq:@x1*2` ≡ `D4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[0]: `G3.i7*2` ≡ `G3*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p18[3]: `D4!legato:0!freq:@x1*4` ≡ `D4!legato:0*4`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[5], p19[9]: `G4!legato:0!freq:@x1*2` ≡ `G4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p18[7], p34[33]: `G4!legato:0!freq:@x1*3` ≡ `G4!legato:0*3`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[0]: `D#4.i7*2` ≡ `D#4*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p19[15]: `G3!legato:0!freq:@x1` ≡ `G3!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[16]: `G#3!legato:0!freq:@x1` ≡ `G#3!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[24]: `G#4!legato:0!freq:@x1*3` ≡ `G#4!legato:0*3`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[3]: `G3!legato:0!freq:@x1*2` ≡ `G3!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p19[7], p34[31]: `F4!legato:0!freq:@x1*2` ≡ `F4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p21[0], p21[16], p30[0], p30[8], p30[16], p30[24]: `C4.i2*2` ≡ `C4*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p22[9]: `D#5.i7*4` ≡ `D#5*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p23[0], p32[0]: `A#1.i5*6` ≡ `A#1*6`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p24[0]: `A#3.i2*2` ≡ `A#3*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p25[0], p38[0]: `C5.i7` ≡ `C5`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p25[6], p38[6]: `F4*5` ≡ `F4*10`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p25[9], p38[9]: `F4.i7` ≡ `F4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p2[8], p5[0], p27[8]: `C4.i2*4` ≡ `C4*4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p31[8], p32[18]: `A#1.i5*2` ≡ `A#1*2`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p33[13], p34[16], p34[28]: `C5!legato:0!freq:@x1*2` ≡ `C5!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[18] (not kept): `F4!legato:0!freq:@x1*8` ≡ `F4!legato:0*8`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[21], p34[2]: `D#4!legato:0!freq:@x1` ≡ `D#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[22], p34[3]: `C4!legato:0!freq:@x1` ≡ `C4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[23]: `A#3!legato:0!freq:@x1` ≡ `A#3!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p33[9]: `G#4!legato:0!freq:@x1*4` ≡ `G#4!legato:0*4`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[0]: `G#4.i9` ≡ `G#4`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p34[18], p34[29]: `G#4!legato:0!freq:@x1*2` ≡ `G#4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[25]: `D#5!legato:0!freq:@x1*2` ≡ `D#5!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[32]: `F#4!legato:0!freq:@x1*2` ≡ `F#4!legato:0*2`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[4], p34[10], p34[13]: `C5!legato:0!freq:@x1` ≡ `C5!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[6], p34[15]: `G#4!legato:0!freq:@x1` ≡ `G#4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[7]: `F4!legato:0!freq:@x1` ≡ `F4!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p34[9], p34[12]: `D5!legato:0!freq:@x1` ≡ `D5!legato:0`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p36[7]: `D#4!run:@w3!sr:139` ≡ `D#4!run:@w3`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p37[5]: `off!sr:125*14` ≡ `off*14`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p38[10]: `G4!legato:0!freq:@x12*2` ≡ `G4!legato:0!freq:@x12*3`. *canonicalise: the writer drops a command its context already plays*
+- sidwizard · csillag p6[0]: `C3.i3*7` ≡ `C3*7`. *canonicalise: name an instrument only where the voice changes it*
+- sidwizard · csillag p8[8], p8[16], p8[24]: `C3.i2*2` ≡ `C3*2`. *canonicalise: name an instrument only where the voice changes it*
+
+## VM dead state
+
+- defmon · field `restart.ad`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
+- defmon · field `restart.dl`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
+- defmon · field `restart.next`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
+- defmon · field `restart.sr`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
+- defmon · field `restart.wgh`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
+- defmon · field `restart.wgl`: never read by the VM. *format-side: the reader plays the note's restart as a program of the player's own*
+- sidwizard · field `flttab.k`: never read by the VM. *transcription fix: the player ignores what the lifter writes here*
+- sidwizard · field `restart.gate`: never read by the VM. *transcription fix: the player ignores what the lifter writes here*
+
+## Unreachable vocabulary
+
+- defmon · crosseyed codec shape restart[0] `{ad, ctrl, hold, sr}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- defmon · crosseyed codec shape restart[1] `{}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[10] `{cut}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[11] `{vol}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[1] `{freq}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[2] `{ad}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[3] `{sr}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[4] `{run}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[5] `{run}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[6] `{res, route}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[7] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[8] `{filter}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape ctrltab[9] `{filter, res, route}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape filttab[1] `{cut}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior codec shape pulsetab[0] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- goattracker2 · metal_warrior command `!ad`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!ctrl`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!cut`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!funk`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!mark`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!resfilt`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!sr`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!vol`: no lifted event plays it. *hand-written only*
+- goattracker2 · metal_warrior command `!vtempo`: no lifted event plays it. *hand-written only*
+- sidwizard · csillag codec shape pwtab[0] `{pw}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+- sidwizard · csillag codec shape wftab[1] `{freq, hold, note}`: no lifted row is written with it. *hand-written only: keep with a test, or retire*
+
+## Song redundancy
+
+- defmon · crosseyed sidtab: `t7: [{cut: (-[(v - 513) % 65536 >= 32768]*(v % 65536) + [(v - 513) % 65536 >= 32768]*((-65536*[v % 65536 >= 513] + (v - 1) % 256 + 512) % 131072) - 65023*[(v - 513) % 65536 >= 32768] + v % 65536 + 48639)*[φ >= 1] + 16384, res: 15, route: 7, mode: 16}, end]` ≡ `t5: [{cut: (-[(v - 513) % 65536 >= 32768]*(v % 65536) + [(v - 513) % 65536 >= 32768]*((-65536*[v % 65536 >= 513] + (v - 1) % 256 + 512) % 131072) - 65023*[(v - 513) % 65536 >= 32768] + v % 65536 - 16896)*[φ >= 1] + 81919, res: 15, route: 7, mode: 16}, end]`. *optimiser: one record for two that play alike*
+- defmon · crosseyed t3[1]: `{hold: 3, ctrl: 128^0, note: =28}` ≡ `{ctrl: 128^0, note: =28}`. *optimiser: rows no start reaches drop*
+- defmon · crosseyed t7[3]: `{hold: 2, ctrl: ^2, note: +0}` ≡ `{loop: 1}`. *optimiser: a loop is written with its shortest cycle*
+- sidwizard · csillag ins: `i8: {sr: 103, ctrl: w4, pw: min(112, φ) + 128, freq: (v - W[N + 33]*[φ >= 21] + 2*W[N + 33]*[φ >= 21]*[(φ + 1) % 8 >= 4]) % 65536, restart: r1}` ≡ `i7: {sr: 103, ctrl: w4, pw: min(112, φ) + 128, freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536), restart: r1}`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x17: v` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x: `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `('pwtab', 2).x: 0`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)` ≡ `x2: [v + W[N + 17] < 65537]*[v >= 32768]*((v + W[N + 17] + 1) % 65536) + [v < 32768]*[v >= 1]*[v > W[N + 17]]*((v - W[N + 17] - 1) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `i5.freq: (v - W[N + 33]*[φ >= 17] + 2*W[N + 33]*[φ >= 17]*[(φ - 3) % 8 >= 4]) % 65536`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x10: [v + W[N + 57] < 65537]*[v >= 32768]*((v + W[N + 57] + 1) % 65536) + [v < 32768]*[v >= 1]*[v > W[N + 57]]*((v - W[N + 57] - 1) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x2: [v + W[N + 17] < 65537]*[v >= 32768]*((v + W[N + 17] + 1) % 65536) + [v < 32768]*[v >= 1]*[v > W[N + 17]]*((v - W[N + 17] - 1) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x9: [v + W[N + 33] < 65537]*[v >= 32768]*((v + W[N + 33] + 1) % 65536) + [v < 32768]*[v >= 1]*[v > W[N + 33]]*((v - W[N + 33] - 1) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x17: v` ≡ `x: (v - W[N + 33]*[φ >= 21] + 2*W[N + 33]*[φ >= 21]*[(φ + 1) % 8 >= 4]) % 65536`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x11: [φ >= 15]*((-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `i9.freq: [φ >= 8]*((-W[N + 33]*abs(φ % 6 - 3) + W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x11: [φ >= 15]*((-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `i9.freq: [φ >= 8]*((-W[N + 33]*abs(φ % 6 - 3) + W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x11: [φ >= 15]*((-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x12: ([v >= 32768]*((v + 32559) % 65536) + [v < 32768]*[v >= 32559]*((v - 32559) % 65536))*[v < 32979]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x13: ([v >= 32768]*((v + 32571) % 65536) + [v < 32768]*[v >= 32571]*((v - 32571) % 65536))*[v < 32967]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x14: ([v >= 32768]*((v + 32605) % 65536) + [v < 32768]*[v >= 32605]*((v - 32605) % 65536))*[v < 32933]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x21: ([v >= 32768]*((v + 32721) % 65536) + [v < 32768]*[v >= 32721]*((v - 32721) % 65536))*[v < 32817]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x22: ([v >= 32768]*((v + 32600) % 65536) + [v < 32768]*[v >= 32600]*((v - 32600) % 65536))*[v < 32938]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x23: ([v >= 32768]*((v + 32652) % 65536) + [v < 32768]*[v >= 32652]*((v - 32652) % 65536))*[v < 32886]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x24: ([v >= 32768]*((v + 32669) % 65536) + [v < 32768]*[v >= 32669]*((v - 32669) % 65536))*[v < 32869]` ≡ `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `i6.freq: [φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `i7.freq: [φ >= 20]*((-W[N + 33]*abs((φ - 2) % 8 - 4) + 2*W[N + 33]) % 65536)`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `x4: ([v >= 32768]*((v + 32630) % 65536) + [v < 32768]*[v >= 32630]*((v - 32630) % 65536))*[v < 32908]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `x5: ([v >= 32768]*((v + 32582) % 65536) + [v < 32768]*[v >= 32582]*((v - 32582) % 65536))*[v < 32956]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `x6: ([v >= 32768]*((v + 32578) % 65536) + [v < 32768]*[v >= 32578]*((v - 32578) % 65536))*[v < 32960]`. *optimiser: one record for two that play alike*
+- sidwizard · csillag x (not kept): `x8: ([v >= 32768]*((v + 32617) % 65536) + [v < 32768]*[v >= 32617]*((v - 32617) % 65536))*[v < 32921]` ≡ `x7: ([v >= 32768]*((v + 32591) % 65536) + [v < 32768]*[v >= 32591]*((v - 32591) % 65536))*[v < 32947]`. *optimiser: one record for two that play alike*
+

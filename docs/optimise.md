@@ -9,12 +9,13 @@ models: `cl100k_base` (GPT-4's BPE) is the objective, and every count below is a
 `o200k_base` (GPT-4o) and Llama 2's SentencePiece tokenizer.
 
 ```sh
-unitracker-optimise song.yaml -o smaller.yaml [--passes hoist,commands] [--workers N]
+unitracker-optimise song.yaml -o smaller.yaml [--passes hoist,commands] [--workers N] [--report orthogonality.md]
 unitracker-lift TUNE.sid -o song.yaml --optimise
 ```
 
 The code is the package `unitracker.optimise` (`proof`, `model`, `edits`, `passes`, `driver`,
-`describe`).
+`describe`); the orthogonality report is `unitracker.orthogonality` ([orthogonality.md](orthogonality.md)
+for the three reference tunes).
 
 ## The proof
 
@@ -47,7 +48,7 @@ canonical (`dumps(loads(text)) == text`). Screening results are sorted by candid
 output and the findings do not depend on the worker count (tested).
 
 Every edit the grid proves is recorded as a finding, kept or not, with its place and the two
-written forms. `factor` and `share`, which
+written forms; `--report` turns them into the orthogonality report. `factor` and `share`, which
 rewrite structure rather than vocabulary, are proved only when they shrink the text.
 
 ## Passes
@@ -121,7 +122,7 @@ Each optimised document plays its tune's native player (`tools/grid_diff.py song
 --ticks 3007 --to 0`: `first mismatch: None`), and the tests check the same for each tune under a
 subset of the passes (`tests/conftest.py`, `OPTIMISED`), which keeps the suite's time bounded.
 
-What the edits found, in brief:
+What the edits found, in brief (the full list is [orthogonality.md](orthogonality.md)):
 
 - **Metal Warrior.** `!run:@c1`, `@c2` and `@c3` on i3's notes are three instruments, which
   removes every `!run`. The toneporta `!freq:@x2` on legato notes and on the steps after them

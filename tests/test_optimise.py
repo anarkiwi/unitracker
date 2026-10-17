@@ -284,14 +284,16 @@ def test_an_embedded_playroutine_is_optimised_embedded():
     assert kept(result) == ["merge"] and "record_types:" in result.text
 
 
-def test_cli_optimises(tmp_path, capsys):
+def test_cli_optimises_and_reports(tmp_path, capsys):
     song = tmp_path / "song.yaml"
     song.write_text(doc(I1, "[C4.i1*2, D4.i1*2, E4!ad:9*2, F4*2]"), encoding="utf-8")
-    out = tmp_path / "small.yaml"
+    out, report = tmp_path / "small.yaml", tmp_path / "orth.md"
     args = [
         str(song),
         "-o",
         str(out),
+        "--report",
+        str(report),
         "--passes",
         "commands",
         "--workers",
@@ -300,6 +302,7 @@ def test_cli_optimises(tmp_path, capsys):
     assert cli.optimise_main(args) == 0
     assert "tokens" in capsys.readouterr().err
     assert "!ad" not in out.read_text(encoding="utf-8")
+    assert "E4!ad:9*2" in report.read_text(encoding="utf-8")
     assert cli.optimise_main([str(song), "--passes", "fields", "--workers", "1"]) == 0
     assert capsys.readouterr().out.startswith("unitracker: 1.15")
     with pytest.raises(SystemExit):

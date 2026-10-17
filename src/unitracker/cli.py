@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from unitracker import backends, optimise, songio
+from unitracker import backends, optimise, orthogonality, songio
 from unitracker.vm import SongPlayer, first_mismatch
 
 
@@ -40,6 +40,7 @@ def optimise_main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="unitracker-optimise", description=optimise_main.__doc__)
     parser.add_argument("song", type=Path)
     parser.add_argument("-o", "--output", type=Path)
+    parser.add_argument("--report", type=Path, metavar="MD", help="write the orthogonality report")
     parser.add_argument("--passes", help="comma-separated passes, default all in order")
     parser.add_argument("--workers", type=int, help="processes proving candidates (default: cores)")
     args = parser.parse_args(argv)
@@ -52,6 +53,9 @@ def optimise_main(argv=None) -> int:
         args.output.write_text(result.text, encoding="utf-8")
     else:
         sys.stdout.write(result.text)
+    if args.report:
+        lines = orthogonality.report([(args.song.stem, result)])
+        args.report.write_text(lines, encoding="utf-8")
     print(f"{args.song}: {result.before} -> {result.after} tokens", file=sys.stderr)
     return 0
 
