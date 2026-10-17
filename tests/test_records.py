@@ -44,6 +44,7 @@ def test_a_type_is_written_under_its_shared_name_and_prefix():
         ({"a": {"writes_as": "x"}}, "share one written name"),
         ({"pw": {}, "pulse": {"writes_as": "pw", "prefix": "q"}}, "share one written name"),
         ({"a": {"prefix": "c"}, "b": {"writes_as": "ctrl"}}, "share one prefix name"),
+        ({"pulse": {"writes_as": "pw"}}, r"\['phrase', 'pulse'\] share one prefix name"),
     ],
 )
 def test_written_names_and_prefixes_are_each_one_types(specs, match):

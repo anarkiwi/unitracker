@@ -21,6 +21,7 @@ META_KEYS = {
     "writes_as",
 }
 EXPR = "x"
+PHRASE = "p"
 
 
 class RecordTypeError(ValueError):
@@ -84,7 +85,8 @@ def record_types(playroutine: dict) -> dict:
     """``{name: RecordType}`` for a playroutine's ``record_types``, and the format's expressions.
 
     The expression type ``x`` holds modulator expressions (see docs/format.md). Each type has its
-    own written name, and each type a document names by number its own prefix.
+    own written name, and each type a document names by number its own prefix, none of them the
+    phrases' ``p``.
     """
     specs = playroutine.get("record_types") or {}
     if EXPR in specs:
@@ -92,7 +94,7 @@ def record_types(playroutine: dict) -> dict:
     out = {name: RecordType(name, spec or {}) for name, spec in specs.items()}
     out[EXPR] = RecordType(EXPR, {"prefix": EXPR, "none": 0, "max": 0xFFFF})
     for attr in ("written", "prefix"):
-        owners = {}
+        owners = {PHRASE: ["phrase"]} if attr == "prefix" else {}
         for rtype in out.values():
             if attr == "written" or not rtype.fixed:
                 owners.setdefault(getattr(rtype, attr), []).append(rtype.name)

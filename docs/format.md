@@ -100,10 +100,10 @@ and `loop` is the row where that state first occurred.
 
 `def` maps a record type, `x`, or `phrase` to `{name: value}`. Names are the record
 type's prefix and a number, given in first-use order (`i1`, `i2`, ..., `c1`, ...;
-expressions `x1`, ...; phrases `p1`, ...). Phrases have names of their own: a play entry
-names a phrase, and everything else names a record, so the phrase `p1` and the pulse program
-`p1` are two names. The reader allocates each type's indices in definition order from the
-type's `first` index, so a name stands for whatever index the playroutine needs.
+expressions `x1`, ...; phrases `p1`, ...). A name is one record's or one phrase's, and the
+prefixes are distinct, so a name says what it is. The reader allocates each type's indices in
+definition order from the type's `first` index, so a name stands for whatever index the
+playroutine needs.
 
 Every player writes its records under the same record types, whatever its own tables are
 called (each playroutine's `record_types` entry names the type it is written as, see Record
@@ -113,7 +113,7 @@ types):
 |---|---|---|---|---|---|
 | `ins` | `i` | an instrument | `ins` | `ins` | none: the pair of sidTAB programs an event arms (see the defMON backend) |
 | `ctrl` | `c` | a control program: waveform, notes, and in defMON any column | `ctrltab` (wavetable) | `wftab` (WF/arp table) | `sidtab` (sidTAB) |
-| `pw` | `p` | a pulse program | `pulsetab` | `pwtab` | — |
+| `pw` | `pw` | a pulse program | `pulsetab` | `pwtab` | — |
 | `filter` | `f` | a filter program | `filttab` | `flttab` | — |
 | `restart` | `r` | a hard restart (see Hard restart) | `restart` | `restart` | `restart` |
 
@@ -564,7 +564,8 @@ change, and the offset of a relative note reads the note base.
 
 The writer produces one text per song:
 
-- names are given in first-use order;
+- names are given in first-use order, each a record type's prefix (distinct from the others' and
+  from the phrases' `p`) and a number;
 - records and rows the song never reaches are dropped;
 - identical phrases, and phrases that are equal up to a transpose, are merged, and
   the transpose moves into the play entry;
@@ -613,7 +614,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `fields` | a list of names, or `{name: default}`; a missing field reads as its default |
 | `form` | `list` (default) or `map` |
 | `writes_as` | the record type a document writes it as (default: its own name; see Definitions) |
-| `prefix` | the name prefix (default: the first letter of the written name) |
+| `prefix` | the name prefix (default: the first letter of the written name); distinct from the other types' and from the phrases' `p` |
 | `chain` | the field holding the next row: the type is a table of programs |
 | `none` | the index that means "no row"; references equal to it are plain numbers |
 | `stop` | an expression over a row's fields after which a program ends |
@@ -659,7 +660,7 @@ written under their own names; a kept reference is written as a name). A key wit
 is written as the expression when that field is set; a key with both `value` and `expr`
 reads an integer as a value and a string as an expression. A key given as
 `{ref: type, field: f}` is the reference raw field `f` holds, written as the record's name
-(`run: p1`); the reader takes the shape whose `ref` is the type the name has. A key given as
+(`run: pw1`); the reader takes the shape whose `ref` is the type the name has. A key given as
 `{none: true}` is written `none` (`pw: none`) and reads only from `none`. The writer
 uses the first shape whose `when` holds and refuses a row that would not read back; a `map` row no
 shape fits is an error. The reader accepts a written row only if encoding its inverse

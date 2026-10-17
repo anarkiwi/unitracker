@@ -246,7 +246,7 @@ DEF = ("song", 0, "def")
         (edit(DEF + ("ins", "i1"), {"p": "nothing"}), "unknown name"),
         (edit(DEF + ("ins", "1x"), {}), "bad name"),
         (edit(DEF + ("ins", "w1"), {}), "defined twice"),
-        (edit(("song", 1, "def"), {"phrase": {"p1": ["-"]}}), "defined twice"),
+        (edit(DEF + ("phrase", "w1"), ["-"]), "defined twice"),
         (edit(DEF + ("bogus",), {"x": 1}), "unknown record type"),
         (edit(DEF + ("init", 0), {"o": 1}), None),
         (edit(DEF + ("phrase", "p2"), ["-!ad:@w1"]), "can't express"),
@@ -347,15 +347,17 @@ def test_reader_refuses_a_players_own_record_type_name(pr, old, new):
     ):
         songio.loads(text)
     rtype = songio.record_types(songio.library(pr))[old]
-    assert (rtype.written, rtype.prefix) == (new, new[0])
+    assert (rtype.written, rtype.prefix) == (new, "pw" if new == "pw" else new[0])
 
 
-def test_a_phrase_and_a_record_may_share_a_name():
-    text = LIST_SONG.format(pr="goattracker2", tname="pw", name="p", row="{pw: 2048}")
-    text = text.replace("p1: [off]", "p1: [off!run:@p1]")
+def test_a_pulse_program_name_is_not_a_phrase_name():
+    text = LIST_SONG.format(pr="goattracker2", tname="pw", name="pw", row="{pw: 2048}")
+    text = text.replace("p1: [off]", "p1: [off!run:@pw1]")
     out = songio.dumps(songio.loads(text))
-    assert "p1: [{pw: 2048}, end]" in out and "p1: [off!run:@p1]" in out
+    assert "pw1: [{pw: 2048}, end]" in out and "p1: [off!run:@pw1]" in out
     assert songio.dumps(songio.loads(out)) == out
+    with pytest.raises(SongFormatError, match="name 'p1' defined twice"):
+        songio.loads(text.replace("pw1", "p1"))
 
 
 def test_writer_refuses_a_wavetable_row_without_a_shared_form():

@@ -114,6 +114,7 @@ record_types:
   # k is the keyboard-track amount; x the expression a program of that one row is.
   pwtab:
     writes_as: pw
+    prefix: pw
     none: 0
     chain: next
     expr: x

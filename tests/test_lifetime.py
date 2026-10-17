@@ -13,12 +13,12 @@ SW_INS = """      ins:
 GT_INS = """      x:
         x1: '1024 + 16*min(3, φ)'
       pw:
-        p1: '2048 + 16*min(3, φ)'
+        pw1: '2048 + 16*min(3, φ)'
       ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(3, φ)',
           restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]}
         i2: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}
-        i3: {sr: 240, ctrl: [{ctrl: 65, note: +0}, {run: p1}, end]}
+        i3: {sr: 240, ctrl: [{ctrl: 65, note: +0}, {run: pw1}, end]}
 """
 
 
@@ -144,7 +144,7 @@ def test_goattracker_accepts_the_command_where_no_program_starts_and_writes_it_i
     [
         ("C4.i1", "C4.i1!pulse:0", "whose instrument i1 starts the pulse program"),
         ("F4.i3", "F4.i3!pulse:0", "whose instrument i3 starts the pulse program"),
-        ("D4.i2", "D4.i2!run:@p1!pulse:0", "!pulse:0 on a note that starts the program"),
+        ("D4.i2", "D4.i2!run:@pw1!pulse:0", "!pulse:0 on a note that starts the program"),
     ],
 )
 def test_goattracker_refuses_the_command_on_a_note_that_starts_the_program(old, new, match):

@@ -159,6 +159,7 @@ record_types:
   # x: the expression a program of that one row is (see modulators).
   pulsetab:
     writes_as: pw
+    prefix: pw
     none: 0
     chain: next
     expr: x

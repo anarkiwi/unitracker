@@ -883,7 +883,7 @@ class _Reader:
             for tname, entries in (item.get("def") or {}).items():
                 for name, value in (entries or {}).items():
                     if tname == PHRASE:
-                        if name in phrases:
+                        if name in phrases or name in self.names:
                             raise SongFormatError(f"name {name!r} defined twice")
                         phrases[name] = value
                     else:
