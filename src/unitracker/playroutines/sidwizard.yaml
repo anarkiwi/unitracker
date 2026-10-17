@@ -28,7 +28,6 @@ commands:
   304: {name: idecay}
   336: {name: isustain}
   352: {name: irelease}
-  608: {name: notevib}
 record_types:
   # An instrument's 16-byte header as fields, its WF/arp, pulse and filter tables as programs.
   ins:
@@ -613,7 +612,10 @@ modulators:
         record: ins
         index: ci
         field: freq
-        clear: {vibrato: 0, vibdelay: 0}
+      # The header's vibrato, its delay and its type (flags bits 4-5) have no written form.
+      retire:
+        record: ins
+        clear: {vibrato: 0, vibdelay: 0, flags: "(flags & 0xCF) | 0x10"}
       hooks:
         - {at: procs.apply_row, written: [voff], key: [svib, fml, fmh, vper, fx]}
         - {at: procs.run_deferred, key: [svib, fml, fmh, vper, fx]}

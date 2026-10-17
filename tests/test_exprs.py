@@ -1,4 +1,4 @@
-"""v1.10 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.11 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -63,6 +63,10 @@ GT_SONG = doc(
         ("sidwizard", "{hrsr: 0}", "ins.hrsr is retired in v1.8"),
         ("sidwizard", "{firstctrl: 9}", "ins.firstctrl is retired in v1.8"),
         ("sidwizard", "{flags: 26}", "ins.flags bits 0x0f are retired in v1.8"),
+        ("sidwizard", "{vibrato: 51}", "ins.vibrato is retired in v1.11: write the vibrato"),
+        ("sidwizard", "{vibdelay: 4}", "ins.vibdelay is retired in v1.11"),
+        ("sidwizard", "{octave: -12}", "ins.octave is retired in v1.11: a note is written as"),
+        ("sidwizard", "{flags: 96}", "ins.flags bits 0x30 are retired in v1.11"),
     ],
 )
 def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
@@ -70,9 +74,52 @@ def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
         songio.loads(doc(playroutine, f"      ins:\n        i1: {ins}", "[C4.i1]"))
 
 
-def test_the_reader_names_the_retired_eor_column():
-    text = doc("defmon", "      sidtab:\n        t1: [{ctrl: 64, wgl: 1}, end]", "[C4.t1]")
-    with pytest.raises(songio.SongFormatError, match="sidtab: wgl is retired in v1.8: write"):
+@pytest.mark.parametrize(
+    "playroutine,command", [("sidwizard", "!notevib:5"), ("goattracker2", "!vib:@s1")]
+)
+def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
+    speeds = "      speedtab:\n        s1: [4, 32]\n" if playroutine == "goattracker2" else ""
+    text = doc(playroutine, speeds + "      ins:\n        i1: {sr: 240}", f"[C4.i1, -{command}]")
+    name = command.split(":")[0]
+    with pytest.raises(songio.SongFormatError, match=f"{name} is retired in v1.11: write"):
+        songio.loads(text)
+
+
+@pytest.mark.parametrize(
+    "fields,match",
+    [
+        ({"vibrato": 0x33}, "ins.vibrato has no written form: it is retired in v1.11"),
+        ({"vibdelay": 4}, "ins.vibdelay has no written form"),
+        ({"octave": -12}, "ins.octave has no written form"),
+        ({"flags": 0x20}, "ins.flags bits 0x30 have no written form: they are retired in v1.11"),
+    ],
+)
+def test_the_writer_refuses_the_retired_header_bytes(fields, match):
+    song = songio.loads(SW_SONG)
+    song["records"]["ins"][1].update(fields)
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.dumps(song)
+
+
+def test_flags_are_written_without_and_read_with_the_vibrato_type():
+    song = songio.loads(SW_SONG)
+    song["records"]["ins"][1]["flags"] = 0xD0
+    text = songio.dumps(song)
+    assert "flags: 192" in text
+    assert songio.loads(text)["records"]["ins"][1]["flags"] == 0xD0
+    assert "flags" not in songio.dumps(songio.loads(SW_SONG))
+
+
+@pytest.mark.parametrize(
+    "row,match",
+    [
+        ("{ctrl: 64, wgl: 1}", "sidtab: wgl is retired in v1.8: write"),
+        ("{ctrl: 64, af: 12}", "sidtab: af is retired in v1.11: write the pitch offset"),
+    ],
+)
+def test_the_reader_names_the_retired_sidtab_columns(row, match):
+    text = doc("defmon", f"      sidtab:\n        t1: [{row}, end]", "[C4.t1]")
+    with pytest.raises(songio.SongFormatError, match=match):
         songio.loads(text)
 
 
@@ -134,7 +181,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.10", "unitracker: 1.8", "not a unitracker v1.10 document"),
+        ("unitracker: 1.11", "unitracker: 1.8", "not a unitracker v1.11 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

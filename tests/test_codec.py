@@ -321,7 +321,7 @@ DM_UNSET = {"re": -1, "fv": -1, "cp": -1}
 
 def test_defmon_row_and_freeze():
     c = codec("defmon", "sidtab")
-    raw = {"dl": 1, "wgh": 80, "wgl": 5, "ad": 0, "sr": 68, "tr": 12, "af": 0x10, "xp": 2}
+    raw = {"dl": 1, "wgh": 80, "wgl": 5, "ad": 0, "sr": 68, "tr": 12, "xp": 2}
     shared = {
         "hold": 2,
         "ctrl": "80^5",
@@ -329,7 +329,6 @@ def test_defmon_row_and_freeze():
         "ad": 0,
         "sr": 68,
         "pw": ("x", 2),
-        "af": 0x10,
     }
     assert written(raw, c) == shared
     assert c.decode(shared) == {**DM_UNSET, **raw}
@@ -381,13 +380,14 @@ def test_defmon_pitch_expression_runs_the_slide_mode():
     assert c.decode({"freq": ("x", 1)})["af"] == 0x80
 
 
-def test_defmon_note_and_offset_columns_round_trip_every_byte():
+def test_defmon_note_column_round_trips_every_byte_and_the_offset_has_no_form():
     c = codec("defmon", "sidtab")
     for byte in range(256):
         assert c.decode(written({"tr": byte}, c))["tr"] == byte
     for byte in range(0x80):
-        assert written({"af": byte}, c) == {"af": byte}
-        assert c.decode({"af": byte})["af"] == byte
+        assert c.encode({"af": byte}) is None
+    with pytest.raises(CodecError, match="sidtab: af is retired in v1.11"):
+        c.decode({"af": 12})
 
 
 def test_defmon_filter_mode_is_the_shared_mode():
@@ -427,7 +427,7 @@ def test_defmon_native_modulation_columns_have_no_shape(cols):
         ({"freq": 5}, "keys"),
         ({"pw": 256}, "values of"),
         ({"cut": 1024}, "values of"),
-        ({"freq": ("x", 1), "af": 0x10}, "keys"),
+        ({"freq": ("x", 1), "af": 0x10}, "af is retired in v1.11"),
         ({"ps": 0x85}, "keys"),
     ],
 )
@@ -450,7 +450,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.10",
+        "unitracker": "1.11",
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -490,9 +490,14 @@ def test_command_rejections():
         cmds.encode(15, 0)
     with pytest.raises(CodecError, match="can't say which"):
         cmds.encode(8, 0)
-    for name, value in [("cut", 1025), ("tempo", 2), ("run", 5), ("vib", ("ctrltab", 1))]:
+    for name, value in [("cut", 1025), ("tempo", 2), ("run", 5), ("funk", ("ctrltab", 1))]:
         with pytest.raises(CodecError, match="can't express"):
             cmds.decode(name, value)
+    for name in ("vib", "notevib"):
+        with pytest.raises(CodecError, match=f"!{name} is retired in v1.11"):
+            cmds.decode(name, ("speedtab", 1))
+    with pytest.raises(CodecError, match="no shared name"):
+        cmds.encode(4, 1)
     dm = CommandCodec(DM["commands"], DM_TYPES)
     assert dm.encode(1, 4) == ("run2", ("sidtab", 4))
     with pytest.raises(CodecError, match="can't express"):
@@ -608,9 +613,6 @@ INS_KEYS = {
         "flags",
         "ad",
         "sr",
-        "vibrato",
-        "vibdelay",
-        "octave",
         "restart",
         "ctrl",
         "pw",
@@ -620,7 +622,7 @@ INS_KEYS = {
 }
 DM_KEEP = {"af", "ps", "cp"}
 # Player-specific keys a program row may carry besides the shared ones.
-ROW_KEEP = {"defmon": DM_KEEP}
+ROW_KEEP = {"defmon": {"cp"}}
 # The list rows the format keeps: GoatTracker wavetable commands with no shared form.
 LIST_ROWS = {"ctrltab": lambda r: r[0] >= 0xF0}
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
@@ -693,7 +695,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.10 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.11 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -761,7 +763,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.10",
+                "unitracker": "1.11",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -803,7 +805,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {ref: defmon}
 song:
   - def:
@@ -895,7 +897,7 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {ref: sidwizard}
 song:
   - def:

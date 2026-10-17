@@ -53,8 +53,8 @@ record_types:
     form: map
     # freq, pw and cut are the row's pitch, pulse and ACID modulator expressions (xf, xp, xc):
     # a pitch expression runs the slide mode (af $80), a pw or cut expression replaces the
-    # pw, ps and acid columns. af below $80 is a fixed offset, kept as a column. re edits $D417
-    # for the row's voice: 0 unroutes it (route -), bit 3 keeps the routing and adds the voice and
+    # pw, ps and acid columns; af below $80, a fixed offset, is a pitch expression too.
+    # re edits $D417 for the row's voice: 0 unroutes it (route -), bit 3 keeps the routing and adds the voice and
     # the low nibble under resonance re >> 4 (route + m), any other value is the byte (res, route).
     codec:
       - when: "xf != 0 and af == 0x80 and pw < 0 and ps < 0 and acid < 0"
@@ -83,9 +83,9 @@ record_types:
             re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
             fv: "mode if has_mode else -1"
           af: 0x80
-      - when: "xf == 0 and af < 0x80 and pw < 0 and ps < 0 and acid < 0"
+      - when: "xf == 0 and af < 0 and pw < 0 and ps < 0 and acid < 0"
         keys: *columns
-        keep: [af, cp]
+        keep: [cp]
         raw: *fields
     # A frozen row ends a program.
     end: {dl: 0x80}
@@ -335,10 +335,17 @@ ghost:
 modulators:
   freq: {hi: note_hi, lo: note_lo}
   notes: [note, tbase]
+  # S[k]: the offset af below $80 adds to note k - af.
+  tables:
+    S: {size: 256, entry: "((por_lo[i + 1] | (por_hi[i + 1] << 8)) - (por_lo[i] | (por_hi[i] << 8))) & 0xFFFF"}
+  functions:
+    por: "S[y]"
   units:
+    # The offset the pitch adds to the note: the slide accumulator, or af below $80's offset.
     - name: pitch A
       key: freq
       cell: sacc
+      chip: {width: 16, value: "sacc if mode >= 0x80 or mode == 0 else por((note + mode) & 0xFF)", store: {sacc: value}}
       fire: [layer_a, pitch_acc]
       pre: procs.layer_a
       post: procs.pitch_acc
@@ -349,7 +356,7 @@ modulators:
         record: sidtab
         index: rowA
         field: xf
-        clear: {af: "-1 if af >= 0x80 else af"}
+        clear: {af: -1}
         first: {af: 0x80}
       hooks: [{at: procs.pattern, written: [sacc], pointer: [rowA]}]
     - name: pulse A

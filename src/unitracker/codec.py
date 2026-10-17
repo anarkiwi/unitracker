@@ -35,6 +35,8 @@ RETIRED = {
     "chordtab": "retired in v1.9: write a chord as a `ctrl` program of relative notes",
     "chord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
     "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
+    "notevib": "retired in v1.11: write the vibrato as `!freq:@x`",
+    "vib": "retired in v1.11: write the vibrato as `!freq:@x`",
 }
 RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
@@ -42,6 +44,7 @@ RETIRED_ROW_KEYS = {
     "re": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
     "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
     "wgl": "retired in v1.8: write the control mask as `ctrl: ^n`",
+    "af": "retired in v1.11: write the pitch offset as the row's `freq` expression",
 }
 COMMAND_NAMES = (
     "run",
@@ -56,7 +59,6 @@ COMMAND_NAMES = (
     "vtempo",
     "funk",
     "freq",
-    "vib",
     "mark",
     "restart",
     # Player-specific: SID-Wizard.
@@ -69,7 +71,6 @@ COMMAND_NAMES = (
     "idecay",
     "isustain",
     "irelease",
-    "notevib",
 )
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")

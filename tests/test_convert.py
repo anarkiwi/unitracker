@@ -19,9 +19,9 @@ INS = (
 
 
 def gt_ir(phrase: str, ins: str = INS + "}"):
-    """A one-voice goattracker2 song read from v1.10 text, the other voices silent."""
+    """A one-voice goattracker2 song read from v1.11 text, the other voices silent."""
     return songio.loads(f"""
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {{ref: goattracker2, constants: {{deftempo: 6}}}}
 song:
   - def:
@@ -225,3 +225,72 @@ def test_an_unproved_start_names_its_program_and_start():
         convert.group_texts(an, [occ], {})
     freq = occurrence("command", (0, 0, 0), {"command": 1, "cmddata": 2}, 0, (1, 2))
     assert convert.diagnosis(an.unit("command"), freq).startswith("command program the event's")
+
+
+def sw_ir(phrase: str):
+    """A one-voice sidwizard song read from v1.11 text, the other voices silent."""
+    return songio.loads(f"""
+unitracker: 1.11
+playroutine: {{ref: sidwizard}}
+song:
+  - def:
+      ins:
+        i1: {{sr: 240, ctrl: [{{ctrl: 65, note: +0}}, end]}}
+      phrase:
+        p1: {phrase}
+        p2: [off*8]
+    play: [p1, p2, p2]
+loop: ~
+""")
+
+
+@pytest.mark.parametrize("flags,cleared,driven", [(0x50, 0x50, True), (0x60, 0x50, False)])
+def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, cleared, driven):
+    ir = sw_ir("[C4.i1*8, -*4, -*4]")
+    ir["records"]["ins"][1].update(vibrato=0x33, vibdelay=4, flags=flags)
+    ir["phrases"]["p1"][2]["command"] = [0x260, 5]
+    want = regs(ir, 120)
+    out = convert.convert(ir, cache=None, workers=1)
+    ins = out["records"]["ins"][1]
+    assert (ins["vibrato"], ins["vibdelay"], ins["flags"]) == (0, 0, cleared)
+    assert bool(ins.get("freq")) == driven
+    text = songio.dumps(out)
+    assert "flags: 64" in text and "vib" not in text
+    back = songio.loads(text)
+    assert back["records"]["ins"][1]["flags"] == cleared
+    assert np.array_equal(regs(back, 120), want)
+
+
+DM_VOICE = "{cntA: 255, cntB: 255}"
+DM_AF = f"""
+unitracker: 1.11
+playroutine: {{ref: defmon}}
+song:
+  - def:
+      vinit: {{0: {DM_VOICE}, 1: {DM_VOICE}, 2: {DM_VOICE}}}
+      ginit: {{0: {{}}}}
+      sidtab:
+        t1: [{{ctrl: 65, hold: 4}}, {{ctrl: 64}}, end]
+        t2: [{{ctrl: 65, hold: 3}}, {{ctrl: 64}}, end]
+      phrase:
+        p1: [C4.t1*12, E4*12, G4.t2*12, A4.t1*12]
+    play: [p1, p1, p1]
+loop: ~
+"""
+
+
+@pytest.mark.parametrize("row,af", [(0, 12), (2, 1)])
+def test_defmon_fixed_pitch_offset_becomes_its_rows_freq_expression(row, af):
+    ir = songio.loads(DM_AF)
+    ir["records"]["sidtab"][row]["af"] = af
+    with pytest.raises(songio.SongFormatError, match="no shared-vocabulary form"):
+        songio.dumps(ir)
+    want = regs(ir, 120)
+    out = convert.convert(ir, cache=None, workers=1)
+    text = songio.dumps(out)
+    assert f"freq: 'S[N + {24 + af}]'" in text and "af" not in text
+    back = songio.loads(text)
+    assert np.array_equal(regs(back, 120), want)
+    assert {r.get("af", -1) for r in back["records"]["sidtab"].values()} == {-1, 0x80}
+    plain = regs(songio.loads(DM_AF), 120)
+    assert not np.array_equal(plain, want)
