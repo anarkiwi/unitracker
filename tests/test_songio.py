@@ -171,6 +171,48 @@ def test_writer_errors(change, match):
         songio.dumps(ir, embed=True)
 
 
+@pytest.mark.parametrize(
+    "value,match",
+    [
+        ({"tempo": 6}, "hints: unknown key 'tempo'"),
+        ({"ticks_per_step": "6"}, "hints: ticks_per_step must be a positive integer"),
+        ({"ticks_per_step": 0}, "hints: ticks_per_step must be a positive integer"),
+        ({"phrase_steps": True}, "hints: phrase_steps must be a positive integer"),
+        ([6], "hints must be a mapping"),
+    ],
+)
+def test_reader_rejects_bad_hints(value, match):
+    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc["hints"] = value
+    with pytest.raises(SongFormatError, match=match):
+        songio.loads(yaml.dump(doc))
+
+
+def test_writer_refuses_disagreeing_phrase_steps():
+    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc["hints"]["phrase_steps"] = 5
+    ir = songio.loads(yaml.dump(doc))
+    assert ir["hints"] == {"ticks_per_step": 1, "phrase_steps": 5}
+    with pytest.raises(SongFormatError, match=r"phrase_steps 5 disagrees .* lengths \[4\]"):
+        songio.dumps(ir, embed=True)
+    ir = song()
+    ir["phrases"]["c"].append({})
+    ir["hints"]["phrase_steps"] = 4
+    with pytest.raises(SongFormatError, match=r"phrase_steps 4 disagrees .* lengths \[4, 5\]"):
+        songio.dumps(ir, embed=True)
+
+
+def test_document_without_hints_reads_and_writes():
+    ir = song()
+    del ir["hints"]
+    ir["phrases"]["c"].append({})
+    text = songio.dumps(ir, embed=True)
+    assert "hints" not in yaml.safe_load(text)
+    back = songio.loads(text)
+    assert not back["hints"]
+    assert songio.dumps(back, embed=True) == text
+
+
 def edit(path, value):
     def apply(doc):
         node = doc

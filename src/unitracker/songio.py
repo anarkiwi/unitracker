@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import eventrestart, refkeys, retired, timeline
+from unitracker import eventrestart, hints, refkeys, retired, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -497,8 +497,10 @@ class _Writer:
 
     def song(self):
         """``(hints, song rows, loop)`` with definitions placed at first use."""
-        lengths = {n: len(compile_phrase(ev)) for n, ev in (self.ir["phrases"] or {}).items()}
-        rows, loop = timeline.to_rows(self.ir["tracks"], lengths)
+        rows, loop = timeline.to_rows(
+            self.ir["tracks"],
+            {n: len(compile_phrase(ev)) for n, ev in (self.ir["phrases"] or {}).items()},
+        )
         alias, compiled = self.phrases(rows)
         fixed = self._roots()
         phrase_row = self._discover(rows, alias, compiled)
@@ -509,14 +511,9 @@ class _Writer:
             item = {"def": item_defs} if item_defs else {}
             item["play"] = Flow(self._entry(e, alias, pnames) for e in row)
             out.append(item)
-        return self._hints({len(compiled[b]) for b in phrase_row}), out, loop
-
-    def _hints(self, steps):
-        """The lifter's hints, plus ``phrase_steps`` when every phrase has one length."""
-        hints = dict(self.ir.get("hints") or {})
-        if len(steps) == 1:
-            hints["phrase_steps"] = steps.pop()
-        return hints
+        reason, found = hints.written(self.ir.get("hints"), {len(compiled[b]) for b in phrase_row})
+        _refuse(reason)
+        return found, out, loop
 
     @staticmethod
     def _entry(entry, alias, pnames):
@@ -586,9 +583,9 @@ def dumps(ir: dict, embed: bool = False) -> str:
         "playroutine": writer.playroutine_entry(embed),
         "meta": FlowMap({k: meta[k] for k in ("title", "author", "released") if k in meta}),
     }
-    hints, rows, loop = writer.song()
-    if hints:
-        doc["hints"] = FlowMap(hints)
+    found, rows, loop = writer.song()
+    if found:
+        doc["hints"] = FlowMap(found)
     doc.update(writer.environment())
     doc["song"] = rows
     doc["loop"] = loop
@@ -973,7 +970,7 @@ def loads(text: str) -> dict:
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
-    _refuse(retired.document(doc))
+    _refuse(retired.document(doc) or hints.problem(doc.get("hints")))
     return _Reader(doc).read()
 
 

@@ -58,7 +58,7 @@ Top-level keys, in this order:
 | `unitracker` | `1.11`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
-| `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
+| `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
 | `clock`, `voices` | only where they differ from the playroutine's `defaults` |
 | `song` | the timeline: a list of rows |
 | `loop` | the row the song loops to, or `~` to end |
