@@ -200,7 +200,7 @@ can't express !attack:1`); the writer refuses to write a value that would not re
   the GoatTracker 2 backend), the instrument keys `speed` and `vd` (the instrument vibrato, which
   runs on every step without a command) and the record type `speedtab`, which they, `!funk`
   and the wavetable commands $F1-$F4 name.
-- **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
+- **defMON:** the sidTAB column `cp`.
 - **SID-Wizard:** the instrument key `flags` (bits 6 and 7 of the header's control byte:
   keeping the pulse and filter programs across notes).
 
@@ -420,9 +420,17 @@ filter.
 
 | unit | key | cell | fires | starts | written |
 |---|---|---|---|---|---|
-| `pitch A` | `freq` | `sacc` | every tick, from layer A's row to the pitch step | a note, or layer A armed with a program that sets `af` or `freq` | the program's first row (its `af` becomes the slide mode $80) |
+| `pitch A` | `freq` | `sacc`; with `af` below $80, the offset `S[k]` it adds | every tick, from layer A's row to the pitch step | a note, or layer A armed with a program that sets `af` or `freq` | the program's first row (it runs the slide mode $80, and the program's other rows set no `af`) |
 | `pulse A` | `pw` | `pw` | every tick, from layer A's row to the pulse step | layer A armed with a program that sets `pw`, `ps` or a pulse expression | the program's first row, replacing its `pw` and `ps` columns |
 | `acid B` | `cut` | `acc`, global | every tick, from layer B's row to the next ACID step | layer B armed with a program that sets `acid` or a cutoff expression | the program's first row, replacing its `acid` column |
+
+`af` below $80 adds a fixed offset to the note's frequency: the step `S[k]` (the table
+`S`, size 256) of note `k` = `N + 24 + af`. A lifted program writes it as its first row's
+`freq` expression, `S[N + 36]` for `af` 12, which plays in the slide mode with the same
+offset; the sidTAB column `af` is retired in v1.11 (`sidtab: af is retired in v1.11`).
+A program that changes the pitch mode after its first row, or sets `af` below $80 under
+relative-note rows, is not covered: the slide mode drops the voice's detune before the
+change, and the offset of a relative note reads the note base.
 
 ## Canonical form
 

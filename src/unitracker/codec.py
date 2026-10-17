@@ -44,6 +44,7 @@ RETIRED_ROW_KEYS = {
     "re": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
     "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
     "wgl": "retired in v1.8: write the control mask as `ctrl: ^n`",
+    "af": "retired in v1.11: write the pitch offset as the row's `freq` expression",
 }
 COMMAND_NAMES = (
     "run",

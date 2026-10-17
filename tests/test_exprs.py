@@ -110,9 +110,16 @@ def test_flags_are_written_without_and_read_with_the_vibrato_type():
     assert "flags" not in songio.dumps(songio.loads(SW_SONG))
 
 
-def test_the_reader_names_the_retired_eor_column():
-    text = doc("defmon", "      sidtab:\n        t1: [{ctrl: 64, wgl: 1}, end]", "[C4.t1]")
-    with pytest.raises(songio.SongFormatError, match="sidtab: wgl is retired in v1.8: write"):
+@pytest.mark.parametrize(
+    "row,match",
+    [
+        ("{ctrl: 64, wgl: 1}", "sidtab: wgl is retired in v1.8: write"),
+        ("{ctrl: 64, af: 12}", "sidtab: af is retired in v1.11: write the pitch offset"),
+    ],
+)
+def test_the_reader_names_the_retired_sidtab_columns(row, match):
+    text = doc("defmon", f"      sidtab:\n        t1: [{row}, end]", "[C4.t1]")
+    with pytest.raises(songio.SongFormatError, match=match):
         songio.loads(text)
 
 

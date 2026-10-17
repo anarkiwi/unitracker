@@ -259,3 +259,38 @@ def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, 
     back = songio.loads(text)
     assert back["records"]["ins"][1]["flags"] == cleared
     assert np.array_equal(regs(back, 120), want)
+
+
+DM_VOICE = "{cntA: 255, cntB: 255}"
+DM_AF = f"""
+unitracker: 1.11
+playroutine: {{ref: defmon}}
+song:
+  - def:
+      vinit: {{0: {DM_VOICE}, 1: {DM_VOICE}, 2: {DM_VOICE}}}
+      ginit: {{0: {{}}}}
+      sidtab:
+        t1: [{{ctrl: 65, hold: 4}}, {{ctrl: 64}}, end]
+        t2: [{{ctrl: 65, hold: 3}}, {{ctrl: 64}}, end]
+      phrase:
+        p1: [C4.t1*12, E4*12, G4.t2*12, A4.t1*12]
+    play: [p1, p1, p1]
+loop: ~
+"""
+
+
+@pytest.mark.parametrize("row,af", [(0, 12), (2, 1)])
+def test_defmon_fixed_pitch_offset_becomes_its_rows_freq_expression(row, af):
+    ir = songio.loads(DM_AF)
+    ir["records"]["sidtab"][row]["af"] = af
+    with pytest.raises(songio.SongFormatError, match="no shared-vocabulary form"):
+        songio.dumps(ir)
+    want = regs(ir, 120)
+    out = convert.convert(ir, cache=None, workers=1)
+    text = songio.dumps(out)
+    assert f"freq: 'S[N + {24 + af}]'" in text and "af" not in text
+    back = songio.loads(text)
+    assert np.array_equal(regs(back, 120), want)
+    assert {r.get("af", -1) for r in back["records"]["sidtab"].values()} == {-1, 0x80}
+    plain = regs(songio.loads(DM_AF), 120)
+    assert not np.array_equal(plain, want)
