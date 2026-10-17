@@ -8,6 +8,7 @@ from pydefmon import DefmonPlayer
 from pygoattracker import decompile_sid
 from pysidwizard import SWMPlayer, parse_sid_song
 
+from conftest import gt_tune
 from unitracker import defmon, sidwizard, songio
 from unitracker.goattracker import lift
 from unitracker.vm import SongPlayer
@@ -90,3 +91,41 @@ def test_lift_is_deterministic(metal_warrior, crosseyed, csillag):
     assert songio.dumps(lift(dec)) == songio.dumps(lift(dec))
     raw = crosseyed.read_bytes()
     assert songio.dumps(defmon.lift(raw)) == songio.dumps(defmon.lift(raw))
+
+
+GT_REST = (None, 0, 0, 0)
+GT_FILTER_TUNES = {
+    "wavetable": (
+        {"wave": [(0x41, 0), (0xFB, 0xA1), (0xFC, 0x40), (0xFD, 0x07), (0x21, 0x80), (0xFF, 5)]},
+        {0x16: 0x40, 0x17: 0xA1, 0x18: 0x07},
+    ),
+    "pattern": (
+        {
+            "wave": [(0x41, 0), (0xFF, 0)],
+            "rows": [(24, 1, 0xB, 0xA1), *[GT_REST] * 3, (None, 0, 0xC, 0x50), *[GT_REST] * 3]
+            + [(None, 0, 0xD, 0x09), *[GT_REST] * 7],
+        },
+        {0x16: 0x50, 0x17: 0xA1, 0x18: 0x09},
+    ),
+    "program-stop": (
+        {
+            "wave": [(0x41, 0), (0xFA, 1), (0x03, 0x80), (0xFB, 0), (0x41, 0x80), (0xFF, 5)],
+            "filt": [(0x90, 0xF1), (0x00, 0x40), (0x10, 0x02), (0xFF, 3)],
+        },
+        {0x17: 0xF1, 0x18: 0x1F},
+    ),
+}
+
+
+@pytest.mark.parametrize("tune,regs", GT_FILTER_TUNES.values(), ids=GT_FILTER_TUNES)
+def test_goattracker_filter_writes_sound_after_the_filter_step(tune, regs):
+    dec, native = gt_tune(**tune)
+    text = songio.dumps(lift(dec))
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    theirs = np.asarray(native.render_grid(200), dtype=np.uint8)
+    player = SongPlayer(song)
+    assert player.mismatch(theirs) is None
+    begun = min(s for s in player.starts if s is not None)
+    for reg, value in regs.items():
+        assert value in theirs[begun:, reg]

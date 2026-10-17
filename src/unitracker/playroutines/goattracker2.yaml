@@ -227,6 +227,10 @@ global:
   filterctrl: {width: 8}
   filtertype: {width: 8}
   masterfader: {width: 8, init: 0x0F}
+  # $D416-$D418 as the filter step writes them, before the channels run.
+  fcutreg: {width: 8}
+  fctrlreg: {width: 8}
+  fmodereg: {width: 8, init: 0x0F}
   fptr: {width: 8}
   ftime: {width: 8}
   funk0: {width: 8, init: 8}
@@ -486,10 +490,11 @@ tick:
   - if: "state == 1"
     then: [{set: {state: 2}}, {return: true}]
   - call: filter_exec
+  - set: {fcutreg: filtercutoff, fctrlreg: filterctrl, fmodereg: "filtertype | masterfader"}
   - for_voices: [{call: play_channel}]
 
 ghost:
-  global: {0x15: "0", 0x16: filtercutoff, 0x17: filterctrl, 0x18: "filtertype | masterfader"}
+  global: {0x15: "0", 0x16: fcutreg, 0x17: fctrlreg, 0x18: fmodereg}
   voice:
     0: "freq & 0xFF"
     1: "freq >> 8"
