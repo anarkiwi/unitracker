@@ -35,28 +35,37 @@ def column(marks: dict, name: str, events: list, arr: np.ndarray) -> np.ndarray:
     return np.column_stack([arr, out])
 
 
-def _starts(event: dict, legato) -> bool:
+def starts(event: dict, legato) -> bool:
+    """Whether ``event`` starts its note: a note without the ``legato`` command."""
     note = event.get("note")
     if not isinstance(note, int) or isinstance(note, bool):
         return False
     return legato is None or all(code != legato for code, _ in event_commands(event))
 
 
+def order(track: dict) -> list[tuple[int, str]]:
+    """``(play, phrase)`` for each phrase a voice plays, repeats written out, twice through its
+    loop; ``play`` is the index of the play that plays it."""
+    plays, loop = track["plays"], track.get("loop")
+    again = range(loop, len(plays)) if loop is not None else range(0)
+    return [
+        (k, plays[k]["phrase"])
+        for k in [*range(len(plays)), *again]
+        for _ in range(int(plays[k].get("repeat", 1)))
+    ]
+
+
 def notes(tracks, phrases: dict, base: int, legato):
     """``(phrase, index, instrument, selects)`` for each note that starts an instrument, per voice
     twice through its loop; the instrument is the event's, else the voice's last, 0 for none."""
     for trk in tracks:
-        plays, loop = trk["plays"], trk.get("loop")
-        order = [p["phrase"] for p in plays for _ in range(int(p.get("repeat", 1)))]
-        if loop is not None:
-            order += [p["phrase"] for p in plays[loop:] for _ in range(int(p.get("repeat", 1)))]
         current = 0
-        for name in order:
+        for _, name in order(trk):
             for k, event in enumerate(phrases[name]):
                 selects = bool(event.get("instrument"))
                 if selects:
                     current = int(event["instrument"]) - base
-                if _starts(event, legato):
+                if starts(event, legato):
                     yield name, k, current, selects
 
 
