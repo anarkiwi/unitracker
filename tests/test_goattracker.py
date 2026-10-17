@@ -296,9 +296,12 @@ def test_a_waveform_command_whose_pause_is_unheard_is_a_waveform_row():
             r"ctrltab rows \[2\] pause the tick's continuous effect, which the song hears at tick",
         ),
         ([(0x41, 0), (0xF7, 0xE1), (0xFF, 2)], None, r"row 2: \$F7 sets waveform \$E1, which no"),
+        ([(0x41, 0), (0xF0, 0), (0xFF, 2)], None, r"row 2: wavetable command \$F0 stops the"),
+        ([(0x41, 0), (0xF8, 1), (0xFF, 2)], None, r"row 2: wavetable command \$F8 stops the"),
+        ([(0x41, 0), (0xFE, 1), (0xFF, 2)], None, r"row 2: wavetable command \$FE stops the"),
     ],
 )
-def test_a_heard_pause_and_an_unwritable_waveform_are_named(wave, rows, match):
+def test_wavetable_rows_without_a_form_are_named(wave, rows, match):
     dec, _ = gt_tune(wave, rows=rows, speed=[(0, 0x20)])
     with pytest.raises(gt.LiftError, match=match):
         gt.lift(dec)

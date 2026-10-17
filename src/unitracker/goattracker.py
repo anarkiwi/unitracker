@@ -104,6 +104,8 @@ _INS_FIELDS = (
     ("vd", "vibrato_delay"),
 )
 NO_GATEOFF, NO_PRESET = 0x40, 0x80
+# The wavetable commands the playroutine stops on.
+STOPS = (C.CMD_DONOTHING, C.CMD_SETWAVEPTR, C.CMD_FUNKTEMPO)
 
 
 def restart_rows(timer: int, first: int, adparam: int) -> list[dict]:
@@ -285,9 +287,12 @@ def _unpaused(row: dict) -> dict | None:
     """The row that does what wavetable command row ``row`` does but pause the tick's
     continuous effect, or None when it does more.
 
-    $F7 sets the waveform, as a waveform row does.
+    $F7 sets the waveform, as a waveform row does. Raises LiftError for the commands the
+    playroutine stops on.
     """
     w, n = row["w"], row["n"]
+    if w >= C.WAVECMD and w & 0x0F in STOPS:
+        raise LiftError(f"wavetable command ${w:02X} stops the playroutine: not lifted")
     if w == 0xF0 | C.CMD_SETWAVE:
         if n >= C.WAVESILENT:
             raise LiftError(f"$F7 sets waveform ${n:02X}, which no waveform row sets")
