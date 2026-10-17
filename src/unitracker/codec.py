@@ -183,8 +183,9 @@ class _Shape:
     """One way to write a row: forward keys, inverse raw fields, fields kept as they are.
 
     A ``route`` key's ``rel`` gives its relation to the program's voice (see
-    :func:`route_value`). A raw field given as ``{search: [lo, hi]}`` is the first value in that range whose row
-    writes back as the written one. A key's ``expr`` names the raw field of its expression.
+    :func:`route_value`). A raw field given as ``{search: [lo, hi]}`` is the first value in
+    that range whose row writes back as the written one. A key's ``expr`` names the raw field
+    of its expression.
     """
 
     # pylint: disable=too-few-public-methods

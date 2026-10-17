@@ -306,20 +306,7 @@ class _Writer:
         shared = codec.encode(row) if codec is not None else None
         refs = dict(self._refs(rtype, row))
         if shared is not None:
-            self._reads_back(codec, shared)
-            out, number = {}, codec.expr_keys()
-            for k, v in shared.items():
-                if k == "note":
-                    v = Atom(note_text(*v))
-                elif k == "route":
-                    v = written_value(k, v)
-                elif is_expr(v):
-                    v = self.ref_value(self.key(EXPR, v[1]))
-                    v = str(v) if number.get(k) else v
-                out[k] = v
-            fields = _expr_fields(codec)
-            out.update((f, self.ref_value(k)) for f, k in refs.items() if f not in fields)
-            return FlowMap(out)
+            return self._shared_row(codec, shared, refs)
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
         values = {}
@@ -341,6 +328,23 @@ class _Writer:
         while out and fields[len(out) - 1] not in values:
             out.pop()
         return Flow(out)
+
+    def _shared_row(self, codec, shared: dict, refs: dict) -> FlowMap:
+        """A row's shared-vocabulary form: notes named, expressions referenced, refs resolved."""
+        self._reads_back(codec, shared)
+        out, number = {}, codec.expr_keys()
+        for k, v in shared.items():
+            if k == "note":
+                v = Atom(note_text(*v))
+            elif k == "route":
+                v = written_value(k, v)
+            elif is_expr(v):
+                v = self.ref_value(self.key(EXPR, v[1]))
+                v = str(v) if number.get(k) else v
+            out[k] = v
+        fields = _expr_fields(codec)
+        out.update((f, self.ref_value(k)) for f, k in refs.items() if f not in fields)
+        return FlowMap(out)
 
     def _reads_back(self, codec, shared):
         """Raise, naming the key, unless the player can read ``shared`` back."""
