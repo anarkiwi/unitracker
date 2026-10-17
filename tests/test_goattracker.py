@@ -208,7 +208,7 @@ def test_lift_document(metal_warrior):
 
 
 COMMANDS_SONG = """
-unitracker: 1.15
+unitracker: 1.16
 playroutine: {ref: goattracker2, constants: {deftempo: 6}}
 song:
   - def:
@@ -326,3 +326,46 @@ def test_wavetable_rows_without_a_form_are_named(wave, rows, match):
     dec, _ = gt_tune(wave, rows=rows, speed=[(0, 0x20)])
     with pytest.raises(gt.LiftError, match=match):
         gt.lift(dec)
+
+
+REST = (None, 0, 0, 0)
+VIBRATO = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "vibrato_param": 1}
+
+
+def vibrato_lift(delay: int, rows: list, second: dict | None = None) -> tuple[dict, list]:
+    """``(instruments, first phrase)`` of a lifted tune whose instrument 1 has a vibrato."""
+    ins = [{**VIBRATO, "vibrato_delay": delay}] + ([second] if second else [])
+    text = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], ins, rows, speed=[(2, 0x20), (0x82, 3)]))
+    assert "speed" not in text and "vd:" not in text
+    first = yaml.safe_load(text)["song"][0]["def"]
+    return first["ins"], first["phrase"]["p1"]
+
+
+@pytest.mark.parametrize(
+    "delay,phase", [(0, "[(φ - 2) % 8 >= 4]"), (3, "[φ >= 2]"), (40, "[φ >= 38]")]
+)
+def test_the_instrument_vibrato_is_the_instrument_freq(delay, phase):
+    rows = [(24, 1, 0, 0)] + [REST] * 7 + [(31, 1, 0, 0), REST, (36, 1, 0, 0)] + [REST] * 5
+    ins, atoms = vibrato_lift(delay, rows)
+    assert phase in ins["i1"]["freq"] and not any("!" in a for a in atoms)
+
+
+def test_a_vibrato_resumed_after_a_command_is_each_steps_freq():
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 0, 1, 1)] + [REST] * 3 + [(31, 1, 0, 0)]
+    _, atoms = vibrato_lift(3, rows + [REST] * 7)
+    assert atoms == ["C2.i1*4", "-!freq:@x1", "-!freq:@x2", "-!freq:@x2", "-!freq:@x2", "G2.i1*8"]
+
+
+def test_an_instrument_change_resumes_the_new_instruments_vibrato():
+    second = {**VIBRATO, "vibrato_param": 2}
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 2, 0, 0)] + [REST] * 3 + [(36, 2, 0, 0)]
+    ins, atoms = vibrato_lift(3, rows + [REST] * 7, second)
+    assert "F((N + 1) % 128)" in ins["i2"]["freq"] and "[φ >= 2]" in ins["i1"]["freq"]
+    assert atoms == [
+        "C2.i1*4",
+        "-.i2!freq:@x1",
+        "-!freq:@x1",
+        "-!freq:@x1",
+        "-!freq:@x1",
+        "C3.i2*8",
+    ]

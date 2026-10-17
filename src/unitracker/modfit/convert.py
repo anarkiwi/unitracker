@@ -11,7 +11,6 @@ import json
 import pickle
 from pathlib import Path
 
-import numpy as np
 import sympy
 
 from unitracker import reach
@@ -22,7 +21,7 @@ from unitracker.modfit.replay import Replay, Stepper
 from unitracker.modulation import declared
 from unitracker.songio import codecs
 from unitracker.records import record_types
-from unitracker.vm import SongPlayer
+from unitracker.vm import SongPlayer, first_mismatch, fold_empty
 from unitracker.xexpr import ExpressionError, source
 
 CACHE = Path("out/modfit/cache")
@@ -558,27 +557,29 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
 
     # -- event sites --
     def event_at(self, instance: tuple) -> tuple:
-        """``(phrase name, event index)`` of an instance, or None when no event starts there."""
+        """``(phrase name, step)`` of an instance, or None past its phrase's end."""
         voice, count, step = instance
         play = self.ir["tracks"][voice]["plays"][self.obs["plays"][voice][count]]
-        events, pos = self.ir["phrases"][play["phrase"]], 0
-        for k, event in enumerate(events):
-            if pos == step:
-                return play["phrase"], k
-            pos += int(event.get("steps", 1))
-        return None
+        if step >= len(_steps(self.ir["phrases"][play["phrase"]])):
+            return None
+        return play["phrase"], step
+
+    def _step_event(self, where: tuple) -> dict:
+        """The event a phrase plays on a step, an empty one inside a folded event."""
+        return _steps(self.ir["phrases"][where[0]])[where[1]]
 
     def edit(self, instance: tuple) -> dict:
-        """The instance's own copy of its event, to be written into its phrase's variant."""
+        """The instance's own copy of its step's event, to be written into its phrase's variant."""
         if instance not in self.events:
             where = self.event_at(instance)
             if where is None:
-                raise ConversionError(f"no event starts at {instance}")
-            self.events[instance] = copy.deepcopy(self.ir["phrases"][where[0]][where[1]])
+                raise ConversionError(f"no step plays at {instance}")
+            self.events[instance] = copy.deepcopy(self._step_event(where))
         return self.events[instance]
 
     def event_sites(self) -> None:
-        """Each event's native modulator commands as its expression's ``!freq`` command."""
+        """Each event's native modulator commands as its expression's ``!freq`` command, and each
+        commandless step a driven occurrence spans after the voice's first note."""
         # pylint: disable=too-many-locals
         occs = self.obs["occurrences"]
         legato = self.spec.get("legato") or {}
@@ -589,10 +590,11 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             where = self.event_at(instance)
             if where is None:
                 continue
-            event = self.ir["phrases"][where[0]][where[1]]
+            event = self._step_event(where)
             native = [c for c in _cmds(event) if int(c[0]) in spec.get("commands", ())]
             started = occ.instance == instance
-            if not (native or (started and text is not None)):
+            onward = not _cmds(event) and occ.start.get(self.pr.get("onset"), 1)
+            if not (native or (text is not None and (started or onward))):
                 continue
             ev = self.edit(instance)
             cmds = [c for c in _cmds(ev) if int(c[0]) not in spec.get("commands", ())]
@@ -622,7 +624,9 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             counts = self.obs["plays"][voice]
             n, loop = len(track["plays"]), track.get("loop")
             by_pos = {}
-            for count, pos in enumerate(counts):
+            # A last pass the window cuts short repeats a whole pass a period earlier.
+            last = len(counts) - 1 if counts.count(counts[-1]) > 1 else len(counts)
+            for count, pos in enumerate(counts[:last]):
                 cycle = 0 if count < n else 1 + (count - n) // max(1, n - (loop or 0))
                 edits = per.get((voice, count), {})
                 frozen = tuple(sorted((s, _frozen(e)) for s, e in edits.items()))
@@ -654,16 +658,12 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         if not changed:
             return phrase
         if key not in variants:
-            events = copy.deepcopy(self.ir["phrases"][phrase])
-            steps, pos = {}, 0
-            for k, event in enumerate(events):
-                steps[pos] = k
-                pos += int(event.get("steps", 1))
+            events = copy.deepcopy(_steps(self.ir["phrases"][phrase]))
             for step, event in edits.items():
-                events[steps[step]] = copy.deepcopy(event)
+                events[step] = copy.deepcopy(event)
             names[phrase] = names.get(phrase, 0) + 1
             variants[key] = f"{phrase}~{names[phrase]}"
-            self.ir["phrases"][variants[key]] = events
+            self.ir["phrases"][variants[key]] = fold_empty(events)
         return variants[key]
 
 
@@ -673,6 +673,15 @@ def _integer(text: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _steps(events: list) -> list:
+    """A phrase's events one per step: a folded event's later steps are empty events."""
+    out = []
+    for event in events:
+        out.append({k: v for k, v in event.items() if k != "steps"})
+        out += [{} for _ in range(int(event.get("steps", 1)) - 1)]
+    return out
 
 
 def _cmds(event: dict) -> list:
@@ -728,19 +737,19 @@ class Conversion:
 
 
 def analyse(ir: dict, cache: Path | None = CACHE, workers=None) -> Conversion:
-    """A song's conversion, verified: its expressions play its native register grid exactly
-    from start to its state's recurrence and one period more."""
+    """A song's conversion, verified: its expressions play its native register grid exactly,
+    each voice from its first note (see ``first_mismatch``), to its state's recurrence and one
+    period more."""
     ir = expand_repeats(ir)
     ticks = window(ir)
     obs = observe(ir, ticks, cache)
     found, texts = derive_all(ir, obs, cache, workers)
     out = Rewrite(ir, obs, texts).run()
-    want = SongPlayer(ir).render_grid(ticks)
-    got = SongPlayer(out).render_grid(ticks)
-    diff = np.argwhere(want != got)
-    if len(diff):
-        tick, reg = (int(x) for x in diff[0])
-        raise ConversionError(f"the expressions play differently: tick {tick}, register {reg}")
+    native = SongPlayer(ir)
+    want = native.render_grid(ticks)
+    bad = first_mismatch(SongPlayer(out).render_grid(ticks), want, native.starts)
+    if bad is not None:
+        raise ConversionError(f"the expressions play differently: tick {bad[0]}, register {bad[1]}")
     return Conversion(ir, ticks, obs, found, texts, out)
 
 

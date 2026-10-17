@@ -39,8 +39,9 @@ record_types:
     none: 0
     pin: [1]
     form: map
-    fields: {ad: 0, sr: 0, ctrl: 0, pw: 0, filter: 0, speed: 0, vd: 0, restart: 0}
-    refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, restart: restart}
+    # speed and vd: the native instrument vibrato, which the instrument's freq replaces.
+    fields: {ad: 0, sr: 0, ctrl: 0, pw: 0, filter: 0, speed: 0, vd: 0, freq: 0, restart: 0}
+    refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, freq: x, restart: restart}
   # Hard restart: a lookahead row, read hold ticks before the note (the gate timer), that
   # may turn the gate off and then preset the envelope to adparam; then the note's first-tick
   # row, which writes the first waveform with the gate on, or only the gate. -1: absent.
@@ -247,6 +248,8 @@ voice:
   ptime: {width: 8}
   vibtime: {width: 8}
   vibdelay: {width: 8}
+  # 1 once the command unit has fired since the note started.
+  fired: {width: 1}
   command: {width: 8}
   cmddata: {width: 8}
   newcommand: {width: 8}
@@ -341,8 +344,9 @@ procs:
     - set: {wc: wc}
   wstep:
     - run: {record: wavecmd, index: wc, field: do}
+  # The voice's registers hold its first note once a wavetable row sets its frequency.
   wnote:
-    - set: {freq: "ftab[n]", vibtime: 0, lastnote: n, skip: 1}
+    - set: {freq: "ftab[n]", vibtime: 0, lastnote: n, skip: 1, onset: 1}
   porta_reached:
     - set: {freq: "ftab[note & 0x7F]", vibtime: 0, lastnote: note}
   toneporta:
@@ -399,7 +403,7 @@ procs:
         - set: {ftime: "ftime - 1"}
         - {if: "ftime == 0", then: [{set: {fptr: "filttab[fptr].next"}}]}
   new_note_init:
-    - set: {onset: 1, note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "ins[ii].speed"}
+    - set: {note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "ins[ii].speed", fired: 0}
     - {if: legato, then: [{return: true}]}
     - set: {hr: "hrnote(ins[ii].restart)"}
     - if: "restart[hr].ctrl >= 0"
@@ -447,7 +451,7 @@ procs:
             - {if: "gatetimer > tick", then: [{set: {state: 1}}]}
         - call: wave_exec
     - if: "not skip and tick != 0"
-      then: [{run: {record: tickn, index: command, field: do}}]
+      then: [{run: {record: tickn, index: command, field: do}}, {set: {fired: 1}}]
     - set: {fetchtick: "tick == gatetimer"}
     - if: "not fetchtick and pptr != 0"
       then:
@@ -505,11 +509,15 @@ modulators:
       fire: [{run: {record: tickn, index: command, field: do}}]
       pre: records.tickn.do
       label: [command, cmddata]
-      x: "cmddata if command == 16 else 0"
+      # A step without a command runs the instrument's freq, as the native instrument vibrato.
+      x: "cmddata if command == 16 else (ins[ii].freq if command == 0 else 0)"
       command: 16
       commands: [1, 2, 3, 4]
+      site: {when: "command == 0 and onset and not fired", record: ins, index: ii, field: freq}
+      retire: {record: ins, clear: {speed: 0, vd: 0}}
       hooks:
         - {at: records.tick0.do, key: [command, cmddata]}
+        - {at: procs.new_note_init, written: [vibdelay]}
         - {at: record_types.ctrltab.do, written: [lastnote]}
     - name: wave
       key: freq

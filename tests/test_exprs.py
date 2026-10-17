@@ -1,4 +1,4 @@
-"""v1.15 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.16 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.15
+unitracker: 1.16
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -68,6 +68,8 @@ GT_SONG = doc(
         ("sidwizard", "{vibdelay: 4}", "ins.vibdelay is retired in v1.11"),
         ("sidwizard", "{octave: -12}", "ins.octave is retired in v1.11: a note is written as"),
         ("sidwizard", "{flags: 192}", "ins.flags is retired in v1.13"),
+        ("goattracker2", "{speed: 1}", "ins.speed is retired in v1.16: write the vibrato as"),
+        ("goattracker2", "{vd: 3}", "ins.vd is retired in v1.16"),
     ],
 )
 def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
@@ -99,6 +101,21 @@ def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
 def test_the_writer_refuses_the_retired_header_bytes(fields, match):
     song = songio.loads(SW_SONG)
     song["records"]["ins"][1].update(fields)
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.dumps(song)
+
+
+@pytest.mark.parametrize(
+    "fields,match",
+    [
+        ({"vd": 3}, "ins.vd has no written form: it is retired in v1.16"),
+        ({"speed": 1}, "ins.speed"),
+    ],
+)
+def test_the_writer_refuses_the_goattracker_instrument_vibrato(fields, match):
+    song = songio.loads(GT_SONG)
+    song["records"]["ins"][1].update(fields)
+    song["records"]["speedtab"] = {1: {"l": 0, "r": 32}}
     with pytest.raises(songio.SongFormatError, match=match):
         songio.dumps(song)
 
@@ -174,7 +191,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.15", "unitracker: 1.8", "not a unitracker v1.15 document"),
+        ("unitracker: 1.16", "unitracker: 1.8", "not a unitracker v1.16 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

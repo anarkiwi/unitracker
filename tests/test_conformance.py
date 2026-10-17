@@ -1,4 +1,4 @@
-"""Lifted songs, written as v1.15 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.16 text and read back, play identically to their native players."""
 
 import dataclasses
 
