@@ -299,50 +299,63 @@ def canon(e):
 
 
 def on_domain(e, r: int, m: int, lo: int = 0, hi: int | None = None):
-    """``e`` for ``v ≡ r (mod m)`` in ``[lo, hi]``: floors and remainders of ``a·v + c`` with
-    ``m·a`` divisible by their divisor taken as linear (a remainder becomes a constant), and a
-    remainder of ``a·v + c`` that stays in ``[0, divisor)`` dropped."""
+    """``e`` for ``v ≡ r (mod m)`` in ``[lo, hi]``, its floors of ``a·v + c`` (``m·a`` an
+    integer) written linearly where the result keeps integer coefficients: in a bracket (scaled
+    to integers), under a multiple of ``m`` or a remainder; and a remainder of ``a·v + c`` that
+    stays in ``[0, divisor)`` dropped."""
     if V not in e.free_symbols:
         return e
 
+    def exact(x):
+        y = sympy.expand(x.args[0])
+        if not (y.free_symbols <= {V} and y.is_polynomial(V)) or sympy.degree(y, V) != 1:
+            return None
+        a, c = y.coeff(V, 1), y.coeff(V, 0)
+        return a * (V - r) + sympy.floor(a * r + c) if (a * m).is_integer else None
+
     def linear(x):
-        x = sympy.expand(x)
-        if not (x.free_symbols <= {V} and x.is_polynomial(V)):
-            return None
-        p = sympy.Poly(x, V)
-        if p.degree() > 1:
-            return None
-        a, c = (p.all_coeffs() + [0])[:2] if p.degree() == 1 else (0, p.all_coeffs()[0])
-        return (a, c) if a and (a * m).is_integer else None
+        x = x.replace(lambda z: isinstance(z, sympy.floor) and exact(z) is not None, exact)
+        return sympy.expand(x)
 
-    def floor_of(x):
-        lin = linear(x.args[0])
-        if lin is None:
-            return x
-        a, c = lin
-        return a * (V - r) + sympy.floor(a * r + c)
+    def integral(x) -> bool:
+        return all(t.as_coeff_Mul()[0].is_Integer for t in sympy.Add.make_args(sympy.expand(x)))
 
-    def mod_of(x):
-        arg, k = x.args
-        if not k.is_Integer:
-            return x
-        if hi is not None and arg.free_symbols <= {V} and arg.is_polynomial(V):
-            ends = [arg.subs(V, lo), arg.subs(V, hi)]
-            if sympy.degree(arg, V) <= 1 and 0 <= min(ends) and max(ends) < k:
-                return arg
-        lin = linear(arg / k)
-        return x if lin is None else sympy.Mod(lin[0] * k * r + lin[1] * k, k)
+    def scaled(x):
+        y = linear(x)
+        return y if integral(y) else x
 
-    def scaled_mod(x):
+    def bracket(z):
+        rel = z.args[0]
+        y = linear(rel.lhs - rel.rhs)
+        dens = [t.as_coeff_Mul()[0].q for t in sympy.Add.make_args(y)]
+        y = sympy.expand(y * functools.reduce(sympy.ilcm, dens, 1))
+        return (eq if isinstance(rel, sympy.Eq) else ge)(y, 0) if integral(y) else z
+
+    def product(x):
         c, rest = x.as_coeff_Mul()
-        if c.is_Integer and c > 0 and isinstance(rest, sympy.Mod) and rest.args[1].is_Integer:
-            return sympy.Mod(sympy.expand(c * rest.args[0]), c * rest.args[1])
-        return x
+        if not (c.is_Integer and c > 0) or not rest.has(sympy.floor, sympy.Mod):
+            return x
+        if isinstance(rest, sympy.Mod) and rest.args[1].is_Integer:
+            return sympy.Mod(scaled(c * rest.args[0]), c * rest.args[1])
+        return scaled(x)
 
-    if m > 1:
-        e = e.replace(lambda x: isinstance(x, sympy.floor), floor_of)
-    e = e.replace(lambda x: x.is_Mul, scaled_mod)
-    return sympy.expand(e.replace(lambda x: isinstance(x, sympy.Mod), mod_of))
+    def dropped(x):
+        arg, k = x.args
+        if hi is None or not k.is_Integer or not (arg.free_symbols <= {V} and arg.is_polynomial(V)):
+            return x
+        if sympy.degree(arg, V) > 1:
+            return x
+        ends = [arg.subs(V, lo), arg.subs(V, hi)]
+        return arg if 0 <= min(ends) and max(ends) < k else x
+
+    e = e.replace(lambda x: isinstance(x, Iv), bracket)
+    e = e.replace(lambda x: x.is_Mul, product)
+
+    def remainder(x):
+        return dropped(sympy.Mod(scaled(x.args[0]), x.args[1])) if x.args[1].is_Integer else x
+
+    e = e.replace(lambda x: isinstance(x, sympy.Mod), remainder)
+    return sympy.expand(e)
 
 
 # ---- text ---------------------------------------------------------------------------

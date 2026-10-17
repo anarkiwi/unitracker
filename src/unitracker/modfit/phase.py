@@ -108,8 +108,9 @@ def player_form(song: dict, spec: dict | None = None) -> Player:
 class Lift:
     """Form terms of one player as grammar expressions: the cell is ``v``, ``N`` the note."""
 
-    def __init__(self, form: Form, cell: str, freq: dict, extra: dict | None = None):
+    def __init__(self, form: Form, cell: str, freq: dict, extra: dict | None = None, alias=None):
         self.form, self.cell, self.freq = form, cell, freq
+        self.alias = dict(alias or {})
         self.offset = int(form.pr.get("note_offset", 0))
         self.extra = dict(extra or {})
         self.unknown = set()
@@ -132,6 +133,8 @@ class Lift:
         if isinstance(t, str):
             if t == self.cell:
                 return G.V
+            if t in self.alias:
+                return self.alias[t]
             if t == "N":
                 return G.N
             if t in self.extra:
@@ -420,9 +423,19 @@ class Machine:  # pylint: disable=too-many-instance-attributes
             m *= 2
         return lo, hi, lo % m, m
 
+    def atom(self, state: dict):
+        """``(name, lo, m)`` of the index atom ``t`` of a chip value ``lo + m·t`` in ``state``,
+        ``t`` in ``[0, (hi - lo) / m]``; None without a chip map or for a pair."""
+        if not self.chip or self.paired:
+            return None
+        lo, hi, _, m = (state[c] for c in DOMAIN)
+        name = f"_t{(hi - lo) // m}"
+        self.form.ranges[name] = (0, (hi - lo) // m)
+        return name, lo, m
+
     def bounds(self, state: dict) -> tuple:
         """The conditions of the chip value's domain in ``state``."""
-        if not self.chip:
+        if not self.paired:
             return ()
         lo, hi, r, m = (state[c] for c in DOMAIN)
         f, x = self.form, self.cell
@@ -443,12 +456,14 @@ class Machine:  # pylint: disable=too-many-instance-attributes
 
     def _step(self, state: dict) -> list:
         f, out = self.form, []
-        known = self.bounds(state)
+        known, index = self.bounds(state), self.atom(state)
+        if index is not None:
+            state = {**state, VALUE: f.add(index[1], f.scale(index[2], index[0]))}
         for conds, final in f.paths(self.actions, known, state):
             conds = conds[len(known) :]
             fused = f.fuse(conds, final) if self.cell in f.pair else final
             nxt = tuple((c, final.get(c, state.get(c, c))) for c in self.control)
-            bad = [c for c, val in nxt if self.parts & atoms(val)]
+            bad = [c for c, val in nxt if (self.parts | {index and index[0]}) & atoms(val)]
             if bad:
                 raise ValueError(f"control {', '.join(bad)} reads the value")
             value = fused.get(self.cell, self.cell)
@@ -733,9 +748,10 @@ def _join(head: list, tail, start: int):
 class Prover:
     """z3 obligations of expressions against the player's paths of one unit."""
 
-    def __init__(self, machine: Machine, freq: dict, extra: dict | None = None, domain=None):
+    def __init__(self, machine: Machine, freq: dict, extra=None, domain=None, index=None):
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
         self.machine, self.freq, self.extra = machine, freq, dict(extra or {})
-        self.domain = domain
+        self.domain, self.index = domain, index
         self.form = machine.form
         self.offset = int(self.form.pr.get("note_offset", 0))
 
@@ -765,7 +781,9 @@ class Prover:
             env["F"] = lambda x: 256 * hi(x + self.offset) + lo(x + self.offset)
         for name in f.tables:
             env.setdefault(name, table(name))
-        if self.domain is not None:
+        if self.index is not None:
+            env["v"] = self.index[1] + self.index[2] * smt.term(self.index[0])
+        elif self.domain is not None:
             lo, hi, r, m = self.domain
             v = env["v"]
             smt.solver.add(v >= lo, v <= hi, z3.URem(v, m) == r)
@@ -902,7 +920,9 @@ class Derived:
 def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = None) -> Derived:
     # pylint: disable=too-many-locals
     """The phase and value expressions of ``machine`` from control ``start``, proved."""
-    lift = Lift(machine.form, machine.cell, freq, extra)
+    index = machine.atom(dict(start))
+    alias = {index[0]: sympy.floor((G.V - index[1]) / index[2])} if index else None
+    lift = Lift(machine.form, machine.cell, freq, extra, alias)
     try:
         graph = machine.explore(start)
     except ValueError as exc:
@@ -918,7 +938,7 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
             states=len(graph.nodes), error="more than one phase: a state advances on two tests"
         )
     out = Derived(order=o, states=len(graph.nodes))
-    prover = Prover(machine, freq, extra, (lo, hi, r, m))
+    prover = Prover(machine, freq, extra, (lo, hi, r, m), index)
     domain = (("v", lo, hi), ("N", 0, (1 << machine.form.width["N"]) - 1))
     forms = value_forms(values, o, machine.mask)
     out.value = G.polar(G.shortest(forms), domain)
