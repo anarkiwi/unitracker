@@ -8,13 +8,14 @@ constants: {tempol: 6, tempor: 6}
 defaults:
   clock: {cycles_per_tick: 19656, clock_hz: 985248}
   voices: 3
-  registers: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15]
 tables:
   freqlo: [7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
   freqhi: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255, 7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
   exptab: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255]
 instrument: {type: ins, base: 0}
 note_offset: 1
+onset: onset
+started: started
 commands:
   16: {name: freq, ref: x}
   32: {name: attack}
@@ -34,7 +35,6 @@ record_types:
   ins:
     prefix: i
     none: 0
-    pin: [1]
     form: map
     fields: {flags: 26, hrad: 15, hrsr: 0, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, arpspeed: 0, chord: 0, octave: 0, firstctrl: 9, ctrl: 0, pw: 0, filter: 0, freq: 0}
     refs: {ctrl: wftab, pw: pwtab, filter: flttab, chord: chordtab, freq: x}
@@ -155,7 +155,7 @@ voice:
   oct: {}
   hr: {width: 8}
   started: {width: 1}
-  hpos: {width: 8}
+  onset: {width: 1}
   wpos: {width: 8}
   arpcnt: {width: 8}
   arpre: {width: 8}
@@ -399,9 +399,7 @@ procs:
     - {if: "cpos == 0", then: [{set: {cpos: cstart, cret: 1}}, {return: true}]}
     - set: {wfarp: "chordtab[cpos].n", wfabs: 0, voff: 0, cpos: "chordtab[cpos].next"}
   wf_advance:
-    - if: started
-      then: [{set: {wpos: "wftab[wpos].next"}}]
-      else: [{set: {hpos: "hpos + 1"}}]
+    - set: {wpos: "wftab[wpos].next"}
   # One WF/arp row: rw, rx, rd. cont 1 when a chord ended and the next row plays now.
   wf_apply:
     - if: "rw < 0x10"
@@ -425,17 +423,8 @@ procs:
               else: [{set: {wfarp: rx, wfabs: 0, voff: 0}}]
     - {if: "rd != 0xFF", then: [{set: {det: "s8(rd)"}}]}
     - call: wf_advance
-  # Before the first note the player walks instrument 1's header as WF rows.
   wf_row:
     - set: {cont: 0}
-    - if: "not started"
-      then:
-        - if: "hpos == 0"
-          then: [{set: {rw: "ins[ci].flags", rx: "ins[ci].hrad", rd: "ins[ci].hrsr"}}]
-          else: [{set: {rw: "ins[ci].ad", rx: "ins[ci].sr", rd: "ins[ci].vibrato"}}]
-        - {if: "rw == 0xFF", then: [{set: {carry: 1}}, {return: true}]}
-        - call: wf_apply
-        - return: true
     - {if: "wpos == 0", then: [{set: {carry: 1}}, {return: true}]}
     - set: {rw: "wftab[wpos].w", rx: "wftab[wpos].a", rd: "wftab[wpos].d"}
     - call: wf_apply
@@ -539,7 +528,7 @@ procs:
     - {if: "not (trig or zpd)", then: [{return: true}]}
     - {if: "(ci == 0 and not zpd) or leg2", then: [{set: {r4: sctl}}, {return: true}]}
     - {if: inhr, then: [{set: {r1: sfh, r5: sad, r6: ssr, r4: sctl}}, {return: true}]}
-    - set: {r0: sfl, r1: sfh, r2: spl, r3: sph}
+    - set: {r0: sfl, r1: sfh, r2: spl, r3: sph, onset: started}
     - {if: adsrw, then: [{set: {r5: sad, r6: ssr}}]}
     - set: {r4: sctl}
   # The player ticks the voices in reverse order, then writes every voice's registers.

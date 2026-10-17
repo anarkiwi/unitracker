@@ -3,7 +3,6 @@
 import pytest
 
 from unitracker.modfit import playroutine, resolve
-from unitracker.modfit.compose import Merge
 from unitracker.modfit.flow import Composed, Writes
 from unitracker.modfit.invariant import Slicer
 from unitracker.modfit.keywords import signer
@@ -65,23 +64,6 @@ def test_chained_pointer_selects_no_value():
 
 def test_mode_field_read_only_by_tests():
     assert signer("defmon").field("ginit", "sub")["sig"] == {("-", "TEST", "-")}
-
-
-def test_sidwizard_header_walk_reaches_ctrl_and_freq():
-    sw = signer("sidwizard")
-    assert sw.field("ins", "ad")["sig"] == {
-        ("-", "TEST", "-"),
-        ("AD", "LOAD", "[0:7]→AD"),
-        ("CTRL", "MASK", "[0:7]→CTRL"),
-    }
-    for name in ("hrad", "sr"):
-        assert any(r.startswith("FREQ") for r, _, _ in sw.field("ins", name)["sig"])
-    pr = playroutine("sidwizard")
-    m = Merge(pr)
-    walk, _ = m.merge(pr["procs"]["wf_row"], {"started": 0, "hpos": 1})
-    head, _ = m.merge(pr["procs"]["wf_row"], {"started": 0, "hpos": 0})
-    assert walk["rw"] == ("fld", "ad", ("rec", "ins", "ci"))
-    assert head["rx"] == ("fld", "hrad", ("rec", "ins", "ci"))
 
 
 def test_slicer_keeps_a_branch_return_before_kept_actions():

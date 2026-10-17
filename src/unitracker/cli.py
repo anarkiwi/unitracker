@@ -8,7 +8,7 @@ import numpy as np
 from tqdm import tqdm
 
 from unitracker import backends, songio
-from unitracker.vm import SongPlayer
+from unitracker.vm import SongPlayer, first_mismatch
 
 
 def lift_main(argv=None) -> int:
@@ -45,12 +45,11 @@ def _render(player, n: int, desc: str) -> np.ndarray:
 
 def check(song: dict, sid: Path, n: int, subtune=None) -> tuple[int, int | None, int | None]:
     """Compare ``n`` ticks with the tune's native player: (ticks, first bad tick, reg)."""
-    ours = _render(SongPlayer(song), n, "unitracker")
+    player = SongPlayer(song)
+    ours = _render(player, n, "unitracker")
     theirs = _render(backends.native_player(sid.read_bytes(), subtune), n, "native")
-    bad = np.argwhere(ours != theirs)
-    if len(bad):
-        return n, int(bad[0][0]), int(bad[0][1])
-    return n, None, None
+    bad = first_mismatch(ours, theirs, player.starts)
+    return (n, *bad) if bad else (n, None, None)
 
 
 def play_main(argv=None) -> int:

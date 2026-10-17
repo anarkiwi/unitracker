@@ -1,4 +1,4 @@
-"""The v1.4 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.6 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 
@@ -17,7 +17,6 @@ PLAYROUTINE = {
     "defaults": {
         "clock": {"cycles_per_tick": 19656, "clock_hz": 985248},
         "voices": 2,
-        "registers": [0] * 25,
     },
     "instrument": {"type": "ins", "base": 0},
     "commands": {8: {"name": "run", "ref": "prog"}},
@@ -75,7 +74,6 @@ def song() -> dict:
         "hints": {"ticks_per_step": 1},
         "clock": {"cycles_per_tick": 19656, "clock_hz": 985248},
         "voices": 2,
-        "registers": [0] * 24 + [15],
         "tables": {"t": [1, 2, 3]},
         "playroutine": copy.deepcopy(PLAYROUTINE),
         "records": {
@@ -115,9 +113,8 @@ def test_roundtrip_plays_identically_and_is_canonical():
     np.testing.assert_array_equal(grid(back), grid(ir))
     assert songio.dumps(back, embed=True) == text
     doc = yaml.safe_load(text)
-    assert list(doc) == ["unitracker", "playroutine", "meta", "hints", "registers", "song", "loop"]
+    assert list(doc) == ["unitracker", "playroutine", "meta", "hints", "song", "loop"]
     assert doc["meta"] == {"title": "Mini", "author": "Test", "released": "2026"}
-    assert doc["registers"] == {24: 15}
     assert doc["hints"] == {"ticks_per_step": 1, "phrase_steps": 4}
 
 
@@ -143,7 +140,7 @@ def test_reference_form_patches_library_tables(metal_warrior):
     assert doc["playroutine"]["ref"] == "goattracker2"
     assert doc["playroutine"]["constants"] == {"deftempo": 11}
     assert "tables" not in doc["playroutine"]
-    assert "clock" not in doc and "registers" not in doc
+    assert "clock" not in doc
     ir["tables"]["ftab"] = ir["tables"]["ftab"][:4]
     back = songio.loads(songio.dumps(ir))
     assert back["tables"]["ftab"] == ir["tables"]["ftab"]
@@ -226,6 +223,13 @@ def test_reader_errors(change, match):
         return
     with pytest.raises(ValueError, match=match):
         songio.loads(text)
+
+
+def test_reader_rejects_the_retired_registers_key():
+    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc["registers"] = {24: 0}
+    with pytest.raises(SongFormatError, match="registers is retired in v1.6: the player starts"):
+        songio.loads(yaml.safe_dump(doc))
 
 
 def test_reader_rejects_rows_beyond_max_and_bad_stop():

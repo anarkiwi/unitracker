@@ -258,8 +258,6 @@ def lift(dec, expressions: bool = True) -> dict:
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
     phrases = _phrases(song, tracks)
     header = dec.header
-    registers = [0] * 25
-    registers[0x18] = 0x0F
     hints = {}
     tps = ticks_per_step(phrases, tracks, deftempo)
     if tps is not None:
@@ -270,7 +268,6 @@ def lift(dec, expressions: bool = True) -> dict:
         "meta": song_meta(header, f"goattracker2 subtune {dec.subtune}"),
         "clock": NTSC_CLOCK if (header.flags >> 2) & 3 == 2 else PAL_CLOCK,
         "voices": 3,
-        "registers": registers,
         "tables": {
             "ftab": [int(v) for v in freq],
         },

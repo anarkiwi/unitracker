@@ -138,12 +138,6 @@ def instrument_record(ins, tables: Tables, chord_starts: dict) -> dict:
     return rec
 
 
-def header_rows_walkable(ins) -> None:
-    """Before the first note the player walks instrument 1's header as WF rows 0 and 1."""
-    if TABLE_JUMP in (ins.control, (ins.attack << 4) | ins.decay):
-        raise LiftError("instrument 1's header reads as a WF-table jump")
-
-
 class Events:
     """Pattern rows as events: commands in column order, instrument column first."""
 
@@ -243,7 +237,11 @@ def track(sequence, patterns: int) -> dict:
 
 
 def first_note_selects(tracks, phrases) -> None:
-    """Each voice's first pitched note selects an instrument, as the header walk needs."""
+    """Each voice's first pitched note selects an instrument.
+
+    A note that selects none on a voice that has never had one has no instrument state
+    to play.
+    """
     for voice, trk in enumerate(tracks):
         for play in trk["plays"]:
             notes = [e for e in phrases[play["phrase"]] if isinstance(e.get("note"), int)]
@@ -307,13 +305,6 @@ def freq(swm, features) -> tuple[bytes, bytes]:
     return freq_tables(features, swm.freq_table_tail)
 
 
-def initial_registers(sid_init: bytes) -> list[int]:
-    """The SID registers before the first play call: what init wrote over the reset state."""
-    regs = [0] * 24 + [0x0F]
-    regs[: len(sid_init[:25])] = sid_init[:25]
-    return list(regs)
-
-
 def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
     """A unitracker song dict for SID-Wizard tune ``raw``.
 
@@ -323,7 +314,6 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
     swm = parse_sid_song(raw, subtune + 1)
     features = features_for_driver(swm.driver_type)
     check_build(swm, features)
-    header_rows_walkable(swm.instruments[0])
     lo, hi = freq(swm, features)
     chord_records, chord_starts = chords(swm.chord_table)
     tables = Tables()
@@ -345,7 +335,6 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
         "meta": song_meta(SidImage.from_bytes(raw).header, f"sidwizard subtune {subtune}"),
         "clock": PAL_CLOCK,
         "voices": 3,
-        "registers": initial_registers(swm.sid_init),
         "tables": {
             "freqlo": list(lo),
             "freqhi": list(hi),

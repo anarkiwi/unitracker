@@ -393,7 +393,6 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
             "clock_hz": NTSC_HZ if (header.flags >> 2) & 3 == 2 else PAL_HZ,
         },
         "voices": 3,
-        "registers": [int(r) for r in player.regs],
         "tables": {name: list(mem[addr : addr + n]) for name, addr, n in TABLES},
         "playroutine": playroutine,
         "records": {

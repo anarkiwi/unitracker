@@ -1,6 +1,6 @@
 # unitracker
 
-A generic tracker song format (v1.5) for the C64 SID, GoatTracker 2, defMON and
+A generic tracker song format (v1.6) for the C64 SID, GoatTracker 2, defMON and
 SID-Wizard lifters, and a generic player. A song is a compact YAML document: a header
 naming its playroutine (integer cells, bounded accumulators, event handlers and modulator
 units, from the library in `src/unitracker/playroutines/`), then one timeline that defines
@@ -26,7 +26,7 @@ pip install -e ".[dev]"
 ```sh
 unitracker-lift TUNE.sid -o song.yaml [--subtune N] [--embed]   # lift a GoatTracker 2, defMON or SID-Wizard .sid
 unitracker-play song.yaml --wav out.wav [--seconds 60] [--model 8580|6581]
-unitracker-play song.yaml --check TUNE.sid                  # compare with the native player
+unitracker-play song.yaml --check TUNE.sid                  # compare with the native player from each voice's first note
 ```
 
 ```python
