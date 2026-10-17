@@ -401,7 +401,7 @@ CSILLAG_FREQS, CSILLAG_EMPTY_STEP_COMMANDS = 91, 16
 
 def test_a_vibrato_across_empty_steps_is_written_once(csillag):
     text = songio.dumps(sidwizard.lift(csillag.read_bytes()))
-    events = [e for p in songio.loads(text)["phrases"].values() for e in p]
-    cmds = [(e, c) for e in events for c in e.get("commands") or [e.get("command")] if c]
+    played = [e for p in songio.loads(text)["phrases"].values() for e in p]
+    cmds = [(e, c) for e in played for c in e.get("commands") or [e.get("command")] if c]
     assert text.count("!freq") <= CSILLAG_FREQS
     assert sum("note" not in e for e, _ in cmds) <= CSILLAG_EMPTY_STEP_COMMANDS
