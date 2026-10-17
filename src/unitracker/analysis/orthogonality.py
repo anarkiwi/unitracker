@@ -10,7 +10,14 @@ import re
 from dataclasses import dataclass
 
 from unitracker.format import songio
-from unitracker.format.codec import COMMAND_NAMES, ROW_KEYS, CodecError, evaluate, row_place
+from unitracker.format.codec import (
+    COMMAND_NAMES,
+    ROW_KEYS,
+    CodecError,
+    evaluate,
+    row_place,
+    command_variants,
+)
 from unitracker.format.events.instrument import written_as
 from unitracker.format.records import META_KEYS
 from unitracker.format.refs import view
@@ -474,7 +481,11 @@ def vocabulary(songs: list) -> list:
         for k in ROW_KEYS
     }
     cmds = {
-        c: [n for n, pr in prs.items() if any(c == _cname(pr, k, v) for k, v in _variants(pr))]
+        c: [
+            n
+            for n, pr in prs.items()
+            if any(c == _cname(pr, k, v) for k, v in command_variants(pr.get("commands")))
+        ]
         for c in COMMAND_NAMES
     }
     out = [
@@ -515,7 +526,9 @@ def _unreached(label: str, ir: dict) -> list:
                 )
             )
     played = command_uses(ir)
-    for c in sorted({_cname(pr, code, v) for code, v in _variants(pr)} - set(played)):
+    for c in sorted(
+        {_cname(pr, code, v) for code, v in command_variants(pr.get("commands"))} - set(played)
+    ):
         out.append(
             Line(
                 UNREACHABLE,
@@ -526,13 +539,6 @@ def _unreached(label: str, ir: dict) -> list:
             )
         )
     return out
-
-
-def _variants(pr: dict):
-    for code, variants in (pr.get("commands") or {}).items():
-        yield from (
-            (int(code), v) for v in (variants if isinstance(variants, list) else [variants])
-        )
 
 
 def _cname(pr: dict, code: int, variant: dict) -> str:

@@ -169,7 +169,11 @@ note[.instrument][!command:arg[!command:arg]][*steps]
   an instrument fills the instrument column with it, so its commands are the FX column's. A
   command the player plays in one column takes either slot: SID-Wizard plays `!ad` and `!sr`
   in the column of their slot (see Backends), and its `!freq`, `!legato:0`, `!run` and timing
-  commands in their own. GoatTracker reads `!legato:0` from either slot and its other command from the
+  commands in their own. Its FX column holds one command, so an event whose two commands both
+  play there is refused, naming both (`sidwizard: the player can't play !tempo and !freq on one
+  event of phrase p1`); a pair is played when one of them is an instrument-column form (`!ad` or
+  `!sr` in the first slot of an event that names no instrument, `!run` on such an event) or
+  `!legato:0`. GoatTracker reads `!legato:0` from either slot and its other command from the
   other, and defMON reads one command, so for them the slots are only an order. Command
   names are the ones below.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
@@ -607,6 +611,7 @@ note_offset: 0                            # frequency-table index of format note
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
 restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
 lifetime: {pulse: {field: pw, flag: {flags: 0x40}}}   # !pulse:0 and !filter:0 (see Lifetime)
+exclusive: "code < 0x100"                 # over code and instrument: commands of a one-command column
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
