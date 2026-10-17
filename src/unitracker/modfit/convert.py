@@ -154,11 +154,15 @@ def derive_task(ir: dict, key: str, start: tuple, cache: Path | None):
     return _cached(where, lambda: _analysis(ir, key).derived(start), _load, _save)
 
 
-def checked(derived, a, f) -> str:
-    """The grammar text of value update ``f`` with phase update ``a``: one per firing."""
+def checked(derived, a, f, scale: int = 1) -> str:
+    """The grammar text of value update ``f`` with phase update ``a``: one per firing, over
+    ``scale`` times the cell."""
     if derived.order.kind != "time" or int(a) != int(G.PHI in f.free_symbols):
         raise ConversionError(f"phase {G.text(a)} is not one per firing: {G.text(f)}")
-    return G.text(f)
+    try:
+        return G.text(G.scaled(f, scale))
+    except ValueError as exc:
+        raise ConversionError(f"{G.text(f)}: no scale {scale} form: {exc}") from exc
 
 
 def groups(occs: list) -> dict:
@@ -184,19 +188,20 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
                 f"{occ.unit} at tick {occ.tick}: not proved: {d.error or d.proof}"
             )
     out = [None] * len(occs)
-    for members in groups(occs).values():
+    for (unit, _), members in groups(occs).items():
+        scale = int(an.unit(unit).get("scale", 1))
         live = {occs[i].key: found[occs[i].key][0] for i in members}
         live = {k: d for k, d in live.items() if not d.identity}
         closed = {G.text(d.closed) for d in live.values() if d.closed is not None}
         recur = {G.text(d.value) for d in live.values()}
         shared, first = None, next(iter(live.values()), None)
         if len(closed) == 1 and all(d.closed is not None for d in live.values()):
-            shared = checked(first, *first.update)
+            shared = checked(first, *first.update, scale)
         elif len(recur) == 1 and live:
-            shared = checked(first, first.phase, first.value)
+            shared = checked(first, first.phase, first.value, scale)
         for i in members:
             d = found[occs[i].key][0]
-            out[i] = None if d.identity else (shared or checked(d, *d.update))
+            out[i] = None if d.identity else (shared or checked(d, *d.update, scale))
     tables = set((declared(an.ir["playroutine"]).get("tables") or {}))
     for text in {t for t in out if t is not None}:
         try:

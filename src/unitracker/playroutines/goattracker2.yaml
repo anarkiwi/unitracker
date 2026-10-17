@@ -390,7 +390,8 @@ ghost:
 
 # The modulators: per unit, the cell its expression drives, the calls that are one firing
 # (pre to post), what starts it (hooks), which expression a start selects (x) and where
-# that expression is written: key, and the site (a record) or the command of the event.
+# that expression is written: key, and the site (a record) or the command of the event. The
+# expression's value is scale times the cell's: cut is the 11-bit cutoff, the cell its top 8 bits.
 modulators:
   freq: {word: ftab}
   notes: [note]
@@ -424,6 +425,7 @@ modulators:
       scope: global
       key: cut
       cell: filtercutoff
+      scale: 8
       fire: [filter_exec]
       pre: procs.filter_exec
       label: [fptr]

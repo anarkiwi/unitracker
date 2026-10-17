@@ -298,6 +298,37 @@ def canon(e):
     return sympy.expand(e.replace(lambda x: x.is_Pow and x.base in brackets, lambda x: x.base))
 
 
+def scaled(e, k: int):
+    """``k * e`` with ``v`` read as ``v / k``: ``e`` over a cell, written over ``k`` times it."""
+    # pylint: disable=too-many-return-statements
+    if k == 1:
+        return e
+    if V not in e.free_symbols:
+        return k * e
+    if e == V:
+        return V
+    if e.is_Add:
+        return sympy.Add(*(scaled(a, k) for a in e.args))
+    if e.is_Mul:
+        free = [a for a in e.args if V not in a.free_symbols]
+        bound = [a for a in e.args if V in a.free_symbols]
+        if len(bound) == 1:
+            return sympy.Mul(*free) * scaled(bound[0], k)
+    if isinstance(e, sympy.Mod) and V not in e.args[1].free_symbols:
+        return sympy.Mod(scaled(e.args[0], k), k * e.args[1])
+    if isinstance(e, (sympy.Abs, sympy.Min, sympy.Max)):
+        return type(e)(*(scaled(a, k) for a in e.args))
+    if isinstance(e, Iv):
+        rel = e.args[0]
+        return k * Iv(type(rel)(scaled(rel.lhs - rel.rhs, k), 0, evaluate=False))
+    if isinstance(e, (IvLt, IvNe)):
+        return k * type(e)(scaled(e.args[0], k))
+    fd = _floordiv(e)
+    if fd and V not in fd[1].free_symbols:
+        return k * sympy.floor(scaled(fd[0], k) / (k * fd[1]))
+    raise ValueError(f"{text(e)} is not linear in v")
+
+
 # ---- text ---------------------------------------------------------------------------
 
 ADD, MUL, ATOM = 1, 2, 3

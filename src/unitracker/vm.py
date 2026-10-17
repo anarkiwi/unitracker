@@ -640,16 +640,16 @@ class SongPlayer:
 
 
 class _Stepper:
-    """One expression's firing: ``(f(v, φ, N), φ + 1)``."""
+    """One expression's firing: ``(f(v, φ, N), φ + 1)``, ``v`` in units of ``1/scale`` cells."""
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, fn):
-        self.fn = fn
+    def __init__(self, fn, scale: int = 1):
+        self.fn, self.scale = fn, scale
 
     def step(self, v: int, phi: int, n: int) -> tuple:
         """``(v', φ')``."""
-        return self.fn(v, phi, n), phi + 1
+        return self.fn(v * self.scale, phi, n) // self.scale, phi + 1
 
 
 class _Driven(modulation.Modulation):
@@ -682,4 +682,6 @@ class _Driven(modulation.Modulation):
             return None
         if occ.key not in self.steppers:
             raise SongError(f"{unit['name']} selects expression {occ.key}, which is undefined")
-        return self.steppers[occ.key]
+        stepper = self.steppers[occ.key]
+        scale = int(unit.get("scale", 1))
+        return stepper if scale == 1 else _Stepper(stepper.fn, scale)
