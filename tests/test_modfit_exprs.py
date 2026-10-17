@@ -292,7 +292,9 @@ def general_forms(conv) -> list:
     for key, members in groups(occs).items():
         if len({conv.texts[i] for i in members} - {None}) > 1:
             starts = list(dict.fromkeys(occs[i].key for i in members))
-            res = [Result(conv.found[k][0], k[1], k[2], start_value=conv.found[k][1]) for k in starts]
+            res = [
+                Result(conv.found[k][0], k[1], k[2], start_value=conv.found[k][1]) for k in starts
+            ]
             live = [r for r in res if not r.derived.identity]
             out.append((inherit(an, an.unit(key[0]), live), live))
     return out

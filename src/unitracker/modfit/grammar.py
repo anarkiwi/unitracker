@@ -311,22 +311,42 @@ def scaled(e, k: int):
         return sympy.Add(*(scaled(a, k) for a in e.args))
     if e.is_Mul:
         free = [a for a in e.args if V not in a.free_symbols]
-        bound = [a for a in e.args if V in a.free_symbols]
-        if len(bound) == 1:
-            return sympy.Mul(*free) * scaled(bound[0], k)
+        level = [(a, _level(a, k)) for a in e.args if V in a.free_symbols]
+        linear = [a for a, b in level if b is None]
+        rest = sympy.Mul(*free, *(b for _, b in level if b is not None))
+        if not linear:
+            return k * rest
+        if len(linear) == 1:
+            return rest * scaled(linear[0], k)
     if isinstance(e, sympy.Mod) and V not in e.args[1].free_symbols:
         return sympy.Mod(scaled(e.args[0], k), k * e.args[1])
     if isinstance(e, (sympy.Abs, sympy.Min, sympy.Max)):
         return type(e)(*(scaled(a, k) for a in e.args))
-    if isinstance(e, Iv):
-        rel = e.args[0]
-        return k * Iv(type(rel)(scaled(rel.lhs - rel.rhs, k), 0, evaluate=False))
-    if isinstance(e, (IvLt, IvNe)):
-        return k * type(e)(scaled(e.args[0], k))
     fd = _floordiv(e)
     if fd and V not in fd[1].free_symbols:
         return k * sympy.floor(scaled(fd[0], k) / (k * fd[1]))
+    level = _level(e, k)
+    if level is not None:
+        return k * level
     raise ValueError(f"{text(e)} is not linear in v")
+
+
+def _level(e, k: int):
+    """``e`` with ``v`` read as ``v / k`` when ``e`` is built of brackets, else None."""
+    if V not in e.free_symbols:
+        return e
+    if isinstance(e, Iv):
+        rel = e.args[0]
+        return Iv(type(rel)(scaled(rel.lhs - rel.rhs, k), 0, evaluate=False))
+    if isinstance(e, (IvLt, IvNe)):
+        return type(e)(scaled(e.args[0], k))
+    if e.is_Add or e.is_Mul:
+        parts = [_level(a, k) for a in e.args]
+        return None if None in parts else e.func(*parts)
+    if e.is_Pow and e.exp.is_Integer and e.exp > 0:
+        base = _level(e.base, k)
+        return None if base is None else base**e.exp
+    return None
 
 
 # ---- text ---------------------------------------------------------------------------
