@@ -24,7 +24,7 @@ GT_INS = """      x:
 
 def song(pr, defs, phrases, rows="    play: [p1, p1, p1]\n", loop="~"):
     phrase = "".join(f"        {name}: [{atoms}]\n" for name, atoms in phrases.items())
-    return f"""unitracker: 1.13
+    return f"""unitracker: 1.14
 playroutine: {{ref: {pr}}}
 song:
   - def:
@@ -77,13 +77,13 @@ def test_lifetime_commands_take_no_command_slot():
     text = song(
         "sidwizard",
         SW_INS + "      x:\n        x1: (v - 7) % 65536\n",
-        {"p1": "C4.i1*4, D4!iattack:1!freq:@x1!pulse:0*4"},
+        {"p1": "C4.i1*4, D4!ad:16!freq:@x1!pulse:0*4"},
     )
     ir = songio.loads(text)
     assert ir["records"]["ins"][1]["flags"] == 0x50
     assert [code for code, _ in ir["phrases"]["p1"][1]["commands"]] == [288, 16]
     out = songio.dumps(ir)
-    assert "D4!iattack:1!freq:@x1!pulse:0*4" in out
+    assert "D4!ad:16!freq:@x1!pulse:0*4" in out
     assert songio.dumps(songio.loads(out)) == out
 
 

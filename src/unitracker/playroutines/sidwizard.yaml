@@ -21,18 +21,20 @@ lifetime:
 note_offset: 1
 onset: onset
 started: started
+# !ad and !sr: small FX $2x/$3x/$5x/$6x set the envelope register's nibble at shift `nibble`, in
+# the FX column (event slot 1) or, from $100, the instrument column (slot 0); see envelope.py.
 commands:
   16: {name: freq, ref: x}
-  32: {name: attack}
-  48: {name: decay}
-  80: {name: sustain}
-  96: {name: release}
+  32: {name: ad, nibble: 4, slot: 1}
+  48: {name: ad, nibble: 0, slot: 1}
+  80: {name: sr, nibble: 4, slot: 1}
+  96: {name: sr, nibble: 0, slot: 1}
   112: {name: run, ref: wftab}
   63: {name: legato}
-  288: {name: iattack}
-  304: {name: idecay}
-  336: {name: isustain}
-  352: {name: irelease}
+  288: {name: ad, nibble: 4, slot: 0}
+  304: {name: ad, nibble: 0, slot: 0}
+  336: {name: sr, nibble: 4, slot: 0}
+  352: {name: sr, nibble: 0, slot: 0}
 record_types:
   # An instrument's 16-byte header as fields, its WF/arp, pulse and filter tables as programs.
   ins:

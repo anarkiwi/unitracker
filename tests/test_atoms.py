@@ -33,7 +33,7 @@ def test_note_name_rejects_negative():
         (1, 46, 1, "i4", ["slideup:@s1"], "A#3.i4!slideup:@s1"),
         (0, 0, 48, None, ["tempo:16"], "-!tempo:16*48"),
         (0, 0, 1, None, ["run:none"], "-!run:none"),
-        (1, 60, 2, "i2", ["run:@w2", "sustain:8"], "C5.i2!run:@w2!sustain:8*2"),
+        (1, 60, 2, "i2", ["run:@w2", "sr:136"], "C5.i2!run:@w2!sr:136*2"),
     ],
 )
 def test_format_and_parse(

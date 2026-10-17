@@ -29,6 +29,11 @@ ROW_KEYS = (
     "vol",
 )
 EXPR = "x"
+ENVELOPE = -2
+_ENVELOPE = (
+    "retired in v1.14: write the envelope byte as `!ad:n` or `!sr:n`, in the event slot of"
+    " its column"
+)
 RETIRED = {
     "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
     " row's `pw`, `cut` or `freq`)",
@@ -37,6 +42,10 @@ RETIRED = {
     "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
     "notevib": "retired in v1.11: write the vibrato as `!freq:@x`",
     "vib": "retired in v1.11: write the vibrato as `!freq:@x`",
+    **dict.fromkeys(
+        ("attack", "decay", "sustain", "release", "iattack", "idecay", "isustain", "irelease"),
+        _ENVELOPE,
+    ),
 }
 RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
@@ -62,16 +71,7 @@ COMMAND_NAMES = (
     "freq",
     "mark",
     "restart",
-    # Player-specific: SID-Wizard.
-    "attack",
-    "decay",
-    "sustain",
-    "release",
     "legato",
-    "iattack",
-    "idecay",
-    "isustain",
-    "irelease",
 )
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
@@ -444,8 +444,16 @@ class RowCodec:
             raise CodecError(f"{self.rtype.name}: row {written!r} can't end a program")
 
 
+def envelope_names(spec: dict) -> list:
+    """The names of a playroutine's envelope commands: the codes with ``nibble``, whose byte
+    depends on the voice (see ``envelope``); internal code ``ENVELOPE - k`` writes the k-th."""
+    variants = [v for vs in (spec or {}).values() for v in (vs if isinstance(vs, list) else [vs])]
+    return sorted({str(v["name"]) for v in variants if "nibble" in v})
+
+
 class CommandCodec:
-    """A playroutine's command codes as shared names."""
+    """A playroutine's command codes as shared names; an envelope command's internal code (see
+    :func:`envelope_names`) as its name and byte."""
 
     def __init__(self, spec: dict, rtypes: dict):
         self.entries = []
@@ -454,10 +462,13 @@ class CommandCodec:
                 name = str(var["name"])
                 if name not in COMMAND_NAMES:
                     raise CodecError(f"{name!r} is not a shared command name")
+                if "nibble" in var:
+                    continue
                 ref = var.get("ref")
                 if ref is not None and ref not in rtypes:
                     raise CodecError(f"command {name} references unknown type {ref!r}")
                 self.entries.append((int(code), name, ref, var))
+        self.entries += [(ENVELOPE - k, n, None, {}) for k, n in enumerate(envelope_names(spec))]
         self.rtypes = rtypes
 
     def ref(self, code: int) -> str | None:
