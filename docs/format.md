@@ -1,4 +1,4 @@
-# unitracker song format (v1.7)
+# unitracker song format (v1.8)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,16 +13,18 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.7
+unitracker: 1.8
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
 song:
   - def:
+      restart:
+        r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]
       ins:
         i1: {ad: 1, sr: 136, ctrl: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: =68},
             {ctrl: 65, note: +0}, end], pw: 16*abs((φ - 32) % 128 - 64) + 512, filter: [{cut: 1024, res: 12,
-              route: 1, mode: 16}, end], gt: 4, fw: 9}
+              route: 1, mode: 16}, end], restart: r1}
         ...
       ctrltab:
         c1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0}, {wait: 1,
@@ -36,8 +38,9 @@ song:
       ...
       x:
         x1: (v + 32) % 65536
-        x2: -F(N)*[v != F(N)] + [v < F(N)]*min(F(N), (v + 32) % 65536) + [v > F(N)]*max(F(N), (v - 32)
-          % 65536) + F(N)
+        x2: v - v*[F(N) != (v + F(N)) % 65536] + (-[F(N) > (v + F(N) - 32) % 65536]*((v - 32) % 65536)
+          + (v - 32) % 65536)*[F(N) < (v + F(N)) % 65536] + [F(N) >= (v + F(N) + 32) % 65536]*[F(N) >
+          (v + F(N)) % 65536]*((v + 32) % 65536)
         x3: (v + 64*[(φ - 3) % 12 >= 6] - 32) % 65536
       phrase:
         ...
@@ -52,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.7`; readers reject any other version |
+| `unitracker` | `1.8`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -121,7 +124,7 @@ playroutine needs.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
   are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
   with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
-  `pw`, `wgl`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`, `cp`), and an omitted field
+  `pw`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`, `cp`), and an omitted field
   is 0.
 
 ## Events
@@ -148,7 +151,8 @@ Program rows and commands use one vocabulary in every song, in chip units.
 
 | row key | meaning |
 |---|---|
-| `ctrl` | control register value |
+| `ctrl` | control register value; `^n` sets an exclusive-or mask the voice's control output keeps until a row sets another, `v^n` both |
+| `gate` | the gate the control register is written with until a row, note or `off`/`on` sets it: 0 off, 1 on |
 | `note` | `+n` / `-n` relative to the event note, `=n` absolute (format numbering, C2 = 24); omitted: no change |
 | `wait` | ticks before the row applies |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
@@ -174,6 +178,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!legato:0` | the event's note does not retrigger (see Legato) |
 | `!vib:@s` | GoatTracker vibrato at the speed of `speedtab` row `s` |
 | `!mark:n` | a timing mark that changes no sound |
+| `!restart:@r` | the note's hard restart, for a player whose instruments have none (see Hard restart) |
 
 SID-Wizard's effect commands are its own: they have no identical shared form.
 
@@ -186,18 +191,25 @@ SID-Wizard's effect commands are its own: they have no identical shared form.
 
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
-(GoatTracker's `ctrl: [...]` or `ctrl: c1`). A row or command a player can't express is
+(GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
 rejected on reading, naming the key or command and the player (`goattracker2: the player
 can't express !notevib:1`); the writer refuses to write a value that would not read back
 (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
 - **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
-  command rows (list rows), `!vib:@s` and the instrument keys.
-- **defMON:** the sidTAB columns `wgl`, `cp`; `af` below $80 (a fixed offset).
+  command rows (list rows), `!vib:@s` and the instrument keys `speed` and `vd`.
+- **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
 - **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
   detune (list rows `[w, a, d]`), pulse and filter sweep rows and keyboard-tracked rows
-  (list rows), `!notevib` and the instrument keys.
+  (list rows), `!notevib` and the instrument keys `flags` (bits 4-7 of the header's control
+  byte: the vibrato type, and keeping the pulse and filter programs across notes),
+  `vibrato`, `vibdelay`, `arpspeed`, `chord` and `octave`.
 
+The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
+`flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
+rejected, naming them (`ins.gt is retired in v1.8: write the hard restart as the
+instrument's restart program`, `sidtab: wgl is retired in v1.8`). A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
+no mask here`).
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
@@ -238,6 +250,43 @@ expression over `v` cannot read.
 
 The sidTAB columns `fv` (`mode`), `re` (`res` and `route`) and `acid` (`cut`) and the row key
 `resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`).
+### Hard restart
+
+A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last
+row applies on the note's first tick, and each earlier row its `hold` ticks before the row
+after it. A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. GoatTracker and SID-Wizard
+instruments name theirs (`restart: r1`); a defMON note names its own (`C3.t2!restart:@r1`):
+
+```yaml
+restart:
+  r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]
+```
+
+Four ticks before the note the gate goes off with envelope $0F00; on its first tick the
+control register takes $09 with the gate on. A note with `!legato:0` runs no restart, and an
+instrument without `restart` has none. Each player plays the shapes its codec accepts (a
+row's place in its program is part of its shape, see Codecs):
+
+| player | lookahead row | first-tick row |
+|---|---|---|
+| GoatTracker 2 | exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n, gate: 1}` (n $01-$FD, the first wave), `{gate: g}`, or `{}` |
+| SID-Wizard | at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform), or `{}` |
+| defMON | one or more: `hold`, `ctrl` (a value, a mask `^n`, or both), `ad`, `sr` | `{}` |
+
+GoatTracker reads the voice's next step its instrument's gate timer ahead of each note, and an
+instrument without a restart reads it on the note's first tick. A GoatTracker note keeps the
+gate as the restart left it, so its first-tick row sets it; a SID-Wizard note sets it itself.
+
+defMON has no instrument restart: composers run a short sidTAB program on layer B on the
+empty steps before a note. The playroutine declares this with `restart: {command: 1}`, and
+the format writes it as the note's restart. On reading, a note's `!restart:@r` becomes
+`!run2` of a sidTAB program of the lookahead rows (the last one frozen, holding until the
+note), on the step their holds put before the note, which must be empty; the writer folds
+every such `!run2` back: one alone on its step, followed only by empty steps up to a note
+with a free command slot, running a program that ends, sets no column but `dl`, `wgh`,
+`wgl`, `ad` and `sr`, and fits in the steps. The note's own sidTAB program starts on its
+first tick, so the restart's last row is empty. A step is one tick in defMON, so `hold`
+counts both.
 
 ## Modulators
 
@@ -359,6 +408,7 @@ The writer produces one text per song:
   the transpose moves into the play entry;
 - equal expression texts share one definition;
 - runs of empty steps become `*steps`;
+- a playroutine's event restarts are written on their notes (see Hard restart);
 - no-op commands are dropped.
 
 Writing what the reader returns gives the same bytes.
@@ -375,6 +425,7 @@ onset: started   # the voice cell that is 1 once the voice's registers hold its 
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
 note_offset: 0                            # frequency-table index of format note 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
+restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
@@ -430,10 +481,13 @@ ctrltab:
 
 ### Codecs
 
-A codec shape has a `when` over the raw fields, `keys` (`{key: {value, omit, abs, expr}}`:
+A codec shape has a `when` over the raw fields, the playroutine's constants, and for a
+program row its place: `first` and `last` are 1 for the program's first row and for the
+row before its `end`; `keys` (`{key: {value, omit, abs, expr, eor}}`:
 the shared key's value from the raw fields, when to leave it out, for `note` whether
-it is absolute, and the raw field holding the key's expression), `raw` (each raw field
-from the written keys, with `has_<key>` and `note_abs` defined) and `keep` (raw fields
+it is absolute, the raw field holding the key's expression, and for `ctrl` its mask as
+`{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
+`note_abs`, and for a mask `has_eor` and `eor` defined) and `keep` (raw fields
 written under their own names; a kept reference is written as a name). A key with `expr`
 is written as the expression when that field is set; a key with both `value` and `expr`
 reads an integer as a value and a string as an expression. The writer uses the first
@@ -615,7 +669,8 @@ native register grid exactly over that window; otherwise the lift fails.
 | `sidwizard` | SID-Wizard 1.x export, normal build (pysidwizard) | one pattern row | the decoded module |
 
 **GoatTracker 2.** The playroutine counts ticks per row itself, and `fetch` runs on its
-gate-timer lookahead. Instrument 1 is pinned because every voice starts on it. A
+gate-timer lookahead, the hold of the restart's first row. Instruments with one gate timer and
+first wave share a restart program; a hard restart on gate timer 0 is not covered. Instrument 1 is pinned because every voice starts on it. A
 filter parameter row carries the following cutoff row's value as `cut`, because the
 player reads both in one tick.
 
@@ -625,11 +680,12 @@ tick the replay applies it. The playroutine fetches every tick and maps the even
 fields as follows:
 
 - `.t3` is the sidTAB program sidcall layer A starts;
-- `!run2:@t5` arms layer B;
+- `!run2:@t5` arms layer B, and `!restart:@r1` arms it on the steps before the note;
 - the note is a GATE_N note.
 
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk
-order: `dl` is `hold` (a frozen row ends its program), `wgh` is `ctrl`, `tr` is
+order: `dl` is `hold` (a frozen row ends its program), `wgh` and `wgl` are `ctrl` and its
+mask (`ctrl: 64^1`), `tr` is
 `note`, the row's pitch, pulse and ACID modulators are `freq`, `pw` and `cut`, and the
 other columns keep their names. Note names are offset by 24 indices: defMON index 48
 is `C2`. The replay probes `$D41B` at init to tell the SID models apart; the result
@@ -637,11 +693,12 @@ becomes the playroutine constants `floor` and `dbl`. The ghost masks pulse-width
 to a nibble, as the reference grid does.
 
 **SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
-applies it at TICK_2 and writes the next instrument's hard-restart ADSR on the ticks
-between, ticking the voices in the player's reverse order. An instrument is its header
-(`flags`, `hrad`, `hrsr`, `ad`, `sr`, `vibrato`, `vibdelay`, `arpspeed`, `chord`,
-`octave`, `firstctrl`), its WF/arp, pulse and filter programs (`ctrl`, `pw`, `filter`)
-and its pitch expression (`freq`). WF rows use `ctrl` and `note`; pulse set rows `pw`;
+applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking
+the voices in the player's reverse order. An instrument is its header (`flags`, `ad`, `sr`,
+`vibrato`, `vibdelay`, `arpspeed`, `chord`, `octave`), its WF/arp, pulse, filter and
+restart programs (`ctrl`, `pw`, `filter`, `restart`) and its pitch expression (`freq`).
+The header's hard-restart bytes and control bits 0-3 become the restart program; a
+restart on both ticks before the note (control bits 0 and 1) is not covered. WF rows use `ctrl` and `note`; pulse set rows `pw`;
 filter set rows `mode`, `cut` and `res`; chords are programs of `note` offsets that loop
 or end. Note names are offset by one index: SID-Wizard index 49 is `C4`. The lifter
 requires each voice's first note to select an instrument: a note that selects none on a

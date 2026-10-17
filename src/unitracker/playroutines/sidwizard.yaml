@@ -36,8 +36,39 @@ record_types:
     prefix: i
     none: 0
     form: map
-    fields: {flags: 26, hrad: 15, hrsr: 0, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, arpspeed: 0, chord: 0, octave: 0, firstctrl: 9, ctrl: 0, pw: 0, filter: 0, freq: 0}
-    refs: {ctrl: wftab, pw: pwtab, filter: flttab, chord: chordtab, freq: x}
+    # flags: bits 4-5 the vibrato type, bit 6 keeps the pulse and bit 7 the filter program
+    # running across notes.
+    fields: {flags: 16, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, arpspeed: 0, chord: 0, octave: 0, ctrl: 0, pw: 0, filter: 0, freq: 0, restart: 0}
+    refs: {ctrl: wftab, pw: pwtab, filter: flttab, chord: chordtab, freq: x, restart: restart}
+  # Hard restart: a lookahead row, written hold (2 or 1) ticks before the note's row applies:
+  # the gate off and the hard-restart envelope, with control $18 (staccato, the voice's tables
+  # paused) or the gated-off waveform; then the note's first-tick row, the first waveform the
+  # control register takes before the WF table. -1: absent.
+  restart:
+    prefix: r
+    none: 0
+    chain: next
+    form: map
+    fields: {hold: 0, ctrl: -1, gate: -1, ad: -1, sr: -1, next: 0}
+    codec:
+      - when: "first and not last and hold >= 1 and hold <= 2 and (ctrl < 0 or ctrl == 0x18) and gate == 0 and ad >= 0 and sr >= 0"
+        keys:
+          hold: {value: hold, omit: "hold == 1"}
+          ctrl: {value: ctrl, omit: "ctrl < 0"}
+          gate: gate
+          ad: ad
+          sr: sr
+        raw:
+          hold: "hold if has_hold else 1"
+          ctrl: "ctrl if has_ctrl else -1"
+          gate: "gate if has_gate else -1"
+          ad: "ad if has_ad else -1"
+          sr: "sr if has_sr else -1"
+      - when: "last and hold == 0 and gate < 0 and ad < 0 and sr < 0"
+        keys:
+          ctrl: {value: ctrl, omit: "ctrl < 0"}
+        raw:
+          ctrl: "ctrl if has_ctrl else -1"
   # WF/arp row: w a waveform ($10+) or a row-hold count; a the arp byte (relative up $00-$7E,
   # chord $7F, none $80, absolute $81-$DF, relative down $E0-$FF); d the detune ($FF: none).
   wftab:
@@ -91,6 +122,10 @@ record_types:
         keys: {note: n}
         raw: {n: note}
 functions:
+  # The row of restart program r on the note's first tick: its last.
+  hrnote:
+    args: [r]
+    expr: "restart[r].next if restart[r].next else r"
   dfreq:
     args: [d]
     expr: "(freqhi[d & 0xFF] << 8) | freqlo[d & 0xFF]"
@@ -153,6 +188,7 @@ voice:
   ci: {width: 8}
   oct: {}
   hr: {width: 8}
+  rr: {width: 8}
   started: {width: 1}
   onset: {width: 1}
   wpos: {width: 8}
@@ -258,14 +294,15 @@ procs:
     - set: {upi: 0}
     - if: "haspend and pk == 1 and not pleg"
       then: [{set: {upi: "pins if pins else ci"}}]
-    - if: "upi != 0 and not ((pre == 0 and (ins[upi].flags & 2)) or (pre == 1 and (ins[upi].flags & 1)))"
+    - set: {rr: "ins[upi].restart"}
+    - if: "upi != 0 and not (restart[rr].next != 0 and pre + restart[rr].hold == 2)"
       then: [{set: {upi: 0}}]
   emit_pre_hr:
     - call: pre_hr_ins
     - {if: "upi == 0", then: [{return: true}]}
-    - set: {gate: 0xFE, sad: "ins[upi].hrad", ssr: "ins[upi].hrsr", adsrw: 1}
-    - if: "ins[upi].flags & 0x04"
-      then: [{set: {sctl: 0x18}}]
+    - set: {gate: 0xFE, sad: "restart[rr].ad", ssr: "restart[rr].sr", adsrw: 1}
+    - if: "restart[rr].ctrl >= 0"
+      then: [{set: {sctl: "restart[rr].ctrl"}}]
       else: [{set: {sctl: "sctl & 0xFE"}}]
   write_adsr:
     - set:
@@ -476,8 +513,9 @@ procs:
     - if: "hr > 0"
       then:
         - call: write_adsr
-        - if: "ins[ci].flags & 0x08"
-          then: [{set: {sctl: "ins[ci].firstctrl & gate", sfh: "freqhi[(note + oct) & 0xFF]"}}]
+        - set: {rr: "hrnote(ins[ci].restart)"}
+        - if: "restart[rr].ctrl >= 0"
+          then: [{set: {sctl: "restart[rr].ctrl & gate", sfh: "freqhi[(note + oct) & 0xFF]"}}]
         - return: true
     - if: "ins[ci].ctrl != 0 or zpd"
       then:
@@ -494,7 +532,7 @@ procs:
     - if: "hr > 0"
       then: [{call: compose}, {call: run_deferred}, {set: {hr: "hr - 1"}}, {return: true}]
     - call: pre_hr_ins
-    - {if: "pre < 2 and upi != 0 and (ins[upi].flags & 0x04)", then: [{call: emit_pre_hr}, {return: true}]}
+    - {if: "pre < 2 and upi != 0 and restart[rr].ctrl >= 0", then: [{call: emit_pre_hr}, {return: true}]}
     - set: {innew: "haspend and pk == 1 and not pleg"}
     - {if: "pre < 2 and upi != 0", then: [{set: {gate: 0xFE}}]}
     - {if: "not innew", then: [{call: tick_vibrato}]}

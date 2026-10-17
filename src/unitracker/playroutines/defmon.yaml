@@ -19,7 +19,31 @@ note_offset: 24
 onset: onset
 commands:
   1: {name: run2, ref: sidtab}
+# A note's restart runs its lookahead rows as one sidTAB program on layer B (!run2), as many
+# ticks before the note as they hold.
+restart: {command: 1}
 record_types:
+  # The restart a note names: lookahead rows of sidTAB columns, then the note's empty row.
+  restart:
+    prefix: r
+    none: 0
+    chain: next
+    form: map
+    fields: {dl: 0, wgh: -1, wgl: -1, ad: -1, sr: -1, next: 0}
+    codec:
+      - when: "not last and dl >= 0 and dl < 0x80"
+        keys:
+          hold: {value: "dl + 1", omit: "dl == 0"}
+          ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
+          ad: {value: ad, omit: "ad < 0"}
+          sr: {value: sr, omit: "sr < 0"}
+        raw:
+          dl: "(hold - 1) if has_hold else 0"
+          wgh: "ctrl if has_ctrl else -1"
+          wgl: "eor if has_eor else -1"
+          ad: "ad if has_ad else -1"
+          sr: "sr if has_sr else -1"
+      - when: "last and dl == 0 and wgh < 0 and wgl < 0 and ad < 0 and sr < 0"
   # sidTAB row: dl holds the row dl + 1 ticks ($80+ freezes the layer); each column, -1 when
   # absent, applies in the replay's bitmap-walk order ($16B0).
   sidtab:
@@ -37,7 +61,7 @@ record_types:
         keys:
           <<: &columns
             hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
-            ctrl: {value: wgh, omit: "wgh < 0"}
+            ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
             note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
             ad: {value: ad, omit: "ad < 0"}
             sr: {value: sr, omit: "sr < 0"}
@@ -47,11 +71,12 @@ record_types:
             route: {value: "re & 0x0F", rel: "-1 if re == 0 else (1 if re & 0x08 else 0)", omit: "re < 0"}
             mode: {value: "fv & 0xF0", omit: "fv < 0"}
           freq: {expr: xf}
-        keep: [wgl, cp]
+        keep: [cp]
         raw:
           <<: &fields
             dl: "(hold - 1) if has_hold else 0"
             wgh: "ctrl if has_ctrl else -1"
+            wgl: "eor if has_eor else -1"
             tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
             ad: "ad if has_ad else -1"
             sr: "sr if has_sr else -1"
@@ -60,7 +85,7 @@ record_types:
           af: 0x80
       - when: "xf == 0 and af < 0x80 and pw < 0 and ps < 0 and acid < 0"
         keys: *columns
-        keep: [wgl, af, cp]
+        keep: [af, cp]
         raw: *fields
     # A frozen row ends a program.
     end: {dl: 0x80}
@@ -97,15 +122,16 @@ record_types:
     fields: [pw, flo, fhi, sr, ad, ctrl, wgl, sacc, af, ps, note, tbase, rowA, cntA, rowB, cntB]
     codec:
       - keys:
-          ctrl: {value: ctrl, omit: "ctrl == 0"}
+          ctrl: {value: ctrl, omit: "ctrl == 0", eor: {value: wgl, omit: "wgl == 0"}}
           note: {value: note, abs: "1", omit: "note == 0"}
           ad: {value: ad, omit: "ad == 0"}
           sr: {value: sr, omit: "sr == 0"}
           # The written width is the 12-bit cell; a cell over $0FFF has no form that reads back.
           pw: {value: "pw if pw <= 0x0FFF else pw + 0x10000", omit: "pw == 0"}
-        keep: [flo, fhi, sacc, af, wgl, ps, tbase, rowA, cntA, rowB, cntB]
+        keep: [flo, fhi, sacc, af, ps, tbase, rowA, cntA, rowB, cntB]
         raw:
           ctrl: "ctrl if has_ctrl else 0"
+          wgl: "eor if has_eor else 0"
           note: "note if has_note else 0"
           ad: "ad if has_ad else 0"
           sr: "sr if has_sr else 0"

@@ -14,6 +14,7 @@ ROW_KEYS = (
     "wait",
     "hold",
     "ctrl",
+    "gate",
     "note",
     "ad",
     "sr",
@@ -34,6 +35,7 @@ RETIRED_ROW_KEYS = {
     "resfilt": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
     "re": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
     "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
+    "wgl": "retired in v1.8: write the control mask as `ctrl: ^n`",
 }
 COMMAND_NAMES = (
     "run",
@@ -50,6 +52,7 @@ COMMAND_NAMES = (
     "freq",
     "vib",
     "mark",
+    "restart",
     # Player-specific: SID-Wizard.
     "attack",
     "decay",
@@ -67,6 +70,7 @@ COMMAND_NAMES = (
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
+_CTRL = re.compile(r"^(?P<lit>\d+)?\^(?P<mask>\d+)$")
 
 
 class CodecError(ValueError):
@@ -74,15 +78,15 @@ class CodecError(ValueError):
 
 
 class _Env(Resolver):
-    """Expressions over one mapping of names (a missing name reads as 0) and the
-    playroutine's tables and functions."""
+    """Expressions over one mapping of names (a missing name reads as the playroutine's
+    constant of that name, else 0) and the playroutine's tables and functions."""
 
     def __init__(self, functions=None, tables=()):
         super().__init__(functions)
         self.tables = set(tables)
 
     def name(self, name):
-        return f"E.get({name!r}, 0)"
+        return f"E.get({name!r}, C.get({name!r}, 0))"
 
     def table(self, name, index):
         if name not in self.tables:
@@ -95,12 +99,14 @@ def _tg(table, index):
 
 
 class Evaluator:
-    """Evaluates codec expressions with a playroutine's functions and a song's tables."""
+    """Evaluates codec expressions with a playroutine's functions and constants and a song's
+    tables."""
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, functions=None, tables=None):
+    def __init__(self, functions=None, tables=None, constants=None):
         self.tables = {k: [int(x) for x in v] for k, v in (tables or {}).items()}
+        self.constants = {k: int(v) for k, v in (constants or {}).items()}
         self.resolver = _Env(functions, self.tables)
         self.codes = {}
 
@@ -113,7 +119,7 @@ class Evaluator:
             except ExprError as exc:
                 raise CodecError(str(exc)) from exc
             self.codes[text] = code
-        glob = {"E": env, "T": self.tables, "_tg": _tg}
+        glob = {"E": env, "C": self.constants, "T": self.tables, "_tg": _tg}
         return int(eval(code, glob))  # pylint: disable=eval-used
 
 
@@ -168,14 +174,38 @@ def route_text(relation: int, mask: int):
     return ("+" if relation > 0 else "-") + (f" {mask}" if mask else "")
 
 
+def ctrl_value(value):
+    """A written ``ctrl``: an int, or ``(literal or None, mask)`` for ``^mask`` or ``n^mask``."""
+    if isinstance(value, (int, tuple)) and not isinstance(value, bool):
+        return value
+    match = _CTRL.match(str(value))
+    if match is None:
+        raise CodecError(f"bad ctrl {value!r}")
+    return int(match["lit"]) if match["lit"] else None, int(match["mask"])
+
+
+def ctrl_text(value):
+    """The written form of a ``ctrl``: an int, or the text of one with an exclusive-or mask."""
+    if not isinstance(value, tuple):
+        return value
+    literal, mask = value
+    return f"{'' if literal is None else literal}^{mask}"
+
+
 _FORMS = {
     "note": (note_value, lambda v: note_text(*v)),
     "route": (route_value, lambda v: route_text(*v)),
+    "ctrl": (ctrl_value, ctrl_text),
 }
 
 
+def row_place(k: int, count: int, ends: bool) -> dict:
+    """The position of row ``k`` of a program of ``count`` rows that ends or loops."""
+    return {"first": int(k == 0), "last": int(ends and k == count - 1)}
+
+
 def written_value(key: str, value):
-    """A shared key's value as written: notes and routes in their text forms."""
+    """A shared key's value as written: notes, routes and masked controls in their text forms."""
     return _FORMS[key][1](value) if key in _FORMS else value
 
 
@@ -239,6 +269,12 @@ class RowCodec:
     def _full(self, row: dict) -> dict:
         return {f: int(row.get(f, d)) for f, d in self.rtype.fields.items()}
 
+    def _part(self, kspec: dict, row: dict):
+        """A key's value from the raw fields, or None when it is left out."""
+        if "value" not in kspec or ("omit" in kspec and self.ev(kspec["omit"], row)):
+            return None
+        return self.ev(kspec["value"], row)
+
     def _encode(self, shape, row) -> dict:
         out = {}
         for key in ROW_KEYS:
@@ -249,9 +285,13 @@ class RowCodec:
             if field is not None and row[field] != self.rtype.default(field):
                 out[key] = (EXPR, row[field])
                 continue
-            if "value" not in kspec or ("omit" in kspec and self.ev(kspec["omit"], row)):
+            value = self._part(kspec, row)
+            mask = self._part(kspec["eor"], row) if "eor" in kspec else None
+            if mask is not None:
+                out[key] = (value, mask)
                 continue
-            value = self.ev(kspec["value"], row)
+            if value is None:
+                continue
             if key == "note":
                 absolute = "abs" in kspec and bool(self.ev(kspec["abs"], row))
                 out[key] = (absolute, value - self.offset if absolute else value)
@@ -264,13 +304,20 @@ class RowCodec:
                 out[field] = row[field]
         return out
 
-    def encode(self, row: dict) -> dict | None:
-        """Shared keys for a raw row, notes as ``(absolute, number)``; None if no shape fits."""
+    def encode(self, row: dict, place: dict | None = None) -> dict | None:
+        """Shared keys for a raw row, notes as ``(absolute, number)``; None if no shape fits.
+
+        ``place`` gives a program row's position to the shapes' ``when``: ``first`` and
+        ``last`` (the row before ``end``) are 1 or 0.
+        """
         full = self._full(row)
         for shape in self.shapes:
-            if shape.when is None or self.ev(shape.when, full):
+            if self._fits(shape, full, place):
                 return self._encode(shape, full)
         return None
+
+    def _fits(self, shape, full: dict, place) -> bool:
+        return shape.when is None or bool(self.ev(shape.when, {**full, **(place or {})}))
 
     def _env(self, shape, norm) -> dict:
         env = {}
@@ -283,17 +330,31 @@ class RowCodec:
                 env["note"] = number + self.offset if absolute else number
             elif key == "route" and plain:
                 env["route_rel"], env["route"] = norm[key]
+            elif key == "ctrl" and plain and isinstance(norm[key], tuple):
+                literal, env["eor"] = norm[key]
+                env["has_eor"], env["has_ctrl"] = 1, int(literal is not None)
+                env.update({"ctrl": literal} if literal is not None else {})
             elif plain:
                 env[env_name(key)] = norm[key]
         return env
 
-    def _try(self, shape, norm) -> tuple[dict | None, str]:
+    @staticmethod
+    def _unfit(shape, norm) -> str | None:
+        """Why a written row's keys can't take ``shape``, or None."""
         extra = set(norm) - set(shape.keys) - set(shape.keep)
         if extra:
-            return None, f"keys {sorted(extra)}"
+            return f"keys {sorted(extra)}"
         for key, value in norm.items():
             if is_expr(value) and "expr" not in shape.keys.get(key, {}):
-                return None, f"{key} holds no expression here"
+                return f"{key} holds no expression here"
+            if key == "ctrl" and isinstance(value, tuple) and "eor" not in shape.keys["ctrl"]:
+                return "ctrl holds no mask here"
+        return None
+
+    def _try(self, shape, norm, place) -> tuple[dict | None, str]:
+        unfit = self._unfit(shape, norm)
+        if unfit is not None:
+            return None, unfit
         env = self._env(shape, norm)
         raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
@@ -304,7 +365,7 @@ class RowCodec:
             if field is not None:
                 raw[field] = value
             full = self._full(raw)
-            if shape.when is not None and not self.ev(shape.when, full):
+            if not self._fits(shape, full, place):
                 continue
             try:
                 back = self._encode(shape, full)
@@ -319,18 +380,20 @@ class RowCodec:
 
     @staticmethod
     def normalize(written: dict) -> dict:
-        """A written row with notes as ``(absolute, number)`` and routes as ``(relation, mask)``."""
+        """A written row with notes as ``(absolute, number)``, routes as ``(relation, mask)``
+        and masked controls as ``(literal, mask)``."""
         return {k: _FORMS[k][0](v) if k in _FORMS else v for k, v in written.items()}
 
-    def decode(self, written: dict) -> dict:
-        """Raw fields for a written row; raises CodecError naming what the player can't express."""
+    def decode(self, written: dict, place: dict | None = None) -> dict:
+        """Raw fields for a written row at ``place`` (see :meth:`encode`); raises CodecError
+        naming what the player can't express."""
         for key in written:
             if key in RETIRED_ROW_KEYS and not any(key in s.keep for s in self.shapes):
                 raise CodecError(f"{self.rtype.name}: {key} is {RETIRED_ROW_KEYS[key]}")
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:
-            raw, problem = self._try(shape, norm)
+            raw, problem = self._try(shape, norm, place)
             if raw is not None:
                 return raw
             problems.append(problem)
@@ -338,12 +401,12 @@ class RowCodec:
             f"{self.rtype.name}: the player can't express row {written!r} ({'; '.join(problems)})"
         )
 
-    def check_end(self, raw: dict, written: dict) -> None:
+    def check_end(self, raw: dict, written: dict, place: dict | None = None) -> None:
         """Raise unless ``raw`` (a program's last row after ``end``) still writes as ``written``.
 
         An expression key compares by presence: ``raw`` holds its reference, ``written`` its text.
         """
-        enc, norm = self.encode(raw), self.normalize(written)
+        enc, norm = self.encode(raw, place), self.normalize(written)
         exprs = {k for k, v in (enc or {}).items() if is_expr(v)}
         if (
             enc is None

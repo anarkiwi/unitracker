@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.7 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.8 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import timeline
+from unitracker import eventrestart, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -24,27 +24,33 @@ from unitracker.codec import (
     Evaluator,
     RowCodec,
     is_expr,
+    row_place,
     note_text,
     written_value,
 )
 from unitracker.expr import ExprError, Resolver
 from unitracker.modulation import declared
-from unitracker.reach import ReachabilityError, table_reads
 from unitracker.records import EXPR, record_types
+from unitracker.tablepatch import table_diff, unread_dropped
 from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
 from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
+from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap
 
-VERSION = 1.7
+VERSION = 1.8
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RETIRED_KEYS = {"registers": "retired in v1.6: the player starts from a zeroed SID"}
+_RESTART = "retired in v1.8: write the hard restart as the instrument's restart program"
+RETIRED_FIELDS = {"gt": _RESTART, "fw": _RESTART, "hrad": _RESTART, "hrsr": _RESTART}
+RETIRED_FIELDS["firstctrl"] = _RESTART
+RETIRED_BITS = {"flags": (0x0F, _RESTART)}
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.7 format."""
+    """A document does not follow the unitracker v1.8 format."""
 
 
 @functools.cache
@@ -91,7 +97,7 @@ class _RowEval(Resolver):
 def _codecs(pr, rtypes, tables):
     """``(note offset, {type: RowCodec}, CommandCodec)`` for a playroutine and a song's tables."""
     offset = int(pr.get("note_offset", 0))
-    ev = Evaluator(pr.get("functions"), tables)
+    ev = Evaluator(pr.get("functions"), tables, pr.get("constants"))
     try:
         rows = {n: RowCodec(rt, rt.codec, offset, ev) for n, rt in rtypes.items() if rt.codec}
         return offset, rows, CommandCodec(pr.get("commands"), rtypes)
@@ -119,54 +125,20 @@ def _ref_type(rtype, field, row):
     return None
 
 
+def _retired(rtype, value: dict) -> None:
+    """Raise, naming it, for a field or flag bit the format has retired."""
+    for key in RETIRED_FIELDS.keys() & value.keys():
+        raise SongFormatError(f"{rtype.name}.{key} is {RETIRED_FIELDS[key]}")
+    for key, (mask, why) in RETIRED_BITS.items():
+        if isinstance(value.get(key), int) and value[key] & mask:
+            raise SongFormatError(f"{rtype.name}.{key} bits {mask:#04x} are {why}")
+
+
 # ---- writing -----------------------------------------------------------------------
 
 
-class Flow(list):
-    """A list written in flow style."""
-
-
-class FlowMap(dict):
-    """A mapping written in flow style."""
-
-
-class Atom(str):
-    """A plain scalar written as is: event atoms, names, entries."""
-
-
-class _Dumper(yaml.SafeDumper):
-    """Block structure, flow leaves, and atoms as unquoted plain scalars."""
-
-    def increase_indent(self, flow=False, indentless=False):
-        return super().increase_indent(flow, False)
-
-    def choose_scalar_style(self):
-        if self.event.style == "A":
-            return ""
-        return super().choose_scalar_style()
-
-
-_SIGNED = re.compile(r"^[+-]\d+$")
-
-
-def _atom(dumper, data):
-    if data in ("off", "on"):
-        tag = "tag:yaml.org,2002:bool"
-    elif _SIGNED.match(data):
-        tag = "tag:yaml.org,2002:int"
-    else:
-        tag = "tag:yaml.org,2002:str"
-    return dumper.represent_scalar(tag, str(data), style="A")
-
-
-_Dumper.add_representer(Flow, lambda d, x: d.represent_sequence("tag:yaml.org,2002:seq", x, True))
-_Dumper.add_representer(FlowMap, lambda d, x: d.represent_mapping("tag:yaml.org,2002:map", x, True))
-_Dumper.add_representer(Atom, _atom)
-_Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.org,2002:null", "~"))
-
-
 class _Writer:
-    """Turns the internal representation into a canonical v1.7 document."""
+    """Turns the internal representation into a canonical v1.8 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -192,6 +164,7 @@ class _Writer:
         self.programs = {}
         self.names = {}
         self.row = 0
+        self.restarts = {}
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -279,7 +252,10 @@ class _Writer:
 
         Phrases equal up to a transpose share the first-used one as their base.
         """
-        compiled = {name: compile_phrase(ev) for name, ev in (self.ir["phrases"] or {}).items()}
+        compiled = {
+            name: self._folded(compile_phrase(ev))
+            for name, ev in (self.ir["phrases"] or {}).items()
+        }
         bases, alias = {}, {}
         for row in rows:
             for entry in row:
@@ -289,6 +265,37 @@ class _Writer:
                 base, base_shift = bases.setdefault(key, (entry[0], shift))
                 alias[entry[0]] = (base, shift - base_shift)
         return alias, compiled
+
+    def _folded(self, arr):
+        """A compiled phrase with its event restarts on their notes (see ``eventrestart``)."""
+        spec = self.pr.get(eventrestart.NAME)
+        if not spec:
+            return arr
+        return eventrestart.fold(arr, int(spec["command"]), self._restart_of)
+
+    def _restart_of(self, entry: int, gap: int):
+        """The restart index of program ``entry`` run ``gap`` steps before a note, or None."""
+        target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
+        rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
+        path, loop = self.program(target, entry)
+        if loop is not None:
+            return None
+        rows = [{**target.fields, **self._row(target, i)} for i in path]
+        raws = eventrestart.restart_rows(rows, target, rtype, codec, gap)
+        if raws is None:
+            return None
+        return self._restart_entry(rtype, raws)
+
+    def _restart_entry(self, rtype, raws: list) -> int:
+        """The entry index of the restart of raw rows ``raws``, allocated on first use."""
+        key = tuple(tuple(sorted(r.items())) for r in raws)
+        if key not in self.restarts:
+            table = self.records.setdefault(rtype.name, {})
+            self.restarts[key] = start = max([rtype.first - 1, *table]) + 1
+            for k, raw in enumerate(raws):
+                nxt = start + k + 1 if k + 1 < len(raws) else rtype.none
+                table[start + k] = {**raw, rtype.chain: nxt}
+        return self.restarts[key]
 
     # -- representations --
 
@@ -300,13 +307,16 @@ class _Writer:
             return Atom(self.names[key])
         return self.program_value(key)
 
-    def row_value(self, rtype, row):
-        """A row in its type's form, references resolved; shared keys where the codec fits."""
+    def row_value(self, rtype, row, place=None):
+        """A row in its type's form, references resolved; shared keys where the codec fits.
+
+        ``place`` is a program row's position (see ``RowCodec.encode``).
+        """
         codec = self.codecs.get(rtype.name)
-        shared = codec.encode(row) if codec is not None else None
+        shared = codec.encode(row, place) if codec is not None else None
         refs = dict(self._refs(rtype, row))
         if shared is not None:
-            return self._shared_row(codec, shared, refs)
+            return self._shared_row(codec, shared, refs, place)
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
         values = {}
@@ -329,14 +339,14 @@ class _Writer:
             out.pop()
         return Flow(out)
 
-    def _shared_row(self, codec, shared: dict, refs: dict) -> FlowMap:
+    def _shared_row(self, codec, shared: dict, refs: dict, place=None) -> FlowMap:
         """A row's shared-vocabulary form: notes named, expressions referenced, refs resolved."""
-        self._reads_back(codec, shared)
+        self._reads_back(codec, shared, place)
         out, number = {}, codec.expr_keys()
         for k, v in shared.items():
             if k == "note":
                 v = Atom(note_text(*v))
-            elif k == "route":
+            elif k in ("route", "ctrl"):
                 v = written_value(k, v)
             elif is_expr(v):
                 v = self.ref_value(self.key(EXPR, v[1]))
@@ -346,10 +356,10 @@ class _Writer:
         out.update((f, self.ref_value(k)) for f, k in refs.items() if f not in fields)
         return FlowMap(out)
 
-    def _reads_back(self, codec, shared):
+    def _reads_back(self, codec, shared, place):
         """Raise, naming the key, unless the player can read ``shared`` back."""
         try:
-            codec.decode({k: written_value(k, v) for k, v in shared.items()})
+            codec.decode({k: written_value(k, v) for k, v in shared.items()}, place)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
@@ -363,7 +373,10 @@ class _Writer:
                 v != rtype.default(f) for f, v in row.items() if f not in (rtype.expr, rtype.chain)
             ):
                 return self.ref_value(self.key(EXPR, int(row[rtype.expr])))
-        rows = [self.row_value(rtype, self._row(rtype, i)) for i in path]
+        rows = [
+            self.row_value(rtype, self._row(rtype, i), row_place(k, len(path), loop is None))
+            for k, i in enumerate(path)
+        ]
         rows.append(Atom("end") if loop is None else FlowMap(loop=loop))
         return Flow(rows)
 
@@ -402,6 +415,8 @@ class _Writer:
         """A command as ``name:arg``, or None for no command."""
         if not (cmd or raw):
             return None
+        if cmd == eventrestart.CODE:
+            return f"{eventrestart.NAME}:@{self.names[(eventrestart.NAME, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
@@ -417,6 +432,9 @@ class _Writer:
             if row[2]:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             for cmd, arg in zip(row[3::2], row[4::2]):
+                if cmd == eventrestart.CODE:
+                    yield (eventrestart.NAME, int(arg)), "command"
+                    continue
                 target = self.commands.ref(int(cmd))
                 if target is not None:
                     none = self.rtypes[target].none
@@ -534,7 +552,7 @@ class _Writer:
         consts = {k: v for k, v in (self.pr.get("constants") or {}).items() if libc.get(k) != v}
         if consts:
             pr["constants"] = FlowMap(consts)
-        diff = _unread_dropped(_table_diff(tables, lib.get("tables") or {}), self.ir)
+        diff = unread_dropped(table_diff(tables, lib.get("tables") or {}), self.ir)
         return {**pr, "tables": diff} if diff else pr
 
     def environment(self) -> dict:
@@ -556,45 +574,8 @@ def _transpose_key(arr):
     return norm.tobytes() + str(norm.shape).encode(), shift
 
 
-def _table_diff(tables, defaults) -> dict:
-    """Tables as sparse ``{index: value}`` differences from the library defaults."""
-    out = {}
-    for name, values in tables.items():
-        base = [int(x) for x in defaults.get(name) or []]
-        if len(base) != len(values):
-            out[name] = Flow(values)
-            continue
-        diff = FlowMap({i: v for i, (v, d) in enumerate(zip(values, base)) if v != d})
-        if diff:
-            out[name] = diff
-    return out
-
-
-def _unread_dropped(diff: dict, ir: dict) -> dict:
-    """``diff`` without the patch entries the song never reads.
-
-    An entry no reachable tick reads cannot change the output, so the reader's library
-    default stands in for it. If reachability can't be established the patch is kept whole.
-    """
-    if not diff:
-        return diff
-    try:
-        reads = table_reads(ir)[0]
-    except ReachabilityError:
-        return diff
-    out = {}
-    for name, values in diff.items():
-        if isinstance(values, Flow):
-            out[name] = values
-            continue
-        kept = FlowMap({i: v for i, v in values.items() if i in reads.get(name, ())})
-        if kept:
-            out[name] = kept
-    return out
-
-
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.7 document for internal-representation song ``ir``.
+    """A canonical v1.8 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -611,14 +592,14 @@ def dumps(ir: dict, embed: bool = False) -> str:
     doc.update(writer.environment())
     doc["song"] = rows
     doc["loop"] = loop
-    return yaml.dump(doc, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
+    return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
 
 
 # ---- reading -----------------------------------------------------------------------
 
 
 class _Reader:
-    """Expands a v1.7 document to the internal representation."""
+    """Expands a v1.8 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -636,6 +617,7 @@ class _Reader:
         self.names = {}
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
+        self.played = {}
 
     def _playroutine(self, spec) -> dict:
         if not isinstance(spec, dict):
@@ -679,19 +661,24 @@ class _Reader:
         self.exprs[len(self.exprs) + 1] = text
         return len(self.exprs)
 
-    def _proto(self, rtype, value) -> dict:
-        """A row's fields; references stay ``("name", str)`` or allocate inline programs."""
+    def _proto(self, rtype, value, place=None) -> dict:
+        """A row's fields; references stay ``("name", str)`` or allocate inline programs.
+
+        ``place`` is a program row's position (see ``RowCodec.encode``).
+        """
         # pylint: disable=too-many-branches
         codec = self.codecs.get(rtype.name)
         decoded = set()
+        if isinstance(value, dict):
+            _retired(rtype, value)
         if codec is not None and isinstance(value, dict):
-            row, decoded = self._decoded(codec, rtype, value)
+            row, decoded = self._decoded(codec, rtype, value, place)
         elif rtype.form == "map":
             if not isinstance(value, dict):
                 raise SongFormatError(f"{rtype.name}: a row must be a mapping")
             row = dict(value)
         else:
-            row = self._list_row(rtype, codec, value)
+            row = self._list_row(rtype, codec, value, place)
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
@@ -715,7 +702,7 @@ class _Reader:
                 raise SongFormatError(f"{rtype.name}.{field}: bad value {val!r}")
         return row
 
-    def _decoded(self, codec, rtype, value: dict) -> tuple:
+    def _decoded(self, codec, rtype, value: dict, place) -> tuple:
         """``(row, decoded fields)`` of a codec row, its named references kept as written."""
         value = dict(value)
         for key, number in codec.expr_keys().items():
@@ -728,19 +715,19 @@ class _Reader:
             if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
         }
         try:
-            row = codec.decode({k: v for k, v in value.items() if k not in named})
+            row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         return {**row, **named}, set(row)
 
     @staticmethod
-    def _list_row(rtype, codec, value) -> dict:
+    def _list_row(rtype, codec, value, place) -> dict:
         """A list row's fields; a row the codec writes with shared keys has no list form."""
         fields = [f for f in rtype.fields if f != rtype.chain]
         if not isinstance(value, list) or len(value) > len(fields):
             raise SongFormatError(f"{rtype.name}: bad row {value!r}")
         row = dict(zip(fields, value))
-        if codec is not None and codec.encode(row) is not None:
+        if codec is not None and codec.encode(row, place) is not None:
             raise SongFormatError(f"{rtype.name}: write row {value!r} with shared keys")
         return row
 
@@ -757,13 +744,13 @@ class _Reader:
         rows, term = value[:-1], value[-1]
         start = self._alloc(rtype, len(rows))
         for k, raw in enumerate(rows):
-            row = self._proto(rtype, raw)
+            row = self._proto(rtype, raw, row_place(k, len(rows), term == timeline.END))
             row[rtype.chain] = start + k + 1
             self.pending.append((rtype, start + k, row))
         last = self.pending[-1][2]
         if term == timeline.END:
             last[rtype.chain] = rtype.none if rtype.none is not None else 0
-            self._end(rtype, last, rows[-1])
+            self._end(rtype, last, rows[-1], row_place(len(rows) - 1, len(rows), True))
             if rtype.stop is not None:
                 plain = {f: v for f, v in last.items() if isinstance(v, int)}
                 if not _RowEval(rtype).holds(rtype.stop, plain):
@@ -774,7 +761,7 @@ class _Reader:
             raise SongFormatError(f"{rtype.name}: bad program end {term!r}")
         return start
 
-    def _end(self, rtype, last, written):
+    def _end(self, rtype, last, written, place):
         """Apply the type's ``end`` fields to a program's last row; it must still read the same."""
         if not rtype.end:
             return
@@ -783,7 +770,9 @@ class _Reader:
         if codec is not None and isinstance(written, dict):
             try:
                 raw = {k: v[1] if is_expr(v) else v for k, v in last.items()}
-                codec.check_end({k: v for k, v in raw.items() if isinstance(v, int)}, written)
+                codec.check_end(
+                    {k: v for k, v in raw.items() if isinstance(v, int)}, written, place
+                )
             except CodecError as exc:
                 raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
@@ -849,6 +838,9 @@ class _Reader:
         if len(parsed["commands"]) > MAX_COMMANDS:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
         commands = [self.command(cmd, arg, atom) for cmd, arg in parsed["commands"]]
+        for code, index in [c for c in commands if c[0] == eventrestart.CODE]:
+            event["restart"] = index
+            commands.remove([code, index])
         if len(commands) == 1:
             event["command"] = commands[0]
         elif commands:
@@ -857,10 +849,51 @@ class _Reader:
             event["steps"] = parsed["steps"]
         return event
 
+    def _event_restart(self, tname: str) -> bool:
+        """Whether type ``tname`` holds event restarts, which the reader plays as commands."""
+        return tname == eventrestart.NAME and bool(self.pr.get(eventrestart.NAME))
+
+    def _unfolded(self, events: list, phrase: str) -> list:
+        """A phrase's events with each restart played before its note (see ``eventrestart``)."""
+        restarts = [e for e in events if "restart" in e]
+        if not restarts:
+            return events
+        try:
+            return eventrestart.unfold(
+                events, int(self.pr[eventrestart.NAME]["command"]), self._played
+            )
+        except eventrestart.RestartError as exc:
+            raise SongFormatError(f"{self.pr['name']}: phrase {phrase}: {exc}") from exc
+
+    def _played(self, index: int) -> tuple:
+        """``(entry, steps)``: the program event restart ``index`` runs, and how far ahead."""
+        if index not in self.played:
+            rtype, codec = self.rtypes[eventrestart.NAME], self.codecs[eventrestart.NAME]
+            target = self.rtypes[self.commands.ref(int(self.pr[eventrestart.NAME]["command"]))]
+            path, rows, entry = [], self.records[rtype.name], index
+            while entry != rtype.none:
+                path.append({f: v for f, v in rows[entry].items() if f != rtype.chain})
+                entry = rows[entry][rtype.chain]
+            try:
+                ahead, steps = eventrestart.lookahead(path, target, codec)
+            except eventrestart.RestartError as exc:
+                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+            start = self._alloc(target, len(ahead))
+            for k, row in enumerate(ahead):
+                last = k + 1 == len(ahead)
+                self.records[target.name][start + k] = {
+                    **row,
+                    target.chain: 0 if last else start + k + 1,
+                }
+            self.played[index] = (start, steps)
+        return self.played[index]
+
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd in RETIRED:
             raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
+        if cmd == eventrestart.NAME and self._event_restart(cmd) and isinstance(arg, str):
+            return [eventrestart.CODE, self.lookup(arg[1:], eventrestart.NAME)]
         if isinstance(arg, str) and arg != NONE:
             if arg[1:] not in self.names:
                 raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
@@ -894,7 +927,10 @@ class _Reader:
         """The internal representation."""
         doc = self.doc
         phrases, rows = self._collect(doc.get("song"))
-        events = {name: [self.event(a) for a in atoms] for name, atoms in phrases.items()}
+        events = {
+            name: self._unfolded([self.event(a) for a in atoms], name)
+            for name, atoms in phrases.items()
+        }
         lengths = {name: len(compile_phrase(ev)) for name, ev in events.items()}
         voices = int(doc.get("voices", self.defaults.get("voices", 3)))
         tracks = timeline.from_rows(rows, doc.get("loop"), lengths, voices)
@@ -906,7 +942,7 @@ class _Reader:
             "voices": voices,
             "tables": self.tables,
             "playroutine": self.pr,
-            "records": {k: v for k, v in self.records.items() if v},
+            "records": {k: v for k, v in self.records.items() if v and not self._event_restart(k)},
             "exprs": self.exprs,
             "tracks": tracks,
             "phrases": events,
@@ -925,7 +961,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.7 document."""
+    """The internal representation of a v1.8 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
@@ -935,13 +971,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.7 document at ``path``."""
+    """The internal representation of the v1.8 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.7 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.8 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

@@ -25,6 +25,10 @@ BIG_FX = (0x01, 0x02, 0x03)
 GLIDE = 0x03
 INST_COLUMN = 0x100
 NOTE_COLUMN = 0x200
+HR_TIMER, HR_STACCATO, HR_FIRSTCTRL, FLAGS = 0x03, 0x04, 0x08, 0xF0
+STACCATO = 0x18
+# The player's empty instrument: its control byte and first waveform.
+EMPTY_CONTROL, EMPTY_FIRST = 0x1A, 0x09
 
 
 class LiftError(ValueError):
@@ -115,14 +119,56 @@ def chords(table: bytes) -> tuple[dict, dict]:
     return records, starts
 
 
-def instrument_record(ins, tables: Tables, chord_starts: dict) -> dict:
-    """An instrument's header fields and its table programs."""
+class Restarts:
+    """The hard-restart programs, one per distinct instrument restart."""
+
+    # pylint: disable=too-few-public-methods
+
+    def __init__(self):
+        self.records, self.entry = {}, {}
+
+    def program(self, rows: tuple) -> int:
+        """The entry index of the program of ``rows``, 0 when it has none."""
+        if not rows:
+            return 0
+        if rows not in self.entry:
+            self.entry[rows] = start = len(self.records) + 1
+            for k, row in enumerate(rows):
+                nxt = start + k + 1 if k + 1 < len(rows) else 0
+                self.records[start + k] = {**dict(row), "next": nxt}
+        return self.entry[rows]
+
+
+def restart_rows(control: int, hrad: int, hrsr: int, first: int) -> tuple:
+    """The hard-restart program of an instrument header's control byte, as hashable rows.
+
+    Bits 0 and 1 fire the restart one and two ticks before the row applies; bit 2 makes it
+    staccato (control $18); bit 3 writes the first waveform on the note's first tick.
+    """
+    timer = control & HR_TIMER
+    if timer == HR_TIMER:
+        raise LiftError("a hard restart on both ticks before the note is not covered")
+    rows = []
+    if timer:
+        ahead = {"hold": 2 if timer & 2 else 1, "gate": 0, "ad": hrad, "sr": hrsr}
+        if control & HR_STACCATO:
+            ahead["ctrl"] = STACCATO
+        rows.append(ahead)
+    note = {"ctrl": first} if control & HR_FIRSTCTRL else {}
+    if rows or note:
+        rows.append(note)
+    return tuple(tuple(sorted(row.items())) for row in rows)
+
+
+def instrument_record(ins, tables: Tables, chord_starts: dict, restarts: Restarts) -> dict:
+    """An instrument's header fields and its table and restart programs."""
     if ins.filter_table and ins.filter_table[0] == TABLE_END:
         raise LiftError("instruments marked unfiltered ($FF filter table) are not covered")
+    hrad = (ins.hr_attack << 4) | ins.hr_decay
+    hrsr = (ins.hr_sustain << 4) | ins.hr_release
+    rows = restart_rows(ins.control, hrad, hrsr, ins.effective_first_waveform)
     rec = {
-        "flags": ins.control,
-        "hrad": (ins.hr_attack << 4) | ins.hr_decay,
-        "hrsr": (ins.hr_sustain << 4) | ins.hr_release,
+        "flags": ins.control & FLAGS,
         "ad": (ins.attack << 4) | ins.decay,
         "sr": (ins.sustain << 4) | ins.release,
         "vibrato": ins.vibrato,
@@ -130,10 +176,10 @@ def instrument_record(ins, tables: Tables, chord_starts: dict) -> dict:
         "arpspeed": ins.arp_speed,
         "chord": chord_starts.get(ins.default_chord, 0),
         "octave": ins.octave_shift,
-        "firstctrl": ins.effective_first_waveform,
         "ctrl": tables.program("wftab", ins.wf_table, wf_record),
         "pw": tables.program("pwtab", ins.pw_table, pw_record),
         "filter": tables.program("flttab", ins.filter_table, filter_record),
+        "restart": restarts.program(rows),
     }
     return rec
 
@@ -270,8 +316,9 @@ class Instruments:
     # pylint: disable=too-few-public-methods
 
     def __init__(self, swm, tables: Tables, chord_starts: dict):
+        self.restarts = Restarts()
         self.records = {
-            num: instrument_record(ins, tables, chord_starts)
+            num: instrument_record(ins, tables, chord_starts, self.restarts)
             for num, ins in enumerate(swm.instruments, start=1)
         }
         self.count = len(swm.instruments)
@@ -283,7 +330,13 @@ class Instruments:
             return ref
         empty = self.count + 1
         if empty not in self.records:
-            self.records[empty] = {"flags": 0x1A, "hrad": 0x0F, "sr": 0xF0, "chord": self.chord}
+            rows = restart_rows(EMPTY_CONTROL, 0x0F, 0x00, EMPTY_FIRST)
+            self.records[empty] = {
+                "flags": EMPTY_CONTROL & FLAGS,
+                "sr": 0xF0,
+                "chord": self.chord,
+                "restart": self.restarts.program(rows),
+            }
         return empty
 
 
@@ -346,6 +399,7 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
             "pwtab": tables.records["pwtab"],
             "flttab": tables.records["flttab"],
             "chordtab": chord_records,
+            "restart": instruments.restarts.records,
         },
         "tracks": tracks,
         "phrases": phrases,
