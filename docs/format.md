@@ -141,7 +141,8 @@ note[.instrument][!command:arg[!command:arg]][*steps]
   index the player's frequency table gives it (see `note_offset`).
 - `.i3` names the instrument. For defMON it names a sidTAB program.
 - `!run:@c1` is a named command with an argument: a number, `@name` for a command that
-  references a record or an expression, or `none`. An event carries at most two commands,
+  references a record or an expression, `none`, or values joined by `/` for a command that
+  carries its record's row (`!funk:6/7`). An event carries at most two commands,
   its two slots, then `!pulse:0` and `!filter:0` (see Lifetime), which take no slot. The
   first slot is the instrument column and the second the FX column, and an event that names
   an instrument fills the instrument column with it, so its commands are the FX column's. A
@@ -183,7 +184,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
 | `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice |
-| `!funk:@s` | swing tempo pair |
+| `!funk:a/b`, `!funk:none` | swing tempo, for all voices: the steps alternate `a` and `b` ticks (each from 2); `none` swings on the pair already set (9/6 until one is) |
 | `!freq:@x` | drive the voice frequency by expression `x` (see Modulators) |
 | `!legato:0` | the event's note does not retrigger (see Legato) |
 | `!mark:n` | a timing mark that changes no sound |
@@ -231,7 +232,7 @@ rejected on reading, naming the key or command and the player (`sidwizard: the p
 can't express !ad:255 over the instrument's ad 18`); the writer refuses to write a value that
 would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
-- **GoatTracker 2:** the record type `speedtab`, which `!funk` names.
+- **GoatTracker 2:** the record type `speedtab`, which no written key or command names.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -616,7 +617,9 @@ uses the first shape whose `when` holds and refuses a row that would not read ba
 shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or
 `x` for an expression), and for a plain argument optional `when`, `arg` (raw to written)
-and `raw` (written to raw), checked the same way. An entry `{name: ad, nibble: s, slot: k}`
+and `raw` (written to raw), checked the same way. A `ref` entry with `inline: true` writes
+the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
+one row per distinct argument, and the type has no definitions of its own. An entry `{name: ad, nibble: s, slot: k}`
 is an envelope command: the code sets the nibble at shift `s` of the register `name` over
 the instrument's field `name`, played from event slot `k`, and is written as the byte it
 writes (see the SID-Wizard backend).

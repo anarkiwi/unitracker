@@ -26,7 +26,8 @@ commands:
   11: {name: resfilt}
   12: {name: cut, arg: "arg << 3", raw: "arg >> 3"}
   13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
-  14: {name: funk, ref: speedtab}
+  # E: the swing tempos, written as the speed-table row's two bytes (!funk:6/7).
+  14: {name: funk, ref: speedtab, inline: true}
   # F: d (bit 7 clear: all voices) gives d ticks per row for d >= 3, and d = 2 plays as 3.
   15:
     - {name: tempo, when: "arg >= 2 and arg < 0x80", arg: "arg if arg >= 3 else 3", raw: arg}

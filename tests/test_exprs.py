@@ -133,6 +133,28 @@ def test_the_reader_names_the_retired_sidtab_columns(row, match):
         songio.loads(text)
 
 
+def test_funk_arguments_share_their_speed_table_rows():
+    text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
+    song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
+    assert song["records"]["speedtab"] == {1: {"l": 6, "r": 9}, 2: {"l": 3, "r": 4}}
+    cmds = [e.get("command") or e["commands"][-1] for e in song["phrases"]["p1"]]
+    assert cmds == [[14, 1], [14, 1], [14, 2], [14, 0]]
+    assert "-!funk:3/4, -!funk:none]" in songio.dumps(song)
+
+
+@pytest.mark.parametrize(
+    "command,match",
+    [
+        ("!funk:6", r"!funk: the argument is 2 values, l/r"),
+        ("!funk:6/256", r"!funk: each value is a byte"),
+        ("!run:6/9", r"!run takes no row argument"),
+    ],
+)
+def test_the_reader_refuses_a_bad_row_argument(command, match):
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.loads(doc("goattracker2", "      ins:\n        i1: {sr: 240}", f"[C4.i1{command}]"))
+
+
 def test_goattracker_freq_command_pulse_expression_and_legato():
     freq, pulse, ctrl = voice0(GT_SONG, 34)
     c4, d4 = GT["ftab"][48], GT["ftab"][50]

@@ -488,6 +488,13 @@ class CommandCodec:
                 return ref
         return None
 
+    def inline(self, key: int | str) -> str | None:
+        """The record type whose row a command (a code or a name) writes as its argument."""
+        for code, name, ref, var in self.entries:
+            if key in (code, name) and ref is not None and var.get("inline"):
+                return ref
+        return None
+
     def encode(self, code: int, arg: int) -> tuple[str, object]:
         """``(name, value)``: value is an int, ``(type, index)`` for a reference, or ``none``."""
         for ecode, name, ref, var in self.entries:

@@ -369,3 +369,12 @@ def test_an_instrument_change_resumes_the_new_instruments_vibrato():
         "-!freq:@x1",
         "C3.i2*8",
     ]
+
+
+def test_funk_carries_its_tempos():
+    rows = [(24 + k, 1, 14 if k == 0 else 0, 1 if k == 0 else 0) for k in range(16)]
+    text = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, speed=[(6, 9)]))
+    assert "C2.i1!funk:6/9," in text and "speedtab" not in text
+    grid = SongPlayer(songio.loads(text)).render_grid(120).astype(int)
+    steps = np.diff([t for t in range(1, 120) if grid[t, 0] != grid[t - 1, 0]])
+    assert set(steps[::2]) == {6} and set(steps[1::2]) == {9}

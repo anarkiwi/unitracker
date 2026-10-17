@@ -62,6 +62,18 @@ def restart_rows(rows: list, target, rtype, codec, gap: int) -> list | None:
         return None
 
 
+def entry_of(raws: list, rtype, table: dict, entries: dict) -> int:
+    """The entry index in ``table`` of the restart of raw rows ``raws``, allocated on first use
+    and remembered in ``entries``."""
+    key = tuple(tuple(sorted(r.items())) for r in raws)
+    if key not in entries:
+        entries[key] = start = max([rtype.first - 1, *table]) + 1
+        for k, raw in enumerate(raws):
+            nxt = start + k + 1 if k + 1 < len(raws) else rtype.none
+            table[start + k] = {**raw, rtype.chain: nxt}
+    return entries[key]
+
+
 def lookahead(path: list, target, codec) -> tuple[list, int]:
     """``(rows, steps)``: a restart's raw ``path`` as the rows of the program it runs, the last
     one ending it, and the steps their holds put it before the note."""
@@ -74,6 +86,23 @@ def lookahead(path: list, target, codec) -> tuple[list, int]:
     rows = [dict(r) for r in ahead]
     rows[-1].update(target.end)
     return rows, sum(holds)
+
+
+def played(index: int, records: dict, types: tuple, codec, alloc) -> tuple[int, int]:
+    """``(entry, steps)`` of restart ``index``: the program of its lookahead rows, allocated in
+    ``records`` by ``alloc(target, rows)``, and its steps before the note; ``types`` is
+    ``(restart type, target type)``."""
+    rtype, target = types
+    path = []
+    while index != rtype.none:
+        path.append({f: v for f, v in records[rtype.name][index].items() if f != rtype.chain})
+        index = records[rtype.name][index][rtype.chain]
+    ahead, steps = lookahead(path, target, codec)
+    start = alloc(target, len(ahead))
+    for k, row in enumerate(ahead):
+        records[target.name][start + k] = {**row, target.chain: start + k + 1}
+    records[target.name][start + len(ahead) - 1][target.chain] = 0
+    return start, steps
 
 
 def unfold(events: list, code: int, program) -> list:
