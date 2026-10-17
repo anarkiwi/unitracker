@@ -5,6 +5,7 @@ derived and proved (in parallel, cached by content) and its expression written w
 lives: a record site (a program's first row, an instrument field) or the event's ``!freq``.
 """
 
+import ast
 import copy
 import dataclasses
 import json
@@ -206,6 +207,23 @@ def site_of(spec: dict, occ) -> tuple | None:
     if site is None or ("when" in site and not evaluate(site["when"], occ.start)):
         return None
     return site["record"], evaluate(site["index"], occ.start)
+
+
+def falls_back(spec: dict) -> bool:
+    """True when unit ``spec``'s selector names its site's record field itself: a step that
+    restarts the unit without its command selects that record's expression, so a start the
+    site does not cover is the command on each step it spans, not on its first alone."""
+    site = spec.get("site")
+    if not site or "x" not in spec:
+        return False
+    return any(
+        isinstance(n, ast.Attribute)
+        and n.attr == site["field"]
+        and isinstance(n.value, ast.Subscript)
+        and ast.unparse(n.value.value) == site["record"]
+        and ast.unparse(n.value.slice) == str(site["index"])
+        for n in ast.walk(ast.parse(str(spec["x"]), mode="eval"))
+    )
 
 
 def diagnosis(spec: dict, occ) -> str:
@@ -597,7 +615,9 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             event = self._step_event(where)
             native = [c for c in _cmds(event) if int(c[0]) in spec.get("commands", ())]
             started = occ.instance == instance
-            onward = not _cmds(event) and occ.start.get(self.pr.get("onset"), 1)
+            onward = (
+                falls_back(spec) and not _cmds(event) and occ.start.get(self.pr.get("onset"), 1)
+            )
             if not (native or (text is not None and (started or onward))):
                 continue
             ev = self.edit(instance)

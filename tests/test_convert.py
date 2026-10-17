@@ -261,6 +261,36 @@ loop: ~
     return songio.loads(text)
 
 
+@pytest.mark.parametrize(
+    "ref,unit,falls", [("goattracker2", "command", True), ("sidwizard", "pitch", False)]
+)
+def test_only_a_selector_naming_its_site_falls_back_to_it(ref, unit, falls):
+    units = {u["name"]: u for u in songio.library(ref)["modulators"]["units"]}
+    assert convert.falls_back(units[unit]) is falls
+    assert not convert.falls_back({k: v for k, v in units[unit].items() if k != "site"})
+    assert not convert.falls_back({**units[unit], "x": "ins[0].freq"})
+
+
+@pytest.mark.parametrize(
+    "make,unit,start,written",
+    [
+        (gt_ir, "command", {"command": 0, "onset": 1, "fired": 1}, [1, 2, 3]),
+        (sw_ir, "pitch", {"svib": 0x81, "pnfx": 0, "onset": 1}, [1]),
+    ],
+)
+def test_a_resumed_vibrato_is_each_steps_freq_only_where_a_step_reselects(
+    make, unit, start, written
+):
+    ir = make("[C4.i1*4, D4*4]")
+    occs = [occurrence(unit, (0, 0, 1), start, 0)]
+    events = {(unit, (0, 0, s)): 0 for s in (1, 2, 3)}
+    obs = {"occurrences": occs, "events": events, "plays": [[0], [0], [0]]}
+    out = convert.Rewrite(ir, obs, ["v + 1"]).run()
+    (variant,) = {p["phrase"] for p in out["tracks"][0]["plays"]}
+    steps = convert._steps(out["phrases"][variant])  # pylint: disable=protected-access
+    assert [k for k, e in enumerate(steps) if e.get("command") == [16, 1]] == written
+
+
 @pytest.mark.parametrize("flags,cleared,driven", [(0x50, 0x50, True), (0x60, 0x50, False)])
 def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, cleared, driven):
     ir = sw_ir("[C4.i1*8, -*4, -*4]")
