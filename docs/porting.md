@@ -184,6 +184,12 @@ pitch effect (`key: freq`), a pulse sweep (`pw`) or a filter sweep (`cut`). The 
 | `site`, `retire`, `command`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` replaces |
 | `chip` | the chip map, below |
 
+A start the `site` does not cover is written as the event's `!freq`. When `x` reads the site's
+own record field (GoatTracker's command unit falls back to the instrument's `freq` on a step
+without a command), each step the start spans without a command gets the `!freq`; otherwise
+(SID-Wizard's pitch unit, whose cell a commandless row leaves alone) only the step that starts
+it does (`convert.falls_back`).
+
 The top level of `modulators` gives what expressions read: `freq` (the word `F(k)` reads),
 `notes`, `transpose`, `legato`, and the named `tables` and `functions`.
 

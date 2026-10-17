@@ -241,7 +241,9 @@ by what they do to the SID.
    - Each text is written at the unit's `site` (the program's first row or the instrument
      field, the unit's `clear` fields removed and its `first` fields set) when its `when`
      holds, else as the event's `command` (`!freq`) in place of the unit's native
-     `commands`, with `!legato:0` when the start's legato cell is set. A record whose
+     `commands`, with `!legato:0` when the start's legato cell is set; on each commandless
+     step it spans too when the unit's `x` reads the site's field, which such a step falls
+     back to. A record whose
      occurrences need several texts is copied per text and each starting event points at its
      copy; changed events go into phrase variants (`p3~1`), unrolling a track's loop where
      its passes differ. A unit whose texts are all constants stays in a program's own rows
