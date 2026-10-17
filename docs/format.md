@@ -125,7 +125,7 @@ playroutine needs.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
   are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
   with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
-  `pw`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`, `cp`), and an omitted field
+  `pw`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`), and an omitted field
   is 0.
 
 ## Events
@@ -269,11 +269,14 @@ byte; `{res: r, route: + m}` with bit 3 of `m` set keeps the routing and adds th
 
 `cut` is the 11-bit cutoff in GoatTracker and SID-Wizard. In defMON it is the ACID
 accumulator: bits 8-15 are the cutoff byte, bits 0-7 its fraction and bit 16 the carry of
-the last step. The playroutine writes `$D416` as the cutoff byte plus the carry and the
-offset `cp`, wrapped to 8 bits, raised to the model floor when it is below the floor or
-above $7F, and doubled on the SID model that needs it. A defMON ACID program is written as
-its row's `cut` expression, so the sidTAB column `acid` has no written form; the column `cp`
-stays.
+the last step. The playroutine writes `$D416` as the cutoff byte plus the carry, wrapped to
+8 bits, raised to the model floor when it is below the floor or above $7F, and doubled on
+the SID model that needs it. The replay's offset `cp`, which it adds to the accumulator's
+high byte only on the way to `$D416`, is part of the accumulator: its high byte holds the
+offset, wrapped to 8 bits as the replay's add-with-carry wraps it, so the cutoff byte is
+exact for every offset. A defMON ACID program, and a layer-B program that sets `cp`, is
+written as its row's `cut` expression, its steps and saturation test carrying the offset as
+constants; the sidTAB column `acid` has no written form.
 
 The sidTAB columns `fv` (`mode`), `re` (`res` and `route`) and `acid` (`cut`) and the row key
 `resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`).
@@ -424,7 +427,7 @@ filter.
 |---|---|---|---|---|---|
 | `pitch A` | `freq` | `sacc`; with `af` below $80, the offset `S[k]` it adds | every tick, from layer A's row to the pitch step | a note, or layer A armed with a program that sets `af` or `freq` | the program's first row (it runs the slide mode $80, and the program's other rows set no `af`) |
 | `pulse A` | `pw` | `pw` | every tick, from layer A's row to the pulse step | layer A armed with a program that sets `pw`, `ps` or a pulse expression | the program's first row, replacing its `pw` and `ps` columns |
-| `acid B` | `cut` | `acc`, global | every tick, from layer B's row to the next ACID step | layer B armed with a program that sets `acid` or a cutoff expression | the program's first row, replacing its `acid` column |
+| `acid B` | `cut` | `acc`, global | every tick, from layer B's row to the next ACID step | layer B armed with a program that sets `acid`, `cp` or a cutoff expression | the program's first row, replacing its `acid` and `cp` columns |
 
 `af` below $80 adds a fixed offset to the note's frequency: the step `S[k]` (the table
 `S`, size 256) of note `k` = `N + 24 + af`. A lifted program writes it as its first row's

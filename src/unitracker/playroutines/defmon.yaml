@@ -106,7 +106,8 @@ record_types:
           - set:
               res: "(res & rmask) if row.re == 0 else (((res & 0x0F) | row.re | rbit) if row.re & 0x08 else row.re)"
       - {if: "row.fv >= 0", then: [{set: {fv: row.fv}}]}
-      - {if: "row.cp >= 0", then: [{set: {cp: row.cp}}]}
+      - if: "row.cp >= 0"
+        then: [{set: {acc: "((acc >= 0x10000) << 16) + ((acc + (row.cp - cp) * 256) & 0xFFFF)", cp: row.cp}}]
       - if: "row.acid >= 0"
         then:
           - if: "row.acid & 0x8000"
@@ -114,7 +115,7 @@ record_types:
               - if: "row.acid & 0x4000"
                 then: [{set: {astep: "row.acid & 0x3FFF", sub: 1}}]
                 else: [{set: {astep: "row.acid & 0x7FFF", sub: 0}}]
-            else: [{set: {acc: row.acid, astep: 0}}]
+            else: [{set: {acc: "(row.acid + cp * 256) & 0xFFFF", astep: 0}}]
   # Each voice's state as init leaves it; a layer's row is a reference while its counter runs.
   vinit:
     fixed: true
@@ -142,13 +143,13 @@ record_types:
   ginit:
     fixed: true
     form: map
-    fields: [resfilt, fv, cp, acc, astep, sub]
+    fields: [resfilt, fv, acc, astep, sub]
     codec:
       - keys:
           res: {value: "resfilt >> 4", omit: "resfilt < 0x10"}
           route: {value: "resfilt & 0x0F", omit: "(resfilt & 0x0F) == 0"}
           mode: {value: "fv & 0xF0", omit: "fv < 0x10"}
-        keep: [cp, acc, astep, sub]
+        keep: [acc, astep, sub]
         raw: {resfilt: "((res & 0x0F) << 4) | (route & 0x0F)", fv: mode}
 functions:
   nfreq:
@@ -208,15 +209,18 @@ procs:
   # $1022 SID band: this call writes the state the previous call left.
   latch:
     - set: {o_flo: flo, o_fhi: fhi, o_pw: pw, o_ctrl: "ctrl ^ eor", o_ad: ad, o_sr: sr}
-  # $10B5 ACID accumulator: CLC then ADC adds the step, or SBC adds its complement (step + 1
-  # less); bit 16 of acc is the carry; a negative high byte saturates to the floor.
+  # $10B5 ACID accumulator. acc holds it with the offset cp added to its high byte, wrapped to
+  # 16 bits; bit 16 is the carry of the last step. CLC then ADC adds the step, or SBC adds its
+  # complement (step + 1 less), to the accumulator without the offset; a negative high byte
+  # saturates to the floor.
   acid_step:
-    - set: {acc: "(acc & 0xFFFF) + ((0xFFFF - astep) if sub else astep)"}
+    - set: {acc: "((acc - cp * 256) & 0xFFFF) + ((0xFFFF - astep) if sub else astep)"}
     - if: "(acc & 0xFFFF) > 0x7FFF"
       then: [{set: {acc: "((acc >= 0x10000) << 16) + (floor << 8) + (acc & 0xFF)"}}]
-  # $10CA the cutoff byte: the high byte plus the offset and the carry, wrapped to 8 bits.
+    - {if: cp, then: [{set: {acc: "((acc >= 0x10000) << 16) + ((acc + cp * 256) & 0xFFFF)"}}]}
+  # $10CA the cutoff byte: the high byte, which holds the offset, plus the carry, wrapped to 8 bits.
   acid_out:
-    - set: {cf: "(acc >> 8) + cp + (acc >> 16)"}
+    - set: {cf: "(acc >> 8) + (acc >> 16)"}
   # $117F pattern event: arm the sidcall layers, latch a note.
   pattern:
     - fetch: true
@@ -308,7 +312,6 @@ init:
   - set:
       res: "ginit[0].resfilt"
       fv: "ginit[0].fv"
-      cp: "ginit[0].cp"
       acc: "ginit[0].acc"
       astep: "ginit[0].astep"
       sub: "ginit[0].sub"
@@ -378,6 +381,6 @@ modulators:
       post: procs.acid_step
       label: [rowB]
       x: "sidtab[rowB].xc"
-      program: {pointer: rowB, record: sidtab, fields: [acid, xc]}
-      site: {record: sidtab, index: rowB, field: xc, clear: {acid: -1}}
+      program: {pointer: rowB, record: sidtab, fields: [cp, acid, xc]}
+      site: {record: sidtab, index: rowB, field: xc, clear: {cp: -1, acid: -1}}
       hooks: [{at: procs.pattern, pointer: [rowB]}]

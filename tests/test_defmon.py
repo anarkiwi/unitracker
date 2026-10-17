@@ -43,15 +43,17 @@ def test_global_init_and_model():
     assert dm.global_init(mem) == {
         "resfilt": 0,
         "fv": 0,
-        "cp": 0,
         "acc": 0x1234,
         "astep": 0x0102,
         "sub": 1,
     }
     mem[0x10B8] = mem[0x10BF] = 0x69
     assert dm.global_init(mem)["sub"] == 0
+    mem[0x10CA] = 0x07
+    with pytest.raises(dm.LiftError, match=r"ACID offset cp at \$07"):
+        dm.global_init(mem)
     mem[0x10BF] = 0xE9
-    with pytest.raises(dm.LiftError, match="ACID"):
+    with pytest.raises(dm.LiftError, match="ACID opcodes"):
         dm.global_init(mem)
     mem[0x10CE] = 2
     assert dm.model_constants(mem) == {"floor": 2, "dbl": 0}

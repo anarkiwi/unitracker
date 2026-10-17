@@ -129,13 +129,13 @@ def test_vibrato_counter_proved_under_its_invariant():
 
 
 def test_acid_carry_cell_is_no_single_accumulator():
-    invs = invariants("defmon", "procs.acid_step", "acc")
-    assert invs == ("acc < 131071",)
+    assert not invariants("defmon", "procs.acid_step", "acc")
     fitter = Fitter(playroutine("defmon"))
     actions = resolve(fitter.form.pr, "procs.acid_step")
     groups = fitter.fit(actions, "acc")
-    assert len(groups) == 1 and groups[0][1] is None
-    assert fit_under(fitter, actions, "acc", groups[0][0], invs) == (invs[0], None)
+    assert sorted(g[0] for g in groups) == [(("eq", "cp", 0),), (("not", ("eq", "cp", 0)),)]
+    assert all(g[1] is None for g in groups)
+    assert all(fit_under(fitter, actions, "acc", g[0], ()) == ("", None) for g in groups)
 
 
 def pool(names) -> list:

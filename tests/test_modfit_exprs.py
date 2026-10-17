@@ -211,7 +211,7 @@ def test_named_tables_equal_the_functions_they_replace(csillag_song):
 def test_inherited_acid_direction_gives_two_expressions(crosseyed):
     song = load(crosseyed)
     machine = Machine(song.ir, {"cell": "acc", "fire": ["layer_b", "acid_step"]})
-    base = {"rowB": 10, "cntB": 0, "astep": 0}
+    base = {"rowB": 10, "cntB": 0, "astep": 0, "cp": 0}
     one = derive(machine, machine.start({**base, "sub": 1}), None, DM_FREQ)
     zero = derive(machine, machine.start({**base, "sub": 0}), None, DM_FREQ)
     assert one.exact and zero.exact and one.canonical != zero.canonical
