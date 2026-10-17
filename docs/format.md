@@ -771,9 +771,12 @@ effect does not run, as on a note row; the commands with a shared form are writt
 $F5 `ad`, $F6 `sr`, $F9 and $FA `run` (the pulse or filter program), $FB `res` and `route`
 (but $FB 00, which also stops the filter program), $FC `cut` and $FD `vol` (below $10). A
 wavetable jump is the program's `loop`. $F1-$F4 (one portamento, toneporta or vibrato step)
-are the row's `freq` (see Modulators). $F7 (a `ctrl` that, unlike a waveform row's, stops the tick's continuous effect),
-$F0, $F8 and $FE (which the playroutine stops on), $F9 00 and $FA 00 (which `run: none`
-can't tell apart), $FB 00 and $FD $10-$FF have no shared form.
+are the row's `freq` (see Modulators). $F7 sets the waveform as a waveform row does, but also
+pauses the tick's continuous effect; the lifter writes it as the waveform row of its value
+(`ctrl`) when a replay to the song's recurrence and one period more proves the pause unheard,
+and otherwise fails, naming the rows and the tick that hears it, as it does for a value from
+$E0, which no waveform row sets. $F0, $F8 and $FE (which the playroutine stops on), $F9 00 and
+$FA 00 (which `run: none` can't tell apart), $FB 00 and $FD $10-$FF have no shared form.
 
 **defMON.** The arranger and pattern counters are lifted as timing. Each song step
 becomes one phrase per voice, all of the same length in ticks, with each event on the

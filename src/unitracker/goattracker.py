@@ -2,13 +2,14 @@
 
 from importlib import resources
 
+import numpy as np
 import yaml
 from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
 from unitracker.songio import song_meta
-from unitracker.modfit.convert import convert
-from unitracker.vm import fold_empty
+from unitracker.modfit.convert import convert, window
+from unitracker.vm import SongPlayer, fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
@@ -261,6 +262,69 @@ def ticks_per_step(phrases, tracks, deftempo):
     return tempo + 1 if tempo >= 2 else None
 
 
+def wave_rows(records: dict, phrases: dict) -> list:
+    """The wavetable rows the instruments and the wavetable pointer command reach, in order."""
+    rows = records["ctrltab"]
+    entries = [ins.get("ctrl", 0) for ins in records["ins"].values()]
+    entries += [
+        arg
+        for events in phrases.values()
+        for event in events
+        for code, arg in event.get("commands") or [event.get("command") or (0, 0)]
+        if code == C.CMD_SETWAVEPTR
+    ]
+    seen = {}
+    for i in entries:
+        while i in rows and i not in seen:
+            seen[i] = None
+            i = rows[i]["next"]
+    return sorted(seen)
+
+
+def _unpaused(row: dict) -> dict | None:
+    """The row that does what wavetable command row ``row`` does but pause the tick's
+    continuous effect, or None when it does more.
+
+    $F7 sets the waveform, as a waveform row does.
+    """
+    w, n = row["w"], row["n"]
+    if w == 0xF0 | C.CMD_SETWAVE:
+        if n >= C.WAVESILENT:
+            raise LiftError(f"$F7 sets waveform ${n:02X}, which no waveform row sets")
+        return {**row, "w": n | C.WAVESILENT if n <= C.WAVELASTDELAY else n, "n": 0x80}
+    return None
+
+
+def unpause(ir: dict) -> dict:
+    """``ir`` with each wavetable row whose only effect beyond its row form is to pause the
+    tick's continuous effect (see :func:`_unpaused`) written in that form, once a replay to the
+    song's recurrence and one period more proves the pause unheard.
+
+    Raises LiftError naming the rows otherwise.
+    """
+    rows = ir["records"]["ctrltab"]
+    new = {}
+    for i in wave_rows(ir["records"], ir["phrases"]):
+        try:
+            row = _unpaused(rows[i])
+        except LiftError as exc:
+            raise LiftError(f"ctrltab row {i}: {exc}") from exc
+        if row is not None:
+            new[i] = row
+    if not new:
+        return ir
+    out = {**ir, "records": {**ir["records"], "ctrltab": {**rows, **new}}}
+    ticks = window(ir)
+    diff = np.argwhere(SongPlayer(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
+    if len(diff):
+        tick, reg = (int(x) for x in diff[0])
+        raise LiftError(
+            f"ctrltab rows {sorted(new)} pause the tick's continuous effect, which the song hears"
+            f" at tick {tick}, register {reg}"
+        )
+    return out
+
+
 def _check_build(info) -> None:
     """Raise for player builds the goattracker2 playroutine does not cover yet."""
     unsupported = {
@@ -320,4 +384,5 @@ def lift(dec, expressions: bool = True) -> dict:
         "phrases": phrases,
         "playroutine": playroutine,
     }
+    ir = unpause(ir)
     return convert(ir) if expressions else ir

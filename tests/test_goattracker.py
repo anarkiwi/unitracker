@@ -278,3 +278,27 @@ def test_a_wavetable_step_on_changing_phases_is_named():
     dec, _ = gt_tune([(0x41, 0), (0xF4, 3), (0xFF, 2)], speed=SPEEDS)
     with pytest.raises(ConversionError, match="ctrltab row 2: its runs need several freq"):
         gt.lift(dec)
+
+
+def test_a_waveform_command_whose_pause_is_unheard_is_a_waveform_row():
+    wave = [(0x41, 0), (0xFF, 0), (0xF7, 0x21), (0xF7, 0x05), (0xFF, 3)]
+    rows = [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 7 + [(None, 0, 8, 3)] + [(None, 0, 0, 0)] * 7
+    text = lifted(*gt_tune(wave, rows=rows))
+    assert "[{ctrl: 33}, {ctrl: 5}, {loop: 0}]" in text
+
+
+@pytest.mark.parametrize(
+    "wave,rows,match",
+    [
+        (
+            [(0x41, 0), (0xF7, 0x21), (0xFF, 2)],
+            [(24, 1, 1, 1)] + [(None, 0, 0, 0)] * 15,
+            r"ctrltab rows \[2\] pause the tick's continuous effect, which the song hears at tick",
+        ),
+        ([(0x41, 0), (0xF7, 0xE1), (0xFF, 2)], None, r"row 2: \$F7 sets waveform \$E1, which no"),
+    ],
+)
+def test_a_heard_pause_and_an_unwritable_waveform_are_named(wave, rows, match):
+    dec, _ = gt_tune(wave, rows=rows, speed=[(0, 0x20)])
+    with pytest.raises(gt.LiftError, match=match):
+        gt.lift(dec)
