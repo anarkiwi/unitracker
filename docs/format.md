@@ -107,7 +107,7 @@ playroutine needs.
 - **Rows** use the shared row keys (see Shared vocabulary) wherever the playroutine's
   codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
   written in the type's `form`: a `list` row holds the fields in declaration order, with
-  trailing defaults left out (a GoatTracker speed-table row `[4, 32]`); a `map`
+  trailing defaults left out (`[4, 32]`); a `map`
   row holds the fields that differ from their defaults. A type's `retired` rows have no
   written form.
 - **Programs** are the rows of a chained type, in the order they run, followed by
@@ -230,9 +230,8 @@ records, and in instruments, where `ctrl` names the program run on the control r
 (GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
 rejected on reading, naming the key or command and the player (`sidwizard: the player
 can't express !ad:255 over the instrument's ad 18`); the writer refuses to write a value that
-would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
-
-- **GoatTracker 2:** the record type `speedtab`, which no written key or command names.
+would not read back (a defMON pulse cell over `$0FFF`). No key, command or record type is
+one player's own.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -252,8 +251,10 @@ and `vibdelay`, bits 4 and 5 of `flags` (the vibrato type) and the note-column c
 retired in v1.11: write the vibrato as the instrument's freq expression`, `!vib is retired
 in v1.11`), and the GoatTracker instrument keys `speed` and `vd` (its vibrato and the vibrato's
 delay) in v1.16 (`ins.speed is retired in v1.16: write the vibrato as the instrument's freq
-expression`). With bits 6 and 7 a note's `!pulse:0` and `!filter:0` (see Lifetime), the
-SID-Wizard instrument key `flags` has no written form and is retired in v1.13 (`ins.flags is
+expression`). GoatTracker's speed table has no written form: its vibrato and slide speeds are in
+the `freq` expressions and `!funk` writes its tempos, so the record type `speedtab` is retired
+in v1.16 (`record type 'speedtab' is retired in v1.16`).
+With bits 6 and 7 a note's `!pulse:0` and `!filter:0` (see Lifetime), the SID-Wizard instrument key `flags` has no written form and is retired in v1.13 (`ins.flags is
 retired in v1.13: its bits are the instrument's restart program, its freq expression, and a
 note's !pulse:0 and !filter:0`); it reads as $10, the plain vibrato type, which no
 expression-driven note consults, with bits 6 and 7 from the notes. An `!freq` is

@@ -81,8 +81,7 @@ def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
     "playroutine,command", [("sidwizard", "!notevib:5"), ("goattracker2", "!vib:@s1")]
 )
 def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
-    speeds = "      speedtab:\n        s1: [4, 32]\n" if playroutine == "goattracker2" else ""
-    text = doc(playroutine, speeds + "      ins:\n        i1: {sr: 240}", f"[C4.i1, -{command}]")
+    text = doc(playroutine, "      ins:\n        i1: {sr: 240}", f"[C4.i1, -{command}]")
     name = command.split(":")[0]
     with pytest.raises(songio.SongFormatError, match=f"{name} is retired in v1.11: write"):
         songio.loads(text)
@@ -103,6 +102,12 @@ def test_the_writer_refuses_the_retired_header_bytes(fields, match):
     song["records"]["ins"][1].update(fields)
     with pytest.raises(songio.SongFormatError, match=match):
         songio.dumps(song)
+
+
+def test_the_speed_table_is_retired():
+    text = doc("goattracker2", "      speedtab:\n        s1: [4, 32]", "[C4]")
+    with pytest.raises(songio.SongFormatError, match="record type 'speedtab' is retired in v1.16"):
+        songio.loads(text)
 
 
 @pytest.mark.parametrize(
@@ -147,7 +152,7 @@ def test_funk_arguments_share_their_speed_table_rows():
     [
         ("!funk:6", r"!funk: the argument is 2 values, l/r"),
         ("!funk:6/256", r"!funk: each value is a byte"),
-        ("!run:6/9", r"!run takes no row argument"),
+        ("!run:6/9", r"!run: the command takes no row argument"),
     ],
 )
 def test_the_reader_refuses_a_bad_row_argument(command, match):

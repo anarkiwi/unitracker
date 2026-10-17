@@ -23,3 +23,17 @@ def read(rtype, values: tuple) -> dict:
     if not all(0 <= v <= 0xFF for v in values):
         raise ValueError("each value is a byte (0-255)")
     return dict(zip(fields, values))
+
+
+def allocated(rtype, values: tuple, records: dict, alloc) -> tuple:
+    """``(type, index)`` of the row of ``rtype`` an argument writes: an equal row of ``records``,
+    else one ``alloc(rtype, 1)`` places there; ValueError for a type of None."""
+    if rtype is None:
+        raise ValueError("the command takes no row argument")
+    row = read(rtype, values)
+    rows = records.setdefault(rtype.name, {})
+    index = next((i for i, r in rows.items() if r == row), None)
+    if index is None:
+        index = alloc(rtype, 1)
+        rows[index] = row
+    return rtype.name, index

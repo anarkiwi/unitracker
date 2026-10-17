@@ -71,6 +71,7 @@ record_types:
         raw:
           ctrl: "ctrl if has_ctrl else -1"
           gate: "gate if has_gate else -1"
+  # The speed table: no written form; !funk writes its rows inline (retired in v1.16).
   speedtab:
     prefix: s
     none: 0

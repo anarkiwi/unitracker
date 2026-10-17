@@ -605,7 +605,7 @@ class _Reader:
         self.names = {}
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
-        self.played, self.inlined = {}, {}
+        self.played = {}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
 
     def _playroutine(self, spec) -> dict:
@@ -898,18 +898,10 @@ class _Reader:
     def _inline(self, cmd: str, values: tuple, atom) -> tuple:
         """``(type, index)`` of the row an inline argument writes, allocated on first use."""
         ref = self.commands.inline(cmd)
-        if ref is None:
-            raise SongFormatError(f"!{cmd} takes no row argument in {atom!r}")
-        rtype = self.rtypes[ref]
         try:
-            row = inline.read(rtype, values)
+            return inline.allocated(self.rtypes.get(ref), values, self.records, self._alloc)
         except ValueError as exc:
             raise SongFormatError(f"!{cmd}: {exc} in {atom!r}") from exc
-        key = (ref, values)
-        if key not in self.inlined:
-            self.inlined[key] = index = self._alloc(rtype, 1)
-            self.records[ref][index] = row
-        return ref, self.inlined[key]
 
     def _collect(self, song):
         """Define every record and phrase; ``(phrase atoms, play rows)``."""
