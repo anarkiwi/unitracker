@@ -284,6 +284,42 @@ def test_sweeps_and_tracked_rows_have_no_shape(pr_name, name, raw):
 
 
 @pytest.mark.parametrize(
+    "raw,shared",
+    [
+        ({"w": 0x41, "a": 0x80, "d": 0, "h": 0}, {"ctrl": 0x41}),
+        (
+            {"w": 0x41, "a": 0x0C, "d": 3, "h": 2},
+            {"hold": 3, "ctrl": 0x41, "note": "+12", "freq": 3},
+        ),
+        ({"w": 0x21, "a": 0xF4, "d": 0xF0, "h": 0}, {"ctrl": 0x21, "note": "-12", "freq": -16}),
+        ({"w": 0, "a": 5, "d": 0, "h": 0}, {"note": "+5"}),
+        ({"w": 3, "a": 0x80, "d": 0x80, "h": 3}, {"hold": 4, "freq": -128}),
+        ({"w": 0x0F, "a": 0x99, "d": 0, "h": 0x0F}, {"hold": 16, "note": "=24"}),
+    ],
+)
+def test_sidwizard_wf_rows_hold_and_detune(raw, shared):
+    c = codec("sidwizard", "wftab")
+    assert written(raw, c) == shared
+    assert c.decode(shared) == raw
+
+
+@pytest.mark.parametrize(
+    "shared",
+    [
+        {"hold": 1},
+        {"hold": 0},
+        {"hold": 17},
+        {"ctrl": 5},
+        {"freq": -1},
+        {"freq": 200},
+    ],
+)
+def test_sidwizard_wf_rows_refuse_what_the_player_cannot_hold(shared):
+    with pytest.raises(CodecError):
+        codec("sidwizard", "wftab").decode(shared)
+
+
+@pytest.mark.parametrize(
     "pr_name,name,shared",
     [
         ("goattracker2", "filttab", {"cut": ("x", 3)}),
@@ -883,12 +919,12 @@ def test_codec_expressions_read_only_declared_tables():
 def test_sidwizard_wf_rows_hold_for_the_arp_speed(raw, shared):
     c = codec("sidwizard", "wftab")
     assert written(raw, c) == shared
-    assert c.decode(shared) == {"h": 0, **raw}
+    assert c.decode(shared) == {"h": 0, "d": 0, **raw}
 
 
 @pytest.mark.parametrize(
     "raw",
-    [{"w": 0x50, "a": 0x7F}, {"w": 0x50, "a": 0, "h": 0x40}, {"w": 5, "a": 3, "h": 5}],
+    [{"w": 0x50, "a": 0x7F}, {"w": 0x50, "a": 0, "h": 0x40}, {"w": 5, "a": 3, "h": 2}],
 )
 def test_sidwizard_wf_rows_without_a_shape(raw):
     assert codec("sidwizard", "wftab").encode(raw) is None

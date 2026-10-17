@@ -2,13 +2,16 @@
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, Transpose
 from pysidwizard.features import features_for_driver
 
-from unitracker import backends, sidwizard
-from unitracker.sidwizard import LiftError
+from unitracker import backends, sidwizard, songio
+from unitracker.sidwizard import NO_DETUNE as KEEP, LiftError
 from unitracker.vm import SongPlayer
+
+TICKS = 15000
 
 
 def test_table_rows_stop_at_the_end_marker():
@@ -24,6 +27,53 @@ def test_table_rows_stop_at_the_end_marker():
     assert tables.program("wftab", b"", sidwizard.pw_record) == 0
     assert tables.allocate("pwtab", [{"a": 1}, {"a": 2}], loop=1) == 3
     assert tables.records["pwtab"][4] == {"a": 2, "next": 4}
+
+
+def test_a_wf_row_that_keeps_the_detune_is_given_the_one_it_keeps():
+    rows = [
+        {"w": 0x41, "a": 0, "d": KEEP, "h": 0},
+        {"w": 0x41, "a": 0, "d": 5, "h": 0},
+        {"w": 0x02, "a": 0x80, "d": KEEP, "h": 1},
+        {"w": 0x41, "a": 0, "d": 0, "h": 1},
+        {"w": 0x41, "a": 0, "d": KEEP, "h": 1},
+    ]
+    out = sidwizard.settled(rows, None)
+    assert [(r["d"], r["h"]) for r in out] == [(0, 0), (5, 0), (5, 2), (0, 1), (0, 1)]
+    assert sidwizard.settled(rows[1:2] + rows[4:], 1)[1]["d"] == 5
+    with pytest.raises(LiftError, match="differs between loop passes"):
+        sidwizard.settled([rows[0], rows[1]], 0)
+    with pytest.raises(LiftError, match="hold row that ends its program"):
+        sidwizard.settled(rows[:3], None)
+
+
+def test_a_wf_hold_row_lasts_its_hold(csillag):
+    ir = backends.lift(csillag.read_bytes())
+    wf, entry = ir["records"]["wftab"], ir["records"]["ins"][6]["ctrl"]
+    nxt, end = wf[entry]["next"], len(wf) + 1
+    wf[entry].update(w=0x41, a=0x80, h=0)
+    wf[nxt].update(w=2, a=0x80, h=2, next=end)
+    wf[end] = {"w": 0x21, "a": 0x80, "d": 0, "h": 0, "next": 0}
+    grid = SongPlayer(ir).render_grid(TICKS)
+    wave = [int(x) for x in grid[:, 7 + 4] & 0xF0]
+    start = wave.index(0x40)
+    assert wave[start : start + 5] == [0x40] * 4 + [0x20]
+    text = songio.dumps(ir)
+    assert "ctrl: [{ctrl: 65}, {hold: 3}, {ctrl: 33}, end]" in text
+    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
+
+
+def test_a_wf_detune_is_written_as_the_rows_constant_freq(csillag):
+    ir = backends.lift(csillag.read_bytes())
+    wf, entry = ir["records"]["wftab"], ir["records"]["ins"][6]["ctrl"]
+    plain = SongPlayer(ir).render_grid(TICKS)
+    wf[entry]["d"], wf[wf[entry]["next"]]["d"] = 0xFB, KEEP
+    grid = SongPlayer(ir).render_grid(TICKS)
+    assert not np.array_equal(grid, plain)
+    wf[wf[entry]["next"]]["d"] = 0xFB
+    assert np.array_equal(SongPlayer(ir).render_grid(TICKS), grid)
+    text = songio.dumps(ir)
+    assert text.count(", freq: -5}") == 2
+    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
 
 
 @pytest.mark.parametrize(
@@ -73,9 +123,9 @@ def test_a_returning_chord_runs_into_the_next_row_and_keeps_a_detune():
     assert loop is None
     assert [(r["w"], r["a"], r["d"], r["h"]) for r in rows] == [
         (0x11, 0, 5, 2),
-        (0x50, 4, 0xFF, 2),
-        (0x50, 7, 0xFF, 2),
-        (0x41, 0, 0xFF, 2),
+        (0x50, 4, 5, 2),
+        (0x50, 7, 5, 2),
+        (0x41, 0, 5, 2),
     ]
 
 

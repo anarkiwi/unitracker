@@ -159,7 +159,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `ad`, `sr` | envelope registers |
 | `pw` | the 12-bit pulse width, a value or an expression |
 | `cut` | the 11-bit cutoff over `$D415`/`$D416`, a value or an expression |
-| `freq` | the voice frequency's expression |
+| `freq` | the voice frequency's expression; an integer is a constant offset from the note's frequency |
 | `res` | the resonance, bits 4-7 of `$D417` (see Filter) |
 | `route` | the filter routing, bits 0-3 of `$D417`: a mask, or an edit for the program's voice (see Filter) |
 | `mode` | the `$D418` filter-mode bits 4-7, volume excluded (see Filter) |
@@ -198,8 +198,7 @@ can't express !notevib:1`); the writer refuses to write a value that would not r
 - **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
   command rows (list rows), `!vib:@s` and the instrument keys `speed` and `vd`.
 - **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
-- **SID-Wizard:** WF rows that hold a row (`w` below $10) or set a detune (list rows
-  `[w, a, d, h]`), pulse and filter sweep rows and keyboard-tracked rows (list rows),
+- **SID-Wizard:** pulse and filter sweep rows and keyboard-tracked rows (list rows),
   `!notevib` and the instrument keys `flags` (bits 4-7 of the header's control byte: the
   vibrato type, and keeping the pulse and filter programs across notes), `vibrato`,
   `vibdelay` and `octave`.
@@ -712,8 +711,15 @@ the voices in the player's reverse order. An instrument is its header (`flags`, 
 `vibrato`, `vibdelay`, `octave`), its WF/arp, pulse, filter and restart programs (`ctrl`,
 `pw`, `filter`, `restart`) and its pitch expression (`freq`). The header's hard-restart
 bytes and control bits 0-3 become the restart program; a restart on both ticks before the
-note (control bits 0 and 1) is not covered. WF rows use `ctrl`, `note` and `hold`, the
-instrument's arp speed plus one; pulse set rows `pw`; filter set rows `mode`, `cut` and
+note (control bits 0 and 1) is not covered. WF rows use `ctrl`, `note`, `hold` and `freq`.
+`hold` is the ticks the row lasts: on a row with `ctrl`, the instrument's arp speed plus one;
+a row without `ctrl` keeps the waveform and lasts its native hold count plus one (1-16). A
+program that ends paces itself afterwards by its last row's `hold`, so a hold row ending a
+program at another arp speed is not covered. `freq` is the row's detune, a constant from -128
+to 126 the player adds to the frequency word from that row until a later row sets another
+(a row without it sets 0; a native row that keeps the detune is written with the one it
+keeps, and the lifter refuses one that keeps different detunes on its loop's passes). Pulse
+set rows use `pw`; filter set rows `mode`, `cut` and
 `res`. A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there,
 each row with that row's waveform, which the player writes on every chord step. A chord
 small FX ($7x) holds until the voice's next note, so on a note it becomes `!run` of the
