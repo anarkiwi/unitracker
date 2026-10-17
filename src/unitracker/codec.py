@@ -33,6 +33,7 @@ RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
     "resfilt": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
     "re": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
+    "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
 }
 COMMAND_NAMES = (
     "run",

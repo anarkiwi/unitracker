@@ -125,6 +125,7 @@ def test_goattracker_rejects_what_it_cannot_express(name, shared, match):
         ("defmon", "sidtab", {"res": 1, "route": "-"}, r"values of \['res'\]"),
         ("defmon", "sidtab", {"route": "- 1"}, r"values of \['route'\]"),
         ("defmon", "sidtab", {"re": 0}, "re is retired in v1.7"),
+        ("defmon", "sidtab", {"acid": 0x8001}, "acid is retired in v1.7"),
     ],
 )
 def test_res_and_route_are_refused_where_the_player_cannot_set_them(pr_name, name, shared, match):
@@ -522,7 +523,7 @@ INS_KEYS = {
         "freq",
     },
 }
-DM_KEEP = {"wgl", "af", "ps", "cp", "acid"}
+DM_KEEP = {"wgl", "af", "ps", "cp"}
 # Player-specific keys a program row may carry besides the shared ones.
 ROW_KEEP = {"defmon": DM_KEEP}
 # Program types that may hold list rows, with the rows each allows.

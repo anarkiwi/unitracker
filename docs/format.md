@@ -230,8 +230,14 @@ writes `$D417` in one of three ways: `{res: r, route: m}` with bit 3 of `m` clea
 byte; `{res: r, route: + m}` with bit 3 of `m` set keeps the routing and adds the voice and
 `m`; `route: '-'` removes the voice and keeps the resonance.
 
-The sidTAB columns `fv` (`mode`) and `re` (`res` and `route`) and the row key `resfilt`
-(`res` and `route`) are refused (`fv is retired in v1.7`).
+`cut` is the 11-bit cutoff in every player. A defMON ACID program is written as its row's
+`cut` expression, so the sidTAB column `acid` has no written form. The column `cp`, an
+offset the replay adds to the ACID accumulator's high byte, stays: with it the cutoff
+next to the model floor depends on the accumulator's low byte and carry, which a `cut`
+expression over `v` cannot read.
+
+The sidTAB columns `fv` (`mode`), `re` (`res` and `route`) and `acid` (`cut`) and the row key
+`resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`).
 
 ## Modulators
 
