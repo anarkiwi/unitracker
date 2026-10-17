@@ -808,7 +808,11 @@ start proves its expression.
 gate-timer lookahead, the hold of the restart's first row. A voice's `onset` is the tick a
 wavetable row first sets its frequency: on its first note's first tick the voice still sounds
 the frequency it had before the note, which the format does not carry. Instruments with one gate timer and
-first wave share a restart program; a hard restart on gate timer 0 is not covered. Instrument 1 is pinned because every voice starts on it. A
+first wave share a restart program; a hard restart on gate timer 0 is not covered. Instrument 1 is pinned because every voice starts on it.
+The filter step writes `$D416`-`$D418` before the channels run, so the playroutine latches
+them there (`fcutreg`, `fctrlreg`, `fmodereg`, which the ghost reads), and a pattern command
+or wavetable row that sets the cutoff, `res`/`route` or the volume ($B-$D, $FB-$FD) sounds on
+the following tick. A
 filter parameter row carries the following cutoff row's value as `cut`, because the
 player reads both in one tick. A wavetable delay row is `wait` on the row it delays. A
 wavetable command row runs the pattern command of its low nibble, and the tick's continuous

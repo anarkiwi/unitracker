@@ -417,7 +417,8 @@ class Flow:
             sa, sb = a.support(), b.support()
             return a.map(lambda m: m & sb) | b.map(lambda m: m & sa)
         if isinstance(n.op, ast.BitOr):
-            return a.map(lambda m: m & ~b.const) | b.map(lambda m: m & ~a.const)
+            ones_a, ones_b = (0 if v.rel else v.const for v in (a, b))
+            return a.map(lambda m: m & ~ones_b) | b.map(lambda m: m & ~ones_a)
         if isinstance(n.op, ast.BitXor):
             return a | b
         if isinstance(n.op, ast.Mult) and k is not None:

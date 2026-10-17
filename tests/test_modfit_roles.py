@@ -3,7 +3,7 @@
 import pytest
 
 from unitracker.modfit import playroutine, resolve
-from unitracker.modfit.flow import Composed, Writes
+from unitracker.modfit.flow import Composed, Flow, Writes
 from unitracker.modfit.invariant import Slicer
 from unitracker.modfit.keywords import signer
 
@@ -51,6 +51,17 @@ def test_bitwise_op_of_two_cells_is_a_mask():
     assert signer("goattracker2").keyword(13, "arg < 0x10")["sig"] == {
         ("MODEVOL", "LOAD", "[0:7]→MODEVOL")
     }
+
+
+def test_or_with_a_masked_cell_keeps_every_bit():
+    pr = {
+        "global": {"a": {"width": 8}, "b": {"width": 8}},
+        "tick": [{"set": {"b": "a & 0x70"}}],
+        "ghost": {"global": {0x18: "a | (b & 0x70)", 0x17: "b | 0x0F"}},
+    }
+    flow = Flow(pr)
+    assert flow.role("a") == {"MODEVOL": CTRL, "RESFILT": {4, 5, 6}}
+    assert flow.role("b") == {"MODEVOL": {4, 5, 6}, "RESFILT": {4, 5, 6, 7}}
 
 
 def test_chained_pointer_selects_no_value():
