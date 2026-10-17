@@ -35,6 +35,9 @@ def round_trip(pr_name: str, name: str, raw: dict) -> dict:
         ({"w": 0xFC, "n": 0x80}, {"cut": 1024}),
         ({"w": 0xFD, "n": 9}, {"vol": 9}),
         ({"w": 0xF1, "n": 0, "x": 2}, {"freq": ("x", 2)}),
+        ({"w": 0xF9, "n": 0}, {"pw": "none"}),
+        ({"w": 0xFA, "n": 0}, {"filter": "none"}),
+        ({"w": 0xFB, "n": 0}, {"res": 0, "route": 0, "filter": "none"}),
     ],
 )
 def test_goattracker_wave_commands_are_shared_row_keys(raw, shared):
@@ -49,9 +52,6 @@ def test_goattracker_wave_commands_are_shared_row_keys(raw, shared):
     + [
         {"w": 0xF1, "n": 0},
         {"w": 0xF2, "n": 0, "x": 1},
-        {"w": 0xF9, "n": 0},
-        {"w": 0xFA, "n": 0},
-        {"w": 0xFB, "n": 0},
         {"w": 0xFD, "n": 0x10},
     ],
 )
@@ -68,6 +68,9 @@ def test_goattracker_wave_commands_without_a_shared_form(raw):
         ({"res": 0, "route": 0}, "no shape"),
         ({"cut": 1025}, "values of"),
         ({"ad": 1, "sr": 2}, "keys"),
+        ({"pw": 5}, "pw is only none here"),
+        ({"ad": "none"}, "ad can't be none here"),
+        ({"res": 1, "route": 0, "filter": "none"}, "values of"),
     ],
 )
 def test_goattracker_wave_commands_refuse_what_they_cannot_set(shared, match):

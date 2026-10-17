@@ -164,13 +164,14 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `wait` | ticks before the row applies |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
 | `ad`, `sr` | envelope registers |
-| `pw` | the 12-bit pulse width, a value or an expression |
+| `pw` | the 12-bit pulse width, a value or an expression; `none` stops the voice's pulse program |
 | `cut` | the 11-bit cutoff over `$D415`/`$D416`, a value or an expression |
 | `freq` | the voice frequency's expression; an integer is a constant offset from the note's frequency |
 | `res` | the resonance, bits 4-7 of `$D417` (see Filter) |
 | `route` | the filter routing, bits 0-3 of `$D417`: a mask, or an edit for the program's voice (see Filter) |
 | `mode` | the `$D418` filter-mode bits 4-7, volume excluded (see Filter) |
 | `run` | the program the row starts in the slot its kind implies, by name, as `!run:@x` |
+| `filter` | `none`: the row stops the filter program, as `pw: none` the pulse program |
 | `vol` | the volume, the low nibble of `$D418`, as `!vol:n` |
 
 | command | meaning |
@@ -574,7 +575,8 @@ written under their own names; a kept reference is written as a name). A key wit
 is written as the expression when that field is set; a key with both `value` and `expr`
 reads an integer as a value and a string as an expression. A key given as
 `{ref: type, field: f}` is the reference raw field `f` holds, written as the record's name
-(`run: pw1`); the reader takes the shape whose `ref` is the type the name has. The writer
+(`run: pw1`); the reader takes the shape whose `ref` is the type the name has. A key given as
+`{none: true}` is written `none` (`pw: none`) and reads only from `none`. The writer
 uses the first shape whose `when` holds and refuses a row that would not read back; a `map` row no
 shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or
@@ -768,16 +770,16 @@ filter parameter row carries the following cutoff row's value as `cut`, because 
 player reads both in one tick. A wavetable delay row is `wait` on the row it delays. A
 wavetable command row runs the pattern command of its low nibble, and the tick's continuous
 effect does not run, as on a note row; the commands with a shared form are written with its key:
-$F5 `ad`, $F6 `sr`, $F9 and $FA `run` (the pulse or filter program), $FB `res` and `route`
-(but $FB 00, which also stops the filter program), $FC `cut` and $FD `vol` (below $10). A
+$F5 `ad`, $F6 `sr`, $F9 and $FA `run` (the pulse or filter program), and with 00 `pw: none` and
+`filter: none` (the program stopped), $FB `res` and `route` (00 also stops the filter program:
+`{res: 0, route: 0, filter: none}`), $FC `cut` and $FD `vol` (below $10). A
 wavetable jump is the program's `loop`. $F1-$F4 (one portamento, toneporta or vibrato step)
 are the row's `freq` (see Modulators). $F7 sets the waveform as a waveform row does, but also
 pauses the tick's continuous effect; the lifter writes it as the waveform row of its value
 (`ctrl`) when a replay to the song's recurrence and one period more proves the pause unheard,
 and otherwise fails, naming the rows and the tick that hears it, as it does for a value from
 $E0, which no waveform row sets. $F0, $F8 and $FE, on which the playroutine stops, are not
-lifted: the lifter names the row. $F9 00 and $FA 00 (which `run: none` can't tell apart), $FB 00
-and $FD $10-$FF have no shared form.
+lifted: the lifter names the row. $FD $10-$FF has no shared form.
 
 **defMON.** The arranger and pattern counters are lifted as timing. Each song step
 becomes one phrase per voice, all of the same length in ticks, with each event on the

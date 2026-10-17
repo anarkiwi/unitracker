@@ -26,6 +26,7 @@ ROW_KEYS = (
     "mode",
     "freq",
     "run",
+    "filter",
     "vol",
 )
 EXPR = "x"
@@ -221,8 +222,8 @@ class _Shape:
     A ``route`` key's ``rel`` gives its relation to the program's voice (see
     :func:`route_value`). A raw field given as ``{search: [lo, hi]}`` is the first value in
     that range whose row writes back as the written one. A key's ``expr`` names the raw field
-    of its expression, and a key with ``ref`` is the reference to that record type its raw
-    ``field`` holds.
+    of its expression, a key with ``ref`` is the reference to that record type its raw
+    ``field`` holds, and a key with ``none`` is written ``none``.
     """
 
     # pylint: disable=too-few-public-methods
@@ -303,6 +304,9 @@ class RowCodec:
             if "ref" in kspec:
                 out[key] = (kspec["ref"], row[kspec["field"]])
                 continue
+            if kspec.get("none"):
+                out[key] = NONE
+                continue
             field = kspec.get("expr")
             if field is not None and row[field] != self.rtype.default(field):
                 out[key] = (EXPR, row[field])
@@ -344,8 +348,8 @@ class RowCodec:
     def _env(self, shape, norm) -> dict:
         env = {}
         for key in shape.keys:
-            plain = key in norm and not is_expr(norm[key])
-            env[f"has_{key}"] = int(plain)
+            plain = key in norm and not is_expr(norm[key]) and norm[key] != NONE
+            env[f"has_{key}"] = int(key in norm and not is_expr(norm[key]))
             if key == "note" and plain:
                 absolute, number = norm[key]
                 env["note_abs"] = int(absolute)
@@ -368,6 +372,12 @@ class RowCodec:
             return f"keys {sorted(extra)}"
         for key, value in norm.items():
             kspec = shape.keys.get(key, {})
+            if bool(kspec.get("none")) != (value == NONE):
+                return (
+                    f"{key} is only {NONE} here"
+                    if kspec.get("none")
+                    else f"{key} can't be {NONE} here"
+                )
             if "ref" in kspec:
                 if not (isinstance(value, tuple) and value[0] == kspec["ref"]):
                     return f"{key} names no {kspec['ref']} here"

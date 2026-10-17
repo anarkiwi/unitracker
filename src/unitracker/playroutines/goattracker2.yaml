@@ -101,8 +101,8 @@ record_types:
         keys: {freq: {expr: x}}
         raw: {w: 0xF1, n: 0}
       # Commands with a shared form, run as the pattern command of the same number: $F5/$F6
-      # set the envelope, $F9/$FA start the pulse/filter program, $FB sets $D417 (0 also
-      # stops the filter program), $FC the cutoff, $FD the volume (below $10).
+      # set the envelope, $F9/$FA start the pulse/filter program or with 0 stop it, $FB sets
+      # $D417 (0 also stops the filter program), $FC the cutoff, $FD the volume (below $10).
       - when: "w == 0xF5 and n >= 0 and n <= 0xFF"
         keys: {ad: n}
         raw: {w: 0xF5, n: ad}
@@ -118,6 +118,15 @@ record_types:
       - when: "w == 0xFB and n != 0"
         keys: {res: "n >> 4", route: "n & 0x0F"}
         raw: {w: 0xFB, n: "((res & 0x0F) << 4) | (route & 0x0F)"}
+      - when: "w == 0xF9 and n == 0"
+        keys: {pw: {none: true}}
+        raw: {w: 0xF9, n: 0}
+      - when: "w == 0xFA and n == 0"
+        keys: {filter: {none: true}}
+        raw: {w: 0xFA, n: 0}
+      - when: "w == 0xFB and n == 0"
+        keys: {res: 0, route: 0, filter: {none: true}}
+        raw: {w: 0xFB, n: 0}
       - when: "w == 0xFC and n >= 0 and n <= 0xFF"
         keys: {cut: "n << 3"}
         raw: {w: 0xFC, n: "cut >> 3"}

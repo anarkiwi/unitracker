@@ -287,6 +287,21 @@ def test_a_waveform_command_whose_pause_is_unheard_is_a_waveform_row():
     assert "[{ctrl: 33}, {ctrl: 5}, {loop: 0}]" in text
 
 
+def test_wavetable_program_stops_name_the_program_kind():
+    wave = [(0x41, 0), (0xF9, 1), (0xFA, 1), (0x03, 0x80), (0xF9, 0), (0x03, 0x80), (0xFA, 0)]
+    wave += [(0x03, 0x80), (0xFA, 1), (0x03, 0x80), (0xFB, 0), (0x41, 0x80), (0xFF, 12)]
+    pulse = [(0x88, 0), (0x20, 0x10), (0xFF, 2)]
+    filt = [(0x90, 0x00), (0x00, 0x40), (0x10, 0x02), (0xFF, 3)]
+    text = lifted(*gt_tune(wave, pulse=pulse, filt=filt))
+    rows = yaml.safe_load(text)["song"][0]["def"]["ins"]["i1"]["ctrl"]
+    assert rows[4::2][:4] == [
+        {"pw": "none"},
+        {"filter": "none"},
+        {"run": "f1"},
+        {"res": 0, "route": 0, "filter": "none"},
+    ]
+
+
 @pytest.mark.parametrize(
     "wave,rows,match",
     [
