@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.6 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.7 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -25,6 +25,7 @@ from unitracker.codec import (
     RowCodec,
     is_expr,
     note_text,
+    written_value,
 )
 from unitracker.expr import ExprError, Resolver
 from unitracker.modulation import declared
@@ -34,7 +35,7 @@ from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
 from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 
-VERSION = 1.6
+VERSION = 1.7
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -43,7 +44,7 @@ RETIRED_KEYS = {"registers": "retired in v1.6: the player starts from a zeroed S
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.6 format."""
+    """A document does not follow the unitracker v1.7 format."""
 
 
 @functools.cache
@@ -165,7 +166,7 @@ _Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.or
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.6 document."""
+    """Turns the internal representation into a canonical v1.7 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -305,18 +306,7 @@ class _Writer:
         shared = codec.encode(row) if codec is not None else None
         refs = dict(self._refs(rtype, row))
         if shared is not None:
-            self._reads_back(codec, shared)
-            out, number = {}, codec.expr_keys()
-            for k, v in shared.items():
-                if k == "note":
-                    v = Atom(note_text(*v))
-                elif is_expr(v):
-                    v = self.ref_value(self.key(EXPR, v[1]))
-                    v = str(v) if number.get(k) else v
-                out[k] = v
-            fields = _expr_fields(codec)
-            out.update((f, self.ref_value(k)) for f, k in refs.items() if f not in fields)
-            return FlowMap(out)
+            return self._shared_row(codec, shared, refs)
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
         values = {}
@@ -339,10 +329,27 @@ class _Writer:
             out.pop()
         return Flow(out)
 
+    def _shared_row(self, codec, shared: dict, refs: dict) -> FlowMap:
+        """A row's shared-vocabulary form: notes named, expressions referenced, refs resolved."""
+        self._reads_back(codec, shared)
+        out, number = {}, codec.expr_keys()
+        for k, v in shared.items():
+            if k == "note":
+                v = Atom(note_text(*v))
+            elif k == "route":
+                v = written_value(k, v)
+            elif is_expr(v):
+                v = self.ref_value(self.key(EXPR, v[1]))
+                v = str(v) if number.get(k) else v
+            out[k] = v
+        fields = _expr_fields(codec)
+        out.update((f, self.ref_value(k)) for f, k in refs.items() if f not in fields)
+        return FlowMap(out)
+
     def _reads_back(self, codec, shared):
         """Raise, naming the key, unless the player can read ``shared`` back."""
         try:
-            codec.decode({k: note_text(*v) if k == "note" else v for k, v in shared.items()})
+            codec.decode({k: written_value(k, v) for k, v in shared.items()})
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
@@ -587,7 +594,7 @@ def _unread_dropped(diff: dict, ir: dict) -> dict:
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.6 document for internal-representation song ``ir``.
+    """A canonical v1.7 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -611,7 +618,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.6 document to the internal representation."""
+    """Expands a v1.7 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -918,7 +925,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.6 document."""
+    """The internal representation of a v1.7 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
@@ -928,13 +935,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.6 document at ``path``."""
+    """The internal representation of the v1.7 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.6 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.7 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

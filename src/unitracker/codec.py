@@ -10,11 +10,30 @@ import re
 
 from unitracker.expr import ExprError, Resolver
 
-ROW_KEYS = ("wait", "hold", "ctrl", "note", "ad", "sr", "pw", "cut", "resfilt", "mode", "freq")
+ROW_KEYS = (
+    "wait",
+    "hold",
+    "ctrl",
+    "note",
+    "ad",
+    "sr",
+    "pw",
+    "cut",
+    "res",
+    "route",
+    "mode",
+    "freq",
+)
 EXPR = "x"
 RETIRED = {
     "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
     " row's `pw`, `cut` or `freq`)"
+}
+RETIRED_ROW_KEYS = {
+    "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
+    "resfilt": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
+    "re": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
+    "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
 }
 COMMAND_NAMES = (
     "run",
@@ -47,6 +66,7 @@ COMMAND_NAMES = (
 )
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
+_ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
 
 
 class CodecError(ValueError):
@@ -127,11 +147,45 @@ def note_text(absolute: bool, number: int) -> str:
     return f"={number}" if absolute else f"{number:+d}"
 
 
+def route_value(value) -> tuple[int, int]:
+    """``(relation, mask)`` for a written ``route``: an int is the mask (relation 0); ``"+ m"``
+    adds the program's voice and mask ``m`` (relation 1), ``"- m"`` removes them (relation -1),
+    and ``m`` may be left out when it is 0."""
+    if isinstance(value, bool):
+        raise CodecError(f"bad route {value!r}")
+    if isinstance(value, int):
+        return 0, value
+    match = _ROUTE.match(str(value))
+    if match is None:
+        raise CodecError(f"bad route {value!r}")
+    return (1 if match["sign"] == "+" else -1), int(match["mask"] or 0)
+
+
+def route_text(relation: int, mask: int):
+    """The written form of a route value."""
+    if not relation:
+        return mask
+    return ("+" if relation > 0 else "-") + (f" {mask}" if mask else "")
+
+
+_FORMS = {
+    "note": (note_value, lambda v: note_text(*v)),
+    "route": (route_value, lambda v: route_text(*v)),
+}
+
+
+def written_value(key: str, value):
+    """A shared key's value as written: notes and routes in their text forms."""
+    return _FORMS[key][1](value) if key in _FORMS else value
+
+
 class _Shape:
     """One way to write a row: forward keys, inverse raw fields, fields kept as they are.
 
-    A raw field given as ``{search: [lo, hi]}`` is the first value in that range whose row
-    writes back as the written one. A key's ``expr`` names the raw field of its expression.
+    A ``route`` key's ``rel`` gives its relation to the program's voice (see
+    :func:`route_value`). A raw field given as ``{search: [lo, hi]}`` is the first value in
+    that range whose row writes back as the written one. A key's ``expr`` names the raw field
+    of its expression.
     """
 
     # pylint: disable=too-few-public-methods
@@ -201,6 +255,8 @@ class RowCodec:
             if key == "note":
                 absolute = "abs" in kspec and bool(self.ev(kspec["abs"], row))
                 out[key] = (absolute, value - self.offset if absolute else value)
+            elif key == "route":
+                out[key] = (int(self.ev(kspec["rel"], row)) if "rel" in kspec else 0, value)
             else:
                 out[key] = value
         for field in shape.keep:
@@ -225,6 +281,8 @@ class RowCodec:
                 absolute, number = norm[key]
                 env["note_abs"] = int(absolute)
                 env["note"] = number + self.offset if absolute else number
+            elif key == "route" and plain:
+                env["route_rel"], env["route"] = norm[key]
             elif plain:
                 env[env_name(key)] = norm[key]
         return env
@@ -261,11 +319,14 @@ class RowCodec:
 
     @staticmethod
     def normalize(written: dict) -> dict:
-        """A written row with notes as ``(absolute, number)``."""
-        return {k: note_value(v) if k == "note" else v for k, v in written.items()}
+        """A written row with notes as ``(absolute, number)`` and routes as ``(relation, mask)``."""
+        return {k: _FORMS[k][0](v) if k in _FORMS else v for k, v in written.items()}
 
     def decode(self, written: dict) -> dict:
         """Raw fields for a written row; raises CodecError naming what the player can't express."""
+        for key in written:
+            if key in RETIRED_ROW_KEYS and not any(key in s.keep for s in self.shapes):
+                raise CodecError(f"{self.rtype.name}: {key} is {RETIRED_ROW_KEYS[key]}")
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:

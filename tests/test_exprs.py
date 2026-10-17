@@ -1,4 +1,4 @@
-"""v1.6 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.7 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -24,7 +24,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.6
+unitracker: 1.7
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -105,7 +105,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.6", "unitracker: 1.5", "not a unitracker v1.6 document"),
+        ("unitracker: 1.7", "unitracker: 1.6", "not a unitracker v1.7 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
@@ -147,7 +147,7 @@ def test_floor_division_floors_toward_minus_infinity():
 @pytest.mark.parametrize("key,value", [("cut", 1024), ("cut", 0)])
 def test_a_constant_expression_in_a_filter_row_reads_back_as_written(key, value):
     ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: "
-    rows = f"[{{{key}: '{value}', resfilt: 193, mode: 16}}, {{{key}: 512}}, end]"
+    rows = f"[{{{key}: '{value}', res: 12, route: 1, mode: 16}}, {{{key}: 512}}, end]"
     text = songio.dumps(
         songio.loads(
             GT_SONG.replace(
@@ -161,7 +161,7 @@ def test_a_constant_expression_in_a_filter_row_reads_back_as_written(key, value)
 
 def test_sidwizard_constant_cut_expression_reads_back_as_written():
     ins = "freq: '[φ >= 2]*W[N + 25]'"
-    rows = ins + ", filter: [{cut: '1024', mode: 16}, {cut: 512, mode: 32}, end]"
+    rows = ins + ", filter: [{cut: '1024', res: 0, mode: 16}, {cut: 512, res: 3, mode: 32}, end]"
     text = songio.dumps(songio.loads(SW_SONG.replace(ins, rows, 1)))
     assert "cut: '1024'" in text and "cut: 512" in text
     assert songio.dumps(songio.loads(text)) == text

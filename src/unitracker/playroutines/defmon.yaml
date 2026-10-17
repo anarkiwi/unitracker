@@ -29,7 +29,9 @@ record_types:
     form: map
     # freq, pw and cut are the row's pitch, pulse and ACID modulator expressions (xf, xp, xc):
     # a pitch expression runs the slide mode (af $80), a pw or cut expression replaces the
-    # pw, ps and acid columns. af below $80 is a fixed offset, kept as a column.
+    # pw, ps and acid columns. af below $80 is a fixed offset, kept as a column. re edits $D417
+    # for the row's voice: 0 unroutes it (route -), bit 3 keeps the routing and adds the voice and
+    # the low nibble under resonance re >> 4 (route + m), any other value is the byte (res, route).
     codec:
       - when: "xf != 0 and af == 0x80 and pw < 0 and ps < 0 and acid < 0"
         keys:
@@ -41,8 +43,11 @@ record_types:
             sr: {value: sr, omit: "sr < 0"}
             pw: {expr: xp}
             cut: {expr: xc}
+            res: {value: "re >> 4", omit: "re <= 0"}
+            route: {value: "re & 0x0F", rel: "-1 if re == 0 else (1 if re & 0x08 else 0)", omit: "re < 0"}
+            mode: {value: "fv & 0xF0", omit: "fv < 0"}
           freq: {expr: xf}
-        keep: [wgl, re, fv, cp]
+        keep: [wgl, cp]
         raw:
           <<: &fields
             dl: "(hold - 1) if has_hold else 0"
@@ -50,10 +55,12 @@ record_types:
             tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
             ad: "ad if has_ad else -1"
             sr: "sr if has_sr else -1"
+            re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
+            fv: "mode if has_mode else -1"
           af: 0x80
       - when: "xf == 0 and af < 0x80 and pw < 0 and ps < 0 and acid < 0"
         keys: *columns
-        keep: [wgl, af, re, fv, cp]
+        keep: [wgl, af, cp]
         raw: *fields
     # A frozen row ends a program.
     end: {dl: 0x80}
@@ -110,6 +117,13 @@ record_types:
     fixed: true
     form: map
     fields: [resfilt, fv, cp, acc, astep, sub]
+    codec:
+      - keys:
+          res: {value: "resfilt >> 4", omit: "resfilt < 0x10"}
+          route: {value: "resfilt & 0x0F", omit: "(resfilt & 0x0F) == 0"}
+          mode: {value: "fv & 0xF0", omit: "fv < 0x10"}
+        keep: [cp, acc, astep, sub]
+        raw: {resfilt: "((res & 0x0F) << 4) | (route & 0x0F)", fv: mode}
 functions:
   nfreq:
     args: [n]

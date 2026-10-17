@@ -14,9 +14,9 @@ V, PHI = G.V, G.PHI
 
 
 def gt_ir(phrase: str, ins: str = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9}"):
-    """A one-voice goattracker2 song read from v1.6 text, the other voices silent."""
+    """A one-voice goattracker2 song read from v1.7 text, the other voices silent."""
     return songio.loads(f"""
-unitracker: 1.6
+unitracker: 1.7
 playroutine: {{ref: goattracker2, constants: {{deftempo: 6}}}}
 song:
   - def:
@@ -71,7 +71,7 @@ def test_a_phase_that_is_not_one_per_firing_is_refused():
 
 def test_a_filter_sweep_is_written_in_cutoff_units():
     ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: [{cut: 1024, "
-    ir = gt_ir("[C4.i1*4, D4*4]", ins + "resfilt: 193, mode: 16}, end]}")
+    ir = gt_ir("[C4.i1*4, D4*4]", ins + "res: 12, route: 1, mode: 16}, end]}")
     ft = ir["records"]["filttab"]
     ft[1]["next"], ft[2], ft[3] = 2, {"l": 20, "r": 3, "next": 3}, {"l": 10, "r": 250}
     want = regs(ir, 200)
@@ -86,7 +86,7 @@ def test_a_filter_sweep_is_written_in_cutoff_units():
 
 def test_a_looping_sweep_with_a_drift_is_written_with_floor_division():
     ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: [{cut: 1024, "
-    ir = gt_ir("[C4.i1*16, D4*16]", ins + "resfilt: 193, mode: 16}, end]}")
+    ir = gt_ir("[C4.i1*16, D4*16]", ins + "res: 12, route: 1, mode: 16}, end]}")
     ft = ir["records"]["filttab"]
     ft[1]["next"], ft[2], ft[3] = 2, {"l": 20, "r": 3, "next": 3}, {"l": 10, "r": 255, "next": 2}
     want = regs(ir, 400)
@@ -101,7 +101,7 @@ def test_a_looping_sweep_with_a_drift_is_written_with_floor_division():
 
 def test_the_player_floors_a_scaled_expression_to_the_cell():
     ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: [{cut: "
-    ir = gt_ir("[C4.i1*8]", ins + "'1024 + 12*min(φ, 6)', resfilt: 193, mode: 16}, end]}")
+    ir = gt_ir("[C4.i1*8]", ins + "'1024 + 12*min(φ, 6)', res: 12, route: 1, mode: 16}, end]}")
     cut = regs(ir, 40)[:, 22]
     run = [int(x) for x in cut[np.argmax(cut > 0) :][:8]]
     assert run == [(1024 + 12 * min(phi, 6)) // 8 for phi in range(8)]
