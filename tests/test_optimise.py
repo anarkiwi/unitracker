@@ -14,7 +14,7 @@ PULSE = "16*abs((φ - 32) % 128 - 64) + 512"
 
 def doc(ins: str, phrase: str, defs: str = "", steps: int = 8, extra: str = "") -> str:
     """A three-voice GoatTracker 2 document: voice 1 plays ``phrase``, the others rest."""
-    return f"""unitracker: 1.15
+    return f"""unitracker: 1.16
 playroutine: {{ref: goattracker2}}
 meta: {{title: t, author: a, released: r}}
 song:
@@ -102,7 +102,8 @@ def test_hoist_value_names_the_field():
     assert optimise.hoist_value(ir, 9, 5, 9) is None
 
 
-I2_UNHEARD = ins_line("i2", "ad: 9, vd: 5, ctrl: [{ctrl: 65, note: +0}, end]")
+LATE = "freq: '[φ >= 38]*(F(N + 1) - F(N))'"
+I2_UNHEARD = ins_line("i2", f"ad: 9, {LATE}, ctrl: [{{ctrl: 65, note: +0}}, end]")
 I2_HEARD = ins_line("i2", "ad: 10, ctrl: [{ctrl: 65, note: +0}, end]")
 TWO = "[C4.i1*2, D4.i2*2, E4.i1*2, F4.i2*2]"
 
@@ -230,15 +231,13 @@ def test_commands_keep_what_is_heard():
 
 
 def test_fields_clear_what_is_never_heard():
-    result = run(
-        doc(
-            ins_line("i1", "ad: 9, vd: 5, ctrl: [{ctrl: 65, note: +0}, end]"),
-            TWO.replace(".i2", ""),
-        ),
-        ["fields"],
-    )
-    assert ("clear", ("ins", 1, "vd")) in [f.edit for f in result.findings if f.kept]
-    assert "ad: 9" in result.text and plays_alike(result)
+    i1 = ins_line("i1", f"ad: 9, {LATE}, ctrl: [{{ctrl: 65, note: +0}}, end]")
+    result = run(doc(i1, TWO.replace(".i2", "")), ["fields"])
+    assert ("clear", ("ins", 1, "freq")) in [f.edit for f in result.findings if f.kept]
+    assert "ad: 9" in result.text and "φ" not in result.text and plays_alike(result)
+    held = run(doc(i1, "[C4.i1*8]"), ["fields"])
+    assert ("clear", ("ins", 1, "freq")) not in [f.edit for f in held.findings if f.kept]
+    assert "φ >= 38" in held.text
 
 
 def test_edits_refuse_what_they_cannot_apply():
@@ -304,7 +303,7 @@ def test_cli_optimises_and_reports(tmp_path, capsys):
     assert "!ad" not in out.read_text(encoding="utf-8")
     assert "E4!ad:9*2" in report.read_text(encoding="utf-8")
     assert cli.optimise_main([str(song), "--passes", "fields", "--workers", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.15")
+    assert capsys.readouterr().out.startswith("unitracker: 1.16")
     with pytest.raises(SystemExit):
         cli.optimise_main([str(song), "--passes", "nosuch"])
 
