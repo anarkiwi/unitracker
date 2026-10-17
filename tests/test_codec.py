@@ -1,6 +1,7 @@
 """Shared vocabulary: row codecs, command names, note offsets, and the vocabulary itself."""
 
 import math
+import re
 
 import pytest
 import yaml
@@ -14,6 +15,8 @@ from unitracker.codec import (
     CommandCodec,
     Evaluator,
     RowCodec,
+    ctrl_text,
+    ctrl_value,
     evaluate,
     note_value,
     route_text,
@@ -151,6 +154,7 @@ def test_restart_rows_read_back_at_their_place(pr_name, place, shared):
         ("goattracker2", LAST, {"ctrl": 9}),
         ("goattracker2", LAST, {"ctrl": 0xFE, "gate": 1}),
         ("goattracker2", ONLY, {"ctrl": 9, "gate": 1}),
+        ("goattracker2", LAST, {"ctrl": "^8", "gate": 1}),
         ("sidwizard", FIRST, {"hold": 3, **HR}),
         ("sidwizard", FIRST, {"hold": 2, "ctrl": 0x20, **HR}),
         ("sidwizard", FIRST, {"hold": 2, "ad": 0x0F, "sr": 0}),
@@ -159,7 +163,9 @@ def test_restart_rows_read_back_at_their_place(pr_name, place, shared):
     ],
 )
 def test_restart_programs_hold_only_what_the_player_plays(pr_name, place, shared):
-    with pytest.raises(CodecError, match=f"restart: the player can't express row {shared!r}"):
+    with pytest.raises(
+        CodecError, match=re.escape(f"restart: the player can't express row {shared!r}")
+    ):
         codec(pr_name, "restart").decode(shared, place)
 
 
@@ -317,12 +323,11 @@ def test_defmon_row_and_freeze():
     raw = {"dl": 1, "wgh": 80, "wgl": 5, "ad": 0, "sr": 68, "tr": 12, "af": 0x10, "xp": 2}
     shared = {
         "hold": 2,
-        "ctrl": 80,
+        "ctrl": "80^5",
         "note": "+12",
         "ad": 0,
         "sr": 68,
         "pw": ("x", 2),
-        "wgl": 5,
         "af": 0x10,
     }
     assert written(raw, c) == shared
@@ -333,10 +338,43 @@ def test_defmon_row_and_freeze():
         c.check_end({"dl": 0x80}, {"hold": 3})
 
 
+@pytest.mark.parametrize(
+    "text,value",
+    [(65, 65), ("^8", (None, 8)), ("64^1", (64, 1)), ("16^0", (16, 0))],
+)
+def test_ctrl_values_and_their_masks(text, value):
+    assert ctrl_value(text) == value
+    if isinstance(value, tuple):
+        assert ctrl_text(value) == text
+
+
+def test_a_ctrl_mask_is_the_defmon_eor_column():
+    c = codec("defmon", "sidtab")
+    assert written({"wgl": 8}, c) == {"ctrl": "^8"}
+    assert c.decode({"ctrl": "^8"})["wgl"] == 8 and c.decode({"ctrl": "^8"})["wgh"] == -1
+    assert c.decode({"ctrl": 16})["wgl"] == -1
+    for bad in (True, "8^", "^-1", "x"):
+        with pytest.raises(CodecError, match="bad ctrl"):
+            ctrl_value(bad)
+
+
+@pytest.mark.parametrize(
+    "pr_name,name,shared",
+    [
+        ("goattracker2", "ctrltab", {"ctrl": "^8"}),
+        ("goattracker2", "ctrltab", {"ctrl": "65^1"}),
+        ("sidwizard", "wftab", {"ctrl": "^1"}),
+    ],
+)
+def test_instrument_players_cannot_express_a_ctrl_mask(pr_name, name, shared):
+    with pytest.raises(CodecError, match="the player can't express row"):
+        codec(pr_name, name).decode(shared)
+
+
 def test_defmon_pitch_expression_runs_the_slide_mode():
     c = codec("defmon", "sidtab")
     raw = {"dl": 1, "wgh": 64, "wgl": 1, "af": 0x80, "xf": 2, "xc": 5}
-    shared = {"hold": 2, "ctrl": 64, "wgl": 1, "freq": ("x", 2), "cut": ("x", 5)}
+    shared = {"hold": 2, "ctrl": "64^1", "freq": ("x", 2), "cut": ("x", 5)}
     assert written(raw, c) == shared
     assert c.decode(shared) == {**DM_UNSET, "tr": -1, "ad": -1, "sr": -1, **raw}
     assert c.decode({"freq": ("x", 1)})["af"] == 0x80
@@ -579,7 +617,7 @@ INS_KEYS = {
         "freq",
     },
 }
-DM_KEEP = {"wgl", "af", "ps", "cp"}
+DM_KEEP = {"af", "ps", "cp"}
 # Player-specific keys a program row may carry besides the shared ones.
 ROW_KEEP = {"defmon": DM_KEEP}
 # Program types that may hold list rows, with the rows each allows.
@@ -613,7 +651,11 @@ def _check_rows(name, rows, keep, exprs=frozenset()):
     for row in rows:
         if isinstance(row, dict) and set(row) != {"loop"}:
             assert set(row) <= set(ROW_KEYS) | keep, (name, row)
-            text = {k for k, v in row.items() if isinstance(v, str) and k not in ("note", "route")}
+            text = {
+                k
+                for k, v in row.items()
+                if isinstance(v, str) and k not in ("note", "route", "ctrl")
+            }
             assert text <= exprs, (name, row)
         elif isinstance(row, list):
             assert name in LIST_ROWS and LIST_ROWS[name](row), (name, row)
@@ -635,7 +677,7 @@ def _check_shared_outside_rows(pr_name, tname, value):
         if tname == "ins" and key in INS_FORMS:
             assert isinstance(value[key], INS_FORMS[key]), value
         else:
-            assert isinstance(value[key], int) or key == "note", (tname, key, value)
+            assert isinstance(value[key], int) or key in ("note", "ctrl"), (tname, key, value)
 
 
 def _check_def(pr_name, tname, value):
@@ -748,7 +790,7 @@ def defmon_doc(vinit, ginit):
 
 def test_defmon_init_keys_mean_what_they_mean_in_rows():
     ir = defmon_doc(
-        {"pw": 0x0567, "ctrl": 0x41, "ad": 0x12, "sr": 0x34, "wgl": 1, "note": "=36"},
+        {"pw": 0x0567, "ctrl": "65^1", "ad": 0x12, "sr": 0x34, "note": "=36"},
         {"res": 15, "route": 1, "mode": 0x30},
     )
     voice = ir["records"]["vinit"][0]

@@ -35,6 +35,7 @@ RETIRED_ROW_KEYS = {
     "resfilt": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
     "re": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
     "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
+    "wgl": "retired in v1.8: write the control mask as `ctrl: ^n`",
 }
 COMMAND_NAMES = (
     "run",
@@ -69,6 +70,7 @@ COMMAND_NAMES = (
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
+_CTRL = re.compile(r"^(?P<lit>\d+)?\^(?P<mask>\d+)$")
 
 
 class CodecError(ValueError):
@@ -172,14 +174,33 @@ def route_text(relation: int, mask: int):
     return ("+" if relation > 0 else "-") + (f" {mask}" if mask else "")
 
 
+def ctrl_value(value):
+    """A written ``ctrl``: an int, or ``(literal or None, mask)`` for ``^mask`` or ``n^mask``."""
+    if isinstance(value, (int, tuple)) and not isinstance(value, bool):
+        return value
+    match = _CTRL.match(str(value))
+    if match is None:
+        raise CodecError(f"bad ctrl {value!r}")
+    return int(match["lit"]) if match["lit"] else None, int(match["mask"])
+
+
+def ctrl_text(value):
+    """The written form of a ``ctrl``: an int, or the text of one with an exclusive-or mask."""
+    if not isinstance(value, tuple):
+        return value
+    literal, mask = value
+    return f"{'' if literal is None else literal}^{mask}"
+
+
 _FORMS = {
     "note": (note_value, lambda v: note_text(*v)),
     "route": (route_value, lambda v: route_text(*v)),
+    "ctrl": (ctrl_value, ctrl_text),
 }
 
 
 def written_value(key: str, value):
-    """A shared key's value as written: notes and routes in their text forms."""
+    """A shared key's value as written: notes, routes and masked controls in their text forms."""
     return _FORMS[key][1](value) if key in _FORMS else value
 
 
@@ -243,6 +264,12 @@ class RowCodec:
     def _full(self, row: dict) -> dict:
         return {f: int(row.get(f, d)) for f, d in self.rtype.fields.items()}
 
+    def _part(self, kspec: dict, row: dict):
+        """A key's value from the raw fields, or None when it is left out."""
+        if "value" not in kspec or ("omit" in kspec and self.ev(kspec["omit"], row)):
+            return None
+        return self.ev(kspec["value"], row)
+
     def _encode(self, shape, row) -> dict:
         out = {}
         for key in ROW_KEYS:
@@ -253,9 +280,13 @@ class RowCodec:
             if field is not None and row[field] != self.rtype.default(field):
                 out[key] = (EXPR, row[field])
                 continue
-            if "value" not in kspec or ("omit" in kspec and self.ev(kspec["omit"], row)):
+            value = self._part(kspec, row)
+            mask = self._part(kspec["eor"], row) if "eor" in kspec else None
+            if mask is not None:
+                out[key] = (value, mask)
                 continue
-            value = self.ev(kspec["value"], row)
+            if value is None:
+                continue
             if key == "note":
                 absolute = "abs" in kspec and bool(self.ev(kspec["abs"], row))
                 out[key] = (absolute, value - self.offset if absolute else value)
@@ -294,6 +325,10 @@ class RowCodec:
                 env["note"] = number + self.offset if absolute else number
             elif key == "route" and plain:
                 env["route_rel"], env["route"] = norm[key]
+            elif key == "ctrl" and plain and isinstance(norm[key], tuple):
+                literal, env["eor"] = norm[key]
+                env["has_eor"], env["has_ctrl"] = 1, int(literal is not None)
+                env.update({"ctrl": literal} if literal is not None else {})
             elif plain:
                 env[env_name(key)] = norm[key]
         return env
@@ -305,6 +340,8 @@ class RowCodec:
         for key, value in norm.items():
             if is_expr(value) and "expr" not in shape.keys.get(key, {}):
                 return None, f"{key} holds no expression here"
+            if key == "ctrl" and isinstance(value, tuple) and "eor" not in shape.keys["ctrl"]:
+                return None, "ctrl holds no mask here"
         env = self._env(shape, norm)
         raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
@@ -330,7 +367,8 @@ class RowCodec:
 
     @staticmethod
     def normalize(written: dict) -> dict:
-        """A written row with notes as ``(absolute, number)`` and routes as ``(relation, mask)``."""
+        """A written row with notes as ``(absolute, number)``, routes as ``(relation, mask)``
+        and masked controls as ``(literal, mask)``."""
         return {k: _FORMS[k][0](v) if k in _FORMS else v for k, v in written.items()}
 
     def decode(self, written: dict, place: dict | None = None) -> dict:

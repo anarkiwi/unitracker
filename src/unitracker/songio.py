@@ -406,7 +406,7 @@ class _Writer:
         for k, v in shared.items():
             if k == "note":
                 v = Atom(note_text(*v))
-            elif k == "route":
+            elif k in ("route", "ctrl"):
                 v = written_value(k, v)
             elif is_expr(v):
                 v = self.ref_value(self.key(EXPR, v[1]))

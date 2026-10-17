@@ -9,7 +9,7 @@ from unitracker.vm import SongPlayer, compile_phrase
 RUN2 = 1
 
 
-def song(phrase, restart="[{hold: 3, wgl: 8}, {}, end]", sidtab="t1: [{ctrl: 64, wgl: 1}, end]"):
+def song(phrase, restart="[{hold: 3, ctrl: ^8}, {}, end]", sidtab="t1: [{ctrl: 64^1}, end]"):
     return f"""
 unitracker: 1.8
 playroutine: {{ref: defmon}}
@@ -134,11 +134,11 @@ def test_a_written_run2_before_a_note_is_folded():
         songio.loads(
             song(
                 "[-, -!run2:@t2*3, C3.t1*8]",
-                sidtab="t1: [{ctrl: 64, wgl: 1}, end]\n        t2: [{wgl: 8}, end]",
+                sidtab="t1: [{ctrl: 64^1}, end]\n        t2: [{ctrl: ^8}, end]",
             )
         )
     )
-    assert "[-*4, C3.t1!restart:@r1*8]" in text and "r1: [{hold: 3, wgl: 8}, {}, end]" in text
+    assert "[-*4, C3.t1!restart:@r1*8]" in text and "r1: [{hold: 3, ctrl: ^8}, {}, end]" in text
 
 
 @pytest.mark.parametrize(

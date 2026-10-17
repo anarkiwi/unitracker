@@ -70,6 +70,12 @@ def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
         songio.loads(doc(playroutine, f"      ins:\n        i1: {ins}", "[C4.i1]"))
 
 
+def test_the_reader_names_the_retired_eor_column():
+    text = doc("defmon", "      sidtab:\n        t1: [{ctrl: 64, wgl: 1}, end]", "[C4.t1]")
+    with pytest.raises(songio.SongFormatError, match="sidtab: wgl is retired in v1.8: write"):
+        songio.loads(text)
+
+
 def test_goattracker_freq_command_pulse_expression_and_legato():
     freq, pulse, ctrl = voice0(GT_SONG, 34)
     c4, d4 = GT["ftab"][48], GT["ftab"][50]

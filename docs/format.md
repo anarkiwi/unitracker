@@ -123,7 +123,7 @@ playroutine needs.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
   are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
   with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
-  `pw`, `wgl`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`, `cp`), and an omitted field
+  `pw`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`, `cp`), and an omitted field
   is 0.
 
 ## Events
@@ -150,7 +150,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 
 | row key | meaning |
 |---|---|
-| `ctrl` | control register value |
+| `ctrl` | control register value; `^n` sets an exclusive-or mask the voice's control output keeps until a row sets another, `v^n` both |
 | `gate` | the gate the control register is written with until a row, note or `off`/`on` sets it: 0 off, 1 on |
 | `note` | `+n` / `-n` relative to the event note, `=n` absolute (format numbering, C2 = 24); omitted: no change |
 | `wait` | ticks before the row applies |
@@ -197,7 +197,7 @@ can't express !notevib:1`); the writer refuses to write a value that would not r
 
 - **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
   command rows (list rows), `!vib:@s` and the instrument keys `speed` and `vd`.
-- **defMON:** the sidTAB columns `wgl`, `cp`; `af` below $80 (a fixed offset).
+- **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
 - **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
   detune (list rows `[w, a, d]`), pulse and filter sweep rows and keyboard-tracked rows
   (list rows), `!notevib` and the instrument keys `flags` (bits 4-7 of the header's control
@@ -205,8 +205,10 @@ can't express !notevib:1`); the writer refuses to write a value that would not r
   `vibrato`, `vibdelay`, `arpspeed`, `chord` and `octave`.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
-`flags` (SID-Wizard) are retired in v1.8: a document using them is rejected, naming them
-(`ins.gt is retired in v1.8: write the hard restart as the instrument's restart program`).
+`flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
+rejected, naming them (`ins.gt is retired in v1.8: write the hard restart as the
+instrument's restart program`, `sidtab: wgl is retired in v1.8`). A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
+no mask here`).
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
@@ -268,7 +270,7 @@ row's place in its program is part of its shape, see Codecs):
 |---|---|---|
 | GoatTracker 2 | exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n, gate: 1}` (n $01-$FD, the first wave), `{gate: g}`, or `{}` |
 | SID-Wizard | at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform), or `{}` |
-| defMON | one or more: `hold`, `ctrl`, `ad`, `sr` and the sidTAB column `wgl` | `{}` |
+| defMON | one or more: `hold`, `ctrl` (a value, a mask `^n`, or both), `ad`, `sr` | `{}` |
 
 GoatTracker reads the voice's next step its instrument's gate timer ahead of each note, and an
 instrument without a restart reads it on the note's first tick. A GoatTracker note keeps the
@@ -480,10 +482,11 @@ ctrltab:
 
 A codec shape has a `when` over the raw fields, the playroutine's constants, and for a
 program row its place: `first` and `last` are 1 for the program's first row and for the
-row before its `end`; `keys` (`{key: {value, omit, abs, expr}}`:
+row before its `end`; `keys` (`{key: {value, omit, abs, expr, eor}}`:
 the shared key's value from the raw fields, when to leave it out, for `note` whether
-it is absolute, and the raw field holding the key's expression), `raw` (each raw field
-from the written keys, with `has_<key>` and `note_abs` defined) and `keep` (raw fields
+it is absolute, the raw field holding the key's expression, and for `ctrl` its mask as
+`{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
+`note_abs`, and for a mask `has_eor` and `eor` defined) and `keep` (raw fields
 written under their own names; a kept reference is written as a name). A key with `expr`
 is written as the expression when that field is set; a key with both `value` and `expr`
 reads an integer as a value and a string as an expression. The writer uses the first
@@ -680,7 +683,8 @@ fields as follows:
 - the note is a GATE_N note.
 
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk
-order: `dl` is `hold` (a frozen row ends its program), `wgh` is `ctrl`, `tr` is
+order: `dl` is `hold` (a frozen row ends its program), `wgh` and `wgl` are `ctrl` and its
+mask (`ctrl: 64^1`), `tr` is
 `note`, the row's pitch, pulse and ACID modulators are `freq`, `pw` and `cut`, and the
 other columns keep their names. Note names are offset by 24 indices: defMON index 48
 is `C2`. The replay probes `$D41B` at init to tell the SID models apart; the result
