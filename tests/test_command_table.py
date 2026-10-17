@@ -1,6 +1,7 @@
 """The per-player command and `ctrl` row key tables in docs/format.md, generated from the
 playroutines' commands and codecs."""
 
+import math
 from importlib import resources
 from pathlib import Path
 
@@ -38,6 +39,16 @@ def spans(values) -> str:
     return ", ".join(out)
 
 
+def cell(values: set) -> str:
+    """The written values a command takes: for an argument of several values, each position's
+    runs joined by ``/``, which hold only when every combination is taken."""
+    if not all(isinstance(v, tuple) for v in values):
+        return spans(values)
+    columns = [{v[k] for v in values} for k in range(len(next(iter(values))))]
+    assert len(values) == math.prod(map(len, columns)), sorted(values)
+    return "/".join(spans(c) for c in columns)
+
+
 def accepted(pr: dict) -> dict:
     """``{name: cell}``: what each shared command takes in playroutine ``pr``."""
     rtypes = record_types(pr)
@@ -58,7 +69,7 @@ def accepted(pr: dict) -> dict:
                 continue
             if ename == name and cmds.decode(name, value):
                 values.setdefault(name, set()).add(value)
-    cells = {n: spans(v) for n, v in values.items()}
+    cells = {n: cell(v) for n, v in values.items()}
     for name in envelope_names(pr.get("commands")):
         cells[name] += ", at most one nibble from the instrument's"
     for name, names in refs.items():
@@ -156,10 +167,61 @@ def _doc(player: str, atom: str) -> str:
 
 @pytest.mark.parametrize(
     "player,command",
-    [("goattracker2", "tempo:2"), ("sidwizard", "tempo:6"), ("defmon", "mark:1")],
+    [
+        ("goattracker2", "tempo:2"),
+        ("sidwizard", "tempo:2"),
+        ("sidwizard", "vtempo:128"),
+        ("sidwizard", "funk:2/6"),
+        ("sidwizard", "funk:6/16"),
+        ("sidwizard", "funk:6"),
+        ("sidwizard", "funk:none"),
+        ("defmon", "tempo:6"),
+    ],
 )
 def test_an_unsupported_timing_command_is_refused_naming_it_and_the_player(player, command):
     with pytest.raises(
         songio.SongFormatError, match=f"^{player}: the player can't express !{command}"
     ):
         songio.loads(_doc(player, f"-!{command}"))
+
+
+@pytest.mark.parametrize("command", ["tempo:3", "vtempo:127", "funk:3/15", "funk:6/7"])
+def test_sidwizard_timing_commands_read_and_write_as_themselves(command):
+    text = songio.dumps(songio.loads(_doc("sidwizard", f"-!{command}")))
+    assert f"-!{command}" in text
+
+
+def sw_commands() -> CommandCodec:
+    pr = songio.library("sidwizard")
+    return CommandCodec(pr["commands"], record_types(pr))
+
+
+@pytest.mark.parametrize(
+    "code,arg,shared,raw",
+    [
+        (17, 0x57, ("funk", (5, 7)), 0x57),
+        (17, 0x0F, ("funk", (6, 15)), 0x6F),
+        (18, 0x84, ("tempo", 4), 4),
+        (18, 0, ("tempo", 6), 6),
+        (19, 127, ("vtempo", 127), 127),
+    ],
+)
+def test_sidwizard_timing_commands(code, arg, shared, raw):
+    cmds = sw_commands()
+    assert cmds.encode(code, arg) == shared
+    assert cmds.decode(*shared) == (code, raw)
+    assert cmds.values("funk") and not cmds.values("tempo")
+
+
+@pytest.mark.parametrize("value", [(2, 6), (6, 16), (6,), (6, 6, 6), 6, "none", ("x", 1)])
+def test_sidwizard_refuses_a_swing_it_cannot_play(value):
+    cmds = sw_commands()
+    with pytest.raises(CodecError, match="can't express !funk:"):
+        cmds.decode("funk", value)
+    with pytest.raises(CodecError, match="no shared name"):
+        cmds.encode(17, 0x26)
+
+
+def test_a_several_value_argument_is_written_with_slashes():
+    with pytest.raises(CodecError, match="can't express !funk:2/6$"):
+        sw_commands().decode("funk", (2, 6))

@@ -8,6 +8,7 @@ from pygoattracker import constants as GT
 from pygoattracker import Instrument, Orderlist, Pattern, Player, PlayPattern, Row, Song
 from pygoattracker import Subtune, Table, TypedSong
 from pysidtracker.testing import resolve_tune
+from pysidwizard import parse_sid_song
 
 from unitracker import backends, optimise
 
@@ -60,6 +61,15 @@ def csillag() -> Path:
     if path is None:
         pytest.skip("HVSC tune unavailable")
     return Path(path)
+
+
+def sw_fx(raw: bytes, rows: dict):
+    """SID-Wizard tune ``raw``'s first subtune with each ``{(pattern, row): (fx, value)}`` set."""
+    swm = parse_sid_song(raw, 1)
+    for (pattern, k), (fx, value) in rows.items():
+        row = swm.patterns[pattern - 1].rows[k]
+        row.fx, row.fx_value = fx, value
+    return swm
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):

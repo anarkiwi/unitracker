@@ -14,7 +14,7 @@ PULSE = "16*abs((φ - 32) % 128 - 64) + 512"
 
 def doc(ins: str, phrase: str, defs: str = "", steps: int = 8, extra: str = "") -> str:
     """A three-voice GoatTracker 2 document: voice 1 plays ``phrase``, the others rest."""
-    return f"""unitracker: 1.17
+    return f"""unitracker: 1.18
 playroutine: {{ref: goattracker2}}
 meta: {{title: t, author: a, released: r}}
 song:
@@ -303,7 +303,7 @@ def test_cli_optimises_and_reports(tmp_path, capsys):
     assert "!ad" not in out.read_text(encoding="utf-8")
     assert "E4!ad:9*2" in report.read_text(encoding="utf-8")
     assert cli.optimise_main([str(song), "--passes", "fields", "--workers", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.17")
+    assert capsys.readouterr().out.startswith("unitracker: 1.18")
     with pytest.raises(SystemExit):
         cli.optimise_main([str(song), "--passes", "nosuch"])
 

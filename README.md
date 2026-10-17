@@ -1,6 +1,6 @@
 # unitracker
 
-A generic tracker song format (v1.17) for the C64 SID, GoatTracker 2, defMON and
+A generic tracker song format (v1.18) for the C64 SID, GoatTracker 2, defMON and
 SID-Wizard lifters, and a generic player. A song is a compact YAML document: a header
 naming its playroutine (integer cells, bounded accumulators, event handlers and modulator
 units, from the library in `src/unitracker/playroutines/`), then one timeline that defines

@@ -1,4 +1,4 @@
-"""The v1.17 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.18 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 
@@ -288,7 +288,7 @@ def test_retired_raw_rows_are_refused_both_ways():
 
 
 LIST_SONG = """
-unitracker: 1.17
+unitracker: 1.18
 playroutine: {{ref: {pr}}}
 song:
   - def:
@@ -378,9 +378,9 @@ def test_writer_refuses_a_list_row_the_format_retired():
 
 def test_the_version_is_its_text():
     text = LIST_SONG.format(pr="goattracker2", tname="ctrl", name="c", row="{ctrl: 65}")
-    assert songio.dumps(songio.loads(text)).startswith("unitracker: 1.17\n")
-    with pytest.raises(SongFormatError, match=r"not a unitracker v1\.17 document"):
-        songio.loads(text.replace("1.17", "1.1", 1))
+    assert songio.dumps(songio.loads(text)).startswith("unitracker: 1.18\n")
+    with pytest.raises(SongFormatError, match=r"not a unitracker v1\.18 document"):
+        songio.loads(text.replace("1.18", "1.1", 1))
 
 
 def test_reader_rejects_rows_beyond_max_and_bad_stop():

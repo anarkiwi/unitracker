@@ -1,4 +1,4 @@
-# unitracker song format (v1.17)
+# unitracker song format (v1.18)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.17
+unitracker: 1.18
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.17`; readers reject any other version |
+| `unitracker` | `1.18`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -162,14 +162,14 @@ note[.instrument][!command:arg[!command:arg]][*steps]
 - `.i3` names the instrument. A defMON instrument names the sidTAB programs the event
   arms (see the defMON backend).
 - `!run:@c1` is a named command with an argument: a number, `@name` for a command that
-  references a record or an expression, `none`, or values joined by `/` for a command that
-  carries its record's row (`!funk:6/7`). An event carries at most two commands,
+  references a record or an expression, `none`, or values joined by `/` for a command of
+  several values (`!funk:6/7`). An event carries at most two commands,
   its two slots, then `!pulse:0` and `!filter:0` (see Lifetime), which take no slot. The
   first slot is the instrument column and the second the FX column, and an event that names
   an instrument fills the instrument column with it, so its commands are the FX column's. A
   command the player plays in one column takes either slot: SID-Wizard plays `!ad` and `!sr`
-  in the column of their slot (see Backends), and its `!freq`, `!legato:0` and `!run` in
-  their own. GoatTracker reads `!legato:0` from either slot and its other command from the
+  in the column of their slot (see Backends), and its `!freq`, `!legato:0`, `!run` and timing
+  commands in their own. GoatTracker reads `!legato:0` from either slot and its other command from the
   other, and defMON reads one command, so for them the slots are only an order. Command
   names are the ones below.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
@@ -217,7 +217,7 @@ from that in at most one nibble (see Backends).
 
 Each player takes the commands its playroutine declares (`commands`, `restart`, `lifetime`),
 with the arguments below: a range of the written value, `@type` a record of that type, `—`
-a command the player refuses by name (`sidwizard: the player can't express !tempo:6`).
+a command the player refuses by name (`defmon: the player can't express !tempo:6`).
 
 | command | `defmon` | `goattracker2` | `sidwizard` |
 |---|---|---|---|
@@ -228,21 +228,24 @@ a command the player refuses by name (`sidwizard: the player can't express !temp
 | `!resfilt` | — | 0-255 | — |
 | `!vol` | — | 0-15 | — |
 | `!cut` | — | 0-2040 step 8 | — |
-| `!tempo` | — | 3-127 | — |
-| `!vtempo` | — | 3-127 | — |
-| `!funk` | — | 0-255/0-255, `none` | — |
+| `!tempo` | — | 3-127 | 3-127 |
+| `!vtempo` | — | 3-127 | 3-127 |
+| `!funk` | — | 0-255/0-255, `none` | 3-15/3-15 |
 | `!freq` | — | `@x`, `none` | `@x`, `none` |
 | `!mark` | — | 16-255 | — |
 | `!restart` | `@restart` | — | — |
-| `!legato` | — | 0 | 0-255 |
+| `!legato` | — | 0 | 0 |
 | `!pulse` | — | 0 | 0 |
 | `!filter` | — | 0 | 0 |
 
-The timing commands are GoatTracker's: its command $F plays a tempo of 2 as 3, so `!tempo`
-and `!vtempo` start at 3; `!funk:a/b` carries the swing pair, and the
-default tempo is the constant `deftempo`. SID-Wizard's tempo is the subtune's tempo pair, the
-constants `tempol` and `tempor`, and its tempo commands are not covered yet. A defMON step is
-one tick, and its arranger and pattern counters are lifted as the timeline (see Backends).
+The timing commands mean one thing in each player that declares them: `!tempo:n` and
+`!vtempo:n` make the steps n ticks long, and `!funk:a/b` alternates `a` and `b`, from the
+step that carries the command as the player counts it. GoatTracker's command $F plays a
+tempo of 2 as 3, so `!tempo` and `!vtempo` start at 3; `!funk:a/b` carries the swing pair, and
+the default tempo is the constant `deftempo`. SID-Wizard's tempo is the subtune's tempo pair,
+the constants `tempol` and `tempor`, which its FX $10, $13 and $11 set as `!tempo`, `!vtempo`
+and `!funk` (see the SID-Wizard backend). A defMON step is one tick, and its arranger and
+pattern counters are lifted as the timeline (see Backends).
 
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
@@ -666,7 +669,9 @@ uses the first shape whose `when` holds and refuses a row that would not read ba
 shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or
 `x` for an expression), and for a plain argument optional `when`, `arg` (raw to written)
-and `raw` (written to raw), checked the same way. A `ref` entry with `inline: true` writes
+and `raw` (written to raw), checked the same way; `args` (`{a: expr, b: expr}`) writes the
+argument as several values joined by `/`, which `raw` reads by those names (SID-Wizard's
+`!funk:6/7`). A `ref` entry with `inline: true` writes
 the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
 one row per distinct argument, and the type has no definitions of its own. An entry `{name: ad, nibble: s, slot: k}`
 is an envelope command: the code sets the nibble at shift `s` of the register `name` over
@@ -960,10 +965,17 @@ FX-column one alone on a row that starts no note is written in the first slot, w
 same. Not covered: one on a voice with no instrument, one that writes the other register with
 another byte (after a row that selects an instrument without a note), an FX-column one alone
 on a note that names no instrument, and a play of a phrase that differs on its loop's passes.
-Note names are offset
+The tempo FX apply on the
+row's TICK_2 with its other FX: $10 (`!tempo`, playroutine code $12, as $10 is `!freq`) sets
+every voice's tempo pair to its value, $13 (`!vtempo`) this voice's, and $11 (`!funk:a/b`)
+every voice's to its nibbles. Each rewinds the swing to its first tempo, and each voice
+counts its current row against the new pair from its next tick. A tempo of 0 plays as 6, and
+1 and 2 never apply a row, so they are not covered, nor is a swing for one voice ($14) unless
+both its tempos are equal, which is `!vtempo`; the lifter names the pattern and row of a tempo
+FX it does not cover. Note names are offset
 by one index: SID-Wizard index 49 is `C4`. The lifter
 requires each voice's first note to select an instrument: a note that selects none on a
-voice that has never had one has no instrument state to play. Table jumps, orderlist
-transposes, tempo and volume commands,
+voice that has never had one has no instrument state to play. Table jumps, the orderlist's
+transpose, tempo and volume commands,
 multispeed, other player builds and the effects not listed above are not covered yet;
 the lifter names what it meets.

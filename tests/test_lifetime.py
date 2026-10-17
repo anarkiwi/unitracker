@@ -24,7 +24,7 @@ GT_INS = """      x:
 
 def song(pr, defs, phrases, rows="    play: [p1, p1, p1]\n", loop="~"):
     phrase = "".join(f"        {name}: [{atoms}]\n" for name, atoms in phrases.items())
-    return f"""unitracker: 1.17
+    return f"""unitracker: 1.18
 playroutine: {{ref: {pr}}}
 song:
   - def:

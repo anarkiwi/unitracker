@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, Transpose
+from conftest import sw_fx
+from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, SWMPlayer, Transpose
 from pysidwizard.features import features_for_driver
 
 from unitracker import backends, sidwizard, songio
@@ -284,6 +285,14 @@ def events():
         (Row(instrument=0x65), {"command": [0x160, 5]}),
         (Row(note=50, instrument=0x72, fx=0x58), {"note": 50, "commands": [[0x170, 2], [0x50, 8]]}),
         (Row(fx=0x77), {"command": [0x70, 7]}),
+        (Row(fx=0x10, fx_value=4), {"command": [0x12, 4]}),
+        (Row(fx=0x10), {"command": [0x12, 0]}),
+        (Row(fx=0x11, fx_value=0x57), {"command": [0x11, 0x57]}),
+        (
+            Row(note=40, instrument=1, fx=0x13, fx_value=0x88),
+            {"note": 40, "instrument": 1, "command": [0x13, 0x88]},
+        ),
+        (Row(fx=0x14, fx_value=0x55), {"command": [0x13, 5]}),
     ],
 )
 def test_row_events(row, event):
@@ -297,6 +306,10 @@ def test_row_events(row, event):
         (Row(fx=0x09, fx_value=1), "big FX"),
         (Row(note=0x79), "note-column"),
         (Row(instrument=0x52, note=0x68, fx=0x54), "three effects"),
+        (Row(fx=0x14, fx_value=0x35), r"tempo FX \$14 \$35 is not covered"),
+        (Row(fx=0x10, fx_value=2), r"tempo FX \$10 \$02"),
+        (Row(fx=0x13, fx_value=0x81), r"tempo FX \$13 \$81"),
+        (Row(fx=0x11, fx_value=0x72), r"tempo FX \$11 \$72"),
     ],
 )
 def test_row_events_reject(row, match):
@@ -312,6 +325,30 @@ def test_phrases_fold_emptytable_rows():
     ]
     with pytest.raises(LiftError, match="empty"):
         events().phrase(SimpleNamespace(rows=[]))
+    with pytest.raises(LiftError, match=r"^pattern \$1A row \$02: tempo FX \$10 \$01"):
+        events().phrase(SimpleNamespace(rows=[Row(), Row(), Row(fx=0x10, fx_value=1)]), 0x1A)
+
+
+@pytest.mark.parametrize(
+    "pair,commands,hints",
+    [
+        ((0x86, 0x83), [], {"ticks_per_step": 6}),
+        ((5, 7), [], {}),
+        ((0, 6), [[0x12, 6], [0x13, 0x86], [0x11, 0x60]], {"ticks_per_step": 6}),
+        ((6, 6), [[0x12, 4]], {}),
+        ((6, 6), [[0x11, 0x67]], {}),
+        ((6, 6), [[0x20, 4], [0x70, 2]], {"ticks_per_step": 6}),
+    ],
+)
+def test_the_tempo_hint_holds_one_tempo(pair, commands, hints):
+    swm = SimpleNamespace(subtune_tempos=[pair])
+    phrases = {"p01": [{"commands": commands}]}
+    constants, got = sidwizard.tempo(swm, phrases)
+    assert got == hints
+    assert constants == {
+        "tempol": pair[0] & 0x7F,
+        "tempor": (pair[1] if pair[1] < 0x80 else pair[0]) & 0x7F,
+    }
 
 
 def test_first_note_must_select_aninstrument_record():
@@ -388,6 +425,30 @@ def test_a_reference_past_the_instruments_plays_the_emptyinstrument_record(csill
         entry = row["next"]
     assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9}]
     SongPlayer(ir).render_grid(20)
+
+
+# Tempo FX on rows no voice plays in step: one voice's tempo and swing, every voice's tempo
+# (0: 6) and swing, on rows that start a note and rows that do not.
+TEMPO_ROWS = {
+    (11, 0): (0x13, 8),
+    (12, 4): (0x14, 0x55),
+    (10, 16): (0x10, 4),
+    (9, 8): (0x11, 0x57),
+    (13, 8): (0x10, 0),
+    (14, 2): (0x11, 0x3F),
+}
+
+
+def test_the_transcription_plays_the_tempo_fx(csillag, monkeypatch):
+    raw = csillag.read_bytes()
+    theirs = np.asarray(SWMPlayer(sw_fx(raw, TEMPO_ROWS)).render_grid(3007), dtype=np.uint8)
+    plain = np.asarray(SWMPlayer(sw_fx(raw, {})).render_grid(3007), dtype=np.uint8)
+    assert not np.array_equal(theirs, plain)
+    swm = sw_fx(raw, TEMPO_ROWS)
+    monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
+    ir = sidwizard.lift(raw, expressions=False)
+    assert "ticks_per_step" not in ir["hints"]
+    assert SongPlayer(ir).mismatch(theirs) is None
 
 
 def test_frequency_tables():
