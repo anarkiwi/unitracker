@@ -1,4 +1,4 @@
-"""v1.12 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.13 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.12
+unitracker: 1.13
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -62,11 +62,12 @@ GT_SONG = doc(
         ("sidwizard", "{hrad: 15}", "ins.hrad is retired in v1.8"),
         ("sidwizard", "{hrsr: 0}", "ins.hrsr is retired in v1.8"),
         ("sidwizard", "{firstctrl: 9}", "ins.firstctrl is retired in v1.8"),
-        ("sidwizard", "{flags: 26}", "ins.flags bits 0x0f are retired in v1.8"),
+        ("sidwizard", "{flags: 26}", "ins.flags is retired in v1.13: its bits are"),
+        ("sidwizard", "{flags: 16}", "ins.flags is retired in v1.13"),
         ("sidwizard", "{vibrato: 51}", "ins.vibrato is retired in v1.11: write the vibrato"),
         ("sidwizard", "{vibdelay: 4}", "ins.vibdelay is retired in v1.11"),
         ("sidwizard", "{octave: -12}", "ins.octave is retired in v1.11: a note is written as"),
-        ("sidwizard", "{flags: 96}", "ins.flags bits 0x30 are retired in v1.11"),
+        ("sidwizard", "{flags: 192}", "ins.flags is retired in v1.13"),
     ],
 )
 def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
@@ -91,7 +92,8 @@ def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
         ({"vibrato": 0x33}, "ins.vibrato has no written form: it is retired in v1.11"),
         ({"vibdelay": 4}, "ins.vibdelay has no written form"),
         ({"octave": -12}, "ins.octave has no written form"),
-        ({"flags": 0x20}, "ins.flags bits 0x30 have no written form: they are retired in v1.11"),
+        ({"flags": 0x20}, "ins.flags has no written form: it is retired in v1.13"),
+        ({"flags": 0x11}, "ins.flags has no written form"),
     ],
 )
 def test_the_writer_refuses_the_retired_header_bytes(fields, match):
@@ -99,15 +101,6 @@ def test_the_writer_refuses_the_retired_header_bytes(fields, match):
     song["records"]["ins"][1].update(fields)
     with pytest.raises(songio.SongFormatError, match=match):
         songio.dumps(song)
-
-
-def test_flags_are_written_without_and_read_with_the_vibrato_type():
-    song = songio.loads(SW_SONG)
-    song["records"]["ins"][1]["flags"] = 0xD0
-    text = songio.dumps(song)
-    assert "flags: 192" in text
-    assert songio.loads(text)["records"]["ins"][1]["flags"] == 0xD0
-    assert "flags" not in songio.dumps(songio.loads(SW_SONG))
 
 
 @pytest.mark.parametrize(
@@ -181,7 +174,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.12", "unitracker: 1.8", "not a unitracker v1.12 document"),
+        ("unitracker: 1.13", "unitracker: 1.8", "not a unitracker v1.13 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
