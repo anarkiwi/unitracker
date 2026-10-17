@@ -458,6 +458,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see Codecs) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field (a reference to `x`) holding a row's modulator expression; a program of one row that sets only it is written as the expression |
+| `retired` | `{expression: reason}`: raw rows the format no longer has; the reader and the writer refuse a row for which an expression holds |
 | any other key | a template: an action list run for a row |
 
 The record type `x` is the format's own: it holds the expressions, and a playroutine

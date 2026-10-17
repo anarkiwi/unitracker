@@ -232,6 +232,18 @@ def test_reader_rejects_the_retired_registers_key():
         songio.loads(yaml.safe_dump(doc))
 
 
+def test_retired_raw_rows_are_refused_both_ways():
+    ir = song()
+    ir["playroutine"]["record_types"]["prog"]["retired"] = {"v == 20": "retired in v0.1: gone"}
+    with pytest.raises(SongFormatError, match=r"prog: row .* is retired in v0.1: gone"):
+        songio.dumps(ir, embed=True)
+    ir["records"]["prog"][2]["v"] = 21
+    doc = yaml.safe_load(songio.dumps(ir, embed=True))
+    doc["song"][0]["def"]["prog"]["w1"][1] = [20]
+    with pytest.raises(SongFormatError, match=r"prog: row \[20\] is retired in v0.1: gone"):
+        songio.loads(yaml.safe_dump(doc, sort_keys=False))
+
+
 def test_reader_rejects_rows_beyond_max_and_bad_stop():
     doc = yaml.safe_load(songio.dumps(song(), embed=True))
     doc["playroutine"]["record_types"]["prog"]["max"] = 3

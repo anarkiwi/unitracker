@@ -117,6 +117,14 @@ def _expr_fields(codec) -> set:
     return {k["expr"] for shape in codec.shapes for k in shape.keys.values() if "expr" in k}
 
 
+def _retired_row(rtype, row: dict, shown) -> None:
+    """Raise, naming it, for a raw row form the format has retired."""
+    plain = {k: v for k, v in row.items() if isinstance(v, int)}
+    for when, why in rtype.retired.items():
+        if _RowEval(rtype).holds(when, plain):
+            raise SongFormatError(f"{rtype.name}: row {shown!r} is {why}")
+
+
 def _ref_type(rtype, field, row):
     """The record type ``field`` of ``row`` references, or None."""
     for target, when in rtype.refs.get(field, ()):
@@ -319,6 +327,7 @@ class _Writer:
             return self._shared_row(codec, shared, refs, place)
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
+        _retired_row(rtype, row, row)
         values = {}
         for field in rtype.fields:
             if field == rtype.chain:
@@ -679,6 +688,7 @@ class _Reader:
             row = dict(value)
         else:
             row = self._list_row(rtype, codec, value, place)
+        _retired_row(rtype, row, value)
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
