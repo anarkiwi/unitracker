@@ -107,7 +107,7 @@ playroutine needs.
 - **Rows** use the shared row keys (see Shared vocabulary) wherever the playroutine's
   codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
   written in the type's `form`: a `list` row holds the fields in declaration order, with
-  trailing defaults left out (a GoatTracker wavetable portamento step `[241, 1]`); a `map`
+  trailing defaults left out (a GoatTracker speed-table row `[4, 32]`); a `map`
   row holds the fields that differ from their defaults. A type's `retired` rows have no
   written form.
 - **Programs** are the rows of a chained type, in the order they run, followed by
@@ -201,10 +201,8 @@ rejected on reading, naming the key or command and the player (`sidwizard: the p
 can't express !ad:255 over the instrument's ad 18`); the writer refuses to write a value that
 would not read back (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
-- **GoatTracker 2:** the wavetable command rows with no shared form (list rows `[w, n]`, see
-  the GoatTracker 2 backend), the instrument keys `speed` and `vd` (the instrument vibrato, which
-  runs on every step without a command) and the record type `speedtab`, which they and `!funk`
-  name.
+- **GoatTracker 2:** the instrument keys `speed` and `vd` (the instrument vibrato, which runs on
+  every step without a command) and the record type `speedtab`, which they and `!funk` name.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -213,7 +211,10 @@ instrument's restart program`, `sidtab: wgl is retired in v1.8`). The list rows 
 GoatTracker's pulse and filter tables and SID-Wizard's pulse, filter and WF tables are retired
 in v1.10 (`pulsetab: row [32, 16] is retired in v1.10: a sweep, stall or keyboard-tracked row
 is its program's expression`): such a row is part of its program's `pw` or `cut` expression,
-which the lifter proves or fails on (see Lifting). A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
+which the lifter proves or fails on (see Lifting). GoatTracker's wavetable list rows are retired in
+v1.15 (`ctrltab: row [242] is retired in v1.15: write the row with the shared keys`): a wavetable
+command row is written with its shared keys or lifts as a row that has them, else the lift fails
+naming it (see the GoatTracker 2 backend), and no program row is a list. A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
 no mask here`).
 A vibrato is a `freq` expression in every player: the SID-Wizard instrument keys `vibrato`
 and `vibdelay`, bits 4 and 5 of `flags` (the vibrato type) and the note-column command

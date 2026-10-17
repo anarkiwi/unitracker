@@ -300,6 +300,7 @@ song:
 loop: ~
 """
 SWEEP = r"retired in v1\.10: a sweep, stall or keyboard-tracked row is its program's expression"
+WAVE = r"retired in v1\.15: write the row with the shared keys"
 
 
 @pytest.mark.parametrize(
@@ -309,6 +310,9 @@ SWEEP = r"retired in v1\.10: a sweep, stall or keyboard-tracked row is its progr
         ("goattracker2", "filttab", "[5, 1]", "filttab: row .* is retired in v1.10"),
         ("goattracker2", "ctrltab", "[65, 128]", "write row .* with shared keys"),
         ("goattracker2", "ctrltab", "[0xF5, 9]", "with shared keys"),
+        ("goattracker2", "ctrltab", "[0xF7, 65]", rf"ctrltab: row \[247, 65\] is {WAVE}"),
+        ("goattracker2", "ctrltab", "[0xF9]", r"write row \[249\] with shared keys"),
+        ("goattracker2", "ctrltab", "[0xF2]", rf"ctrltab: row \[242\] is {WAVE}"),
         ("sidwizard", "pwtab", "[16, 4]", SWEEP),
         ("sidwizard", "flttab", "[16, 4]", "flttab: row .* is retired in v1.10"),
         ("sidwizard", "wftab", "[2, 5, 0, 2]", "with shared keys"),
@@ -323,11 +327,14 @@ def test_reader_rejects_retired_list_rows(pr, tname, row, match):
         songio.loads(text)
 
 
-def test_the_kept_list_rows_read():
+def test_writer_refuses_a_wavetable_row_without_a_shared_form():
     ir = songio.loads(
-        LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="[0xF7, 65]")
+        LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="{ctrl: 65}")
     )
-    assert list(ir["records"]["ctrltab"].values()) == [{"w": 0xF7, "n": 65, "next": 0}]
+    ir["records"].update(ins={1: {"ctrl": 1}}, ctrltab={1: {"w": 0xF1, "n": 1, "next": 0}})
+    ir["phrases"]["p1"] = [{"note": 30, "instrument": 1}]
+    with pytest.raises(SongFormatError, match=rf"ctrltab: row .* is {WAVE}"):
+        songio.dumps(ir)
 
 
 def test_writer_refuses_a_list_row_the_format_retired():

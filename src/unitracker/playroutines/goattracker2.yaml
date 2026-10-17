@@ -79,6 +79,9 @@ record_types:
     prefix: c
     none: 0
     chain: next
+    # A list row: a wavetable command with no shared form, which the lifter names.
+    retired:
+      "1": "retired in v1.15: write the row with the shared keys"
     fields: [w, n, next, x]
     refs:
       n:

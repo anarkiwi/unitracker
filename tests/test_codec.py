@@ -624,8 +624,6 @@ INS_KEYS = {
 DM_KEEP = {"af", "ps"}
 # Player-specific keys a program row may carry besides the shared ones.
 ROW_KEEP = {"defmon": {"cp"}}
-# The list rows the format keeps: GoatTracker wavetable commands with no shared form.
-LIST_ROWS = {"ctrltab": lambda r: r[0] >= 0xF0}
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
 # envelope and control-register values in init records, the filter registers as res, route and
 # mode, and in an instrument ctrl names the program its voice runs on the control register, pw,
@@ -660,8 +658,7 @@ def _check_rows(name, rows, keep, exprs=frozenset()):
                 if isinstance(v, str) and v != "none" and k not in ("note", "route", "ctrl")
             }
             assert text <= exprs, (name, row)
-        elif isinstance(row, list):
-            assert name in LIST_ROWS and LIST_ROWS[name](row), (name, row)
+        assert not isinstance(row, list), (name, row)
 
 
 def _check_program(pr_name, tname, value):
