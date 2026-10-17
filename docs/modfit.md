@@ -227,15 +227,23 @@ by what they do to the SID.
      the cell between firings is reported. A second replay drives every modulator's cells with
      its expressions and its register grid is compared with the native player's.
    - Occurrences group by their document form. A form whose starts give more than one
-     expression needs state that is no phase; the start cells that decide the expression are
-     reported. Equal canonical texts across forms and players, and texts equal up to their
+     expression reads cells the modulator before it left (`inherit`). It is derived once more
+     with the start cells that differ between its starts symbolic: when it is proved, those cells
+     are inputs of one expression, read when the modulator starts, proved for every value of
+     their widths and equal to each start's expression. A cell the firing counts from its
+     inherited value is a phase instead: every start's state must lie on the run of the longest
+     start, entered at `φ0` (its position), proved with z3 for every `φ`, and `φ0` is one sum
+     with the cell. Otherwise the reason is reported. Equal canonical texts across forms and players, and texts equal up to their
      constants, are listed. The token count rewrites each proved form as an `x` record
      `{a, v}`, deduplicated by text, named by its commands, programs and instrument fields.
+   - The driven replay steps an expression with inputs bound to the cells at each occurrence's
+     start.
    - Stages run in one process pool (`--workers`, default the host's cores, two BLAS threads
      each): per song the native grid and the start-collecting replay, then start keys in
      chunks, then each distinct start's derivation and proofs, then one driven replay per song.
-     Lifted texts, native grids and collected starts are cached in `out/modfit/cache/` under
-     the sha256 of the tune, the playroutine library and the code they depend on.
+     Lifted texts, native grids, collected starts and derivations are cached in
+     `out/modfit/cache/` under the sha256 of the tune, the playroutine library and the code they
+     depend on.
 
 ## Assumptions
 
@@ -402,12 +410,19 @@ lasts between its forms at `fc = 0` and `fc = 1`.
 
 Phase and value expressions (`exprs.txt`, the three conformance songs over their conformance
 tick counts): every modulator's cells driven by its expressions give each native register
-grid exactly. Every form has one proved expression except four, whose expression depends on
-state that is neither a phase nor a modulator's value: defMON `t6` acid (the `sub` direction
-and `astep` left by the previous program), SID-Wizard `!legato:0` glides (the low speed byte
-`fml` left by the previous effect), `!notevib:8` (the vibrato delay `vdc` left by the note's
-instrument vibrato) and the glide after `!noteglide:0` (a speed from the previous note).
-Examples:
+grid exactly, and every form has one proved expression. Four read what the modulator before
+them left:
+
+| Form | Inherited | Expression reads |
+| --- | --- | --- |
+| defMON `t6` acid | the direction `sub` (`astep` is overwritten before it is read) | input `sub` |
+| SW `!legato:0` glide | the speed's low byte `fml` (`fmh` is set to `$7F`), and `ci` | inputs `fml`, `ci` |
+| SW glide after `!noteglide:0` | the whole speed `fmh:fml` | input `fmh:fml` |
+| SW `!notevib:8` | the instrument vibrato's delay counter `vdc`, which counts | `φ0 = 15 − vdc` into the run from `vdc = 15` |
+
+The grammar as used: integers, `+ - * % abs min max`, Iverson brackets, `v`, `φ`, `N`,
+`F(k)`, the table `W[k]` and the start cells above as inputs (`fmh:fml` is the pair's 16-bit
+value). Examples:
 
 | Form | `a; f` (closed form where the start value is known) |
 | --- | --- |

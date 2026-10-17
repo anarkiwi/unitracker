@@ -15,6 +15,7 @@ import pickle
 from pathlib import Path
 
 import numpy as np
+import sympy
 import yaml
 from tqdm import tqdm
 
@@ -23,7 +24,8 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit import specs
 from unitracker.modfit.form import atoms
 from unitracker.modfit.phase import Lift, Machine, derive, dispatch, unproved_functions
-from unitracker.modfit.replay import Replay, Stepper
+from unitracker.modfit.inherit import Inherited, inherit
+from unitracker.modfit.replay import G_value, Replay, Stepper
 
 TICKS = {"goattracker2": 2 * 3840, "defmon": 95 + 2 * 1152 + 100, "sidwizard": 2304 * 6 + 600}
 
@@ -392,6 +394,7 @@ class Modulator:
     label: str
     occurrences: list
     results: list
+    inherited: Inherited | None = None
 
     @property
     def identity(self) -> bool:
@@ -431,7 +434,10 @@ class Modulator:
 
     @property
     def canonical(self) -> str | None:
-        """One text for every start: the shared closed form, else the shared recurrence."""
+        """One text for every start: the shared closed form, else the shared recurrence, else the
+        expression with inherited inputs."""
+        if self.inherited is not None and self.inherited.update is not None:
+            return self.inherited.text
         if len(self.forms) == 1 and not self.errors:
             return self.forms[0]
         if len(self.recurrences) == 1 and not self.errors:
@@ -441,6 +447,8 @@ class Modulator:
     @property
     def canonical_exprs(self) -> tuple:
         """``(a, f)`` of ``canonical``."""
+        if self.inherited is not None and self.inherited.update is not None:
+            return self.inherited.update
         d = self.live[0].derived
         return d.update if self.canonical in self.forms else (d.phase, d.value)
 
@@ -565,22 +573,47 @@ def observe_task(path: str, ticks: int, cache: Path | None) -> list:
                    lambda p, x: p.write_bytes(pickle.dumps(x)))  # fmt: skip
 
 
+DERIVERS = [Path(__file__).resolve().parent / f for f in ("phase.py", "grammar.py", "form.py")]
+
+
 def derive_task(path: str, key: tuple, cache: Path | None):
-    """The proved expressions of one start of a tune."""
-    return _analysis(path, cache).derived(key)
+    """The proved expressions of one start of a tune, cached by content."""
+    parts = (Path(path).read_bytes(), _library_text(), yaml.dump(specs()["exprs"]),
+             *(p.read_text() for p in DERIVERS), repr(key))  # fmt: skip
+    where = cache / "derived" / f"{content_key(*parts)}.pkl" if cache else None
+    return _cached(where, lambda: _analysis(path, cache).derived(key),
+                   lambda p: pickle.loads(p.read_bytes()),
+                   lambda p, x: p.write_bytes(pickle.dumps(x)))  # fmt: skip
 
 
-def driven_task(path: str, ticks: int, found: dict, driven: set, position: int, cache) -> tuple:
-    """``(grid, occurrences)`` of a tune with every driven modulator's cells overridden."""
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
+def driven_task(path: str, ticks: int, found: dict, driven: set, position: int, cache,
+                inputs: dict | None = None) -> tuple:  # fmt: skip
+    """``(grid, occurrences)`` of a tune with every driven modulator's cells overridden.
+
+    ``inputs`` maps ``(unit, label)`` to one ``(a, f)`` whose input cells are read at each start.
+    """
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     an = _analysis(path, cache)
     song = an.song
     results = {k: an.result(k, v) for k, v in found.items()}
+    inputs, bound = inputs or {}, {}
 
     def lookup(unit, occ):
         occ.key = an.key(unit, occ)
         res = results.get(occ.key)
-        return res if res is not None and res.stepper is not None else None
+        if res is None or res.stepper is None:
+            return None
+        lab = _relabel(song, an, occ)
+        if lab not in inputs:
+            return res
+        a, f = inputs[lab]
+        cells = sorted({x.name for x in a.free_symbols | f.free_symbols} - {"v", "φ", "N"})
+        bind = (lab, tuple((c, G_value(occ.start, c)) for c in cells))
+        if bind not in bound:
+            sub = {sympy.Symbol(c, integer=True): x for c, x in bind[1]}
+            stepper = Stepper(a.xreplace(sub), f.xreplace(sub), an.tables, an.freq, an.offset)
+            bound[bind] = dataclasses.replace(res, stepper=stepper)
+        return bound[bind]
 
     seen = {}
 
@@ -673,9 +706,14 @@ def analyse_all(paths, ticks=None, workers=None, cache: Path | None = CACHE) -> 
                 songs[p], an, observed[p], {k: an.result(k, v) for k, v in mine.items()}
             )
             mods = [m for m in every if not m.identity]
+            for m in mods:
+                if m.canonical is None and not m.errors and len(m.forms) > 1:
+                    m.inherited = inherit(an, m)
+            inputs = {(m.unit["name"], m.label): m.inherited.update for m in mods
+                      if m.inherited is not None and m.inherited.update is not None}  # fmt: skip
             driven = {(m.unit["name"], m.label) for m in mods}
             live = {k: v for k, v in mine.items() if not v[0].identity}
-            drive.append((p, ticks[p], live, driven, i, cache))
+            drive.append((p, ticks[p], live, driven, i, cache, inputs))
             reports[p] = every
         runs = pool.map(driven_task, drive, "driven replays")
     finally:
@@ -686,6 +724,9 @@ def analyse_all(paths, ticks=None, workers=None, cache: Path | None = CACHE) -> 
         mine = {k: an.result(k, v) for (q, k), v in found.items() if q == p}
         every = modulators(songs[p], an, occs, mine)
         mods = [m for m in every if not m.identity]
+        before = {(m.unit["name"], m.label): m.inherited for m in reports[p]}
+        for m in mods:
+            m.inherited = before.get((m.unit["name"], m.label))
         quiet = [m.label for m in reports[p] if m.identity]
         diff = np.argwhere(grid != native[p])
         first_diff = tuple(int(x) for x in diff[0]) if len(diff) else None
