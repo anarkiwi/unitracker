@@ -1,4 +1,4 @@
-"""The v1.8 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.9 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 
@@ -230,6 +230,18 @@ def test_reader_rejects_the_retired_registers_key():
     doc["registers"] = {24: 0}
     with pytest.raises(SongFormatError, match="registers is retired in v1.6: the player starts"):
         songio.loads(yaml.safe_dump(doc))
+
+
+def test_retired_raw_rows_are_refused_both_ways():
+    ir = song()
+    ir["playroutine"]["record_types"]["prog"]["retired"] = {"v == 20": "retired in v0.1: gone"}
+    with pytest.raises(SongFormatError, match=r"prog: row .* is retired in v0.1: gone"):
+        songio.dumps(ir, embed=True)
+    ir["records"]["prog"][2]["v"] = 21
+    doc = yaml.safe_load(songio.dumps(ir, embed=True))
+    doc["song"][0]["def"]["prog"]["w1"][1] = [20]
+    with pytest.raises(SongFormatError, match=r"prog: row \[20\] is retired in v0.1: gone"):
+        songio.loads(yaml.safe_dump(doc, sort_keys=False))
 
 
 def test_reader_rejects_rows_beyond_max_and_bad_stop():

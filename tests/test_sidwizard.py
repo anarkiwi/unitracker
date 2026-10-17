@@ -14,16 +14,16 @@ from unitracker.vm import SongPlayer
 def test_table_rows_stop_at_the_end_marker():
     tables = sidwizard.Tables()
     entry = tables.program(
-        "wftab", bytes([0x41, 0x00, 0x00, 0x21, 0x0C, 0x00, 0xFF]), sidwizard.wf_record
+        "pwtab", bytes([0x41, 0x00, 0x00, 0x21, 0x0C, 0x00, 0xFF]), sidwizard.pw_record
     )
     assert entry == 1
-    assert tables.records["wftab"] == {
-        1: {"w": 0x41, "a": 0, "d": 0, "next": 2},
-        2: {"w": 0x21, "a": 0x0C, "d": 0, "next": 0},
+    assert tables.records["pwtab"] == {
+        1: {"a": 0x41, "b": 0, "k": 0, "next": 2},
+        2: {"a": 0x21, "b": 0x0C, "k": 0, "next": 0},
     }
-    assert tables.program("pwtab", b"", sidwizard.pw_record) == 0
-    second = tables.program("wftab", bytes([0x11, 0x80, 0x00]), sidwizard.wf_record)
-    assert second == 3
+    assert tables.program("wftab", b"", sidwizard.pw_record) == 0
+    assert tables.allocate("pwtab", [{"a": 1}, {"a": 2}], loop=1) == 3
+    assert tables.records["pwtab"][4] == {"a": 2, "next": 4}
 
 
 @pytest.mark.parametrize(
@@ -46,11 +46,115 @@ def testfilter_records_split_mode_and_resonance():
 
 
 def test_chords_loop_return_and_open_end():
-    records, starts = sidwizard.chords(bytes([0, 3, 7, 0x7F, 0, 4, 0x7E, 0x7F, 5, 9]))
-    assert starts == {1: 1, 2: 4, 4: 6}
-    assert records[3] == {"n": 7, "next": 1}
-    assert records[5] == {"n": 4, "next": 0}
-    assert records[7] == {"n": 9, "next": 6}
+    assert sidwizard.chords(bytes([0, 3, 7, 0x7F, 0, 4, 0x7E, 0x7F, 5, 9])) == {
+        1: ((0, 3, 7), True),
+        2: ((0, 4), False),
+        4: ((5, 9), True),
+    }
+
+
+def native(wf, arp_speed=1, chord=1):
+    return SimpleNamespace(wf_table=bytes(wf), arp_speed=arp_speed, default_chord=chord)
+
+
+def test_a_looping_chord_is_the_programs_tail_from_its_row():
+    rows, loop = sidwizard.wf_rows(native([0x11, 0, 0, 0x50, 0x7F, 0, 0x41, 0, 0]), ((0, 3), True))
+    assert loop == 1
+    assert rows == [
+        {"w": 0x11, "a": 0, "d": 0, "h": 1},
+        {"w": 0x50, "a": 0, "d": 0, "h": 1},
+        {"w": 0x50, "a": 3, "d": 0, "h": 1},
+    ]
+
+
+def test_a_returning_chord_runs_into_the_next_row_and_keeps_a_detune():
+    wf = [0x11, 0, 5, 0x50, 0x7F, 0, 0x41, 0, 0xFF]
+    rows, loop = sidwizard.wf_rows(native(wf, arp_speed=0x42), ((4, 7), False))
+    assert loop is None
+    assert [(r["w"], r["a"], r["d"], r["h"]) for r in rows] == [
+        (0x11, 0, 5, 2),
+        (0x50, 4, 0xFF, 2),
+        (0x50, 7, 0xFF, 2),
+        (0x41, 0, 0xFF, 2),
+    ]
+
+
+@pytest.mark.parametrize(
+    "wf,chord,match",
+    [
+        ([0x50, 0x7F, 0], None, "does not have"),
+        ([0x50, 0x7F, 0], ((0, 0x90), True), "offset"),
+        ([0x05, 0x7F, 0], ((0, 3), False), "hold row"),
+        ([0x50, 0x7F, 0, 0x02, 0, 0], ((0, 3), False), "hold row"),
+    ],
+)
+def test_wf_rows_reject(wf, chord, match):
+    with pytest.raises(LiftError, match=match):
+        sidwizard.wf_rows(native(wf), chord)
+
+
+def waves():
+    instruments = [native([0x11, 0, 0, 0x50, 0x7F, 0]), native([0x41, 0, 0], chord=2)]
+    return sidwizard.Waves(instruments, bytes([0, 3, 0x7F, 0, 4, 0x7F]), sidwizard.Tables())
+
+
+def test_waves_share_a_program_per_instrument_and_chord():
+    w = waves()
+    first = w.entry(1, 1)
+    assert w.entry(1, 9) == first
+    assert w.entry(1, 2) != first
+    assert w.entry(1, 2) == w.entry(1, 2)
+    assert w.entry(2, 1) == w.entry(2, 2)
+    assert w.entry(3, 1) == 0
+    assert w.tables.records["wftab"][first + 2] == {"w": 0x50, "a": 3, "d": 0, "h": 1, "next": 2}
+
+
+def chord_song(*rows, plays=1):
+    tracks = [{"plays": [{"phrase": "a"}] * plays, "loop": 0}]
+    return tracks, {"a": [dict(e) for e in rows]}
+
+
+def test_chord_fx_runs_the_program_its_note_starts():
+    tracks, phrases = chord_song(
+        {"note": 30, "instrument": 1, "command": [0x70, 2]},
+        {"note": 31, "commands": [[0x170, 2], [0x50, 8]]},
+        {"note": 32, "instrument": 2, "command": [0x70, 1]},
+    )
+    w = waves()
+    sidwizard.chord_runs(tracks, phrases, w)
+    got = phrases["a"]
+    assert got[0]["command"] == got[1]["commands"][0] == [0x70, w.entry(1, 2)]
+    assert got[1]["commands"][1] == [0x50, 8]
+    assert got[2]["command"] == [0x70, w.entry(2, 1)]
+
+
+@pytest.mark.parametrize(
+    "rows,match",
+    [
+        ([{"note": 30, "instrument": 1}, {"command": [0x70, 2]}], "starts no note"),
+        ([{"note": 30, "instrument": 1, "commands": [[0x3F, 0], [0x70, 2]]}], "starts no note"),
+        (
+            [
+                {"note": 30, "instrument": 1},
+                {"command": [0x278, 0]},
+                {"note": 3, "command": [0x170, 2]},
+            ],
+            "starts no note",
+        ),
+        (
+            [{"note": 30, "instrument": 1}, {"note": 30, "command": [0x70, 2]}],
+            "without an instrument",
+        ),
+        (
+            [{"note": 31, "command": [0x170, 2]}, {"note": 30, "instrument": 2}],
+            "different instruments",
+        ),
+    ],
+)
+def test_chord_runs_reject(rows, match):
+    tracks, phrases = chord_song(*rows, plays=2)
+    with pytest.raises(LiftError, match=match):
+        sidwizard.chord_runs(tracks, phrases, waves())
 
 
 def test_track_plays_loop_and_end():
@@ -78,7 +182,7 @@ def test_track_rejects(seq, match):
 
 
 def events():
-    return sidwizard.Events(lambda ref: ref, {1: 1, 2: 4})
+    return sidwizard.Events(lambda ref: ref)
 
 
 @pytest.mark.parametrize(
@@ -92,10 +196,10 @@ def events():
         (Row(note=0x78), {"command": [0x278, 0]}),
         (Row(note=40, fx=0x03, fx_value=0x40), {"note": 40, "commands": [[63, 0], [3, 0x40]]}),
         (Row(fx=0x2D), {"command": [0x20, 0x0D]}),
-        (Row(fx=0x72), {"command": [0x70, 4]}),
+        (Row(fx=0x72), {"command": [0x70, 2]}),
         (Row(instrument=0x65), {"command": [0x160, 5]}),
-        (Row(note=50, instrument=0x72, fx=0x58), {"note": 50, "commands": [[0x170, 4], [0x50, 8]]}),
-        (Row(fx=0x77), {"command": [0x70, 0]}),
+        (Row(note=50, instrument=0x72, fx=0x58), {"note": 50, "commands": [[0x170, 2], [0x50, 8]]}),
+        (Row(fx=0x77), {"command": [0x70, 7]}),
     ],
 )
 def test_row_events(row, event):
@@ -142,7 +246,7 @@ def test_build_and_header_checks():
         sidwizard.check_build(bad, SimpleNamespace(name="light"))
     marked = SimpleNamespace(filter_table=bytes([0xFF]))
     with pytest.raises(LiftError, match="unfiltered"):
-        sidwizard.instrument_record(marked, sidwizard.Tables(), {}, sidwizard.Restarts())
+        sidwizard.instrument_record(marked, sidwizard.Tables(), 0, sidwizard.Restarts())
 
 
 @pytest.mark.parametrize(
@@ -192,7 +296,7 @@ def test_a_reference_past_the_instruments_plays_the_emptyinstrument_record(csill
     monkeypatch.setattr(sidwizard, "parse_sid_song", patched)
     ir = sidwizard.lift(csillag.read_bytes(), expressions=False)
     empty = ir["records"]["ins"][len(ir["records"]["ins"])]
-    assert empty == {"flags": 0x10, "sr": 0xF0, "chord": 1, "restart": empty["restart"]}
+    assert empty == {"flags": 0x10, "sr": 0xF0, "restart": empty["restart"]}
     path, entry = [], empty["restart"]
     while entry:
         row = ir["records"]["restart"][entry]

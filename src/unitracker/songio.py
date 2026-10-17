@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.8 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.9 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import eventrestart, timeline
+from unitracker import eventrestart, retired, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -37,20 +37,15 @@ from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap
 
-VERSION = 1.8
+VERSION = 1.9
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-RETIRED_KEYS = {"registers": "retired in v1.6: the player starts from a zeroed SID"}
-_RESTART = "retired in v1.8: write the hard restart as the instrument's restart program"
-RETIRED_FIELDS = {"gt": _RESTART, "fw": _RESTART, "hrad": _RESTART, "hrsr": _RESTART}
-RETIRED_FIELDS["firstctrl"] = _RESTART
-RETIRED_BITS = {"flags": (0x0F, _RESTART)}
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.8 format."""
+    """A document does not follow the unitracker v1.9 format."""
 
 
 @functools.cache
@@ -117,6 +112,12 @@ def _expr_fields(codec) -> set:
     return {k["expr"] for shape in codec.shapes for k in shape.keys.values() if "expr" in k}
 
 
+def _refuse(problem) -> None:
+    """Raise for a retired form's reason, if there is one."""
+    if problem is not None:
+        raise SongFormatError(problem)
+
+
 def _ref_type(rtype, field, row):
     """The record type ``field`` of ``row`` references, or None."""
     for target, when in rtype.refs.get(field, ()):
@@ -125,20 +126,11 @@ def _ref_type(rtype, field, row):
     return None
 
 
-def _retired(rtype, value: dict) -> None:
-    """Raise, naming it, for a field or flag bit the format has retired."""
-    for key in RETIRED_FIELDS.keys() & value.keys():
-        raise SongFormatError(f"{rtype.name}.{key} is {RETIRED_FIELDS[key]}")
-    for key, (mask, why) in RETIRED_BITS.items():
-        if isinstance(value.get(key), int) and value[key] & mask:
-            raise SongFormatError(f"{rtype.name}.{key} bits {mask:#04x} are {why}")
-
-
 # ---- writing -----------------------------------------------------------------------
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.8 document."""
+    """Turns the internal representation into a canonical v1.9 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -319,6 +311,7 @@ class _Writer:
             return self._shared_row(codec, shared, refs, place)
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
+        _refuse(retired.row(rtype, row, row, _RowEval(rtype).holds))
         values = {}
         for field in rtype.fields:
             if field == rtype.chain:
@@ -575,7 +568,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.8 document for internal-representation song ``ir``.
+    """A canonical v1.9 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -599,7 +592,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.8 document to the internal representation."""
+    """Expands a v1.9 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -670,7 +663,7 @@ class _Reader:
         codec = self.codecs.get(rtype.name)
         decoded = set()
         if isinstance(value, dict):
-            _retired(rtype, value)
+            _refuse(retired.fields(rtype, value))
         if codec is not None and isinstance(value, dict):
             row, decoded = self._decoded(codec, rtype, value, place)
         elif rtype.form == "map":
@@ -679,6 +672,7 @@ class _Reader:
             row = dict(value)
         else:
             row = self._list_row(rtype, codec, value, place)
+        _refuse(retired.row(rtype, row, value, _RowEval(rtype).holds))
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
@@ -961,23 +955,22 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.8 document."""
+    """The internal representation of a v1.9 document."""
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
-    for key in RETIRED_KEYS.keys() & doc.keys():
-        raise SongFormatError(f"{key} is {RETIRED_KEYS[key]}")
+    _refuse(retired.document(doc))
     return _Reader(doc).read()
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.8 document at ``path``."""
+    """The internal representation of the v1.9 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.8 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.9 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")
