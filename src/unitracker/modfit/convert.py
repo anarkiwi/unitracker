@@ -28,9 +28,18 @@ from unitracker.xexpr import ExpressionError, source
 CACHE = Path("out/modfit/cache")
 IDENTITY = "v"
 _HERE = Path(__file__).resolve().parent
-SOURCES = [_HERE / f for f in ("convert.py", "exprs.py", "phase.py", "grammar.py", "form.py")] + [
-    _HERE.parent / f for f in ("modulation.py", "vm.py", "records.py", "codec.py")
-]
+SOURCES = [
+    _HERE / f
+    for f in (
+        "convert.py",
+        "exprs.py",
+        "phase.py",
+        "grammar.py",
+        "form.py",
+        "chipinv.py",
+        "invariant.py",
+    )
+] + [_HERE.parent / f for f in ("modulation.py", "vm.py", "records.py", "codec.py")]
 
 
 class ConversionError(ValueError):

@@ -59,6 +59,11 @@ def start_lines(r: Result, tag: str) -> list:
         why = "the start value is the incoming one" if r.v0 is None else "a value update reads v"
         lines.append(f"{tag} closed form: none ({why})")
     lines.append(f"{tag} proof: " + "; ".join(p[0] for p in d.proof) + ": proved")
+    inv = d.invariant
+    if inv is not None:
+        held = " and ".join(inv.glob + inv.unit) or "true"
+        what = "proved" if inv.ok else f"NOT proved: {inv.why}"
+        lines.append(f"{tag} invariant: under {held} the recurrence is {what}")
     return lines
 
 
@@ -99,6 +104,10 @@ def group_lines(conv, an, key: tuple, members: list, places: dict) -> list:
     live = [r for r in results if not r.derived.identity]
     cells = ", ".join(f"{c} {v}" for c, v in zip(unit.get("label") or [], label))
     lines = [f"### {unit['name']} [{cells}] (cell {unit['cell']})"]
+    chip = unit.get("chip")
+    if chip:
+        store = ", ".join(f"{c} = {e}" for c, e in chip["store"].items())
+        lines.append(f"    chip units: {chip['width']} bits, v = {chip['value']}; store {store}")
     quiet = len(results) - len(live)
     lines.append(f"    occurrences {len(occs)}, distinct starts {len(live)}"
                  + (f" (and {quiet} that do not modulate)" if quiet else ""))  # fmt: skip

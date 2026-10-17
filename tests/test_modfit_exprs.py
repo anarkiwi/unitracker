@@ -19,7 +19,8 @@ from unitracker.modfit.exprs_report import load, native_grid
 from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.form import Form
 from unitracker.modfit.orbit import deltas
-from unitracker.modfit.phase import Machine, derive, unproved_functions
+from unitracker.modfit import chipinv
+from unitracker.modfit.phase import Machine, Prover, derive, unproved_functions
 from unitracker.modfit.replay import Replay
 from unitracker.songio import library
 from unitracker.vm import SongPlayer
@@ -317,6 +318,38 @@ def test_acid_carries_its_hidden_carry_and_clamp_in_as_a_start_constant(crosseye
         assert rising in (0, hidden)
         seen.add((rising, hidden))
     assert {(0, 0), (8, 8), (16, 16)} <= seen
+
+
+RISE = "v + (-8*(v // 8) - 64)*[v >= 944] + 80"
+
+
+def test_acid_rises_are_proved_under_an_invariant_and_falls_are_not(crosseyed):
+    conv = analyse(load(crosseyed).ir, workers=4)
+    acid = {k: d for k, (d, _) in conv.found.items() if k[0] == "acid B" and not d.identity}
+    proved = {G.text(d.value) for d in acid.values() if d.invariant.ok}
+    assert proved == {RISE}
+    held = "not (acc & 65535 > 32767)"
+    assert all(d.invariant.glob == (held,) for d in acid.values())
+    for d in acid.values():
+        if not d.invariant.ok:
+            acc = int(re.search(r"acc=(\d+)", d.invariant.why).group(1))
+            assert acc >> 16 or acc & 0xFF
+    key = next(k for k, d in acid.items() if G.text(d.value) == RISE)
+    machine = conv.analysis.machines["acid B"]
+    graph = machine.explore(key[1])
+    chk = chipinv.Checker(machine, graph)
+    inv = [*acid[key].invariant.glob, *acid[key].invariant.unit]
+    prover = Prover(machine, DM_FREQ)
+    cls, seq = [0] * len(graph.nodes), [0]
+    rise = acid[key].value
+    assert chipinv.recurrence(chk, inv, cls, seq, rise, prover) is None
+    assert chipinv.recurrence(chk, inv, cls, seq, rise + 8, prover)
+    assert chipinv.recurrence(chk, [], cls, seq, rise, prover)
+
+
+def test_comparisons_are_found_with_their_negations():
+    got = chipinv.comparisons(["a + (b > 3)", "x if y == 0 else z"])
+    assert got == ["b > 3", "not (b > 3)", "y == 0", "not (y == 0)"]
 
 
 def test_a_carried_delay_counter_is_a_gate(csillag_song):

@@ -13,6 +13,7 @@ import typing
 import sympy
 import z3
 
+from unitracker.modfit import chipinv
 from unitracker.modfit import grammar as G
 from unitracker.modfit.flow import Writes
 from unitracker.modfit.form import INF, Form, Programs, atoms, lin, mk, record_data, show
@@ -386,6 +387,16 @@ class Machine:  # pylint: disable=too-many-instance-attributes
             need = grown
         self.reads = before - self.parts
         self.control = sorted((need & written) - self.parts)
+        self.hidden = sorted(self.parts - {VALUE}) if self.chip else []
+        self.real = []
+        if self.chip:
+            fire = actions if self.paired else form.procs[FIRE]
+            need = set(self.hidden) | set(self.control)
+            while True:
+                self.real, before = slicer.seq(fire, need, need)
+                if need | (before & written) == need:
+                    break
+                need |= before & written
         self.mask = (1 << int(self.chip["width"] if self.chip else form.width[self.cell])) - 1
         self.memo = {}
 
@@ -890,6 +901,7 @@ class Derived:
     states: int = 0
     proof: list = dataclasses.field(default_factory=list)
     error: str = ""
+    invariant: typing.Any = None
 
     @property
     def exact(self) -> bool:
@@ -959,6 +971,7 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
         (f"{len(graph.nodes)} states", not bad, f"state {bad[0][0]} {bad[0][1]}" if bad else "")
     )
     if machine.chip:
+        out.invariant = chipinv.prove(machine, graph, (lo, hi, r, m), cls, o.seq, out.value, prover)
         why = prover.closure(graph)
         out.proof.append(("every firing stays in the chip values", why is None, why or ""))
     if o.period > 1 or o.kind == "turn":
