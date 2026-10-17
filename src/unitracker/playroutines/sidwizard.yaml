@@ -78,9 +78,8 @@ record_types:
     refs: {x: x}
     codec:
       - when: "a >= 0x80 and k == 0 and (x == 0 or b == 0)"
-        keys: {mode: "a & 0x70", cut: {value: "b << 3", expr: x}}
-        keep: [res]
-        raw: {a: "0x80 | mode", b: "cut >> 3"}
+        keys: {mode: "a & 0x70", res: "res & 0x0F", cut: {value: "b << 3", expr: x}}
+        raw: {a: "0x80 | mode", b: "cut >> 3", res: res}
   # Chord row: a note offset; a chord loops or ends back to the WF table.
   chordtab:
     prefix: ch

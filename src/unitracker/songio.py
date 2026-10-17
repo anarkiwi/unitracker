@@ -25,6 +25,7 @@ from unitracker.codec import (
     RowCodec,
     is_expr,
     note_text,
+    written_value,
 )
 from unitracker.expr import ExprError, Resolver
 from unitracker.modulation import declared
@@ -310,6 +311,8 @@ class _Writer:
             for k, v in shared.items():
                 if k == "note":
                     v = Atom(note_text(*v))
+                elif k == "route":
+                    v = written_value(k, v)
                 elif is_expr(v):
                     v = self.ref_value(self.key(EXPR, v[1]))
                     v = str(v) if number.get(k) else v
@@ -342,7 +345,7 @@ class _Writer:
     def _reads_back(self, codec, shared):
         """Raise, naming the key, unless the player can read ``shared`` back."""
         try:
-            codec.decode({k: note_text(*v) if k == "note" else v for k, v in shared.items()})
+            codec.decode({k: written_value(k, v) for k, v in shared.items()})
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 

@@ -91,8 +91,8 @@ record_types:
         raw: {l: "0x80 | (pw >> 8)", r: "pw & 0xFF"}
     do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
     each: [{accumulate: pulse, step: "row.r - 0x100 if row.r >= 0x80 else row.r"}]
-  # Filtertable row: l $80+ sets type and routing (and cut, a cutoff the player reads from the
-  # following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
+  # Filtertable row: l $80+ sets the mode and r, the $D417 byte (and cut, a cutoff the player
+  # reads from the following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
   filttab:
     prefix: f
     none: 0
@@ -104,9 +104,13 @@ record_types:
       - when: "l >= 0x80 and (x == 0 or cut < 0)"
         keys:
           mode: "l & 0x70"
-          resfilt: r
+          res: "r >> 4"
+          route: "r & 0x0F"
           cut: {value: "cut << 3", omit: "cut < 0", expr: x}
-        raw: {l: "0x80 | mode", r: resfilt, cut: "(cut >> 3) if has_cut else -1"}
+        raw:
+          l: "0x80 | mode"
+          r: "((res & 0x0F) << 4) | (route & 0x0F)"
+          cut: "(cut >> 3) if has_cut else -1"
       - when: "l == 0 and x == 0"
         keys: {cut: "r << 3"}
         raw: {l: 0, r: "cut >> 3"}

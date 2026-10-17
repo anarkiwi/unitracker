@@ -15,8 +15,10 @@ from unitracker.codec import (
     Evaluator,
     RowCodec,
     evaluate,
-    note_text,
     note_value,
+    route_text,
+    route_value,
+    written_value,
 )
 from unitracker.defmon import lift as lift_defmon
 from unitracker.goattracker import lift as lift_gt
@@ -40,7 +42,7 @@ def codec(pr_name, name):
 
 
 def written(raw_row, c):
-    return {k: note_text(*v) if k == "note" else v for k, v in c.encode(raw_row).items()}
+    return {k: written_value(k, v) for k, v in c.encode(raw_row).items()}
 
 
 @pytest.mark.parametrize(
@@ -64,8 +66,12 @@ def test_goattracker_wave_rows(raw, shared):
     "name,raw,shared",
     [
         ("pulsetab", {"l": 0x84, "r": 0}, {"pw": 1024}),
-        ("filttab", {"l": 0x90, "r": 193, "cut": 128}, {"mode": 16, "resfilt": 193, "cut": 1024}),
-        ("filttab", {"l": 0x90, "r": 193, "cut": -1}, {"mode": 16, "resfilt": 193}),
+        (
+            "filttab",
+            {"l": 0x90, "r": 193, "cut": 128},
+            {"mode": 16, "res": 12, "route": 1, "cut": 1024},
+        ),
+        ("filttab", {"l": 0x90, "r": 193, "cut": -1}, {"mode": 16, "res": 12, "route": 1}),
         ("filttab", {"l": 0, "r": 240}, {"cut": 1920}),
     ],
 )
@@ -91,7 +97,7 @@ def test_goattracker_leftover_rows_have_no_shape(name, raw):
     "name,shared,match",
     [
         ("filttab", {"cut": 1025}, "values of"),
-        ("filttab", {"mode": 16, "resfilt": 1, "cut": 4}, "values of"),
+        ("filttab", {"mode": 16, "res": 0, "route": 1, "cut": 4}, "values of"),
         ("ctrltab", {"ctrl": 0xE5}, "values of"),
         ("ctrltab", {"ctrl": 9, "wait": 1}, "values of"),
         ("ctrltab", {"note": "=0"}, "values of"),
@@ -105,20 +111,78 @@ def test_goattracker_rejects_what_it_cannot_express(name, shared, match):
 
 
 @pytest.mark.parametrize(
+    "pr_name,name,shared,match",
+    [
+        ("goattracker2", "filttab", {"mode": 16, "res": 12}, r"values of \['route'\]"),
+        ("goattracker2", "filttab", {"mode": 16, "res": 16, "route": 1}, r"values of \['res'\]"),
+        ("goattracker2", "filttab", {"mode": 16, "res": 1, "route": "+"}, r"values of \['route'\]"),
+        ("goattracker2", "filttab", {"mode": 16, "resfilt": 193}, "resfilt is retired in v1.7"),
+        ("sidwizard", "flttab", {"mode": 16, "res": 3, "cut": 64, "route": 7}, r"keys \['route'\]"),
+        ("sidwizard", "flttab", {"mode": 16, "res": 16, "cut": 64}, r"values of \['res'\]"),
+        ("defmon", "sidtab", {"route": "+"}, r"values of \['route'\]"),
+        ("defmon", "sidtab", {"res": 3}, r"values of \['res'\]"),
+        ("defmon", "sidtab", {"res": 3, "route": 8}, r"values of \['route'\]"),
+        ("defmon", "sidtab", {"res": 1, "route": "-"}, r"values of \['res'\]"),
+        ("defmon", "sidtab", {"route": "- 1"}, r"values of \['route'\]"),
+        ("defmon", "sidtab", {"re": 0}, "re is retired in v1.7"),
+    ],
+)
+def test_res_and_route_are_refused_where_the_player_cannot_set_them(pr_name, name, shared, match):
+    with pytest.raises(CodecError, match=match):
+        codec(pr_name, name).decode(shared)
+
+
+@pytest.mark.parametrize(
+    "byte,shared",
+    [
+        (0, {"route": "-"}),
+        (0xF8, {"res": 15, "route": "+ 8"}),
+        (0x9F, {"res": 9, "route": "+ 15"}),
+        (0xF7, {"res": 15, "route": 7}),
+        (0x10, {"res": 1, "route": 0}),
+    ],
+)
+def test_defmon_resonance_edits_are_res_and_route(byte, shared):
+    c = codec("defmon", "sidtab")
+    assert written({"re": byte}, c) == shared
+    assert c.decode(shared)["re"] == byte
+
+
+def test_defmon_resonance_edits_round_trip_every_byte():
+    c = codec("defmon", "sidtab")
+    for byte in range(-1, 256):
+        assert c.decode(written({"re": byte}, c))["re"] == byte
+
+
+def test_route_forms():
+    assert [route_value(v) for v in (7, "+", "-", "+ 8", "- 3")] == [
+        (0, 7),
+        (1, 0),
+        (-1, 0),
+        (1, 8),
+        (-1, 3),
+    ]
+    assert [route_text(*v) for v in ((0, 7), (1, 0), (-1, 0), (1, 8))] == [7, "+", "-", "+ 8"]
+    for bad in (True, "+8", "x", "+ x"):
+        with pytest.raises(CodecError, match="bad route"):
+            route_value(bad)
+
+
+@pytest.mark.parametrize(
     "pr_name,name,raw,shared,back",
     [
         (
             "goattracker2",
             "filttab",
             {"l": 0x90, "r": 193, "x": 3},
-            {"mode": 16, "resfilt": 193, "cut": ("x", 3)},
+            {"mode": 16, "res": 12, "route": 1, "cut": ("x", 3)},
             {"l": 0x90, "r": 193, "cut": -1, "x": 3},
         ),
         (
             "goattracker2",
             "filttab",
             {"l": 0x90, "r": 1, "cut": 128},
-            {"mode": 16, "resfilt": 1, "cut": 1024},
+            {"mode": 16, "res": 0, "route": 1, "cut": 1024},
             {"l": 0x90, "r": 1, "cut": 128},
         ),
         (
@@ -140,7 +204,7 @@ def test_goattracker_rejects_what_it_cannot_express(name, shared, match):
 )
 def test_filter_cut_holds_an_expression_or_a_number(pr_name, name, raw, shared, back):
     c = codec(pr_name, name)
-    assert c.encode(raw) == shared
+    assert written(raw, c) == shared
     assert c.decode(shared) == back
 
 
@@ -458,9 +522,9 @@ INS_KEYS = {
         "freq",
     },
 }
-DM_KEEP = {"wgl", "af", "ps", "re", "cp", "acid"}
+DM_KEEP = {"wgl", "af", "ps", "cp", "acid"}
 # Player-specific keys a program row may carry besides the shared ones.
-ROW_KEEP = {"defmon": DM_KEEP, "sidwizard": {"res"}}
+ROW_KEEP = {"defmon": DM_KEEP}
 # Program types that may hold list rows, with the rows each allows.
 LIST_ROWS = {
     "ctrltab": lambda r: r[0] >= 0xF0,
@@ -471,14 +535,14 @@ LIST_ROWS = {
     "flttab": lambda r: len(r) > 2,
 }
 # Outside program rows, a shared key may appear only where it keeps its shared meaning:
-# envelope and control-register values in init records, the $D417 value as resfilt, and in an
-# instrument ctrl names the program its voice runs on the control register, pw and freq the
-# program or expression driving the pulse width and the frequency.
+# envelope and control-register values in init records, the filter registers as res, route and
+# mode, and in an instrument ctrl names the program its voice runs on the control register, pw
+# and freq the program or expression driving the pulse width and the frequency.
 SHARED_OUTSIDE_ROWS = {
     ("goattracker2", "ins"): {"ad", "sr", "ctrl", "pw"},
     ("sidwizard", "ins"): {"ad", "sr", "ctrl", "pw", "freq"},
     ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
-    ("defmon", "ginit"): {"resfilt", "mode"},
+    ("defmon", "ginit"): {"res", "route", "mode"},
 }
 INS_FORMS = {"ctrl": (list, str), "pw": (list, str, int), "freq": (str, int)}
 INIT_KEYS = {
@@ -491,7 +555,7 @@ def _check_rows(name, rows, keep, exprs=frozenset()):
     for row in rows:
         if isinstance(row, dict) and set(row) != {"loop"}:
             assert set(row) <= set(ROW_KEYS) | keep, (name, row)
-            text = {k for k, v in row.items() if isinstance(v, str) and k != "note"}
+            text = {k for k, v in row.items() if isinstance(v, str) and k not in ("note", "route")}
             assert text <= exprs, (name, row)
         elif isinstance(row, list):
             assert name in LIST_ROWS and LIST_ROWS[name](row), (name, row)
@@ -627,7 +691,7 @@ def defmon_doc(vinit, ginit):
 def test_defmon_init_keys_mean_what_they_mean_in_rows():
     ir = defmon_doc(
         {"pw": 0x0567, "ctrl": 0x41, "ad": 0x12, "sr": 0x34, "wgl": 1, "note": "=36"},
-        {"resfilt": 0xF1, "mode": 0x30},
+        {"res": 15, "route": 1, "mode": 0x30},
     )
     voice = ir["records"]["vinit"][0]
     assert (voice["pw"], voice["ctrl"], voice["wgl"], voice["note"]) == (0x0567, 0x41, 1, 60)
@@ -645,6 +709,33 @@ def test_defmon_init_keys_mean_what_they_mean_in_rows():
 def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
     with pytest.raises(songio.SongFormatError, match=match):
         defmon_doc(vinit, {})
+
+
+DM_ROUTES = """
+unitracker: 1.6
+playroutine: {ref: defmon}
+song:
+  - def:
+      vinit: {0: {cntA: 255, cntB: 255}, 1: {cntA: 255, cntB: 255}, 2: {cntA: 255, cntB: 255}}
+      ginit: {0: {res: 2, route: 3}}
+      sidtab:
+        t1: [{res: 15, route: + 8}, end]
+        t2: [{route: '-'}, end]
+      phrase:
+        p1: [-*8]
+        p2: [-.t1*4, -.t2*4]
+    play: [p1, p2, p1]
+loop: 0
+"""
+
+
+def test_defmon_routes_relative_to_the_programs_voice():
+    ir = songio.loads(DM_ROUTES)
+    text = songio.dumps(ir)
+    assert "route: + 8" in text and "route: '-'" in text
+    assert songio.dumps(songio.loads(text)) == text
+    d417 = [int(r[0x17]) for r in SongPlayer(ir).render_grid(10)]
+    assert list(dict.fromkeys(d417)) == [0x23, 0xF8 | 0x03 | 2, 0xF8 | 0x01]
 
 
 def test_defmon_init_refuses_the_retired_mode_column():

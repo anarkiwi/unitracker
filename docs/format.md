@@ -121,7 +121,7 @@ playroutine needs.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
   are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
   with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
-  `pw`, `wgl`, `af`, `ps`; `ginit` writes `resfilt`, `mode`, `cp`), and an omitted field
+  `pw`, `wgl`, `af`, `ps`; `ginit` writes `resfilt`, `fv`, `cp`), and an omitted field
   is 0.
 
 ## Events
@@ -156,14 +156,16 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `pw` | the 12-bit pulse width, a value or an expression |
 | `cut` | the 11-bit cutoff over `$D415`/`$D416`, a value or an expression |
 | `freq` | the voice frequency's expression |
-| `resfilt` | `$D417`, resonance and filter routing |
+| `res` | the resonance, bits 4-7 of `$D417` (see Filter) |
+| `route` | the filter routing, bits 0-3 of `$D417`: a mask, or an edit for the program's voice (see Filter) |
 | `mode` | the `$D418` filter-mode bits 4-7, volume excluded (see Filter) |
 
 | command | meaning |
 |---|---|
 | `!run:@x` | start program `x` in the slot its kind implies; `!run:none` stops it |
 | `!run2:@x` | start program `x` in slot 2, for players with generic slots |
-| `!ad:`, `!sr:`, `!ctrl:`, `!resfilt:` | set the register |
+| `!ad:`, `!sr:`, `!ctrl:` | set the register |
+| `!resfilt:n` | set `$D417` whole, `n = 16*res + route` |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
 | `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice |
@@ -191,10 +193,10 @@ can't express !notevib:1`); the writer refuses to write a value that would not r
 
 - **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
   command rows (list rows), `!vib:@s` and the instrument keys.
-- **defMON:** the sidTAB columns `wgl`, `re`, `cp`; `af` below $80 (a fixed offset).
+- **defMON:** the sidTAB columns `wgl`, `cp`; `af` below $80 (a fixed offset).
 - **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
   detune (list rows `[w, a, d]`), pulse and filter sweep rows and keyboard-tracked rows
-  (list rows), a filter row's resonance `res`, `!notevib` and the instrument keys.
+  (list rows), `!notevib` and the instrument keys.
 
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
@@ -204,16 +206,32 @@ first 255 expressions, else the reader refuses it.
 
 ### Filter
 
-`$D418` is `mode` (bit 4 low-pass, 5 band-pass, 6 high-pass, 7 voice 3 off) over the
-volume (bits 0-3, `!vol`). A player's codec rejects what the player can't set:
+`$D417` is `res` (bits 4-7) over `route` (bits 0-2 voices 1-3, bit 3 the external input).
+`$D418` is `mode` (bit 4 low-pass, 5 band-pass, 6 high-pass, 7 voice 3 off) over the volume
+(bits 0-3, `!vol`). A key a row leaves out is unchanged.
 
-| player | `mode` | volume |
-|---|---|---|
-| GoatTracker 2 | filter parameter rows, bits 4-6 | `!vol` |
-| SID-Wizard | filter set rows, bits 4-6 | not covered |
-| defMON | sidTAB rows and `ginit`, bits 4-7 | fixed at 15; `!vol` is rejected |
+`route` is the mask, or an edit for the voice that runs the program: `route: + m` adds that
+voice and the bits of `m`, `route: - m` removes them, and `m` is left out when it is 0
+(`route: +`, `route: '-'`). The space belongs to the form: `route: +8` is the mask 8.
 
-The sidTAB column `fv` is `mode`: a document using it is rejected (`fv is retired in v1.7`).
+A player's codec rejects what the player can't set:
+
+| player | `res`, `route` | `mode` | volume |
+|---|---|---|---|
+| GoatTracker 2 | filter parameter rows set both, `route` as a mask | parameter rows, bits 4-6 | `!vol` |
+| SID-Wizard | filter set rows set `res`; `route` is rejected | set rows, bits 4-6 | not covered |
+| defMON | see below; `ginit` sets both, `route` as a mask | sidTAB rows and `ginit`, bits 4-7 | fixed at 15; `!vol` is rejected |
+
+GoatTracker's `!resfilt:n` stays one command: the player sets both nibbles with one code,
+and `!resfilt:0` also stops the filter program. SID-Wizard writes no routing in a row: it
+routes the filter to every voice whose instrument has a filter program, so the routing
+depends on what the other voices play and no row value can state it. A defMON sidTAB row
+writes `$D417` in one of three ways: `{res: r, route: m}` with bit 3 of `m` clear sets the
+byte; `{res: r, route: + m}` with bit 3 of `m` set keeps the routing and adds the voice and
+`m`; `route: '-'` removes the voice and keeps the resonance.
+
+The sidTAB columns `fv` (`mode`) and `re` (`res` and `route`) and the row key `resfilt`
+(`res` and `route`) are refused (`fv is retired in v1.7`).
 
 ## Modulators
 

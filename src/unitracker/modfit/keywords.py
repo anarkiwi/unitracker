@@ -425,7 +425,7 @@ def signer(name: str) -> Signer:
 
 SHARED_COMMANDS = {"run", "run2", "ad", "sr", "ctrl", "resfilt", "vol", "cut", "tempo"}
 SHARED_COMMANDS |= {"vtempo", "funk", "mod", "vib", "mark"}
-SHARED_KEYS = {"ctrl", "note", "wait", "hold", "ad", "sr", "pw", "cut", "resfilt", "mode"}
+SHARED_KEYS = {"ctrl", "note", "wait", "hold", "ad", "sr", "pw", "cut", "res", "route", "mode"}
 
 
 def coarse(role: str) -> frozenset:
