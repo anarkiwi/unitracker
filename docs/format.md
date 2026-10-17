@@ -211,7 +211,7 @@ a command the player refuses by name (`sidwizard: the player can't express !temp
 | `!cut` | — | 0-2040 step 8 | — |
 | `!tempo` | — | 3-127 | — |
 | `!vtempo` | — | 3-127 | — |
-| `!funk` | — | `@speedtab`, `none` | — |
+| `!funk` | — | 0-255/0-255, `none` | — |
 | `!freq` | — | `@x`, `none` | `@x`, `none` |
 | `!mark` | — | 16-255 | — |
 | `!restart` | `@restart` | — | — |
@@ -220,7 +220,7 @@ a command the player refuses by name (`sidwizard: the player can't express !temp
 | `!filter` | — | 0 | 0 |
 
 The timing commands are GoatTracker's: its command $F plays a tempo of 2 as 3, so `!tempo`
-and `!vtempo` start at 3; `!funk` names the `speedtab` row of the swing pair, and the
+and `!vtempo` start at 3; `!funk:a/b` carries the swing pair, and the
 default tempo is the constant `deftempo`. SID-Wizard's tempo is the subtune's tempo pair, the
 constants `tempol` and `tempor`, and its tempo commands are not covered yet. A defMON step is
 one tick, and its arranger and pattern counters are lifted as the timeline (see Backends).
