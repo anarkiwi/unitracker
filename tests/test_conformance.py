@@ -200,7 +200,7 @@ def test_csillag_with_a_keyboard_tracked_pulse_row_matches_its_player(csillag, a
     song = songio.loads(text)
     assert songio.dumps(song) == text
     n = CSILLAG_LOOP + 600
-    theirs = oracle(raw, f"csillag-pw-{amount:02x}", n)
+    theirs = oracle(raw, n)
     plain = np.asarray(SWMPlayer(parse_sid_song(csillag.read_bytes(), 1)).render_grid(n))
     assert not np.array_equal(theirs[: len(plain)], plain)
     assert SongPlayer(song).mismatch(theirs) is None
@@ -216,7 +216,7 @@ def test_csillag_with_a_keyboard_tracked_filter_row_matches_its_player(csillag, 
     song = songio.loads(text)
     assert songio.dumps(song) == text
     n = CSILLAG_LOOP + 600
-    theirs = oracle(raw, f"csillag-filter-{instrument}-{amount:02x}", n)
+    theirs = oracle(raw, n)
     plain = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n))
     assert not np.array_equal(theirs[: len(plain), 0x16], plain[:, 0x16])
     assert SongPlayer(song).mismatch(theirs) is None

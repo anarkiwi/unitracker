@@ -20,3 +20,10 @@ def test_the_renderer_plays_the_lifted_document_as_the_native_player(metal_warri
     assert (grid == song.render_grid(300)).all()
     native = backends.native_player(raw, 0).render_grid(300)
     assert first_mismatch(grid, native, song.starts) is None
+
+
+def test_the_native_renderer_is_the_backends_player(metal_warrior):
+    raw = metal_warrior.read_bytes()
+    grid, info = load_render(TOOL.replace(".py", ".py:native"))(raw, 1, 100)
+    assert info == {"backend": "goattracker2"}
+    assert (grid == backends.native_player(raw, 0).render_grid(100)).all()

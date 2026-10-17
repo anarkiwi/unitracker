@@ -1,6 +1,5 @@
 """Shared fixtures: the HVSC tunes the conformance tests lift."""
 
-import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +18,8 @@ from pygoattracker import (
     TypedSong,
 )
 from pygoattracker import constants as GT
-from pysidtracker.testing import oracle_grid, resolve_tune
+from pysidtracker.survey import file_oracle
+from pysidtracker.testing import resolve_tune
 from pysidwizard import parse_sid_song
 from pysidwizard.player import INST_WF_TABLE_POS
 
@@ -102,13 +102,9 @@ def sw_table_byte(raw: bytes, instrument: int, which: str, offset: int, value: i
     return bytes(out)
 
 
-def oracle(raw: bytes, name: str, frames: int):
-    """The sidtrace 6502 oracle's register grid of tune ``raw`` (Docker), cached by content."""
-    path = CACHE / "oracle" / f"{name}-{hashlib.sha256(raw).hexdigest()[:16]}.sid"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(raw)
-    grid = oracle_grid(path, oracle_cache=CACHE / "oracle", seconds=frames // 50 + 2, frames=frames)
-    return np.asarray(grid, dtype=np.uint8)[:, :25]
+def oracle(raw: bytes, frames: int):
+    """The 6502 oracle's register grid of tune ``raw``, cached by content under the tune cache."""
+    return np.asarray(file_oracle(raw, 1, frames, work=CACHE / "oracle")[1], dtype=np.uint8)
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
