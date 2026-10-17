@@ -10,6 +10,7 @@ from pygoattracker import decompile_sid
 from unitracker import songio
 from unitracker.codec import (
     COMMAND_NAMES,
+    RETIRED_ROW_KEYS,
     ROW_KEYS,
     CodecError,
     CommandCodec,
@@ -188,6 +189,8 @@ def test_restart_programs_hold_only_what_the_player_plays(pr_name, place, shared
         ("defmon", "sidtab", {"acid": 0x8001}, "acid is retired in v1.7"),
         ("defmon", "sidtab", {"cp": 5}, "cp is retired in v1.12"),
         ("defmon", "ginit", {"cp": 5}, "cp is retired in v1.12"),
+        ("sidwizard", "pwtab", {"pw": 2048, "k": 5}, "pw: k is retired in v1.19"),
+        ("sidwizard", "flttab", {"mode": 16, "res": 3, "cut": 64, "k": 5}, "k is retired in v1.19"),
     ],
 )
 def test_res_and_route_are_refused_where_the_player_cannot_set_them(pr_name, name, shared, match):
@@ -452,7 +455,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.18",
+        "unitracker": "1.19",
         "playroutine": {"ref": "defmon"},
         "song": [{"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}],
     }
@@ -692,7 +695,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.18 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.19 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -746,13 +749,14 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
             if i != j:
                 assert mine & theirs <= set(ROW_KEYS) | {"restart"}
     assert not keys[2] & (set(COMMAND_NAMES) - {"restart"} - set(ROW_KEYS))
+    assert not set().union(*keys) & set(RETIRED_ROW_KEYS)
 
 
 def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.18",
+                "unitracker": "1.19",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -808,7 +812,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {ref: defmon}
 song:
   - def:
@@ -922,7 +926,7 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {ref: sidwizard}
 song:
   - def:

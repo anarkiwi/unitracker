@@ -1,4 +1,4 @@
-# unitracker song format (v1.18)
+# unitracker song format (v1.19)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.18`; readers reject any other version |
+| `unitracker` | `1.19`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -263,7 +263,10 @@ instrument's restart program`, `ctrl: wgl is retired in v1.8`). The list rows of
 GoatTracker's pulse and filter tables and SID-Wizard's pulse, filter and WF tables are retired
 in v1.10 (`pw: row [32, 16] is retired in v1.10: a sweep, stall or keyboard-tracked row
 is its program's expression`): such a row is part of its program's `pw` or `cut` expression,
-which the lifter proves or fails on (see Lifting). GoatTracker's wavetable list rows are retired in
+which the lifter proves or fails on (see Lifting). SID-Wizard's pulse and filter row field `k`, the
+keyboard-track amount, is retired in v1.19 (`pw: k is retired in v1.19: a keyboard-tracked row
+is its program's pw or cut expression in N`): the amount is a term of `N` in the program's
+expression (see the SID-Wizard modulators). GoatTracker's wavetable list rows are retired in
 v1.15 (`ctrl: row [242] is retired in v1.15: write the row with the shared keys`): a wavetable
 command row is written with its shared keys or lifts as a row that has them, else the lift fails
 naming it (see the GoatTracker 2 backend), and no program row is a list. A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds

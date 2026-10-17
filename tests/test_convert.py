@@ -19,9 +19,9 @@ INS = (
 
 
 def gt_ir(phrase: str, ins: str = INS + "}"):
-    """A one-voice goattracker2 song read from v1.18 text, the other voices silent."""
+    """A one-voice goattracker2 song read from v1.19 text, the other voices silent."""
     text = f"""
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {{ref: goattracker2, constants: {{deftempo: 6}}}}
 song:
   - def:
@@ -244,9 +244,9 @@ def test_an_unproved_start_names_its_program_and_start():
 
 
 def sw_ir(phrase: str):
-    """A one-voice sidwizard song read from v1.18 text, the other voices silent."""
+    """A one-voice sidwizard song read from v1.19 text, the other voices silent."""
     text = f"""
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {{ref: sidwizard}}
 song:
   - def:
@@ -309,7 +309,7 @@ def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, 
 
 DM_VOICE = "{}"
 DM_AF = f"""
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {{ref: defmon}}
 song:
   - def:

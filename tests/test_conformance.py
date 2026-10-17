@@ -1,4 +1,4 @@
-"""Lifted songs, written as v1.18 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.19 text and read back, play identically to their native players."""
 
 import dataclasses
 from pathlib import Path

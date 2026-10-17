@@ -1,4 +1,4 @@
-"""v1.18 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.19 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -138,6 +138,16 @@ def test_the_reader_names_the_retired_sidtab_columns(row, match):
         songio.loads(text)
 
 
+@pytest.mark.parametrize(
+    "key,row",
+    [("pw", "{pw: 2048, k: 5}"), ("filter", "{mode: 16, res: 3, cut: 64, k: 5}")],
+)
+def test_the_reader_names_the_retired_keyboard_track_field(key, row):
+    text = doc("sidwizard", f"      ins:\n        i1: {{sr: 240, {key}: [{row}, end]}}", "[C4.i1]")
+    with pytest.raises(songio.SongFormatError, match="k is retired in v1.19: a keyboard-tracked"):
+        songio.loads(text)
+
+
 def test_funk_arguments_share_their_speed_table_rows():
     text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
     song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
@@ -233,7 +243,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.18", "unitracker: 1.8", "not a unitracker v1.18 document"),
+        ("unitracker: 1.19", "unitracker: 1.8", "not a unitracker v1.19 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

@@ -15,7 +15,7 @@ LAYER_B = next(int(code) for code in SPEC["commands"])
 
 def song(phrase, ins="i1: {ctrl: c1, filter: c2}"):
     return f"""
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {{ref: defmon}}
 meta: {{title: instruments}}
 song:
