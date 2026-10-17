@@ -202,7 +202,7 @@ can't express !attack:1`); the writer refuses to write a value that would not re
   and the wavetable commands $F1-$F4 name.
 - **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
 - **SID-Wizard:** the instrument key `flags` (bits 6 and 7 of the header's control byte:
-  keeping the pulse and filter programs across notes) and `octave`.
+  keeping the pulse and filter programs across notes).
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -221,6 +221,10 @@ in v1.11`). A field's retired bits are written without, and read as its default'
 reads with the plain vibrato type, which no expression-driven note consults. An `!freq` is
 always read as the player's expression command (GoatTracker command 16, SID-Wizard FX $10),
 which plays every expression; no written form selects the player's own vibrato.
+A note names the pitch it sounds, so SID-Wizard's per-instrument octave shift is in the
+notes: the instrument key `octave` is retired in v1.11 (`ins.octave is retired in v1.11: a
+note is written as the pitch it sounds`). A note is read as the player's note with no shift,
+which plays the same pitch.
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
@@ -732,12 +736,15 @@ to a nibble, as the reference grid does.
 
 **SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
 applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking
-the voices in the player's reverse order. An instrument is its header (`flags`, `ad`, `sr`,
-`octave`), its WF/arp, pulse, filter and restart programs (`ctrl`, `pw`, `filter`,
+the voices in the player's reverse order. An instrument is its header (`flags`, `ad`, `sr`),
+its WF/arp, pulse, filter and restart programs (`ctrl`, `pw`, `filter`,
 `restart`) and its pitch expression (`freq`), which holds the header's vibrato; a
-note-column vibrato is `!freq`. The header's hard-restart bytes and control bits 0-3 become
-the restart program; a restart on both ticks before the
-note (control bits 0 and 1) is not covered. WF rows use `ctrl`, `note`, `hold` and `freq`.
+note-column vibrato is `!freq`. The header's octave shift moves into the notes the
+instrument plays, each written as the pitch it sounds; a row that selects an instrument of
+another shift without a note, and a phrase note played under instruments of different
+shifts, are not covered. The header's hard-restart bytes and control bits 0-3 become the
+restart program; a restart on both ticks before the note (control bits 0 and 1) is not
+covered. WF rows use `ctrl`, `note`, `hold` and `freq`.
 `hold` is the ticks the row lasts: on a row with `ctrl`, the instrument's arp speed plus one;
 a row without `ctrl` keeps the waveform and lasts its native hold count plus one (1-16). A
 program that ends paces itself afterwards by its last row's `hold`, so a hold row ending a

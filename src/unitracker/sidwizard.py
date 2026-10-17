@@ -420,17 +420,53 @@ def chord_runs(tracks, phrases, waves: Waves) -> None:
     """
     runs = {}
     for trk in tracks:
-        loop = trk["loop"]
         ins, glide = 0, False
-        for play in trk["plays"] + (trk["plays"][loop:] if loop is not None else []):
-            for k, event in enumerate(phrases[play["phrase"]]):
-                ins = event.get("instrument", ins)
-                for j, target in _chord_targets(event, ins, glide, waves).items():
-                    if runs.setdefault((play["phrase"], k, j), target) != target:
-                        raise LiftError("a chord FX's note plays different instruments")
-                glide = _gliding(event, glide)
+        for name, k, event in _voice_events(trk, phrases):
+            ins = event.get("instrument", ins)
+            for j, target in _chord_targets(event, ins, glide, waves).items():
+                if runs.setdefault((name, k, j), target) != target:
+                    raise LiftError("a chord FX's note plays different instruments")
+            glide = _gliding(event, glide)
     for (name, k, j), target in runs.items():
         _commands(phrases[name][k])[j][:] = [CHORD_FX, target]
+
+
+def _voice_events(trk: dict, phrases: dict):
+    """``(phrase, index, event)`` in a voice's play order, twice through its loop."""
+    loop = trk["loop"]
+    for play in trk["plays"] + (trk["plays"][loop:] if loop is not None else []):
+        for k, event in enumerate(phrases[play["phrase"]]):
+            yield play["phrase"], k, event
+
+
+def fold_octaves(tracks, phrases, records: dict) -> None:
+    """Each instrument's octave shift moved into the notes it plays.
+
+    The player adds the selected instrument's shift to every note, so each note becomes its
+    sounding pitch and every shift 0. A row that selects an instrument of another shift
+    without a note retunes the sounding note, and a phrase note played under instruments of
+    different shifts has no one pitch: neither is covered.
+    """
+    shifts = {}
+    for trk in tracks:
+        octave, sounding = 0, False
+        for name, k, event in _voice_events(trk, phrases):
+            note = isinstance(event.get("note"), int)
+            if "instrument" in event:
+                new = records[event["instrument"]].get("octave", 0)
+                if sounding and not note and new != octave:
+                    raise LiftError("an octave change without a note is not covered")
+                octave = new
+            if note and shifts.setdefault((name, k), octave) != octave:
+                raise LiftError("a note played under instruments of different octaves")
+            sounding = sounding or note
+    for (name, k), octave in shifts.items():
+        event = phrases[name][k]
+        event["note"] += octave
+        if event["note"] < 1:
+            raise LiftError(f"a note shifted by {octave} semitones sounds below C0")
+    for rec in records.values():
+        rec.pop("octave", None)
 
 
 def check_build(swm, features) -> None:
@@ -517,6 +553,7 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
     }
     first_note_selects(tracks, phrases)
     chord_runs(tracks, phrases, instruments.waves)
+    fold_octaves(tracks, phrases, instruments.records)
     playroutine = library("sidwizard")
     playroutine["constants"], hints = tempo(swm)
     ir = {

@@ -65,6 +65,7 @@ GT_SONG = doc(
         ("sidwizard", "{flags: 26}", "ins.flags bits 0x0f are retired in v1.8"),
         ("sidwizard", "{vibrato: 51}", "ins.vibrato is retired in v1.11: write the vibrato"),
         ("sidwizard", "{vibdelay: 4}", "ins.vibdelay is retired in v1.11"),
+        ("sidwizard", "{octave: -12}", "ins.octave is retired in v1.11: a note is written as"),
         ("sidwizard", "{flags: 96}", "ins.flags bits 0x30 are retired in v1.11"),
     ],
 )
@@ -89,10 +90,11 @@ def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
     [
         ({"vibrato": 0x33}, "ins.vibrato has no written form: it is retired in v1.11"),
         ({"vibdelay": 4}, "ins.vibdelay has no written form"),
+        ({"octave": -12}, "ins.octave has no written form"),
         ({"flags": 0x20}, "ins.flags bits 0x30 have no written form: they are retired in v1.11"),
     ],
 )
-def test_the_writer_refuses_the_retired_vibrato_bytes(fields, match):
+def test_the_writer_refuses_the_retired_header_bytes(fields, match):
     song = songio.loads(SW_SONG)
     song["records"]["ins"][1].update(fields)
     with pytest.raises(songio.SongFormatError, match=match):

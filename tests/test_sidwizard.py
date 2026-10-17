@@ -207,6 +207,40 @@ def test_chord_runs_reject(rows, match):
         sidwizard.chord_runs(tracks, phrases, waves())
 
 
+def octave_records():
+    return {1: {"sr": 240, "octave": -12}, 2: {"sr": 240}, 3: {"sr": 240, "octave": -12}}
+
+
+def test_octave_shifts_move_into_the_notes_they_play():
+    tracks, phrases = chord_song(
+        {"note": 30, "instrument": 1},
+        {"note": 31},
+        {"instrument": 3, "note": "off"},
+        {"note": 32, "instrument": 2},
+        {"note": "off"},
+    )
+    records = octave_records()
+    sidwizard.fold_octaves(tracks, phrases, records)
+    assert [e.get("note") for e in phrases["a"]] == [18, 19, "off", 32, "off"]
+    assert all("octave" not in r for r in records.values())
+
+
+@pytest.mark.parametrize(
+    "rows,match",
+    [
+        ([{"note": 30, "instrument": 1}, {"instrument": 2}], "octave change without a note"),
+        ([{"note": 30}, {"note": 30, "instrument": 2}], "different octaves"),
+        ([{"note": 5, "instrument": 1}], "shifted by -12 semitones sounds below C0"),
+    ],
+)
+def test_fold_octaves_reject(rows, match):
+    tracks, phrases = chord_song(*rows, plays=2)
+    tracks[0]["plays"].insert(0, {"phrase": "b"})
+    phrases["b"] = [{"note": 40, "instrument": 1}]
+    with pytest.raises(LiftError, match=match):
+        sidwizard.fold_octaves(tracks, phrases, octave_records())
+
+
 def test_track_plays_loop_and_end():
     seq = [PlayPattern(2), PlayPattern(1), Loop(1)]
     assert sidwizard.track(seq, 2) == {"plays": [{"phrase": "p02"}, {"phrase": "p01"}], "loop": 1}

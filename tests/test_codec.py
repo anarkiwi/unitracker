@@ -613,7 +613,6 @@ INS_KEYS = {
         "flags",
         "ad",
         "sr",
-        "octave",
         "restart",
         "ctrl",
         "pw",

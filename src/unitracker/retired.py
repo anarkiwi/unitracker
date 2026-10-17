@@ -17,6 +17,7 @@ FIELDS = {
     "arpspeed": "retired in v1.9: write the arp speed as the `ctrl` program rows' `hold`",
     "vibrato": _VIBRATO,
     "vibdelay": _VIBRATO,
+    "octave": "retired in v1.11: a note is written as the pitch it sounds",
 }
 BITS = {"flags": ((0x0F, _RESTART), (0x30, _VIBRATO))}
 
