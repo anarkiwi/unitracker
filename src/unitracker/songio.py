@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.18 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.19 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -39,7 +39,7 @@ from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 
-VERSION = "1.18"
+VERSION = "1.19"
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -47,7 +47,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.18 format."""
+    """A document does not follow the unitracker v1.19 format."""
 
 
 @functools.cache
@@ -121,7 +121,7 @@ def _player(pr, call, *args):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.18 document."""
+    """Turns the internal representation into a canonical v1.19 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -550,7 +550,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False, respell=None) -> str:
-    """A canonical v1.18 document for internal-representation song ``ir``.
+    """A canonical v1.19 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference;
     ``respell(doc)`` rewrites the written structure before it is dumped (spelling studies).
@@ -576,7 +576,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
 
 
 class _Reader:
-    """Expands a v1.18 document to the internal representation."""
+    """Expands a v1.19 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -934,7 +934,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.18 document."""
+    """The internal representation of a v1.19 document."""
     doc = parse(text)
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
@@ -944,13 +944,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.18 document at ``path``."""
+    """The internal representation of the v1.19 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.18 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.19 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

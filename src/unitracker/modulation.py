@@ -352,11 +352,12 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         if occ.v != native and occ.mismatch is None:
             occ.mismatch = (self.tick, phi, before, native, occ.v)
         if self.override(occ):
+            cell = self.cells.get(unit["cell"], voice)
             self.write(unit, voice, occ.v)
             occ.v = self.read(unit, voice)
             mirror = unit.get("mirror")
-            if mirror and self.cells.get(mirror, voice) == native:
-                self.cells.set(mirror, voice, occ.v)
+            if mirror and self.cells.get(mirror, voice) == cell:
+                self.cells.set(mirror, voice, self.cells.get(unit["cell"], voice))
 
     def capture(self, unit: dict, voice) -> dict:  # pylint: disable=unused-argument
         """What a start keeps of the cells before its first firing: every cell by name."""

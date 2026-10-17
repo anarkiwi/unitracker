@@ -143,7 +143,7 @@ arg, raw, inline}`, or `{name, nibble, slot}` for an envelope command.
 
 **A document names no player.** No key, command or record type is one player's own. What the
 player cannot play has no shape, so the reader refuses it naming the key or command and the
-player (`sidwizard: the player can't express !tempo:6`), and the writer refuses a raw value that
+player (`sidwizard: the player can't express !tempo:2`), and the writer refuses a raw value that
 would not read back. Never add a key for one player: resolve the native row at lift time into a
 form that has shared keys (section 6), or fail the lift naming it. A shared form two players need
 and the format lacks is a format change (`songio.VERSION`, the `RETIRED` and `RETIRED_ROW_KEYS`
@@ -196,12 +196,13 @@ The top level of `modulators` gives what expressions read: `freq` (the word `F(k
 **The chip map.** `chip: {width, value, store}` gives the unit's value `v` from its cells
 (`value`, `width` bits) and writes a value back (`store`, run only when the cells do not already
 give it). `v` must be a bijective image of the cell: each cell state the firings reach gives its
-own `v`, and `store` inverts `value`. A map that loses information (a clamp, a floor, an offset
-added on the way to the register) makes two cell states one `v`, and no recurrence over `v` is
-exact. Keep `value` a linear image of the cell and move the rest into the ghost, where the
-register is written: GoatTracker's cutoff is `filtercutoff << 3`, SID-Wizard's pulse
-`((pwhi << 8) | pwlo) & 0xFFF`, and `defmon`'s `acid B` is its whole accumulator, with the floor,
-the `dbl` shift and the offset in the ghost's `$D416`. A value the replay carries from earlier
+own `v`, and `store` inverts `value`. A map that loses information (a clamp, a floor) makes two
+cell states one `v`, and no recurrence over `v` is exact. Keep `value` a linear image of the cell,
+plus at most a term that does not depend on the cell, wrapped to `width`, and move the rest into
+the ghost, where the register is written: GoatTracker's cutoff is `filtercutoff << 3`,
+SID-Wizard's pulse is `pwhi:pwlo` plus its keyboard-tracking term in the note (`store` subtracts
+it), and `defmon`'s `acid B` is its whole accumulator, with the floor, the `dbl` shift and the
+offset in the ghost's `$D416`. A value the replay carries from earlier
 playback becomes a constant of the start's expression, which the lifter resolves (*Evaluation*).
 
 **Running `unitracker-modfit`.** The `exprs` report lifts the tune with native modulations,

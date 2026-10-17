@@ -1,4 +1,4 @@
-"""v1.18 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.19 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -138,6 +138,16 @@ def test_the_reader_names_the_retired_sidtab_columns(row, match):
         songio.loads(text)
 
 
+@pytest.mark.parametrize(
+    "key,row",
+    [("pw", "{pw: 2048, k: 5}"), ("filter", "{mode: 16, res: 3, cut: 64, k: 5}")],
+)
+def test_the_reader_names_the_retired_keyboard_track_field(key, row):
+    text = doc("sidwizard", f"      ins:\n        i1: {{sr: 240, {key}: [{row}, end]}}", "[C4.i1]")
+    with pytest.raises(songio.SongFormatError, match="k is retired in v1.19: a keyboard-tracked"):
+        songio.loads(text)
+
+
 def test_funk_arguments_share_their_speed_table_rows():
     text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
     song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
@@ -200,6 +210,21 @@ def test_sidwizard_instrument_freq_and_pulse_and_a_freq_command():
     assert [int(d) for d in np.diff(pulse)[3:9] if d] == [2, 2, 2, 2]
 
 
+SW_TRACKED = doc(
+    "sidwizard",
+    """      ins:
+        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '2048 + 256*(E[N + 6] - E[N + 5])'}""",
+    "[C2.i1*8, C6.i1*8]",
+)
+
+
+def test_a_sidwizard_pulse_expression_reads_the_keyboard_track_table():
+    _, pulse, _ = voice0(SW_TRACKED, 120)
+    step = [SW["freqhi"][n + 6 - 11] - SW["freqhi"][n + 5 - 11] for n in (24, 72)]
+    assert step[0] != step[1]
+    assert {2048 + 256 * d for d in step} <= {int(p) for p in pulse}
+
+
 DM_SONG = doc(
     "defmon",
     """      ins:
@@ -218,7 +243,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.18", "unitracker: 1.8", "not a unitracker v1.18 document"),
+        ("unitracker: 1.19", "unitracker: 1.8", "not a unitracker v1.19 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

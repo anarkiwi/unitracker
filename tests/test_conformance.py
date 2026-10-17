@@ -1,4 +1,4 @@
-"""Lifted songs, written as v1.18 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.19 text and read back, play identically to their native players."""
 
 import dataclasses
 from pathlib import Path
@@ -9,7 +9,7 @@ from pydefmon import DefmonPlayer
 from pygoattracker import decompile_sid
 from pysidwizard import SWMPlayer, parse_sid_song
 
-from conftest import gt_tune, sw_fx
+from conftest import gt_tune, oracle, sw_fx, sw_table_byte
 from unitracker import defmon, sidwizard, songio
 from unitracker.goattracker import lift
 from unitracker.vm import SongPlayer
@@ -186,4 +186,36 @@ def test_csillag_with_tempo_changes_exact(csillag, monkeypatch):
     theirs = np.asarray(SWMPlayer(sw_fx(raw, STEP_TEMPOS)).render_grid(n), dtype=np.uint8)
     plain = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n), dtype=np.uint8)
     assert not np.array_equal(theirs, plain)
+    assert SongPlayer(song).mismatch(theirs) is None
+
+
+# Csillag's instrument 7 sets its pulse at its first row; a keyboard-track amount there, up and
+# down, adds a term of the note to the register until the next row's amount (0) replaces it.
+@pytest.mark.parametrize("amount", [0x05, 0xF4])
+def test_csillag_with_a_keyboard_tracked_pulse_row_matches_its_player(csillag, amount):
+    raw = sw_table_byte(csillag.read_bytes(), 7, "pw", 2, amount)
+    text = songio.dumps(sidwizard.lift(raw))
+    assert "E[" in text and "k:" not in text
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    n = CSILLAG_LOOP + 600
+    theirs = oracle(raw, f"csillag-pw-{amount:02x}", n)
+    plain = np.asarray(SWMPlayer(parse_sid_song(csillag.read_bytes(), 1)).render_grid(n))
+    assert not np.array_equal(theirs[: len(plain)], plain)
+    assert SongPlayer(song).mismatch(theirs) is None
+
+
+# Instruments 4 and 8 set the filter at their first row; a keyboard-track amount there adds a
+# term of the controlling voice's note to $D416, which pysidwizard's player does not model.
+@pytest.mark.parametrize("instrument, amount", [(4, 0x05), (8, 0x05), (8, 0xF4)])
+def test_csillag_with_a_keyboard_tracked_filter_row_matches_its_player(csillag, instrument, amount):
+    raw = sw_table_byte(csillag.read_bytes(), instrument, "filter", 2, amount)
+    text = songio.dumps(sidwizard.lift(raw))
+    assert "E[" in text and "k:" not in text
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    n = CSILLAG_LOOP + 600
+    theirs = oracle(raw, f"csillag-filter-{instrument}-{amount:02x}", n)
+    plain = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n))
+    assert not np.array_equal(theirs[: len(plain), 0x16], plain[:, 0x16])
     assert SongPlayer(song).mismatch(theirs) is None

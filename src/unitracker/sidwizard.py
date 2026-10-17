@@ -24,6 +24,8 @@ CHORD_ROW = 0x7F
 WAVEFORM = 0x10
 ARP_SPEED = 0x3F
 NO_DETUNE = 0xFF
+# A filter row's third byte from which it sets the routing nibble instead of the tracking.
+ROUTING = 0x80
 MAX_INSTRUMENT = 0x3E
 LEGATO = 0x3F
 GATE_ON, GATE_OFF = 0x7D, 0x7E
@@ -95,7 +97,10 @@ def pw_record(row: bytes) -> dict:
 
 
 def filter_record(row: bytes) -> dict:
-    """A filter row; a set row's first byte splits into its mode bits and resonance."""
+    """A filter row; a set row's first byte splits into its mode bits and resonance. A third
+    byte of $80-$8F sets the routing nibble, which has no shared form here."""
+    if ROUTING <= row[2] < ROUTING + 0x10:
+        raise LiftError(f"filter row routing byte ${row[2]:02X} is not covered")
     if row[0] >= 0x80:
         return {"a": row[0] & 0xF0, "res": row[0] & 0x0F, "b": row[1], "k": row[2]}
     return {"a": row[0], "b": row[1], "k": row[2]}

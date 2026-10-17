@@ -197,6 +197,10 @@ by what they do to the SID.
    - The units are the playroutine's `modulators:` declaration (`exprs.Analysis`). A unit's
      `fire` list is sliced to its cell; the cells it reads before writing them and the
      cells it writes that are needed again are the control.
+   - A unit with a `chip` map runs on its chip value. On a pair cell the chip value must be the
+     pair plus an offset free of its parts (z3 proves it at each control state, else the start
+     is reported): a firing's value is the fused pair update plus the offset after it less the
+     offset before (SID-Wizard's keyboard-tracked pulse).
    - From a start's concrete control (note cells as `N`) every firing runs through `Form` with
      the value symbolic; the reachable control states and their guarded cases are a graph,
      minimised by bisimulation (equal value updates, equal guarded successor classes). One

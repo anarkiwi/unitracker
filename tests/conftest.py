@@ -1,14 +1,17 @@
 """Shared fixtures: the HVSC tunes the conformance tests lift."""
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from pygoattracker import constants as GT
 from pygoattracker import Instrument, Orderlist, Pattern, Player, PlayPattern, Row, Song
 from pygoattracker import Subtune, Table, TypedSong
-from pysidtracker.testing import resolve_tune
+from pysidtracker.testing import oracle_grid, resolve_tune
 from pysidwizard import parse_sid_song
+from pysidwizard.player import INST_WF_TABLE_POS
 
 from unitracker import backends, optimise
 
@@ -70,6 +73,30 @@ def sw_fx(raw: bytes, rows: dict):
         row = swm.patterns[pattern - 1].rows[k]
         row.fx, row.fx_value = fx, value
     return swm
+
+
+def sw_table_byte(raw: bytes, instrument: int, table: str, offset: int, value: int) -> bytes:
+    """SID-Wizard tune ``raw`` with byte ``offset`` of instrument ``instrument``'s ``pw`` or
+    ``filter`` table set to ``value``; the instruments lie in order in the file."""
+    pos, instruments = -1, parse_sid_song(raw, 1).instruments[:instrument]
+    for one in instruments:
+        pos = raw.index(one.memory_image(), pos + 1)
+    ins = instruments[-1]
+    start = pos + INST_WF_TABLE_POS + len(ins.wf_table) + 1
+    if table == "filter":
+        start += len(ins.pw_table) + 1
+    out = bytearray(raw)
+    out[start + offset] = value
+    return bytes(out)
+
+
+def oracle(raw: bytes, name: str, frames: int):
+    """The sidtrace 6502 oracle's register grid of tune ``raw`` (Docker), cached by content."""
+    path = CACHE / "oracle" / f"{name}-{hashlib.sha256(raw).hexdigest()[:16]}.sid"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    grid = oracle_grid(path, oracle_cache=CACHE / "oracle", seconds=frames // 50 + 2, frames=frames)
+    return np.asarray(grid, dtype=np.uint8)[:, :25]
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):

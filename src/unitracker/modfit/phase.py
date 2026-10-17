@@ -6,6 +6,7 @@ state has one successor, turns when a state stays until a test of ``v`` advances
 """
 
 # pylint: disable=too-many-lines
+import ast
 import dataclasses
 import functools
 import itertools
@@ -25,6 +26,20 @@ from unitracker.modulation import VALUE
 PHI_BOUND = 1 << 20
 FIRE = "_fire"
 DOMAIN = ("_lo", "_hi", "_r", "_m")
+OFFSET = ("_off0", "_off1")
+
+
+def zeroed(src: str, names: set) -> str:
+    """Expression ``src`` with each of ``names`` read as 0: a paired chip value's offset."""
+
+    class Zero(ast.NodeTransformer):
+        """Each of ``names`` as 0."""
+
+        def visit_Name(self, node):  # pylint: disable=invalid-name
+            """A name of ``names`` as 0, another as it is."""
+            return ast.Constant(0) if node.id in names else node
+
+    return ast.unparse(Zero().visit(ast.parse(src, mode="eval")))
 
 
 class Player(Programs):
@@ -376,10 +391,14 @@ class Machine:  # pylint: disable=too-many-instance-attributes
             self.cell = unit["cell"]
             self.store = []
             self.parts = self._parts(self.cell)
+        self.offsets = set(OFFSET) if self.paired else set()
+        if self.paired:
+            off = zeroed(self.chip["value"], self.parts)
+            actions = [{"set": {OFFSET[0]: off}}, *actions, {"set": {OFFSET[1]: off}}]
         slicer = Slicer(form.pr, Writes(form.pr), form.procs)
         full = self.store + actions
         written = Writes(form.pr).of(full) | self.parts
-        need = {VALUE} if self.cell == VALUE else set(self.parts)
+        need = {VALUE} if self.cell == VALUE else set(self.parts) | (set(OFFSET) & self.offsets)
         while True:
             self.actions, before = slicer.seq(full, need, need)
             grown = need | (before & written)
@@ -387,7 +406,7 @@ class Machine:  # pylint: disable=too-many-instance-attributes
                 break
             need = grown
         self.reads = before - self.parts
-        self.control = sorted((need & written) - self.parts)
+        self.control = sorted((need & written) - self.parts - set(OFFSET))
         self.hidden = sorted(self.parts - {VALUE}) if self.chip else []
         self.real = []
         if self.chip:
@@ -400,6 +419,19 @@ class Machine:  # pylint: disable=too-many-instance-attributes
                 need |= before & written
         self.mask = (1 << int(self.chip["width"] if self.chip else form.width[self.cell])) - 1
         self.memo = {}
+
+    def check_offset(self, state: dict) -> None:
+        """Raise unless the chip value at control ``state`` is the pair plus its offset, wrapped
+        to the chip width."""
+        f = self.form
+        off = f.expr(zeroed(self.chip["value"], self.parts), state)
+        lo, hi, k, _ = f.pair[self.cell]
+        smt = f.solver()
+        x = smt.term(f.expr(self.chip["value"], state))
+        joined = smt.term(hi) * (1 << k) + (smt.term(lo) & ((1 << k) - 1))
+        smt.solver.add(smt.term(self.cell) == joined, x != (joined + smt.term(off)) & self.mask)
+        if smt.solver.check() != z3.unsat:
+            raise ValueError("the chip value is not its pair plus an offset")
 
     def domain(self, start) -> tuple:
         """``(lo, hi, r, m)``: the chip values the cells give at control ``start`` lie in
@@ -469,6 +501,8 @@ class Machine:  # pylint: disable=too-many-instance-attributes
     def _step(self, state: dict) -> list:
         f, out = self.form, []
         known, index = self.bounds(state), self.atom(state)
+        if self.paired:
+            self.check_offset(state)
         if index is not None:
             state = {**state, VALUE: f.add(index[1], f.scale(index[2], index[0]))}
         for conds, final in f.paths(self.actions, known, state):
@@ -479,7 +513,14 @@ class Machine:  # pylint: disable=too-many-instance-attributes
             if bad:
                 raise ValueError(f"control {', '.join(bad)} reads the value")
             value = fused.get(self.cell, self.cell)
-            out.append((conds, f.band(value, self.mask) if self.paired else value, nxt))
+            if self.paired:
+                wrapped = (
+                    isinstance(value, tuple) and value[0] == "and" and isinstance(value[2], int)
+                )
+                inner = value[1] if wrapped and (value[2] + 1) % (self.mask + 1) == 0 else value
+                shift = f.sub(final.get(OFFSET[1], 0), final.get(OFFSET[0], 0))
+                value = f.band(f.add(inner, shift), self.mask)
+            out.append((conds, value, nxt))
         return out if self.cell not in f.pair else self.project(out)
 
     def project(self, cases: list) -> list:

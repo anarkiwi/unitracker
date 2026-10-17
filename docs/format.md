@@ -1,4 +1,4 @@
-# unitracker song format (v1.18)
+# unitracker song format (v1.19)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.18
+unitracker: 1.19
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.18`; readers reject any other version |
+| `unitracker` | `1.19`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional; the complete list: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -263,7 +263,10 @@ instrument's restart program`, `ctrl: wgl is retired in v1.8`). The list rows of
 GoatTracker's pulse and filter tables and SID-Wizard's pulse, filter and WF tables are retired
 in v1.10 (`pw: row [32, 16] is retired in v1.10: a sweep, stall or keyboard-tracked row
 is its program's expression`): such a row is part of its program's `pw` or `cut` expression,
-which the lifter proves or fails on (see Lifting). GoatTracker's wavetable list rows are retired in
+which the lifter proves or fails on (see Lifting). SID-Wizard's pulse and filter row field `k`, the
+keyboard-track amount, is retired in v1.19 (`pw: k is retired in v1.19: a keyboard-tracked row
+is its program's pw or cut expression in N`): the amount is a term of `N` in the program's
+expression (see the SID-Wizard modulators). GoatTracker's wavetable list rows are retired in
 v1.15 (`ctrl: row [242] is retired in v1.15: write the row with the shared keys`): a wavetable
 command row is written with its shared keys or lifts as a row that has them, else the lift fails
 naming it (see the GoatTracker 2 backend), and no program row is a list. A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
@@ -477,8 +480,8 @@ the unit to the playroutine's own firing.
 | key | the unit's value |
 |---|---|
 | `freq` | the 16-bit voice frequency word (GoatTracker); in defMON and SID-Wizard, the 16-bit offset the player adds to the note's frequency |
-| `pw` | the pulse width: 12 bits (GoatTracker), the 16-bit pair `pwhi:pwlo` (SID-Wizard), a 16-bit cell whose low 12 bits are the register (defMON) |
-| `cut` | the 11-bit cutoff (GoatTracker, SID-Wizard); defMON's 17-bit ACID accumulator, the offset `cp` in its high byte (see Filter) |
+| `pw` | the pulse width: 12 bits (GoatTracker); the 12-bit register (SID-Wizard: the pair `pwhi:pwlo` plus its row's keyboard-track term); a 16-bit cell whose low 12 bits are the register (defMON) |
+| `cut` | the 11-bit cutoff (GoatTracker; SID-Wizard: the cell plus its row's keyboard-track term); defMON's 17-bit ACID accumulator, the offset `cp` in its high byte (see Filter) |
 
 A unit with `scale: s` keeps its value in a cell that holds the chip value divided by
 `s`: the player evaluates the expression with `v` as the cell times `s` and stores the
@@ -537,15 +540,24 @@ song hears fails it too.
 | unit | key | cell | fires | starts | written |
 |---|---|---|---|---|---|
 | `pitch` | `freq` | `voff` | every tick but the one a note starts on | a row writes `voff` or changes the vibrato or slide state, at the row or at its deferred FX | the instrument's `freq` for an instrument vibrato; else `!freq:@x` (FX 16) |
-| `pulse` | `pw` | `pwhi:pwlo` | every tick but the one a note starts on | a note starts the pulse program | the program's first row (instrument `pw`) |
-| `filter` | `cut` | `vfhi:vflo:3`, mirrored to the global cutoff | every tick but the one a note starts on | a note starts the filter program | the program's first row (instrument `filter`) |
+| `pulse` | `pw` | `pwhi:pwlo`, as the register: plus the row's keyboard-track term | every tick but the one a note starts on | a note starts the pulse program | the program's first row (instrument `pw`) |
+| `filter` | `cut` | `vfhi:vflo:3`, mirrored to the global cutoff, as the cutoff: plus the row's keyboard-track term | every tick the voice controls the filter but the one a note starts on | a note starts the filter program | the program's first row (instrument `filter`) |
 
 A `!freq` lasts until a note starts the instrument (which selects its `freq`) or another
 pitch effect replaces it. Big FX $01-$03, note-column vibrato ($60-$77) and glide ($78)
 are the pitch unit's own firings; a lifted song writes their modulations as `!freq`.
 Speeds read the table `W[k]` (`exptab[k]` below 107, the frequency word of note index
-`k - 107` above, size 204). The filter program runs for the voice that controls the
-filter.
+`k - 107` above, size 204). A pulse row's keyboard-track amount `k` (its third byte) adds a
+term of the note to the register's high nibble from the row until a later row's amount
+replaces it: with `y` the sum `N + 1 + k` wrapped to a byte and `c` its carry, `256·(E[y] -
+E[y - 1] + c - [E[y] - E[y - 1] + c < 1])` over the table `E[i]`, the player's EXPTABH (0 below 11,
+then the frequency high bytes from index `i - 11`, size 256). A lifted program writes it as
+its `pw` expression in `N`. The filter program runs for the voice that controls the filter,
+and a filter row's amount adds `E[y] + c` to the cutoff's high byte, with `y` and `c` from the
+controlling voice's note, from the row until a later row's amount replaces it: a lifted
+program writes it as its `cut` expression in `N`. A sum past $FF also adds its carry to
+`$D416`, which no cutoff value states, so a song that reaches it fails the lift; a third byte
+of $80-$8F sets the routing instead, which the lifter does not cover.
 
 ### defMON
 
@@ -770,6 +782,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `name` | the unit's name |
 | `key` | the shared key it drives: `freq`, `pw` or `cut` |
 | `cell` | the driven cell; a pair `hi:lo[:k]` is the value `hi << k \| lo & (2**k - 1)` (k 8 when omitted) |
+| `chip` | `{width, value, store}`: the unit's value is the chip value `value` reads from the cells, `width` bits, which `store` (reading `value`) writes back; on a pair cell it is the pair plus an offset free of the pair's parts |
 | `scale` | the chip value per cell unit (default 1; see Units) |
 | `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it |
 | `fire` | the actions (or proc names) of one firing |
@@ -777,7 +790,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing |
 | `hooks` | the starts: `{at: function, written: [cells], key: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `key` cells, or writes a `pointer` to a program that sets one of `program.fields` |
 | `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start |
-| `mirror` | a cell that takes the expression's value when it held the playroutine's |
+| `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
 | `label` | the cells that group a unit's occurrences for the lifter |
 | `relative` | cells a start reads as `N` plus their offset from the note (GoatTracker's `lastnote`) |
 | `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
@@ -942,8 +955,9 @@ program at another arp speed is not covered. `freq` is the row's detune, a const
 to 126 the player adds to the frequency word from that row until a later row sets another
 (a row without it sets 0; a native row that keeps the detune is written with the one it
 keeps, and the lifter refuses one that keeps different detunes on its loop's passes). Pulse
-set rows use `pw`; filter set rows `mode`, `cut` and
-`res`. A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there,
+set rows use `pw`, and a program with a keyboard-tracked row is its `pw` expression in `N` (see
+Modulators); filter set rows `mode`, `cut` and
+`res`, and a program with a keyboard-tracked row is its `cut` expression in `N`. A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there,
 each row with that row's waveform, which the player writes on every chord step. A chord
 small FX ($7x) holds until the voice's next note, so on a note it becomes `!run` of the
 instrument's program with that chord inlined. `!run` plays in the instrument column on an
