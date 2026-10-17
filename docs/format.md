@@ -194,6 +194,36 @@ Program rows and commands use one vocabulary in every song, in chip units.
 that changes one nibble of the sounding instrument's byte, so it plays a byte that differs
 from that in at most one nibble (see Backends).
 
+Each player takes the commands its playroutine declares (`commands`, `restart`, `lifetime`),
+with the arguments below: a range of the written value, `@type` a record of that type, `—`
+a command the player refuses by name (`sidwizard: the player can't express !tempo:6`).
+
+| command | `defmon` | `goattracker2` | `sidwizard` |
+|---|---|---|---|
+| `!run` | — | `@ctrltab`, `@pulsetab`, `@filttab` | `@wftab`, `none` |
+| `!run2` | `@sidtab` | — | — |
+| `!ad` | — | 0-255 | 0-255, at most one nibble from the instrument's |
+| `!sr` | — | 0-255 | 0-255, at most one nibble from the instrument's |
+| `!ctrl` | — | 0-255 | — |
+| `!resfilt` | — | 0-255 | — |
+| `!vol` | — | 0-15 | — |
+| `!cut` | — | 0-2040 step 8 | — |
+| `!tempo` | — | 3-127 | — |
+| `!vtempo` | — | 3-127 | — |
+| `!funk` | — | `@speedtab`, `none` | — |
+| `!freq` | — | `@x`, `none` | `@x`, `none` |
+| `!mark` | — | 16-255 | — |
+| `!restart` | `@restart` | — | — |
+| `!legato` | — | 0 | 0-255 |
+| `!pulse` | — | 0 | 0 |
+| `!filter` | — | 0 | 0 |
+
+The timing commands are GoatTracker's: its command $F plays a tempo of 2 as 3, so `!tempo`
+and `!vtempo` start at 3; `!funk` names the `speedtab` row of the swing pair, and the
+default tempo is the constant `deftempo`. SID-Wizard's tempo is the subtune's tempo pair, the
+constants `tempol` and `tempor`, and its tempo commands are not covered yet. A defMON step is
+one tick, and its arranger and pattern counters are lifted as the timeline (see Backends).
+
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
 (GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
