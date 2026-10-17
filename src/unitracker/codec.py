@@ -2,7 +2,8 @@
 
 A record type's ``codec`` shapes map raw fields to shared keys and back; a written row is
 accepted only if encoding its inverse gives the row again. A key may hold an expression,
-a reference ``("x", index)`` to the format's expression records.
+a reference ``("x", index)`` to the format's expression records, or a reference
+``(type, index)`` to a record a raw field holds (``{ref: type, field: f}``).
 """
 
 import keyword
@@ -24,6 +25,8 @@ ROW_KEYS = (
     "route",
     "mode",
     "freq",
+    "run",
+    "vol",
 )
 EXPR = "x"
 RETIRED = {
@@ -216,7 +219,8 @@ class _Shape:
     A ``route`` key's ``rel`` gives its relation to the program's voice (see
     :func:`route_value`). A raw field given as ``{search: [lo, hi]}`` is the first value in
     that range whose row writes back as the written one. A key's ``expr`` names the raw field
-    of its expression.
+    of its expression, and a key with ``ref`` is the reference to that record type its raw
+    ``field`` holds.
     """
 
     # pylint: disable=too-few-public-methods
@@ -228,6 +232,9 @@ class _Shape:
             if key not in ROW_KEYS:
                 raise CodecError(f"{key!r} is not a shared row key")
             self.keys[key] = kspec if isinstance(kspec, dict) else {"value": kspec}
+            if ("ref" in self.keys[key]) != ("field" in self.keys[key]):
+                raise CodecError(f"{key}: a reference key has both ref and field")
+        self.refs = {k for k, s in self.keys.items() if "ref" in s}
         self.raw, self.search = {}, None
         for field, expr in (spec.get("raw") or {}).items():
             if not isinstance(expr, dict):
@@ -267,6 +274,15 @@ class RowCodec:
                     out[key] = out.get(key, False) or "value" in kspec
         return out
 
+    def ref_keys(self) -> dict:
+        """``{key: (raw field, {record types})}`` of the keys that hold a record reference."""
+        out = {}
+        for shape in self.shapes:
+            for key, kspec in shape.keys.items():
+                if "ref" in kspec:
+                    out.setdefault(key, (kspec["field"], set()))[1].add(kspec["ref"])
+        return out
+
     def _full(self, row: dict) -> dict:
         return {f: int(row.get(f, d)) for f, d in self.rtype.fields.items()}
 
@@ -281,6 +297,9 @@ class RowCodec:
         for key in ROW_KEYS:
             kspec = shape.keys.get(key)
             if kspec is None:
+                continue
+            if "ref" in kspec:
+                out[key] = (kspec["ref"], row[kspec["field"]])
                 continue
             field = kspec.get("expr")
             if field is not None and row[field] != self.rtype.default(field):
@@ -346,9 +365,13 @@ class RowCodec:
         if extra:
             return f"keys {sorted(extra)}"
         for key, value in norm.items():
-            if is_expr(value) and "expr" not in shape.keys.get(key, {}):
+            kspec = shape.keys.get(key, {})
+            if "ref" in kspec:
+                if not (isinstance(value, tuple) and value[0] == kspec["ref"]):
+                    return f"{key} names no {kspec['ref']} here"
+            elif is_expr(value) and "expr" not in kspec:
                 return f"{key} holds no expression here"
-            if key == "ctrl" and isinstance(value, tuple) and "eor" not in shape.keys["ctrl"]:
+            elif key == "ctrl" and isinstance(value, tuple) and "eor" not in kspec:
                 return "ctrl holds no mask here"
         return None
 
@@ -356,10 +379,11 @@ class RowCodec:
         unfit = self._unfit(shape, norm)
         if unfit is not None:
             return None, unfit
-        env = self._env(shape, norm)
+        env = self._env(shape, {k: v for k, v in norm.items() if k not in shape.refs})
         raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
         raw.update({shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)})
+        raw.update({shape.keys[k]["field"]: v[1] for k, v in norm.items() if k in shape.refs})
         field, values = shape.search or (None, [None])
         problem = "no shape"
         for value in values:

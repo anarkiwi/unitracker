@@ -29,7 +29,37 @@ class Dumper(yaml.SafeDumper):
         return super().choose_scalar_style()
 
 
+class Decimal(float):
+    """A decimal number that keeps its text: a version's digits after the point are a number
+    of their own (1.10 follows 1.9)."""
+
+    text = ""
+
+
+def _decimal(loader, node):
+    out = Decimal(loader.construct_yaml_float(node))
+    out.text = str(node.value)
+    return out
+
+
+class Loader(yaml.SafeLoader):  # pylint: disable=too-many-ancestors
+    """Safe loading with each decimal number's text kept."""
+
+
+Loader.add_constructor("tag:yaml.org,2002:float", _decimal)
+for _dumper in (yaml.SafeDumper, Dumper):
+    _dumper.add_representer(
+        Decimal, lambda d, x: d.represent_scalar("tag:yaml.org,2002:float", x.text)
+    )
+
+
+def parse(text: str):
+    """A document's YAML, its version as written."""
+    return yaml.load(text, Loader=Loader)
+
+
 _SIGNED = re.compile(r"^[+-]\d+$")
+_DECIMAL = re.compile(r"^\d+\.\d+$")
 
 
 def _atom(dumper, data):
@@ -37,6 +67,8 @@ def _atom(dumper, data):
         tag = "tag:yaml.org,2002:bool"
     elif _SIGNED.match(data):
         tag = "tag:yaml.org,2002:int"
+    elif _DECIMAL.match(data):
+        tag = "tag:yaml.org,2002:float"
     else:
         tag = "tag:yaml.org,2002:str"
     return dumper.represent_scalar(tag, str(data), style="A")

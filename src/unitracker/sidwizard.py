@@ -178,8 +178,40 @@ def wf_rows(ins, chord) -> tuple[list, int | None]:
         start = len(out)
         out += [{"w": wave, "a": n, "d": detune, "h": hold} for n in offsets]
         if loops:
-            return out, start
-    return out, None
+            return settled(out, start), start
+    return settled(out, None), None
+
+
+def settled(rows: list, loop: int | None) -> list:
+    """WF rows with each detune a row keeps written as the one it keeps, and each hold row's
+    reload equal to its count.
+
+    A note starts the program with no detune. A row below $10 lasts its count whatever its
+    reload, which paces the program only after a last row that ends it.
+    """
+    kept, detune = {}, 0
+    again = range(loop, len(rows)) if loop is not None else range(0)
+    for k in [*range(len(rows)), *again]:
+        if rows[k]["d"] == NO_DETUNE:
+            kept.setdefault(k, set()).add(detune)
+        else:
+            detune = rows[k]["d"]
+    out = []
+    for k, row in enumerate(rows):
+        row = dict(row)
+        if k in kept:
+            if len(kept[k]) > 1:
+                raise LiftError(f"WF row {k} keeps a detune that differs between loop passes")
+            (row["d"],) = kept[k]
+        if row["w"] < WAVEFORM and row["h"] != row["w"]:
+            if loop is None and k + 1 == len(rows):
+                raise LiftError(
+                    "a WF hold row that ends its program with an arp speed other than its"
+                    " count is not covered"
+                )
+            row["h"] = row["w"]
+        out.append(row)
+    return out
 
 
 class Waves:

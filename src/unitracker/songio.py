@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.9 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.10 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker import eventrestart, retired, timeline
+from unitracker import eventrestart, refkeys, retired, timeline
 from unitracker.atoms import format_atom, parse_atom, runs
 from unitracker.codec import (
     NONE,
@@ -35,9 +35,9 @@ from unitracker.tablepatch import table_diff, unread_dropped
 from unitracker.vm import IR_VERSION, MAX_COMMANDS, compile_phrase
 from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
-from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap
+from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 
-VERSION = 1.9
+VERSION = "1.10"
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -45,7 +45,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.9 format."""
+    """A document does not follow the unitracker v1.10 format."""
 
 
 @functools.cache
@@ -106,10 +106,11 @@ def codecs(pr: dict, tables) -> dict:
 
 
 def _expr_fields(codec) -> set:
-    """The raw fields a codec writes as expression keys."""
+    """The raw fields a codec writes as expression or reference keys."""
     if codec is None:
         return set()
-    return {k["expr"] for shape in codec.shapes for k in shape.keys.values() if "expr" in k}
+    keys = [k for shape in codec.shapes for k in shape.keys.values()]
+    return {k["expr"] for k in keys if "expr" in k} | {k["field"] for k in keys if "ref" in k}
 
 
 def _refuse(problem) -> None:
@@ -130,7 +131,7 @@ def _ref_type(rtype, field, row):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.9 document."""
+    """Turns the internal representation into a canonical v1.10 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -335,12 +336,14 @@ class _Writer:
     def _shared_row(self, codec, shared: dict, refs: dict, place=None) -> FlowMap:
         """A row's shared-vocabulary form: notes named, expressions referenced, refs resolved."""
         self._reads_back(codec, shared, place)
-        out, number = {}, codec.expr_keys()
+        out, number, named = {}, codec.expr_keys(), codec.ref_keys()
         for k, v in shared.items():
             if k == "note":
                 v = Atom(note_text(*v))
             elif k in ("route", "ctrl"):
                 v = written_value(k, v)
+            elif k in named:
+                v = Atom(self.names[self.key(*v)])
             elif is_expr(v):
                 v = self.ref_value(self.key(EXPR, v[1]))
                 v = str(v) if number.get(k) else v
@@ -379,6 +382,8 @@ class _Writer:
         refs = self.referrers.get(key, [])
         if key[0] == EXPR:
             return "command" not in refs
+        if any(refkeys.named_ref(self.codecs, r) for r in refs):
+            return False
         rtype = self.rtypes[key[0]]
         if rtype.expr is not None and "command" not in refs:
             if not isinstance(self.program_value(key), Flow):
@@ -568,14 +573,14 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.9 document for internal-representation song ``ir``.
+    """A canonical v1.10 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
     writer = _Writer(ir)
     meta = ir.get("meta") or {}
     doc = {
-        "unitracker": VERSION,
+        "unitracker": Atom(VERSION),
         "playroutine": writer.playroutine_entry(embed),
         "meta": FlowMap({k: meta[k] for k in ("title", "author", "released") if k in meta}),
     }
@@ -592,7 +597,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.9 document to the internal representation."""
+    """Expands a v1.10 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -672,7 +677,7 @@ class _Reader:
             row = dict(value)
         else:
             row = self._list_row(rtype, codec, value, place)
-        _refuse(retired.row(rtype, row, value, _RowEval(rtype).holds))
+            _refuse(retired.row(rtype, row, value, _RowEval(rtype).holds))
         for field, val in list(row.items()):
             if field not in rtype.fields or field == rtype.chain:
                 raise SongFormatError(f"{rtype.name}: unknown field {field!r}")
@@ -682,7 +687,12 @@ class _Reader:
             target = _ref_type(rtype, field, plain) if field in rtype.refs else None
             if target == EXPR and isinstance(val, (str, int)) and not isinstance(val, bool):
                 row[field] = (EXPR, self.expr(val))
-            elif target is not None and self.rtypes[target].expr and isinstance(val, (str, int)):
+            elif (
+                target is not None
+                and self.rtypes[target].expr
+                and isinstance(val, (str, int))
+                and not refkeys.is_name(self.names, self.rtypes, val, target)
+            ):
                 row[field] = self._program(self.rtypes[target], val)
             elif isinstance(val, str):
                 row[field] = ("name", val)
@@ -709,10 +719,11 @@ class _Reader:
             if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
         }
         try:
+            names = refkeys.placeholders(self.names, self.rtypes, codec, value)
             row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
-        except CodecError as exc:
+        except ValueError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        return {**row, **named}, set(row)
+        return {**row, **named, **names}, set(row)
 
     @staticmethod
     def _list_row(rtype, codec, value, place) -> dict:
@@ -955,22 +966,23 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.9 document."""
-    doc = yaml.safe_load(text)
-    if not isinstance(doc, dict) or doc.get("unitracker") != VERSION:
+    """The internal representation of a v1.10 document."""
+    doc = parse(text)
+    version = doc.get("unitracker") if isinstance(doc, dict) else None
+    if getattr(version, "text", version) != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
     _refuse(retired.document(doc))
     return _Reader(doc).read()
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.9 document at ``path``."""
+    """The internal representation of the v1.10 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.9 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.10 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

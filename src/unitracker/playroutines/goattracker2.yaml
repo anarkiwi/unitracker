@@ -90,6 +90,30 @@ record_types:
         raw:
           w: "((ctrl | 0xE0) if ctrl < 0x10 else ctrl) if has_ctrl else wait"
           n: "((note | 0x80) if note_abs else (note & 0x7F)) if has_note else 0x80"
+      # Commands with a shared form, run as the pattern command of the same number: $F5/$F6
+      # set the envelope, $F9/$FA start the pulse/filter program, $FB sets $D417 (0 also
+      # stops the filter program), $FC the cutoff, $FD the volume (below $10).
+      - when: "w == 0xF5 and n >= 0 and n <= 0xFF"
+        keys: {ad: n}
+        raw: {w: 0xF5, n: ad}
+      - when: "w == 0xF6 and n >= 0 and n <= 0xFF"
+        keys: {sr: n}
+        raw: {w: 0xF6, n: sr}
+      - when: "w == 0xF9 and n != 0"
+        keys: {run: {ref: pulsetab, field: n}}
+        raw: {w: 0xF9}
+      - when: "w == 0xFA and n != 0"
+        keys: {run: {ref: filttab, field: n}}
+        raw: {w: 0xFA}
+      - when: "w == 0xFB and n != 0"
+        keys: {res: "n >> 4", route: "n & 0x0F"}
+        raw: {w: 0xFB, n: "((res & 0x0F) << 4) | (route & 0x0F)"}
+      - when: "w == 0xFC and n >= 0 and n <= 0xFF"
+        keys: {cut: "n << 3"}
+        raw: {w: 0xFC, n: "cut >> 3"}
+      - when: "w == 0xFD and n >= 0 and n < 0x10"
+        keys: {vol: n}
+        raw: {w: 0xFD, n: vol}
     do:
       - if: "row.w >= 0xF0"
         then:
@@ -111,6 +135,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: [l, r, next, x]
     refs: {x: x}
     codec:
@@ -126,6 +153,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {l: 0, r: 0, cut: -1, next: 0, x: 0}
     refs: {x: x}
     codec:

@@ -68,9 +68,12 @@ record_types:
           ctrl: {value: ctrl, omit: "ctrl < 0"}
         raw:
           ctrl: "ctrl if has_ctrl else -1"
-  # WF/arp row: w a waveform ($10+) or a row-hold count; a the arp byte (relative up $00-$7E,
-  # none $80, absolute $81-$DF, relative down $E0-$FF); d the detune ($FF: none); h the ticks
-  # the row holds after its first, the instrument's arp speed. A chord is the program's own rows.
+  # WF/arp row: w a waveform ($10+) or a hold count below $10 (the row keeps the waveform); a
+  # the arp byte (relative up $00-$7E, none $80, absolute $81-$DF, relative down $E0-$FF); d
+  # the signed detune the row sets, written as its constant freq ($FF keeps it; the lifter
+  # writes the value kept); h the ticks a waveform row holds after its first, the instrument's
+  # arp speed. A hold row lasts w ticks after its first whatever its h, which paces the
+  # program only once it ends; the lifter makes h equal w. A chord is the program's own rows.
   wftab:
     prefix: w
     none: 0
@@ -78,16 +81,29 @@ record_types:
     fields: {w: 0, a: 128, d: 0, h: 0, next: 0}
     retired:
       "a == 0x7F": "retired in v1.9: a chord is the program's own rows of relative notes"
+      "a != 0x7F": "retired in v1.10: write the row with the shared keys"
     codec:
-      - when: "w >= 0x10 and a != 0x7F and d == 0 and 0 <= h <= 0x3F"
+      - when: "w >= 0x10 and a != 0x7F and d != 0xFF and 0 <= h <= 0x3F"
         keys:
           hold: {value: "h + 1", omit: "h == 0"}
           ctrl: w
           note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
+          freq: {value: "s8(d)", omit: "d == 0"}
         raw:
           w: ctrl
           a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
           h: "hold - 1 if has_hold else 0"
+          d: "(freq & 0xFF) if has_freq else 0"
+      - when: "w >= 0 and w < 0x10 and h == w and a != 0x7F and d != 0xFF"
+        keys:
+          hold: {value: "w + 1", omit: "w == 0"}
+          note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
+          freq: {value: "s8(d)", omit: "d == 0"}
+        raw:
+          w: "(hold - 1) if has_hold else 0"
+          h: "(hold - 1) if has_hold else 0"
+          a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
+          d: "(freq & 0xFF) if has_freq else 0"
   # Pulse row: a $80+ sets the width from (a & $7F, b); otherwise a ticks of a signed b sweep.
   # k is the keyboard-track amount; x the expression a program of that one row is.
   pwtab:
@@ -95,6 +111,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {a: 0, b: 0, k: 0, next: 0, x: 0}
     refs: {x: x}
     codec:
@@ -109,6 +128,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {a: 0, b: 0, res: 0, k: 0, next: 0, x: 0}
     refs: {x: x}
     codec:
