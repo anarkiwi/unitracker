@@ -306,15 +306,19 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         self.spec = declared(self.pr)
         self.units = {u["name"]: u for u in self.spec.get("units") or []}
         self.obs, self.texts = obs, texts
-        self.exprs = {}
+        self.exprs = {int(i): str(t) for i, t in (self.ir.get("exprs") or {}).items()}
+        self.xindex = {t: i for i, t in sorted(self.exprs.items(), reverse=True)}
         self.events = {}
         self.instrument = self.pr.get("instrument") or {}
         self.records = self.ir.setdefault("records", {})
         self.codecs = codecs(self.pr, self.ir.get("tables"))
 
     def x(self, text: str) -> int:
-        """The index of an expression text."""
-        return self.exprs.setdefault(text, len(self.exprs) + 1)
+        """The index of an expression text, after the song's own expressions."""
+        if text not in self.xindex:
+            self.xindex[text] = max(self.exprs, default=0) + 1
+            self.exprs[self.xindex[text]] = text
+        return self.xindex[text]
 
     def site(self, occ):
         """``(record, index)`` of the record an occurrence's expression is written in, or None."""
@@ -335,7 +339,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         self.event_sites()
         self.retire()
         self.phrases()
-        self.ir["exprs"] = {i: t for t, i in self.exprs.items()}
+        self.ir["exprs"] = self.exprs
         self.check_shared({s["record"] for u in self.units.values() if (s := u.get("site"))})
         return self.ir
 

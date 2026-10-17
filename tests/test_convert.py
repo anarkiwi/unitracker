@@ -146,6 +146,21 @@ def test_a_record_with_two_expressions_is_cloned_into_a_phrase_variant():
     assert pw.index(3000) >= 24
 
 
+def test_a_song_with_expressions_keeps_them_and_numbers_new_ones_after():
+    ir = gt_ir("[C4.i1*4, D4*4, E4*4]")
+    ir["phrases"]["p1"][2]["command"] = [16, 1]
+    ir["exprs"] = {1: "(v + 300) % 65536"}
+    ir["phrases"]["p1"][1]["commands"] = [[17, 0], [3, 1]]
+    ir["records"]["speedtab"] = {1: {"l": 0, "r": 64}}
+    want = regs(ir, 80)
+    out = convert.convert(ir, cache=None, workers=1)
+    assert out["exprs"][1] == "(v + 300) % 65536" and set(out["exprs"]) == {1, 2}
+    (variant,) = [p["phrase"] for p in out["tracks"][0]["plays"]]
+    events = out["phrases"][variant]
+    assert events[1]["commands"] == [[17, 0], [16, 2]] and events[2]["command"] == [16, 1]
+    assert np.array_equal(regs(out, 80), want)
+
+
 def test_an_event_command_becomes_a_freq_expression_and_keeps_its_legato():
     ir = gt_ir("[C4.i1*4, D4*4]")
     ir["phrases"]["p1"][1]["commands"] = [[17, 0], [3, 1]]
