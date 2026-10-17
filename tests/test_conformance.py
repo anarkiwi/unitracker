@@ -5,14 +5,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import gt_tune, oracle, sw_fx, sw_table_byte
 from pydefmon import DefmonPlayer
 from pygoattracker import decompile_sid
 from pysidwizard import SWMPlayer, parse_sid_song
 
-from conftest import gt_tune, oracle, sw_fx, sw_table_byte
-from unitracker import defmon, sidwizard, songio
-from unitracker.goattracker import lift
-from unitracker.vm import SongPlayer
+from unitracker.format import songio
+from unitracker.lift import defmon, sidwizard
+from unitracker.lift.goattracker import lift
+from unitracker.player.vm import SongPlayer
 
 LOOP_TICKS = 3840
 DOC = Path(__file__).resolve().parents[1] / "docs" / "format.md"

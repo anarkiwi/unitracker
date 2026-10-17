@@ -2,7 +2,10 @@
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
+import yaml
+from conftest import gt_tune
 from pygoattracker import decompile_sid
 from pygoattracker.model import (
     Instrument,
@@ -15,13 +18,10 @@ from pygoattracker.model import (
     Transpose,
 )
 
-import numpy as np
-import yaml
-from conftest import gt_tune
-
-from unitracker import goattracker as gt, songio
+from unitracker.format import songio
+from unitracker.lift import goattracker as gt
 from unitracker.modfit.convert import ConversionError
-from unitracker.vm import SongPlayer
+from unitracker.player.vm import SongPlayer
 
 
 def table(*rows):

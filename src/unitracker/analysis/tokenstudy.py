@@ -9,12 +9,13 @@ import copy
 import functools
 import re
 import sys
+
 from tqdm import tqdm
 
-from unitracker import songio
-from unitracker.atoms import parse_atom
+from unitracker.format import songio
+from unitracker.format.atoms import parse_atom
+from unitracker.format.yamlstyle import Atom, Flow, FlowMap
 from unitracker.optimise import one_line
-from unitracker.yamlstyle import Atom, Flow, FlowMap
 
 SECTIONS = ("header", "definitions", "phrases", "plays", "structure")
 

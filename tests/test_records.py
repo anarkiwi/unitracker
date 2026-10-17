@@ -3,9 +3,9 @@
 import pytest
 from conftest import mini_song
 
-from unitracker.expr import ExprError
-from unitracker.records import RecordType, RecordTypeError, record_types
-from unitracker.vm import SongPlayer
+from unitracker.format.expr import ExprError
+from unitracker.format.records import RecordType, RecordTypeError, record_types
+from unitracker.player.vm import SongPlayer
 
 
 def test_defaults_and_refs():

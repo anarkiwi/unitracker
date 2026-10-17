@@ -2,7 +2,7 @@
 
 import pytest
 
-from unitracker import defmon as dm
+from unitracker.lift import defmon as dm
 
 
 def build_mem():

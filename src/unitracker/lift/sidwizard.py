@@ -7,11 +7,11 @@ from pysidwizard import End, Loop, PlayPattern, parse_sid_song
 from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
 
-from unitracker.codec import CodecError, CommandCodec
-from unitracker.records import record_types
-from unitracker.songio import library, song_meta
+from unitracker.format.codec import CodecError, CommandCodec
+from unitracker.format.records import record_types
+from unitracker.format.songio import library, song_meta
 from unitracker.modfit.convert import convert
-from unitracker.vm import fold_empty
+from unitracker.player.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 TABLE_JUMP = 0xFE

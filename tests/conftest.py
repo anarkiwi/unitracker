@@ -6,14 +6,25 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from pygoattracker import (
+    Instrument,
+    Orderlist,
+    Pattern,
+    Player,
+    PlayPattern,
+    Row,
+    Song,
+    Subtune,
+    Table,
+    TypedSong,
+)
 from pygoattracker import constants as GT
-from pygoattracker import Instrument, Orderlist, Pattern, Player, PlayPattern, Row, Song
-from pygoattracker import Subtune, Table, TypedSong
 from pysidtracker.testing import oracle_grid, resolve_tune
 from pysidwizard import parse_sid_song
 from pysidwizard.player import INST_WF_TABLE_POS
 
-from unitracker import backends, optimise
+from unitracker import optimise
+from unitracker.lift import backends
 
 METAL_WARRIOR = "MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid"
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"

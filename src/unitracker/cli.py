@@ -7,8 +7,11 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from unitracker import backends, optimise, orthogonality, songio
-from unitracker.vm import SongPlayer, first_mismatch
+from unitracker import optimise
+from unitracker.analysis import orthogonality
+from unitracker.format import songio
+from unitracker.lift import backends
+from unitracker.player.vm import SongPlayer, first_mismatch
 
 
 def lift_main(argv=None) -> int:

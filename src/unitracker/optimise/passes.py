@@ -1,5 +1,6 @@
 """The passes: each lists the candidate edits of a song, in a deterministic order."""
 
+from unitracker.format.records import EXPR
 from unitracker.optimise.edits import hoist_value, repeats
 from unitracker.optimise.model import (
     apart,
@@ -13,7 +14,6 @@ from unitracker.optimise.model import (
     view,
     walk,
 )
-from unitracker.records import EXPR
 
 
 def _pairs(indices):

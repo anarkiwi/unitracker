@@ -10,21 +10,20 @@ import pytest
 import sympy
 import z3
 
+from unitracker.format import songio
+from unitracker.format.songio import library
+from unitracker.modfit import chipinv, convert
 from unitracker.modfit import grammar as G
-from unitracker import songio
 from unitracker.modfit.cli import main
-from unitracker.modfit import convert
 from unitracker.modfit.convert import analyse, groups
 from unitracker.modfit.exprs import Analysis, Result
 from unitracker.modfit.exprs_report import load, native_grid
-from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.form import Form
+from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.orbit import deltas
-from unitracker.modfit import chipinv
 from unitracker.modfit.phase import Machine, derive, unproved_functions
 from unitracker.modfit.replay import Replay
-from unitracker.songio import library
-from unitracker.vm import SongPlayer
+from unitracker.player.vm import SongPlayer
 
 PHI, V, N = G.PHI, G.V, G.N
 GT_FREQ, DM_FREQ = {"word": "ftab"}, {"hi": "note_hi", "lo": "note_lo"}

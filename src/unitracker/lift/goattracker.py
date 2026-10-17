@@ -7,9 +7,9 @@ import yaml
 from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
-from unitracker.songio import song_meta
+from unitracker.format.songio import song_meta
 from unitracker.modfit.convert import convert, window
-from unitracker.vm import SongPlayer, fold_empty
+from unitracker.player.vm import SongPlayer, fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}

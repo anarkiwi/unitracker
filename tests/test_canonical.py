@@ -1,6 +1,6 @@
 """Normalizing native write streams to canonical flushes."""
 
-from unitracker.canonical import CANONICAL_ORDER, canonical_frames
+from unitracker.player.canonical import CANONICAL_ORDER, canonical_frames
 
 
 def test_order_covers_every_register_once():

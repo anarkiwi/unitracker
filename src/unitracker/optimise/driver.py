@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from tqdm import tqdm
 
-from unitracker import songio
+from unitracker.format import songio
 from unitracker.optimise.describe import describe
 from unitracker.optimise.edits import EDITS
 from unitracker.optimise.model import ERRORS

@@ -3,7 +3,8 @@
 import pytest
 from test_tokenstudy import song
 
-from unitracker import songio, spelling, tokenstudy
+from unitracker.analysis import spelling, tokenstudy
+from unitracker.format import songio
 
 
 @pytest.fixture(scope="module", name="written")

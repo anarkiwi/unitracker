@@ -13,11 +13,9 @@ from importlib import resources
 
 import yaml
 
-from unitracker import envelope, eventfold, eventins, eventrestart, hints, inline, lifetime
-from unitracker import refkeys, retired
-from unitracker import timeline
-from unitracker.atoms import format_atom, parse_atom, runs
-from unitracker.codec import (
+from unitracker.format import hints, inline, refkeys, retired, timeline, xexpr
+from unitracker.format.atoms import format_atom, parse_atom, runs
+from unitracker.format.codec import (
     NONE,
     RETIRED,
     ROW_KEYS,
@@ -27,17 +25,17 @@ from unitracker.codec import (
     RowCodec,
     arg_text,
     is_expr,
-    row_place,
     note_text,
+    row_place,
     written_value,
 )
-from unitracker.modulation import declared
-from unitracker.records import EXPR, RowEval, record_types, ref_type
-from unitracker.tablepatch import table_diff, unread_dropped
-from unitracker.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
-from unitracker import xexpr
-from unitracker.xexpr import ExpressionError, text_of
-from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
+from unitracker.format.events import envelope, fold, instrument, lifetime, restart
+from unitracker.format.records import EXPR, RowEval, record_types, ref_type
+from unitracker.format.tablepatch import table_diff, unread_dropped
+from unitracker.format.xexpr import ExpressionError, text_of
+from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
+from unitracker.player.modulation import declared
+from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
 
 VERSION = "1.19"
 WIDTH = 100
@@ -132,7 +130,7 @@ class _Writer:
             name: {int(k): v for k, v in (rows or {}).items()}
             for name, rows in (ir.get("records") or {}).items()
         }
-        self.ins_type, self.ins_base = eventins.document(self.pr)
+        self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
         self.exprs = {int(k): str(v) for k, v in (ir.get("exprs") or {}).items()}
         canon = {}
@@ -152,9 +150,7 @@ class _Writer:
             self.pr, written, self.ir["tracks"], self.ir["phrases"], self.records.get(native, {})
         )
         self.records.update({native: rows} if native in self.records else {})
-        self.folds = eventfold.EventFolds(
-            self.pr, self.rtypes, self.codecs, self.commands, self.records
-        )
+        self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -257,10 +253,10 @@ class _Writer:
         return alias, compiled
 
     def _folded(self, arr):
-        """A compiled phrase with its event restarts and instruments named (see ``eventfold``)."""
+        """A compiled phrase with its event restarts and instruments named (see ``events.fold``)."""
         try:
             return self.folds.fold(arr, self.program)
-        except eventfold.FoldError as exc:
+        except fold.FoldError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
 
     # -- representations --
@@ -388,8 +384,8 @@ class _Writer:
         """A command as ``name:arg``, or None for no command."""
         if not (cmd or raw):
             return None
-        if cmd == eventrestart.CODE:
-            return f"{eventrestart.NAME}:@{self.names[(eventrestart.NAME, raw)]}"
+        if cmd == restart.CODE:
+            return f"{restart.NAME}:@{self.names[(restart.NAME, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
@@ -409,8 +405,8 @@ class _Writer:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             cmds = row[3:EVENT_COLUMNS]
             for cmd, arg in zip(cmds[::2], cmds[1::2]):
-                if cmd == eventrestart.CODE:
-                    yield (eventrestart.NAME, int(arg)), "command"
+                if cmd == restart.CODE:
+                    yield (restart.NAME, int(arg)), "command"
                     continue
                 target = self.commands.ref(int(cmd))
                 if target is not None and not self.commands.inline(int(cmd)):
@@ -584,7 +580,7 @@ class _Reader:
         self.doc = doc
         self.pr = self._playroutine(doc.get("playroutine"))
         self.rtypes = record_types(self.pr)
-        self.ins_type, self.ins_base = eventins.document(self.pr)
+        self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
         self.exprs = {}
         self.named_tables = set((declared(self.pr).get("tables") or {}))
@@ -594,9 +590,7 @@ class _Reader:
         self.records = {name: {} for name in self.rtypes}
         self.written = {rt.written: rt for rt in self.rtypes.values()}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
-        self.folds = eventfold.EventFolds(
-            self.pr, self.rtypes, self.codecs, self.commands, self.records
-        )
+        self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
 
     def _playroutine(self, spec) -> dict:
         if not isinstance(spec, dict):
@@ -830,7 +824,7 @@ class _Reader:
         refs = {self.commands.ref(code) for code, _ in commands}
         keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"], refs)
         event.update({"keep": keep} if keep else {})
-        for code, index in [c for c in commands if c[0] == eventrestart.CODE]:
+        for code, index in [c for c in commands if c[0] == restart.CODE]:
             event["restart"] = index
             commands.remove([code, index])
         if len(commands) == 1:
@@ -842,18 +836,18 @@ class _Reader:
         return event
 
     def _unfolded(self, events: list, phrase: str) -> list:
-        """A phrase's events with its restarts and instruments unfolded (see ``eventfold``)."""
+        """A phrase's events with its restarts and instruments unfolded (see ``events.fold``)."""
         try:
             return self.folds.unfold(events, self._alloc)
-        except eventfold.FoldError as exc:
+        except fold.FoldError as exc:
             raise SongFormatError(f"{self.pr['name']}: phrase {phrase}: {exc}") from exc
 
     def command(self, cmd, arg, atom) -> list[int]:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd in RETIRED:
             raise SongFormatError(f"!{cmd} is {RETIRED[cmd]} in {atom!r}")
-        if cmd == eventrestart.NAME and self.folds.held(cmd) and isinstance(arg, str):
-            return [eventrestart.CODE, self.lookup(arg[1:], eventrestart.NAME)]
+        if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
+            return [restart.CODE, self.lookup(arg[1:], restart.NAME)]
         row = isinstance(arg, tuple) and not self.commands.values(cmd)
         if row or (isinstance(arg, int) and self.commands.inline(cmd)):
             arg = self._inline(cmd, arg if isinstance(arg, tuple) else (arg,), atom)

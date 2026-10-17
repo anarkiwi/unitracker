@@ -13,7 +13,7 @@ import z3
 from unitracker.modfit import grammar as G
 from unitracker.modfit.flow import NESTED, cells_of, names, parse
 from unitracker.modfit.invariant import inductive
-from unitracker.modulation import VALUE
+from unitracker.player.modulation import VALUE
 
 
 @dataclasses.dataclass

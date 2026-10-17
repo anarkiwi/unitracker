@@ -7,7 +7,7 @@ the command's record type; the program's last row, on the note's first tick, is 
 
 import numpy as np
 
-from unitracker.codec import CodecError, row_place
+from unitracker.format.codec import CodecError, row_place
 
 CODE = -1
 NAME = "restart"

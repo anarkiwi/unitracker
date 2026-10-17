@@ -5,7 +5,6 @@ written text has fewer tokens and plays the input's register grid (see :func:`mi
 applies the passes to a fixpoint (see docs/optimise.md).
 """
 
-from unitracker import reach
 from unitracker.optimise.describe import describe, first_difference, one_line, writer
 from unitracker.optimise.driver import Finding, Optimiser, Result, optimise
 from unitracker.optimise.edits import (
@@ -38,6 +37,7 @@ from unitracker.optimise.passes import (
     shared_runs,
 )
 from unitracker.optimise.proof import ENCODING, Trace, mismatch, tokens
+from unitracker.player import reach
 
 __all__ = [
     "alias",

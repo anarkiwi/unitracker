@@ -12,9 +12,10 @@ from pathlib import Path
 
 import numpy as np
 
-from unitracker import backends, songio
 from unitracker.cli import lift_main
-from unitracker.vm import SongPlayer, first_mismatch
+from unitracker.format import songio
+from unitracker.lift import backends
+from unitracker.player.vm import SongPlayer, first_mismatch
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
 TUNES = (

@@ -3,7 +3,8 @@
 import pytest
 from test_optimise import PULSE, doc, ins_line
 
-from unitracker import songio, tokenstudy
+from unitracker.analysis import tokenstudy
+from unitracker.format import songio
 
 I2 = ins_line("i2", "ad: 4, ctrl: [{ctrl: 33, note: +0}, end]")
 X = (

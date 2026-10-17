@@ -10,7 +10,7 @@ from importlib import resources
 import yaml
 from pysidtracker import SidImage
 
-from unitracker.songio import song_meta
+from unitracker.format.songio import song_meta
 from unitracker.modfit.convert import convert
 
 PAL_HZ = 985248

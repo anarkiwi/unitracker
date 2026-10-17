@@ -1,6 +1,6 @@
 """Record types: the field layout, references and templates a playroutine declares."""
 
-from unitracker.expr import ExprError, Resolver
+from unitracker.format.expr import ExprError, Resolver
 
 META_KEYS = {
     "fields",

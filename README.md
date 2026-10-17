@@ -33,8 +33,8 @@ unitracker-optimise song.yaml -o smaller.yaml [--report orthogonality.md]  # sam
 ```
 
 ```python
-from unitracker import songio
-from unitracker.vm import SongPlayer
+from unitracker.format import songio
+from unitracker.player.vm import SongPlayer
 
 player = SongPlayer(songio.load("song.yaml"))
 grid = player.render_grid(3000)            # (ticks, 25) SID register grid

@@ -226,7 +226,7 @@ by what they do to the SID.
      paths, `f` and `a` at that state's phase equal the player's value and advance;
      `f(v, φ + P) = f(v, φ)` and the same for `a` from the prefix on; `g(0) = f(v0, 0)` and
      `g(φ + 1) = f(g(φ), φ + 1)`.
-   - Starts and firings come from the compiled player (`unitracker.modulation`): each unit's
+   - Starts and firings come from the compiled player (`unitracker.player.modulation`): each unit's
      `pre`/`post` functions bound a firing and its `hooks` mark a restart, which opens an
      occurrence at the next firing. The hook is run again symbolically with the note as `N`
      for the start's terms (amplitudes, start values).

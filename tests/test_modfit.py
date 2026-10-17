@@ -5,14 +5,14 @@ import itertools
 import pytest
 import sympy
 
+from unitracker.modfit import orbit as orbit_mod
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.arith import Arith
 from unitracker.modfit.cli import check_lines, main
 from unitracker.modfit.fit import Fitter, model_text, src
 from unitracker.modfit.form import Form, atoms
-from unitracker.modfit import orbit as orbit_mod
 from unitracker.modfit.orbit import deltas, orbits, pingpong, reflector, report, start
-from unitracker.vm import CLAMPS, SongError, _acc
+from unitracker.player.vm import CLAMPS, SongError, _acc
 
 TOY = {"voice": {"x": {"width": 8}, "a": {"width": 8}, "b": {"width": 8}, "e": None}}
 

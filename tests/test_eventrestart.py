@@ -3,13 +3,14 @@
 import numpy as np
 import pytest
 
-from unitracker import eventrestart, songio
-from unitracker.vm import SongPlayer, compile_phrase
+from unitracker.format import songio
+from unitracker.format.events import restart
+from unitracker.player.vm import SongPlayer, compile_phrase
 
 LAYER_B = 1
 
 
-def song(phrase, restart="[{hold: 3, ctrl: ^8}, {}, end]", ins="i1: {ctrl: [{ctrl: 64^1}, end]}"):
+def song(phrase, program="[{hold: 3, ctrl: ^8}, {}, end]", ins="i1: {ctrl: [{ctrl: 64^1}, end]}"):
     return f"""
 unitracker: 1.19
 playroutine: {{ref: defmon}}
@@ -18,7 +19,7 @@ song:
       ins:
         {ins}
       restart:
-        r1: {restart}
+        r1: {program}
       phrase:
         p1: {phrase}
         p2: [-*12]
@@ -41,11 +42,11 @@ def test_fold_moves_a_lone_command_onto_the_note_it_precedes():
         seen.append((entry, gap))
         return 7
 
-    out = eventrestart.fold(phrase, LAYER_B, restart_of)
+    out = restart.fold(phrase, LAYER_B, restart_of)
     assert seen == [(4, 2), (4, 1)]
     assert out[1].tolist() == [0] * 7 and out[4].tolist() == [0] * 7
-    assert out[3].tolist() == [1, 60, 2, eventrestart.CODE, 7, 0, 0]
-    assert out[5].tolist() == [1, 62, 2, LAYER_B, 5, eventrestart.CODE, 7]
+    assert out[3].tolist() == [1, 60, 2, restart.CODE, 7, 0, 0]
+    assert out[5].tolist() == [1, 62, 2, LAYER_B, 5, restart.CODE, 7]
 
 
 @pytest.mark.parametrize(
@@ -60,12 +61,12 @@ def test_fold_moves_a_lone_command_onto_the_note_it_precedes():
 )
 def test_fold_leaves_what_is_not_a_restart(step, note):
     phrase = arr((0,), step, note)
-    assert (eventrestart.fold(phrase, LAYER_B, lambda e, g: 1) == phrase).all()
+    assert (restart.fold(phrase, LAYER_B, lambda e, g: 1) == phrase).all()
 
 
 def test_fold_leaves_a_command_with_no_restart():
     phrase = arr((0,), (0, 0, 0, LAYER_B, 4), (1, 60))
-    assert (eventrestart.fold(phrase, LAYER_B, lambda e, g: None) == phrase).all()
+    assert (restart.fold(phrase, LAYER_B, lambda e, g: None) == phrase).all()
 
 
 def test_unfold_splits_the_steps_before_the_note():
@@ -75,7 +76,7 @@ def test_unfold_splits_the_steps_before_the_note():
         {"steps": 3},
         {"note": 53, "restart": 1},
     ]
-    out = eventrestart.unfold(events, LAYER_B, lambda index: (9, 3))
+    out = restart.unfold(events, LAYER_B, lambda index: (9, 3))
     assert out == [
         {"note": 50, "steps": 2},
         {"command": [LAYER_B, 9], "steps": 3},
@@ -84,12 +85,12 @@ def test_unfold_splits_the_steps_before_the_note():
         {"note": 53},
     ]
     start = [{"steps": 3}, {"note": 1, "restart": 1}]
-    assert eventrestart.unfold(start, LAYER_B, lambda index: (9, 3)) == [
+    assert restart.unfold(start, LAYER_B, lambda index: (9, 3)) == [
         {"command": [LAYER_B, 9], "steps": 3},
         {"note": 1},
     ]
     one = [{"steps": 2}, {"note": 1, "restart": 1}]
-    assert eventrestart.unfold(one, LAYER_B, lambda index: (9, 1)) == [
+    assert restart.unfold(one, LAYER_B, lambda index: (9, 1)) == [
         {},
         {"command": [LAYER_B, 9]},
         {"note": 1},
@@ -105,8 +106,8 @@ def test_unfold_splits_the_steps_before_the_note():
     ],
 )
 def test_unfold_refuses_a_restart_without_room(events, match):
-    with pytest.raises(eventrestart.RestartError, match=match):
-        eventrestart.unfold(events, LAYER_B, lambda index: (9, 3))
+    with pytest.raises(restart.RestartError, match=match):
+        restart.unfold(events, LAYER_B, lambda index: (9, 3))
 
 
 def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
@@ -143,15 +144,15 @@ def test_a_layer_b_program_before_a_note_is_folded():
 
 
 @pytest.mark.parametrize(
-    "phrase,restart,match",
+    "phrase,program,match",
     [
         ("[-*2, C3.i1!restart:@r1*8]", None, "3 empty steps"),
         ("[-*4, C3.i1!restart:@r1*8]", "[{}, end]", "a row before its note"),
         ("[-*4, C3.i1!restart:@r1*8]", "[{hold: 3}, {ctrl: 9}, end]", "can't express row"),
     ],
 )
-def test_the_reader_refuses_a_restart_it_cannot_play(phrase, restart, match):
-    text = song(phrase, restart) if restart else song(phrase)
+def test_the_reader_refuses_a_restart_it_cannot_play(phrase, program, match):
+    text = song(phrase, program) if program else song(phrase)
     with pytest.raises(songio.SongFormatError, match=match):
         songio.loads(text)
 

@@ -8,22 +8,23 @@ lives: a record site (a program's first row, an instrument field) or the event's
 import ast
 import copy
 import dataclasses
+import importlib.util
 import json
 import pickle
 from pathlib import Path
 
 import sympy
 
-from unitracker import reach
-from unitracker.codec import evaluate
+from unitracker.format.codec import evaluate
+from unitracker.format.records import record_types
+from unitracker.format.songio import codecs
+from unitracker.format.xexpr import ExpressionError, source
 from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
-from unitracker.modulation import declared
-from unitracker.songio import codecs
-from unitracker.records import record_types
-from unitracker.vm import SongPlayer, first_mismatch, fold_empty
-from unitracker.xexpr import ExpressionError, source
+from unitracker.player import reach
+from unitracker.player.modulation import declared
+from unitracker.player.vm import SongPlayer, first_mismatch, fold_empty
 
 CACHE = Path("out/modfit/cache")
 IDENTITY = "v"
@@ -39,7 +40,10 @@ SOURCES = [
         "chipinv.py",
         "invariant.py",
     )
-] + [_HERE.parent / f for f in ("modulation.py", "vm.py", "records.py", "codec.py")]
+] + [
+    Path(importlib.util.find_spec(f"unitracker.{m}").origin)
+    for m in ("player.modulation", "player.vm", "format.records", "format.codec")
+]
 
 
 class ConversionError(ValueError):

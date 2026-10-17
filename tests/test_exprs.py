@@ -3,8 +3,9 @@
 import numpy as np
 import pytest
 
-from unitracker import backends, songio, xexpr
-from unitracker.vm import SongError, SongPlayer
+from unitracker.format import songio, xexpr
+from unitracker.lift import backends
+from unitracker.player.vm import SongError, SongPlayer
 
 GT = songio.library("goattracker2")["tables"]
 SW = songio.library("sidwizard")["tables"]

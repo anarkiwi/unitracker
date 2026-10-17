@@ -5,10 +5,11 @@ from collections.abc import Iterator
 import numpy as np
 from tqdm import tqdm
 
-from unitracker import modulation, xexpr
-from unitracker.canonical import CANONICAL_ORDER, REG_COUNT
-from unitracker.expr import ExprError, Resolver
-from unitracker.records import EXPR, record_types
+from unitracker.format import xexpr
+from unitracker.format.expr import ExprError, Resolver
+from unitracker.format.records import EXPR, record_types
+from unitracker.player import modulation
+from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT
 
 IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
@@ -385,7 +386,7 @@ class _Codegen:
         self.count(cell, store, out, pad)
 
     def count(self, cell, store, out, pad):
-        """Append the write count of a watched cell (see :mod:`unitracker.modulation`)."""
+        """Append the write count of a watched cell (see :mod:`unitracker.player.modulation`)."""
         if cell in self.watch:
             key = f"({'id(v)' if store.startswith('v[') else 0}, {cell!r})"
             out.append(f"{pad}_W[{key}] = _W.get({key}, 0) + 1")
@@ -542,7 +543,9 @@ class SongPlayer:
 
     def __init__(self, song: dict, record_reads: bool = False, watch: bool | None = None):
         if song.get("unitracker") != IR_VERSION:
-            raise SongError("not an expanded unitracker song; read files with unitracker.songio")
+            raise SongError(
+                "not an expanded unitracker song; read files with unitracker.format.songio"
+            )
         if len(song["tracks"]) != int(song.get("voices", 3)):
             raise SongError("one track per voice is required")
         self.song = song

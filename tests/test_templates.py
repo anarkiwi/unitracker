@@ -2,8 +2,8 @@
 
 import pytest
 
-from unitracker import songio
-from unitracker.vm import SongPlayer
+from unitracker.format import songio
+from unitracker.player.vm import SongPlayer
 
 
 def run_row(name, rtype, row, cells=None, **where):

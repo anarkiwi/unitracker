@@ -1,9 +1,9 @@
 """Edits described in the written document's names and forms, for findings and reports."""
 
-from unitracker import songio
+from unitracker.format import songio
+from unitracker.format.records import EXPR
 from unitracker.optimise.edits import EDITS, hoist_value
 from unitracker.optimise.model import ERRORS, view
-from unitracker.records import EXPR
 
 
 def one_line(value) -> str:

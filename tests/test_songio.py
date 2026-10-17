@@ -7,11 +7,11 @@ import pytest
 import yaml
 from pygoattracker import decompile_sid
 
-from unitracker import songio
-from unitracker.goattracker import lift
-from unitracker.songio import SongFormatError
-from unitracker.vm import SongPlayer
-from unitracker.yamlstyle import parse
+from unitracker.format import songio
+from unitracker.format.songio import SongFormatError
+from unitracker.format.yamlstyle import parse
+from unitracker.lift.goattracker import lift
+from unitracker.player.vm import SongPlayer
 
 PLAYROUTINE = {
     "name": "mini",

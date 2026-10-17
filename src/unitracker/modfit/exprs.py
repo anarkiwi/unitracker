@@ -18,7 +18,7 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.form import atoms
 from unitracker.modfit.phase import Lift, Machine, derive, dispatch
 from unitracker.modfit.replay import Stepper
-from unitracker.modulation import declared
+from unitracker.player.modulation import declared
 
 # ---- derivation --------------------------------------------------------------------------
 

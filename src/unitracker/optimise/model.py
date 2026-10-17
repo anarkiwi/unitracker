@@ -2,10 +2,10 @@
 
 import copy
 
-from unitracker import songio
-from unitracker.codec import CommandCodec
-from unitracker.records import EXPR, record_types, ref_type
-from unitracker.vm import EVENT_COLUMNS, event_commands
+from unitracker.format import songio
+from unitracker.format.codec import CommandCodec
+from unitracker.format.records import EXPR, record_types, ref_type
+from unitracker.player.vm import EVENT_COLUMNS, event_commands
 
 ERRORS = (ValueError, KeyError, IndexError, TypeError)
 

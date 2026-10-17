@@ -6,8 +6,8 @@ field naming the program, and ``flag`` the header bit that keeps it (see docs/fo
 
 import numpy as np
 
-from unitracker.records import program_rows, ref_type
-from unitracker.vm import event_commands
+from unitracker.format.records import program_rows, ref_type
+from unitracker.player.vm import event_commands
 
 NAME = "lifetime"
 NAMES = ("pulse", "filter")

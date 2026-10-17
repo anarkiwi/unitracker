@@ -2,7 +2,8 @@
 
 import copy
 
-from unitracker.codec import CodecError
+from unitracker.format.codec import CodecError
+from unitracker.format.records import ref_type
 from unitracker.optimise.model import (
     apart,
     copied,
@@ -20,7 +21,6 @@ from unitracker.optimise.model import (
     steps_of,
     view,
 )
-from unitracker.records import ref_type
 
 
 def merge(ir: dict, tname: str, keep: int, drop: int) -> dict | None:

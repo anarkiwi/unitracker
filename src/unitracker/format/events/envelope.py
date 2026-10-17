@@ -7,9 +7,9 @@ from its override, which must leave it unchanged; overrides last until the next 
 
 import functools
 
-from unitracker.codec import ENVELOPE, envelope_names
-from unitracker.lifetime import order, starts
-from unitracker.vm import event_commands
+from unitracker.format.codec import ENVELOPE, envelope_names
+from unitracker.format.events.lifetime import order, starts
+from unitracker.player.vm import event_commands
 
 NIBBLE = 0x0F
 

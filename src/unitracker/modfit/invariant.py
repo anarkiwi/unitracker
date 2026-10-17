@@ -12,7 +12,7 @@ from unitracker.modfit import playroutine, resolve
 from unitracker.modfit.fit import Fitter, src
 from unitracker.modfit.flow import NESTED, Writes, action_lists, cells_of, direct_writes, names
 from unitracker.modfit.form import Form, atoms, lin
-from unitracker.vm import PSEUDO
+from unitracker.player.vm import PSEUDO
 
 
 def bodies(actions):

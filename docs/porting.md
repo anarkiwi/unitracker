@@ -17,8 +17,8 @@ with `PYTHONPATH=src`. `TUNE.sid` is the port's reference tune, `<name>` the pla
 | playroutine | `src/unitracker/playroutines/<name>.yaml` | the replay transcribed as cells, procs, records and a ghost (*The playroutine*) |
 | record types and codecs | the playroutine's `record_types` and `commands` | the native table layouts, and each row kind and command code as shared keys and back, rejecting what the player cannot play (*Record types*, *Codecs*) |
 | modulator units | the playroutine's `modulators` | the cells the song drives by expressions (*Modulator declarations*) |
-| lifter | `src/unitracker/<name>.py` | native module data to the internal representation (*The internal representation*) |
-| backend entry | `src/unitracker/backends.py` | detection, and dispatch to the lifter and the native player |
+| lifter | `src/unitracker/lift/<name>.py` | native module data to the internal representation (*The internal representation*) |
+| backend entry | `src/unitracker/lift/backends.py` | detection, and dispatch to the lifter and the native player |
 | reference tune | `tests/conftest.py` | an HVSC tune fetched into `.tunecache/` and checked against the native replay |
 
 The native replay comes from a Python package built on `pysidtracker` (`pygoattracker`,
@@ -98,8 +98,8 @@ where the replay writes the note's frequency, which need not be where the event 
 PYTHONPATH=src .venv/bin/python -c '
 import sys, numpy as np
 from pathlib import Path
-from unitracker import backends
-from unitracker.vm import SongPlayer
+from unitracker.lift import backends
+from unitracker.player.vm import SongPlayer
 raw = Path(sys.argv[1]).read_bytes()
 theirs = np.asarray(backends.native_player(raw).render_grid(3007), dtype=np.uint8)
 print(SongPlayer(backends.lift(raw, expressions=False)).mismatch(theirs))
@@ -240,9 +240,9 @@ the existing ports do.
 | tempo | the tempo commands and constants (*Shared vocabulary*) | `commands` entries with `when`, `arg`, `raw` | the command table; a tempo command no entry declares is refused by name |
 
 The writer and reader resolve the context these forms need by walking each voice's plays:
-`lifetime.py` (the instrument a note plays), `envelope.py` (an envelope nibble command as the byte
-it writes), and the event folds `eventfold.py`, `eventins.py` (the record an event's columns arm)
-and `eventrestart.py` (a restart run on the steps before its note). They read the playroutine's
+`src/unitracker/format/events/`: `lifetime.py` (the instrument a note plays), `envelope.py` (an
+envelope nibble command as the byte it writes), and the event folds `fold.py`, `instrument.py` (the
+record an event's columns arm) and `restart.py` (a restart run on the steps before its note). They read the playroutine's
 `lifetime`, `commands` with `nibble`, `instrument: writes_as` and `restart` declarations, so a port
 declares them rather than codes them; each raises its own error naming what has no written form.
 
@@ -252,7 +252,7 @@ shapes and `commands`. **Verify:**
 
 ## 6. The lifter
 
-`src/unitracker/<name>.py` defines `LiftError(ValueError)` and
+`src/unitracker/lift/<name>.py` defines `LiftError(ValueError)` and
 `lift(raw: bytes, subtune, expressions: bool = True) -> dict`, which decodes the module with the
 native package and returns the internal representation:
 
@@ -290,7 +290,7 @@ first note selects no instrument`). Never fall back to an
 approximation: acceptance is the exact grid, and an unproved modulation raises
 `ConversionError`. List what the lifter refuses in the port's paragraph of *Backends*.
 
-**Files:** `src/unitracker/<name>.py`, `src/unitracker/backends.py`, `pyproject.toml` (the native
+**Files:** `src/unitracker/lift/<name>.py`, `src/unitracker/lift/backends.py`, `pyproject.toml` (the native
 package, the description), `docs/format.md` (the *Backends* table and paragraph, the timing and
 command subsets). **Verify:**
 
@@ -347,7 +347,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -n auto --cov=unitracker --cov-fail-un
 |---|---|---|---|
 | 1 | pick the closest port; fetch the reference tunes | `tests/conftest.py` | `.venv/bin/python tools/reference_check.py out/porting` |
 | 2 | transcribe the replay: cells, tables, procs, `init`, `tick`, ghost, `onset` | `playroutines/<name>.yaml` | the `expressions=False` snippet of section 2 prints `None` |
-| 3 | a first lifter and its registration | `<name>.py`, `backends.py`, `pyproject.toml` | the same snippet, through `backends.lift` and `backends.native_player` |
+| 3 | a first lifter and its registration | `lift/<name>.py`, `lift/backends.py`, `pyproject.toml` | the same snippet, through `backends.lift` and `backends.native_player` |
 | 4 | record types, codec shapes and commands on the shared keys | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit keywords <name>` |
 | 5 | hard restart, chords, filter, lifetime, relative control in their shared forms | `playroutines/<name>.yaml` | `.venv/bin/python -m pytest -n auto tests/test_lifetime.py tests/test_envelope.py tests/test_eventrestart.py` |
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |

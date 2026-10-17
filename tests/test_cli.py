@@ -1,6 +1,7 @@
 """The two command-line tools."""
 
-from unitracker import cli, songio
+from unitracker import cli
+from unitracker.format import songio
 
 
 def test_lift_check_and_render(metal_warrior, tmp_path, capsys):

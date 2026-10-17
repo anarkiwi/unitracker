@@ -11,14 +11,14 @@ import re
 import z3
 from tqdm import tqdm
 
+from unitracker.format.events.instrument import written_as
+from unitracker.format.records import record_types
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.fit import Fitter, src
-from unitracker.modfit.flow import Liveness, action_lists, flow_of, persistent, walk
+from unitracker.modfit.flow import Liveness, Writes, action_lists, flow_of
 from unitracker.modfit.flow import names as names_of
+from unitracker.modfit.flow import persistent, walk
 from unitracker.modfit.form import Form, is_cond
-from unitracker.modfit.flow import Writes
-from unitracker.eventins import written_as
-from unitracker.records import record_types
 
 ARG = "arg"
 

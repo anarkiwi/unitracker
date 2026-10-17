@@ -839,7 +839,7 @@ definitions imply.
 
 ## The internal representation
 
-`unitracker.songio.loads` expands a document to the dict `SongPlayer` runs
+`unitracker.format.songio.loads` expands a document to the dict `SongPlayer` runs
 (`"unitracker": "ir"`): numbered records with a `next` field per program row,
 per-voice tracks of plays, phrases of event dicts, the expressions as
 `exprs: {index: text}`, and the full playroutine and tables. Lifters produce this
