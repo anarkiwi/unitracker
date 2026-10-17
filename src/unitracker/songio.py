@@ -144,6 +144,7 @@ class _Writer:
         self.names = {}
         self.row = 0
         self.restarts = {}
+        self.phrase_names = {}
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         rows = self.records.get(self.ins_type, {})
         written = lifetime.Lifetime(self.pr, self.rtypes).written
@@ -498,6 +499,7 @@ class _Writer:
         phrase_row = self._discover(rows, alias, compiled)
         defs = self._defs(len(rows), fixed, phrase_row, compiled)
         pnames = {base: f"p{i}" for i, base in enumerate(phrase_row, start=1)}
+        self.phrase_names = {p: (pnames[b], d) for p, (b, d) in alias.items()}
         out = []
         for row, item_defs in zip(rows, defs):
             item = {"def": item_defs} if item_defs else {}

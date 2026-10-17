@@ -9,6 +9,8 @@ from pygoattracker import Instrument, Orderlist, Pattern, Player, PlayPattern, R
 from pygoattracker import Subtune, Table, TypedSong
 from pysidtracker.testing import resolve_tune
 
+from unitracker import backends, optimise
+
 METAL_WARRIOR = "MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid"
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
 
@@ -103,3 +105,31 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
     header = SimpleNamespace(name="synthetic", author="", released="", flags=0)
     dec = SimpleNamespace(info=info, typed=TypedSong.from_song(song), subtune=0, header=header)
     return dec, Player(song, freq_table=GT.FREQ_TABLE)
+
+
+OPTIMISED = {
+    "metal_warrior": ["hoist"],
+    "crosseyed": ["instruments", "programs"],
+    "csillag": ["instruments"],
+}
+
+
+class _Optimised(dict):
+    """Each reference tune lifted and optimised on first use."""
+
+    def __init__(self, request):
+        super().__init__()
+        self.request = request
+
+    def __missing__(self, name):
+        sid = self.request.getfixturevalue(name)
+        ir = backends.lift(sid.read_bytes())
+        self[name] = (sid, optimise.optimise(ir, OPTIMISED[name], progress=False))
+        return self[name]
+
+
+@pytest.fixture(scope="session")
+def optimised_tunes(request) -> dict:
+    """``{tune: (path, optimiser Result)}``: a reference tune lifted and optimised by the passes
+    of :data:`OPTIMISED` (the full runs are measured in docs/optimise.md)."""
+    return _Optimised(request)

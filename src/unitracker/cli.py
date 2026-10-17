@@ -1,4 +1,4 @@
-"""Command-line entry points: ``unitracker-lift`` and ``unitracker-play``."""
+"""Command-line entry points: ``unitracker-lift``, ``-play`` and ``-optimise``."""
 
 import argparse
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from unitracker import backends, songio
+from unitracker import backends, optimise, songio
 from unitracker.vm import SongPlayer, first_mismatch
 
 
@@ -20,13 +20,39 @@ def lift_main(argv=None) -> int:
     parser.add_argument(
         "--embed", action="store_true", help="write the playroutine in full, not by reference"
     )
+    parser.add_argument(
+        "--optimise", action="store_true", help="rewrite the song smaller with the same output"
+    )
     args = parser.parse_args(argv)
     song = backends.lift(args.sid.read_bytes(), args.subtune)
+    if args.optimise:
+        song = optimise.optimise(song).ir
     if args.output:
         songio.dump(song, args.output, embed=args.embed)
     else:
         text = songio.dumps(song, embed=args.embed)
         sys.stdout.write(text)
+    return 0
+
+
+def optimise_main(argv=None) -> int:
+    """Rewrite a unitracker YAML song as a smaller document with the same register grid."""
+    parser = argparse.ArgumentParser(prog="unitracker-optimise", description=optimise_main.__doc__)
+    parser.add_argument("song", type=Path)
+    parser.add_argument("-o", "--output", type=Path)
+    parser.add_argument("--passes", help="comma-separated passes, default all in order")
+    parser.add_argument("--workers", type=int, help="processes proving candidates (default: cores)")
+    args = parser.parse_args(argv)
+    passes = args.passes.split(",") if args.passes else None
+    unknown = sorted(set(passes or ()) - set(optimise.PASSES))
+    if unknown:
+        parser.error(f"unknown passes {unknown}; known: {', '.join(optimise.PASSES)}")
+    result = optimise.optimise(songio.load(args.song), passes, args.workers)
+    if args.output:
+        args.output.write_text(result.text, encoding="utf-8")
+    else:
+        sys.stdout.write(result.text)
+    print(f"{args.song}: {result.before} -> {result.after} tokens", file=sys.stderr)
     return 0
 
 

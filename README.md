@@ -27,6 +27,7 @@ pip install -e ".[dev]"
 unitracker-lift TUNE.sid -o song.yaml [--subtune N] [--embed]   # lift a GoatTracker 2, defMON or SID-Wizard .sid
 unitracker-play song.yaml --wav out.wav [--seconds 60] [--model 8580|6581]
 unitracker-play song.yaml --check TUNE.sid                  # compare with the native player from each voice's first note
+unitracker-optimise song.yaml -o smaller.yaml  # same output, fewer tokens (docs/optimise.md)
 ```
 
 ```python
