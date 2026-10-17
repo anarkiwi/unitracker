@@ -73,9 +73,14 @@ def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
         songio.loads(doc(playroutine, f"      ins:\n        i1: {ins}", "[C4.i1]"))
 
 
-def test_the_reader_names_the_retired_note_column_vibrato():
-    text = doc("sidwizard", "      ins:\n        i1: {sr: 240}", "[C4.i1, -!notevib:5]")
-    with pytest.raises(songio.SongFormatError, match="!notevib is retired in v1.11: write"):
+@pytest.mark.parametrize(
+    "playroutine,command", [("sidwizard", "!notevib:5"), ("goattracker2", "!vib:@s1")]
+)
+def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
+    speeds = "      speedtab:\n        s1: [4, 32]\n" if playroutine == "goattracker2" else ""
+    text = doc(playroutine, speeds + "      ins:\n        i1: {sr: 240}", f"[C4.i1, -{command}]")
+    name = command.split(":")[0]
+    with pytest.raises(songio.SongFormatError, match=f"{name} is retired in v1.11: write"):
         songio.loads(text)
 
 

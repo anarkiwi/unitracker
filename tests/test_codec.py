@@ -490,9 +490,14 @@ def test_command_rejections():
         cmds.encode(15, 0)
     with pytest.raises(CodecError, match="can't say which"):
         cmds.encode(8, 0)
-    for name, value in [("cut", 1025), ("tempo", 2), ("run", 5), ("vib", ("ctrltab", 1))]:
+    for name, value in [("cut", 1025), ("tempo", 2), ("run", 5), ("funk", ("ctrltab", 1))]:
         with pytest.raises(CodecError, match="can't express"):
             cmds.decode(name, value)
+    for name in ("vib", "notevib"):
+        with pytest.raises(CodecError, match=f"!{name} is retired in v1.10"):
+            cmds.decode(name, ("speedtab", 1))
+    with pytest.raises(CodecError, match="no shared name"):
+        cmds.encode(4, 1)
     dm = CommandCodec(DM["commands"], DM_TYPES)
     assert dm.encode(1, 4) == ("run2", ("sidtab", 4))
     with pytest.raises(CodecError, match="can't express"):

@@ -179,7 +179,6 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `!funk:@s` | swing tempo pair |
 | `!freq:@x` | drive the voice frequency by expression `x` (see Modulators) |
 | `!legato:0` | the event's note does not retrigger (see Legato) |
-| `!vib:@s` | GoatTracker vibrato at the speed of `speedtab` row `s` |
 | `!mark:n` | a timing mark that changes no sound |
 | `!restart:@r` | the note's hard restart, for a player whose instruments have none (see Hard restart) |
 
@@ -198,7 +197,9 @@ can't express !attack:1`); the writer refuses to write a value that would not re
 (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
 - **GoatTracker 2:** the wavetable command rows with no shared form (list rows `[w, n]`, see
-  the GoatTracker 2 backend), `!vib:@s` and the instrument keys `speed` and `vd`.
+  the GoatTracker 2 backend), the instrument keys `speed` and `vd` (the instrument vibrato, which
+  runs on every step without a command) and the record type `speedtab`, which they, `!funk`
+  and the wavetable commands $F1-$F4 name.
 - **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
 - **SID-Wizard:** the instrument key `flags` (bits 6 and 7 of the header's control byte:
   keeping the pulse and filter programs across notes) and `octave`.
@@ -214,10 +215,12 @@ which the lifter proves or fails on (see Lifting). A control mask is defMON's: G
 no mask here`).
 A vibrato is a `freq` expression in every player: the SID-Wizard instrument keys `vibrato`
 and `vibdelay`, bits 4 and 5 of `flags` (the vibrato type) and the note-column command
-`!notevib` are retired in v1.11 (`ins.vibrato is retired in v1.11: write the vibrato as the
-instrument's freq expression`, `!notevib is retired in v1.11`). A field's retired bits are
-written without, and read as its default's: `flags` reads with the plain vibrato type, which
-no expression-driven note consults.
+`!notevib`, and the GoatTracker command `!vib`, are retired in v1.11 (`ins.vibrato is
+retired in v1.11: write the vibrato as the instrument's freq expression`, `!vib is retired
+in v1.11`). A field's retired bits are written without, and read as its default's: `flags`
+reads with the plain vibrato type, which no expression-driven note consults. An `!freq` is
+always read as the player's expression command (GoatTracker command 16, SID-Wizard FX $10),
+which plays every expression; no written form selects the player's own vibrato.
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
@@ -391,7 +394,8 @@ command 17); SID-Wizard writes instrument column $3F.
 A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence
 (`φ` keeps counting); a different one, or a step with another or no command, starts the
 next. Commands 1-4 and the instrument vibrato are the unit's own firings; a lifted song
-writes their modulations as `!freq`.
+writes the commands' modulations as `!freq`, and the instrument vibrato's on the step of a
+note, whose later steps without a command keep the instrument's `speed`.
 
 ### SID-Wizard
 

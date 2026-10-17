@@ -36,6 +36,7 @@ RETIRED = {
     "chord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
     "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
     "notevib": "retired in v1.11: write the vibrato as `!freq:@x`",
+    "vib": "retired in v1.11: write the vibrato as `!freq:@x`",
 }
 RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
@@ -57,7 +58,6 @@ COMMAND_NAMES = (
     "vtempo",
     "funk",
     "freq",
-    "vib",
     "mark",
     "restart",
     # Player-specific: SID-Wizard.

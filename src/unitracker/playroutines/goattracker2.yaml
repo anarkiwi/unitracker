@@ -12,7 +12,6 @@ note_offset: 0
 onset: onset
 started: started
 commands:
-  4: {name: vib, ref: speedtab}
   5: {name: ad}
   6: {name: sr}
   7: {name: ctrl}
