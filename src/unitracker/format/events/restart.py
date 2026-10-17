@@ -8,6 +8,7 @@ the command's record type; the program's last row, on the note's first tick, is 
 import numpy as np
 
 from unitracker.format.codec import CodecError, row_place
+from unitracker.format.records import chained, program_path
 
 CODE = -1
 NAME = "restart"
@@ -41,8 +42,8 @@ def fold(arr: np.ndarray, code: int, restart_of) -> np.ndarray:
 def restart_rows(rows: list, target, rtype, codec, gap: int) -> list | None:
     """The raw rows of the restart a program's ``rows`` (of type ``target``) make ``gap`` steps
     before a note, or None when the program sets another field or doesn't fit."""
-    fields = [f for f in rtype.fields if f != rtype.chain]
-    other = [f for f in target.fields if f not in fields and f != target.chain]
+    fields = rtype.own
+    other = [f for f in target.own if f not in fields]
     if any(r[f] != target.default(f) for r in rows for f in other):
         return None
     rows = [{f: r[f] for f in fields} for r in rows]
@@ -67,10 +68,8 @@ def entry_of(raws: list, rtype, table: dict, entries: dict) -> int:
     and remembered in ``entries``."""
     key = tuple(tuple(sorted(r.items())) for r in raws)
     if key not in entries:
-        entries[key] = start = max([rtype.first - 1, *table]) + 1
-        for k, raw in enumerate(raws):
-            nxt = start + k + 1 if k + 1 < len(raws) else rtype.none
-            table[start + k] = {**raw, rtype.chain: nxt}
+        entries[key] = start = rtype.free(table)
+        table.update(chained(rtype, raws, start))
     return entries[key]
 
 
@@ -93,15 +92,13 @@ def played(index: int, records: dict, types: tuple, codec, alloc) -> tuple[int, 
     ``records`` by ``alloc(target, rows)``, and its steps before the note; ``types`` is
     ``(restart type, target type)``."""
     rtype, target = types
-    path = []
-    while index != rtype.none:
-        path.append({f: v for f, v in records[rtype.name][index].items() if f != rtype.chain})
-        index = records[rtype.name][index][rtype.chain]
-    ahead, steps = lookahead(path, target, codec)
+    rows = records[rtype.name]
+    path, loop = program_path(rtype, rows.get, index)
+    if loop is not None:
+        raise RestartError("a restart's program can't loop")
+    ahead, steps = lookahead([rtype.body(rows[i]) for i in path], target, codec)
     start = alloc(target, len(ahead))
-    for k, row in enumerate(ahead):
-        records[target.name][start + k] = {**row, target.chain: start + k + 1}
-    records[target.name][start + len(ahead) - 1][target.chain] = 0
+    records[target.name].update(chained(target, ahead, start))
     return start, steps
 
 

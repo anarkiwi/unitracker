@@ -65,7 +65,7 @@ class EventFolds:
         if key not in self.instruments:
             rtype = self.rtypes[self.ins["type"]]
             table = self.records.setdefault(rtype.name, {})
-            self.instruments[key] = max([rtype.first - 1, *table]) + 1
+            self.instruments[key] = rtype.free(table)
             table[self.instruments[key]] = dict(fields)
         return self.instruments[key]
 

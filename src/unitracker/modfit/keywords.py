@@ -192,7 +192,7 @@ class Signer:
         rt = self.rtypes.get(rtype)
         if rt is None:
             return {}
-        return union(self.roles.role(f"{rtype}.{f}") for f in rt.fields if f != rt.chain)
+        return union(self.roles.role(f"{rtype}.{f}") for f in rt.own)
 
     def through(self, rel: dict, cell: str, roles: Composed | None = None) -> dict:
         """``{(quantity, bit): source bits}`` of a relation ``{source bit: cell bits}``."""

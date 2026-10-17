@@ -23,7 +23,7 @@ from unitracker.optimise.edits import (
     truncate,
     unhoist,
 )
-from unitracker.optimise.model import entries, program, programs_of, references, shape, view
+from unitracker.optimise.model import programs_of, shape
 from unitracker.optimise.passes import (
     LARGER_UNPROVED,
     PASSES,
@@ -49,7 +49,6 @@ __all__ = [
     "drop_keep",
     "EDITS",
     "ENCODING",
-    "entries",
     "expressions",
     "factor",
     "fields",
@@ -67,11 +66,9 @@ __all__ = [
     "Optimiser",
     "PASSES",
     "phrases",
-    "program",
     "programs",
     "programs_of",
     "reach",
-    "references",
     "reloop",
     "Result",
     "shape",
@@ -81,6 +78,5 @@ __all__ = [
     "Trace",
     "truncate",
     "unhoist",
-    "view",
     "writer",
 ]

@@ -71,6 +71,7 @@ class RecordType:
         for key, actions in self.templates.items():
             if not isinstance(actions, list):
                 raise RecordTypeError(f"{name}.{key}: a template must be an action list")
+        self.own = [f for f in self.fields if f != self.chain]
         if self.chain is not None and self.chain not in self.fields:
             raise RecordTypeError(f"{name}: chain field {self.chain!r} is not a field")
         if self.expr is not None and self.refs.get(self.expr) != [(EXPR, None)]:
@@ -79,6 +80,14 @@ class RecordType:
     def default(self, field: str) -> int:
         """The value a missing ``field`` reads as."""
         return self.fields.get(field, 0)
+
+    def body(self, row: dict) -> dict:
+        """``row`` without its chain field."""
+        return {f: v for f, v in row.items() if f != self.chain}
+
+    def free(self, rows) -> int:
+        """The type's first index after every used index of ``rows``."""
+        return max([self.first - 1, *rows]) + 1
 
 
 def record_types(playroutine: dict) -> dict:
@@ -132,12 +141,26 @@ def ref_type(rtype, field, row, ev=RowEval):
     return None
 
 
-def program_rows(rtype, rows: dict, entry: int, ev=RowEval):
-    """The rows of the program of chained type ``rtype`` starting at ``entry``, each once."""
-    seen = set()
-    while rtype.chain is not None and entry != rtype.none and entry in rows and entry not in seen:
-        seen.add(entry)
-        yield rows[entry]
-        if rtype.stop is not None and ev(rtype).holds(rtype.stop, rows[entry]):
-            return
-        entry = int(rows[entry].get(rtype.chain, rtype.default(rtype.chain)))
+def program_path(rtype, row, entry: int, ev=RowEval) -> tuple[list, int | None]:
+    """``(row indices, loop position or None)`` of chained type ``rtype``'s program at ``entry``;
+    ``row(index)`` is a row, None ending the program before it."""
+    path, pos, index = [], {}, entry
+    while index not in pos and (got := row(index)) is not None:
+        pos[index] = len(path)
+        path.append(index)
+        if rtype.stop is not None and ev(rtype).holds(rtype.stop, got):
+            return path, None
+        index = int(got.get(rtype.chain, rtype.default(rtype.chain)))
+        if index == rtype.none:
+            return path, None
+    return path, pos.get(index)
+
+
+def chained(rtype, rows: list, start: int, loop: int | None = None) -> dict:
+    """``{index: row}`` of ``rows`` from ``start``, chained as a program of ``rtype`` that ends,
+    or loops to row ``loop``."""
+    end = (0 if rtype.none is None else rtype.none) if loop is None else start + loop
+    last = start + len(rows) - 1
+    return {
+        i: {**row, rtype.chain: i + 1 if i < last else end} for i, row in enumerate(rows, start)
+    }

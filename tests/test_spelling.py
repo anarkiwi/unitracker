@@ -1,17 +1,10 @@
 """Note and duration spellings: how tokenizers split them, and each spelling's exact inverse."""
 
 import pytest
-from test_tokenstudy import song
+from test_tokenstudy import fixture_written, song  # pylint: disable=unused-import
 
 from unitracker.analysis import spelling, tokenstudy
 from unitracker.format import songio
-
-
-@pytest.fixture(scope="module", name="written")
-def fixture_written():
-    holder = {}
-    songio.dumps(song(), respell=lambda d: holder.setdefault("doc", d))
-    return holder["doc"]
 
 
 def test_tokenizers_split_note_names_differently():

@@ -149,6 +149,7 @@ def test_a_layer_b_program_before_a_note_is_folded():
         ("[-*2, C3.i1!restart:@r1*8]", None, "3 empty steps"),
         ("[-*4, C3.i1!restart:@r1*8]", "[{}, end]", "a row before its note"),
         ("[-*4, C3.i1!restart:@r1*8]", "[{hold: 3}, {ctrl: 9}, end]", "can't express row"),
+        ("[-*4, C3.i1!restart:@r1*8]", "[{hold: 3, ctrl: ^8}, {}, {loop: 0}]", "can't loop"),
     ],
 )
 def test_the_reader_refuses_a_restart_it_cannot_play(phrase, program, match):

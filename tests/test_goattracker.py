@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import yaml
-from conftest import gt_tune
+from conftest import gt_tune, table
 from pygoattracker import decompile_sid
 from pygoattracker.model import (
     Instrument,
@@ -14,7 +14,6 @@ from pygoattracker.model import (
     Repeat,
     Row,
     Song,
-    Table,
     Transpose,
 )
 
@@ -22,10 +21,6 @@ from unitracker.format import songio
 from unitracker.lift import goattracker as gt
 from unitracker.modfit.convert import ConversionError
 from unitracker.player.vm import SongPlayer
-
-
-def table(*rows):
-    return Table(left=[r[0] for r in rows], right=[r[1] for r in rows])
 
 
 def test_wave_records():

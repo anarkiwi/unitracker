@@ -8,7 +8,7 @@ from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
 
 from unitracker.format.codec import CodecError, CommandCodec
-from unitracker.format.records import record_types
+from unitracker.format.records import chained, record_types
 from unitracker.format.songio import library, song_meta
 from unitracker.modfit.convert import convert
 from unitracker.player.vm import fold_empty
@@ -69,11 +69,8 @@ class Tables:
         empty."""
         if not rows:
             return 0
-        recs = self.records[name]
-        start = len(recs) + 1
-        for k, rec in enumerate(rows):
-            last = 0 if loop is None else start + loop
-            recs[start + k] = {**rec, "next": start + k + 1 if k + 1 < len(rows) else last}
+        start = len(self.records[name]) + 1
+        self.records[name].update(chained(rtypes()[name], rows, start, loop))
         return start
 
 
@@ -139,9 +136,7 @@ class Restarts:
             return 0
         if rows not in self.entry:
             self.entry[rows] = start = len(self.records) + 1
-            for k, row in enumerate(rows):
-                nxt = start + k + 1 if k + 1 < len(rows) else 0
-                self.records[start + k] = {**dict(row), "next": nxt}
+            self.records.update(chained(rtypes()["restart"], [dict(r) for r in rows], start))
         return self.entry[rows]
 
 
@@ -280,10 +275,15 @@ def instrument_record(ins, tables: Tables, wave: int, restarts: Restarts) -> dic
 
 
 @cache
+def rtypes() -> dict:
+    """The sidwizard playroutine's record types."""
+    return record_types(library("sidwizard"))
+
+
+@cache
 def shared_commands() -> CommandCodec:
     """The sidwizard playroutine's commands."""
-    pr = library("sidwizard")
-    return CommandCodec(pr["commands"], record_types(pr))
+    return CommandCodec(library("sidwizard")["commands"], rtypes())
 
 
 def tempo_command(fx: int, value: int) -> tuple[int, int]:

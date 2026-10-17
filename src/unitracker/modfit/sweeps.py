@@ -11,8 +11,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from unitracker.format import songio
-from unitracker.lift import backends
-from unitracker.modfit import resolve, specs
+from unitracker.modfit import exprs_report, resolve, specs
 from unitracker.modfit.bounce import bounce_lines
 from unitracker.modfit.fit import src
 from unitracker.modfit.flow import Writes
@@ -28,7 +27,7 @@ def load(path: Path) -> dict:
     """The internal form of a song YAML, or of a tune lifted with its native modulations."""
     if path.suffix in (".yaml", ".yml"):
         return songio.loads(path.read_text(encoding="utf-8"))
-    return backends.lift(path.read_bytes(), None, expressions=False)
+    return exprs_report.load(path).ir
 
 
 def entries(song: dict, record: str) -> dict:

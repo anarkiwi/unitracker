@@ -30,7 +30,7 @@ from unitracker.format.codec import (
     written_value,
 )
 from unitracker.format.events import envelope, fold, instrument, lifetime, restart
-from unitracker.format.records import EXPR, RowEval, record_types, ref_type
+from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.xexpr import ExpressionError, text_of
 from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
@@ -173,22 +173,7 @@ class _Writer:
         """``(row indices, loop index or None)`` of the program starting at ``entry``."""
         key = (rtype.name, entry)
         if key not in self.programs:
-            path, pos, index = [], {}, entry
-            while True:
-                if index in pos:
-                    loop = pos[index]
-                    break
-                row = self._row(rtype, index)
-                pos[index] = len(path)
-                path.append(index)
-                if rtype.stop is not None and _RowEval(rtype).holds(rtype.stop, row):
-                    loop = None
-                    break
-                index = int(row.get(rtype.chain, rtype.default(rtype.chain)))
-                if rtype.none is not None and index == rtype.none:
-                    loop = None
-                    break
-            self.programs[key] = (path, loop)
+            self.programs[key] = program_path(rtype, lambda i: self._row(rtype, i), entry, _RowEval)
         return self.programs[key]
 
     def _refs(self, rtype, row):
@@ -284,9 +269,7 @@ class _Writer:
         _refuse(retired.row(rtype, row, row, _RowEval(rtype).holds))
         _refuse(retired.unwritten(rtype, row))
         values = {}
-        for field in rtype.fields:
-            if field == rtype.chain:
-                continue
+        for field in rtype.own:
             value = int(row.get(field, rtype.default(field)))
             if field in refs:
                 values[field] = self.ref_value(refs[field])
@@ -297,7 +280,7 @@ class _Writer:
             raise SongFormatError(f"{rtype.written}: fields {sorted(unknown)} are not declared")
         if rtype.form == "map":
             return FlowMap(values)
-        fields = [f for f in rtype.fields if f != rtype.chain]
+        fields = rtype.own
         out = [values.get(f, rtype.default(f)) for f in fields]
         while out and fields[len(out) - 1] not in values:
             out.pop()
@@ -703,7 +686,7 @@ class _Reader:
     @staticmethod
     def _list_row(rtype, codec, value, place) -> dict:
         """A list row's fields; a row the codec writes with shared keys has no list form."""
-        fields = [f for f in rtype.fields if f != rtype.chain]
+        fields = rtype.own
         if not isinstance(value, list) or len(value) > len(fields):
             raise SongFormatError(f"{rtype.written}: bad row {value!r}")
         row = dict(zip(fields, value))
@@ -716,29 +699,30 @@ class _Reader:
         if rtype.expr is not None and isinstance(value, (str, int)) and not isinstance(value, bool):
             start = self._alloc(rtype, 1)
             row = {rtype.expr: (EXPR, self.expr(value))}
-            row[rtype.chain] = rtype.none if rtype.none is not None else 0
-            self.pending.append((rtype, start, row))
+            self.pending.append((rtype, start, chained(rtype, [row], start)[start]))
             return start
         if not isinstance(value, list) or len(value) < 2:
             raise SongFormatError(f"{rtype.written}: a program is rows then end or loop")
         rows, term = value[:-1], value[-1]
         start = self._alloc(rtype, len(rows))
+        out = []
         for k, raw in enumerate(rows):
-            row = self._proto(rtype, raw, row_place(k, len(rows), term == timeline.END))
-            row[rtype.chain] = start + k + 1
-            self.pending.append((rtype, start + k, row))
-        last = self.pending[-1][2]
+            out.append(self._proto(rtype, raw, row_place(k, len(rows), term == timeline.END)))
+            self.pending.append((rtype, start + k, out[-1]))
         if term == timeline.END:
-            last[rtype.chain] = rtype.none if rtype.none is not None else 0
-            self._end(rtype, last, rows[-1], row_place(len(rows) - 1, len(rows), True))
-            if rtype.stop is not None:
-                plain = {f: v for f, v in last.items() if isinstance(v, int)}
-                if not _RowEval(rtype).holds(rtype.stop, plain):
-                    raise SongFormatError(f"{rtype.written}: a program can only end on a stop row")
+            loop = None
         elif isinstance(term, dict) and set(term) == {"loop"} and 0 <= term["loop"] < len(rows):
-            last[rtype.chain] = start + int(term["loop"])
+            loop = int(term["loop"])
         else:
             raise SongFormatError(f"{rtype.written}: bad program end {term!r}")
+        for row, linked in zip(out, chained(rtype, out, start, loop).values()):
+            row[rtype.chain] = linked[rtype.chain]
+        if loop is None:
+            self._end(rtype, out[-1], rows[-1], row_place(len(rows) - 1, len(rows), True))
+            if rtype.stop is not None:
+                plain = {f: v for f, v in out[-1].items() if isinstance(v, int)}
+                if not _RowEval(rtype).holds(rtype.stop, plain):
+                    raise SongFormatError(f"{rtype.written}: a program can only end on a stop row")
         return start
 
     def _end(self, rtype, last, written, place):

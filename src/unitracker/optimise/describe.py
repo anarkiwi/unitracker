@@ -2,8 +2,9 @@
 
 from unitracker.format import songio
 from unitracker.format.records import EXPR
+from unitracker.format.refs import view
 from unitracker.optimise.edits import EDITS, hoist_value
-from unitracker.optimise.model import ERRORS, view
+from unitracker.optimise.model import ERRORS
 
 
 def one_line(value) -> str:

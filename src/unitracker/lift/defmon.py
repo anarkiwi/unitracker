@@ -5,12 +5,10 @@ pydefmon's DefmonPlayer and tables and state are read from that memory. Song tim
 comes from simulating the replay's arranger and pattern counters.
 """
 
-from importlib import resources
-
 import yaml
 from pysidtracker import SidImage
 
-from unitracker.format.songio import song_meta
+from unitracker.format.songio import library, song_meta
 from unitracker.modfit.convert import convert
 
 PAL_HZ = 985248
@@ -119,12 +117,6 @@ VOICE_SET = {
 
 class LiftError(ValueError):
     """The tune is not a replay build the defMON playroutine covers."""
-
-
-def load_playroutine() -> dict:
-    """The defMON playroutine definition."""
-    text = resources.files("unitracker").joinpath("playroutines/defmon.yaml").read_text()
-    return yaml.safe_load(text)
 
 
 def check_build(mem) -> None:
@@ -390,7 +382,7 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     check_build(mem)
     vinit = voice_init(mem)
     tracks, phrases, seeds = structure(mem, subtune)
-    playroutine = load_playroutine()
+    playroutine = library("defmon")
     playroutine["constants"] = model_constants(mem)
     ir = {
         "unitracker": "ir",
