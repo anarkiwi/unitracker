@@ -121,7 +121,7 @@ playroutine needs.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
   are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
   with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
-  `pw`, `wgl`, `af`, `ps`; `ginit` writes `resfilt`, `fv`, `cp`), and an omitted field
+  `pw`, `wgl`, `af`, `ps`; `ginit` writes `resfilt`, `mode`, `cp`), and an omitted field
   is 0.
 
 ## Events
@@ -157,13 +157,14 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | `cut` | the 11-bit cutoff over `$D415`/`$D416`, a value or an expression |
 | `freq` | the voice frequency's expression |
 | `resfilt` | `$D417`, resonance and filter routing |
-| `mode` | the `$D418` filter-mode bits, volume excluded |
+| `mode` | the `$D418` filter-mode bits 4-7, volume excluded (see Filter) |
 
 | command | meaning |
 |---|---|
 | `!run:@x` | start program `x` in the slot its kind implies; `!run:none` stops it |
 | `!run2:@x` | start program `x` in slot 2, for players with generic slots |
-| `!ad:`, `!sr:`, `!ctrl:`, `!resfilt:`, `!vol:` | set the register |
+| `!ad:`, `!sr:`, `!ctrl:`, `!resfilt:` | set the register |
+| `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
 | `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice |
 | `!funk:@s` | swing tempo pair |
@@ -190,7 +191,7 @@ can't express !notevib:1`); the writer refuses to write a value that would not r
 
 - **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
   command rows (list rows), `!vib:@s` and the instrument keys.
-- **defMON:** the sidTAB columns `wgl`, `re`, `fv`, `cp`; `af` below $80 (a fixed offset).
+- **defMON:** the sidTAB columns `wgl`, `re`, `cp`; `af` below $80 (a fixed offset).
 - **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
   detune (list rows `[w, a, d]`), pulse and filter sweep rows and keyboard-tracked rows
   (list rows), a filter row's resonance `res`, `!notevib` and the instrument keys.
@@ -200,6 +201,19 @@ keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a 
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
 `can't express !noteglide:0`). A command's argument is a byte: `!freq:@x` names one of the
 first 255 expressions, else the reader refuses it.
+
+### Filter
+
+`$D418` is `mode` (bit 4 low-pass, 5 band-pass, 6 high-pass, 7 voice 3 off) over the
+volume (bits 0-3, `!vol`). A player's codec rejects what the player can't set:
+
+| player | `mode` | volume |
+|---|---|---|
+| GoatTracker 2 | filter parameter rows, bits 4-6 | `!vol` |
+| SID-Wizard | filter set rows, bits 4-6 | not covered |
+| defMON | sidTAB rows and `ginit`, bits 4-7 | fixed at 15; `!vol` is rejected |
+
+The sidTAB column `fv` is `mode`: a document using it is rejected (`fv is retired in v1.7`).
 
 ## Modulators
 

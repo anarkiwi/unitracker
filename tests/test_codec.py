@@ -233,6 +233,20 @@ def test_defmon_note_and_offset_columns_round_trip_every_byte():
         assert c.decode({"af": byte})["af"] == byte
 
 
+def test_defmon_filter_mode_is_the_shared_mode():
+    c = codec("defmon", "sidtab")
+    for byte in range(0, 256, 16):
+        assert written({"fv": byte}, c) == {"mode": byte}
+        assert c.decode({"mode": byte})["fv"] == byte
+    assert written({"fv": 0x2F}, c) == {"mode": 0x20}
+    with pytest.raises(CodecError, match=r"values of \['mode'\]"):
+        c.decode({"mode": 0x21})
+    with pytest.raises(CodecError, match="fv is retired in v1.7"):
+        c.decode({"fv": 16})
+    with pytest.raises(CodecError, match="can't express !vol"):
+        CommandCodec(DM["commands"], DM_TYPES).decode("vol", 15)
+
+
 @pytest.mark.parametrize(
     "cols",
     [
@@ -444,7 +458,7 @@ INS_KEYS = {
         "freq",
     },
 }
-DM_KEEP = {"wgl", "af", "ps", "re", "fv", "cp", "acid"}
+DM_KEEP = {"wgl", "af", "ps", "re", "cp", "acid"}
 # Player-specific keys a program row may carry besides the shared ones.
 ROW_KEEP = {"defmon": DM_KEEP, "sidwizard": {"res"}}
 # Program types that may hold list rows, with the rows each allows.
@@ -464,12 +478,12 @@ SHARED_OUTSIDE_ROWS = {
     ("goattracker2", "ins"): {"ad", "sr", "ctrl", "pw"},
     ("sidwizard", "ins"): {"ad", "sr", "ctrl", "pw", "freq"},
     ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
-    ("defmon", "ginit"): {"resfilt"},
+    ("defmon", "ginit"): {"resfilt", "mode"},
 }
 INS_FORMS = {"ctrl": (list, str), "pw": (list, str, int), "freq": (str, int)}
 INIT_KEYS = {
     "vinit": {"flo", "fhi", "sacc", "tbase", "rowA", "cntA", "rowB", "cntB"} | DM_KEEP,
-    "ginit": {"fv", "cp", "acc", "astep", "sub"},
+    "ginit": {"cp", "acc", "astep", "sub"},
 }
 
 
@@ -613,13 +627,13 @@ def defmon_doc(vinit, ginit):
 def test_defmon_init_keys_mean_what_they_mean_in_rows():
     ir = defmon_doc(
         {"pw": 0x0567, "ctrl": 0x41, "ad": 0x12, "sr": 0x34, "wgl": 1, "note": "=36"},
-        {"resfilt": 0xF1},
+        {"resfilt": 0xF1, "mode": 0x30},
     )
     voice = ir["records"]["vinit"][0]
     assert (voice["pw"], voice["ctrl"], voice["wgl"], voice["note"]) == (0x0567, 0x41, 1, 60)
     grid = SongPlayer(ir).render_grid(2)
     assert list(grid[0][2:7]) == [0x67, 0x05, 0x41 ^ 1, 0x12, 0x34]
-    assert grid[0][0x17] == 0xF1
+    assert (grid[0][0x17], grid[0][0x18]) == (0xF1, 0x3F)
     word = DM["tables"]["note_lo"][60] | DM["tables"]["note_hi"][60] << 8
     assert int(grid[1][0]) | int(grid[1][1]) << 8 == word
 
@@ -631,6 +645,11 @@ def test_defmon_init_keys_mean_what_they_mean_in_rows():
 def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
     with pytest.raises(songio.SongFormatError, match=match):
         defmon_doc(vinit, {})
+
+
+def test_defmon_init_refuses_the_retired_mode_column():
+    with pytest.raises(songio.SongFormatError, match="ginit: fv is retired in v1.7"):
+        defmon_doc({}, {"fv": 0x30})
 
 
 def test_writer_refuses_an_init_cell_with_no_written_form(crosseyed):

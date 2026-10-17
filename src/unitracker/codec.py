@@ -16,6 +16,7 @@ RETIRED = {
     "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
     " row's `pw`, `cut` or `freq`)"
 }
+RETIRED_ROW_KEYS = {"fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`"}
 COMMAND_NAMES = (
     "run",
     "run2",
@@ -266,6 +267,9 @@ class RowCodec:
 
     def decode(self, written: dict) -> dict:
         """Raw fields for a written row; raises CodecError naming what the player can't express."""
+        for key in written:
+            if key in RETIRED_ROW_KEYS and not any(key in s.keep for s in self.shapes):
+                raise CodecError(f"{self.rtype.name}: {key} is {RETIRED_ROW_KEYS[key]}")
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:
