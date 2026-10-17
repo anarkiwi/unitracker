@@ -10,6 +10,27 @@ in *italics* are those of [format.md](format.md); the modulator machinery is
 In a worktree the venv's editable install points at the main checkout, so every command runs
 with `PYTHONPATH=src`. `TUNE.sid` is the port's reference tune, `<name>` the playroutine's name.
 
+## Tools
+
+Every check a port needs already exists and is player-generic: a port adds a playroutine, a
+lifter and its registration, and the tools pick it up through `backends.py`. Extend a tool rather
+than writing a port-specific copy; the README's *Triage* table indexes the same tools by question.
+
+| need | tool |
+|---|---|
+| the native replay's register grid | `lift.backends.native_player(raw).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
+| the first differing `(tick, register)` | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)`; for a document, `unitracker-play song.yaml --check TUNE.sid` |
+| both grids side by side over a tick range | `tools/grid_diff.py song.yaml TUNE.sid --from T --to T` |
+| round trip, native grid and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
+| a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
+| proofs, closed forms, command composition, keyword signatures | `unitracker-modfit {exprs,command,keywords,fit,poly,generic,sweeps,orbit}` (modfit.md) |
+| redundancy the lifter writes | `unitracker-optimise song.yaml -o OUT --report orthogonality.md` |
+| document size | `tools/token_report.py song.yaml` |
+| how many tunes of the player lift, by failure cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |
+| a reference tune in the tests | `conftest.hvsc_tune(name, "MUSICIANS/...", doc)` |
+| a one-feature tune in the tests | `conftest.gt_tune`, `sw_fx`, `sw_table_byte` (patch a native module), `mini_song`, `table` (an IR song) |
+| iterating a playroutine's command variants | `format.codec.command_variants(spec)` |
+
 ## 1. What a port is
 
 | part | file | content |
@@ -306,7 +327,7 @@ PYTHONPATH=src .venv/bin/unitracker-play out/porting/song.yaml --check TUNE.sid
 
 | test | file | shape |
 |---|---|---|
-| reference tune | `tests/conftest.py` | a session fixture: `resolve_tune("MUSICIANS/.../Tune.sid", cache_dir=CACHE)` (local `$HVSC`, `.tunecache/`, or the mirror), `pytest.skip` when unavailable; the path also goes in `tools/reference_check.py`'s `TUNES` |
+| reference tune | `tests/conftest.py` | a session fixture `hvsc_tune(name, "MUSICIANS/.../Tune.sid", doc)` (local `$HVSC`, `.tunecache/`, or the mirror; skipped when unavailable); the path also goes in `tools/reference_check.py`'s `TUNES` |
 | synthetic tunes | `tests/conftest.py` | a builder like `gt_tune`, returning `(decoded tune, native player)` for a one-feature tune, where the native package can build modules |
 | conformance | `tests/test_conformance.py` | for `embed` False and True: lift, `text = songio.dumps(ir)`, `song = songio.loads(text)`, `songio.dumps(song) == text` (the canonical round trip); the native grid over the intro and two loops, non-trivial (`len(np.unique(theirs, axis=0))`); `SongPlayer(song).mismatch(theirs) is None`; and the tune in `test_lift_is_deterministic` |
 | dispatch | `tests/test_backends.py` | `detect`, `lift` and `native_player` on the tune |
@@ -330,13 +351,15 @@ PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/song.opt.yaml TUN
 `first mismatch: None` for the lifted and the optimised song; `tools/reference_check.py`, with
 the native table and column names as `--forbid`, prints `round trip ok` and `forbidden: none`;
 `tools/token_report.py song.yaml` counts the document's tokens; coverage stays above 85% and the
-lint is clean.
+lint is clean. Run `pylint` without `-j`: the parallel run misses cross-module checks such as
+W0621. Then run the HVSC survey over the player's tunes (README) to see which builds and
+features the lifter still refuses.
 
 **Files:** `tests/conftest.py`, `tests/test_conformance.py`, `tests/test_backends.py`,
 `tests/test_<name>.py`, `tools/reference_check.py`. **Verify:**
 
 ```sh
-PYTHONPATH=src .venv/bin/black --check src tests
+PYTHONPATH=src .venv/bin/black --check src tests tools
 PYTHONPATH=src .venv/bin/pylint src
 PYTHONPATH=src .venv/bin/pylint --disable=missing-function-docstring tests
 PYTHONPATH=src .venv/bin/python -m pytest -n auto --cov=unitracker --cov-fail-under=85
@@ -359,3 +382,4 @@ PYTHONPATH=src .venv/bin/python -m pytest -n auto --cov=unitracker --cov-fail-un
 | 11 | the optimiser on the lifted tune | `tests/conftest.py` | `.venv/bin/unitracker-optimise out/porting/song.yaml -o out/porting/song.opt.yaml`, then step 8 on it |
 | 12 | canonical round trip and forbidden names | `tools/reference_check.py` | `.venv/bin/python tools/reference_check.py out/porting --forbid <native names>` |
 | 13 | lint and the full suite | | the four commands of section 7 |
+| 14 | the player's tunes over HVSC | | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |
