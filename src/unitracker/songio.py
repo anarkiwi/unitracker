@@ -725,16 +725,23 @@ class _Reader:
             for k, v in value.items()
             if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
         }
-        keys, names = codec.ref_keys(), {}
-        for key in keys.keys() & value.keys():
-            kind = self._named_type(value[key], keys[key][1])
-            names[keys[key][0]] = ("name", value[key])
-            value[key] = (kind, self.rtypes[kind].first)
+        names = self._ref_keys(codec, value)
         try:
             row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         return {**row, **named, **names}, set(row)
+
+    def _ref_keys(self, codec, value: dict) -> dict:
+        """``{raw field: ("name", name)}`` of a row's reference keys, each key in ``value`` set
+        to its type's first index to decode with: a name resolves once every one is defined."""
+        names = {}
+        for key, (field, types) in codec.ref_keys().items():
+            if key in value:
+                kind = self._named_type(value[key], types)
+                names[field] = ("name", value[key])
+                value[key] = (kind, self.rtypes[kind].first)
+        return names
 
     def _is_name(self, value, tname: str) -> bool:
         """Whether ``value`` names a ``tname``: defined as one, or not yet defined and of its
