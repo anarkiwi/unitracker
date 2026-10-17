@@ -1,4 +1,4 @@
-# unitracker song format (v1.6)
+# unitracker song format (v1.7)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.6
+unitracker: 1.7
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -21,8 +21,8 @@ song:
   - def:
       ins:
         i1: {ad: 1, sr: 136, ctrl: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: =68},
-            {ctrl: 65, note: +0}, end], pw: 16*abs((φ - 32) % 128 - 64) + 512, filter: [{cut: 1024, resfilt: 193,
-              mode: 16}, end], gt: 4, fw: 9}
+            {ctrl: 65, note: +0}, end], pw: 16*abs((φ - 32) % 128 - 64) + 512, filter: [{cut: 1024, res: 12,
+              route: 1, mode: 16}, end], gt: 4, fw: 9}
         ...
       ctrltab:
         c1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0}, {wait: 1,
@@ -52,7 +52,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.6`; readers reject any other version |
+| `unitracker` | `1.7`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -121,7 +121,7 @@ playroutine needs.
 - **Fixed** record types, such as defMON's initial voice state, keep their indices and
   are defined in the first row: `vinit: {0: {...}, 1: {...}}`. They use the shared keys
   with their row meaning wherever one fits (`vinit` writes `ctrl`, `note`, `ad`, `sr`,
-  `pw`, `wgl`, `af`, `ps`; `ginit` writes `resfilt`, `fv`, `cp`), and an omitted field
+  `pw`, `wgl`, `af`, `ps`; `ginit` writes `res`, `route`, `mode`, `cp`), and an omitted field
   is 0.
 
 ## Events

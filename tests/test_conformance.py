@@ -1,4 +1,4 @@
-"""Lifted songs, written as v1.6 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.7 text and read back, play identically to their native players."""
 
 import numpy as np
 import pytest
