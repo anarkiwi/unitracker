@@ -42,6 +42,23 @@ grid = player.render_grid(3000)            # (ticks, 25) SID register grid
 
 `python tools/token_report.py song.yaml` counts a document's tokens per section (needs the `dev` extras).
 
+`tools/oracle_hvsc.py` is the renderer for pysidtracker's HVSC survey: each subtune is lifted,
+written, read back and played, and compared with the sidtrace oracle (lift failures are its
+`library_error` rows):
+
+```sh
+python -m pysidtracker.survey find $HVSC --out out/survey/tunes.csv --player 'goattracker|wizard|defmon'
+PYTHONPATH=tools python -m pysidtracker.survey run $HVSC out/survey/tunes.csv --work out/survey --render oracle_hvsc:render
+python -m pysidtracker.survey report out/survey/results.csv
+```
+
+## Layout
+
+`src/unitracker/`: `format/` (reading and writing documents, the shared vocabulary, event folds),
+`player/` (the generic player), `lift/` (detection and the three lifters), `modfit/` (proved
+modulation conversion), `optimise/` (smaller documents), `analysis/` (format studies),
+`playroutines/` (the library).
+
 ## Test
 
 ```sh
