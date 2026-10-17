@@ -5,6 +5,7 @@ the reachable control states form a graph whose order is the phase: elapsed firi
 state has one successor, turns when a state stays until a test of ``v`` advances it.
 """
 
+# pylint: disable=too-many-lines
 import dataclasses
 import functools
 import itertools
@@ -106,7 +107,7 @@ def player_form(song: dict, spec: dict | None = None) -> Player:
     return form
 
 
-class Lift:
+class Lift:  # pylint: disable=too-many-instance-attributes
     """Form terms of one player as grammar expressions: the cell is ``v``, ``N`` the note."""
 
     def __init__(self, form: Form, cell: str, freq: dict, extra: dict | None = None, alias=None):
@@ -891,7 +892,7 @@ def witness(solver) -> str:
 
 
 @dataclasses.dataclass
-class Derived:
+class Derived:  # pylint: disable=too-many-instance-attributes
     """The expressions of one start, with their proof status."""
 
     phase: typing.Any = None

@@ -132,7 +132,7 @@ def houdini(chk: Checker, glob: list, own: list) -> list:
 
 
 def recurrence(chk: Checker, inv: list, cls: list, seq: list, value, prover) -> str | None:
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     """None when every firing from a state the graph enters and ``inv`` holds in gives
     ``value`` of its chip value at its class's phase, else the first counterexample; the start's
     first firing is the start constant's."""

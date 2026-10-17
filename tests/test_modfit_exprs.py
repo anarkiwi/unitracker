@@ -324,6 +324,7 @@ RISE = "v + (-8*(v // 8) - 64)*[v >= 944] + 80"
 
 
 def test_acid_rises_are_proved_under_an_invariant_and_falls_are_not(crosseyed):
+    # pylint: disable=too-many-locals
     conv = analyse(load(crosseyed).ir, workers=4)
     acid = {k: d for k, (d, _) in conv.found.items() if k[0] == "acid B" and not d.identity}
     proved = {G.text(d.value) for d in acid.values() if d.invariant.ok}
