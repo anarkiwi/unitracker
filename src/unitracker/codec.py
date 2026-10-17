@@ -35,6 +35,7 @@ RETIRED = {
     "chordtab": "retired in v1.9: write a chord as a `ctrl` program of relative notes",
     "chord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
     "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
+    "notevib": "retired in v1.11: write the vibrato as `!freq:@x`",
 }
 RETIRED_ROW_KEYS = {
     "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
@@ -69,7 +70,6 @@ COMMAND_NAMES = (
     "idecay",
     "isustain",
     "irelease",
-    "notevib",
 )
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")

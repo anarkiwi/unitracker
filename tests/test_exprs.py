@@ -1,4 +1,4 @@
-"""v1.10 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.11 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -63,11 +63,44 @@ GT_SONG = doc(
         ("sidwizard", "{hrsr: 0}", "ins.hrsr is retired in v1.8"),
         ("sidwizard", "{firstctrl: 9}", "ins.firstctrl is retired in v1.8"),
         ("sidwizard", "{flags: 26}", "ins.flags bits 0x0f are retired in v1.8"),
+        ("sidwizard", "{vibrato: 51}", "ins.vibrato is retired in v1.11: write the vibrato"),
+        ("sidwizard", "{vibdelay: 4}", "ins.vibdelay is retired in v1.11"),
+        ("sidwizard", "{flags: 96}", "ins.flags bits 0x30 are retired in v1.11"),
     ],
 )
 def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
     with pytest.raises(songio.SongFormatError, match=match):
         songio.loads(doc(playroutine, f"      ins:\n        i1: {ins}", "[C4.i1]"))
+
+
+def test_the_reader_names_the_retired_note_column_vibrato():
+    text = doc("sidwizard", "      ins:\n        i1: {sr: 240}", "[C4.i1, -!notevib:5]")
+    with pytest.raises(songio.SongFormatError, match="!notevib is retired in v1.11: write"):
+        songio.loads(text)
+
+
+@pytest.mark.parametrize(
+    "fields,match",
+    [
+        ({"vibrato": 0x33}, "ins.vibrato has no written form: it is retired in v1.11"),
+        ({"vibdelay": 4}, "ins.vibdelay has no written form"),
+        ({"flags": 0x20}, "ins.flags bits 0x30 have no written form: they are retired in v1.11"),
+    ],
+)
+def test_the_writer_refuses_the_retired_vibrato_bytes(fields, match):
+    song = songio.loads(SW_SONG)
+    song["records"]["ins"][1].update(fields)
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.dumps(song)
+
+
+def test_flags_are_written_without_and_read_with_the_vibrato_type():
+    song = songio.loads(SW_SONG)
+    song["records"]["ins"][1]["flags"] = 0xD0
+    text = songio.dumps(song)
+    assert "flags: 192" in text
+    assert songio.loads(text)["records"]["ins"][1]["flags"] == 0xD0
+    assert "flags" not in songio.dumps(songio.loads(SW_SONG))
 
 
 def test_the_reader_names_the_retired_eor_column():
@@ -134,7 +167,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.10", "unitracker: 1.8", "not a unitracker v1.10 document"),
+        ("unitracker: 1.11", "unitracker: 1.8", "not a unitracker v1.11 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

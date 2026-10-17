@@ -333,6 +333,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         for where, by_unit in sites.items():
             self.record_site(where, by_unit)
         self.event_sites()
+        self.retire()
         self.phrases()
         self.ir["exprs"] = {i: t for t, i in self.exprs.items()}
         self.check_shared({s["record"] for u in self.units.values() if (s := u.get("site"))})
@@ -460,6 +461,15 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         if loop is None and rtype.end:
             out[-1].update({f: int(v) for f, v in rtype.end.items()})
         return self.allocate(rtype, out, loop)
+
+    def retire(self) -> None:
+        """Clear, in every row of its record, the native data a unit's expressions replace."""
+        for unit in self.units.values():
+            spec = unit.get("retire")
+            if spec:
+                rtype = self.rtypes[spec["record"]]
+                for row in self.records.get(rtype.name, {}).values():
+                    row.update(self.cleared(spec, {**rtype.fields, **row}))
 
     @staticmethod
     def cleared(spec: dict, row: dict) -> dict:

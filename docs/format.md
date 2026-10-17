@@ -1,4 +1,4 @@
-# unitracker song format (v1.10)
+# unitracker song format (v1.11)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.10`; readers reject any other version |
+| `unitracker` | `1.11`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -189,21 +189,19 @@ SID-Wizard's effect commands are its own: they have no identical shared form.
 |---|---|
 | `!attack:n`, `!decay:n`, `!sustain:n`, `!release:n` | small FX $2x/$3x/$5x/$6x: one ADSR nibble |
 | `!iattack`, `!idecay`, `!isustain`, `!irelease` | the same small FX in the instrument column, which the player times differently |
-| `!notevib:n` | note column $60-$77: vibrato with amplitude n |
 
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
 (GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
 rejected on reading, naming the key or command and the player (`goattracker2: the player
-can't express !notevib:1`); the writer refuses to write a value that would not read back
+can't express !attack:1`); the writer refuses to write a value that would not read back
 (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
 - **GoatTracker 2:** the wavetable command rows with no shared form (list rows `[w, n]`, see
   the GoatTracker 2 backend), `!vib:@s` and the instrument keys `speed` and `vd`.
 - **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
-- **SID-Wizard:** `!notevib` and the instrument keys `flags` (bits 4-7 of the header's
-  control byte: the vibrato type, and keeping the pulse and filter programs across notes),
-  `vibrato`, `vibdelay` and `octave`.
+- **SID-Wizard:** the instrument key `flags` (bits 6 and 7 of the header's control byte:
+  keeping the pulse and filter programs across notes) and `octave`.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
@@ -214,6 +212,12 @@ in v1.10 (`pulsetab: row [32, 16] is retired in v1.10: a sweep, stall or keyboar
 is its program's expression`): such a row is part of its program's `pw` or `cut` expression,
 which the lifter proves or fails on (see Lifting). A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
 no mask here`).
+A vibrato is a `freq` expression in every player: the SID-Wizard instrument keys `vibrato`
+and `vibdelay`, bits 4 and 5 of `flags` (the vibrato type) and the note-column command
+`!notevib` are retired in v1.11 (`ins.vibrato is retired in v1.11: write the vibrato as the
+instrument's freq expression`, `!notevib is retired in v1.11`). A field's retired bits are
+written without, and read as its default's: `flags` reads with the plain vibrato type, which
+no expression-driven note consults.
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
@@ -616,6 +620,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `mirror` | a cell that takes the expression's value when it held the playroutine's |
 | `label` | the cells that group a unit's occurrences for the lifter |
 | `site` | where the lifter writes the expression: `{record, index, field, clear, first, when}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command) |
+| `retire` | `{record, clear}`: native fields the unit's expressions replace and the format does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
 | `command` | the command code that names an expression (`!freq`) |
 | `commands` | the native command codes the lifter replaces by `command` |
 
@@ -724,9 +729,10 @@ to a nibble, as the reference grid does.
 **SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
 applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking
 the voices in the player's reverse order. An instrument is its header (`flags`, `ad`, `sr`,
-`vibrato`, `vibdelay`, `octave`), its WF/arp, pulse, filter and restart programs (`ctrl`,
-`pw`, `filter`, `restart`) and its pitch expression (`freq`). The header's hard-restart
-bytes and control bits 0-3 become the restart program; a restart on both ticks before the
+`octave`), its WF/arp, pulse, filter and restart programs (`ctrl`, `pw`, `filter`,
+`restart`) and its pitch expression (`freq`), which holds the header's vibrato; a
+note-column vibrato is `!freq`. The header's hard-restart bytes and control bits 0-3 become
+the restart program; a restart on both ticks before the
 note (control bits 0 and 1) is not covered. WF rows use `ctrl`, `note`, `hold` and `freq`.
 `hold` is the ticks the row lasts: on a row with `ctrl`, the instrument's arp speed plus one;
 a row without `ctrl` keeps the waveform and lasts its native hold count plus one (1-16). A

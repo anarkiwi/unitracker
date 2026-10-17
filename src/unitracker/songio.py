@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.10 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.11 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -37,7 +37,7 @@ from unitracker import xexpr
 from unitracker.xexpr import ExpressionError, text_of
 from unitracker.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 
-VERSION = "1.10"
+VERSION = "1.11"
 WIDTH = 100
 PHRASE = "phrase"
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
@@ -45,7 +45,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.10 format."""
+    """A document does not follow the unitracker v1.11 format."""
 
 
 @functools.cache
@@ -131,7 +131,7 @@ def _ref_type(rtype, field, row):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.10 document."""
+    """Turns the internal representation into a canonical v1.11 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -313,6 +313,8 @@ class _Writer:
         if codec is not None and rtype.form == "map":
             raise SongFormatError(f"{rtype.name}: row {row} has no shared-vocabulary form")
         _refuse(retired.row(rtype, row, row, _RowEval(rtype).holds))
+        _refuse(retired.unwritten(rtype, row))
+        row = retired.written_fields(rtype, row)
         values = {}
         for field in rtype.fields:
             if field == rtype.chain:
@@ -573,7 +575,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False) -> str:
-    """A canonical v1.10 document for internal-representation song ``ir``.
+    """A canonical v1.11 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference.
     """
@@ -597,7 +599,7 @@ def dumps(ir: dict, embed: bool = False) -> str:
 
 
 class _Reader:
-    """Expands a v1.10 document to the internal representation."""
+    """Expands a v1.11 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -704,7 +706,7 @@ class _Reader:
                 row[field] = self._program(self.rtypes[target], val)
             elif not isinstance(val, int) or isinstance(val, bool):
                 raise SongFormatError(f"{rtype.name}.{field}: bad value {val!r}")
-        return row
+        return retired.read_fields(rtype, row)
 
     def _decoded(self, codec, rtype, value: dict, place) -> tuple:
         """``(row, decoded fields)`` of a codec row, its named references kept as written."""
@@ -966,7 +968,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.10 document."""
+    """The internal representation of a v1.11 document."""
     doc = parse(text)
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
@@ -976,13 +978,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.10 document at ``path``."""
+    """The internal representation of the v1.11 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.10 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.11 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

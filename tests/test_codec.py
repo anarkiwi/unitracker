@@ -450,7 +450,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.10",
+        "unitracker": "1.11",
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -608,8 +608,6 @@ INS_KEYS = {
         "flags",
         "ad",
         "sr",
-        "vibrato",
-        "vibdelay",
         "octave",
         "restart",
         "ctrl",
@@ -693,7 +691,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.10 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.11 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -761,7 +759,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.10",
+                "unitracker": "1.11",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -803,7 +801,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {ref: defmon}
 song:
   - def:
@@ -895,7 +893,7 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.10
+unitracker: 1.11
 playroutine: {ref: sidwizard}
 song:
   - def:
