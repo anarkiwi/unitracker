@@ -1,6 +1,6 @@
 """References between the records, events and commands of the internal representation."""
 
-from unitracker.format.codec import CommandCodec
+from unitracker.format.codec import CommandCodec, command_variants
 from unitracker.format.records import record_types, ref_type
 from unitracker.player.vm import EVENT_COLUMNS, event_commands
 
@@ -17,9 +17,8 @@ class View:
         self.base = int(inst.get("base", 0))
         self.commands = CommandCodec(pr.get("commands"), self.rtypes)
         self.nibbles = {
-            int(code): (str(v["name"]), int(v["nibble"]))
-            for code, variants in (pr.get("commands") or {}).items()
-            for v in (variants if isinstance(variants, list) else [variants])
+            code: (str(v["name"]), int(v["nibble"]))
+            for code, v in command_variants(pr.get("commands"))
             if "nibble" in v
         }
 

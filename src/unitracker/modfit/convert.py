@@ -15,7 +15,7 @@ from pathlib import Path
 
 import sympy
 
-from unitracker.format.codec import evaluate
+from unitracker.format.codec import command_variants, evaluate
 from unitracker.format.records import chained, program_path, record_types
 from unitracker.format.songio import codecs
 from unitracker.format.xexpr import ExpressionError, source
@@ -538,10 +538,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     def commands(self, name: str) -> set:
         """The command codes whose argument references record type ``name``."""
         return {
-            int(code)
-            for code, var in (self.pr.get("commands") or {}).items()
-            for v in (var if isinstance(var, list) else [var])
-            if v.get("ref") == name
+            code for code, v in command_variants(self.pr.get("commands")) if v.get("ref") == name
         }
 
     def point(self, event: dict, name: str, old: int, new: int, commands: set) -> bool:

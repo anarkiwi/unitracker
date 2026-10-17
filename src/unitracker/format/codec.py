@@ -481,11 +481,16 @@ class RowCodec:
             raise CodecError(f"{self.rtype.written}: row {written!r} can't end a program")
 
 
+def command_variants(spec: dict):
+    """``(code, variant)`` of each variant of a playroutine's ``commands`` map."""
+    for code, vs in (spec or {}).items():
+        yield from ((int(code), v) for v in (vs if isinstance(vs, list) else [vs]))
+
+
 def envelope_names(spec: dict) -> list:
     """The names of a playroutine's envelope commands: the codes with ``nibble``, whose byte
     depends on the voice (see ``envelope``); internal code ``ENVELOPE - k`` writes the k-th."""
-    variants = [v for vs in (spec or {}).values() for v in (vs if isinstance(vs, list) else [vs])]
-    return sorted({str(v["name"]) for v in variants if "nibble" in v})
+    return sorted({str(v["name"]) for _, v in command_variants(spec) if "nibble" in v})
 
 
 class CommandCodec:
@@ -495,19 +500,18 @@ class CommandCodec:
 
     def __init__(self, spec: dict, rtypes: dict):
         self.entries, self.unnamed = [], {}
-        for code, variants in (spec or {}).items():
-            for var in variants if isinstance(variants, list) else [variants]:
-                name = str(var.get("name", f"command {code}"))
-                ref = var.get("ref")
-                if ref is not None and ref not in rtypes:
-                    raise CodecError(f"{name} references unknown type {ref!r}")
-                if "name" not in var:
-                    self.unnamed[int(code)] = ref
-                    continue
-                if name not in COMMAND_NAMES:
-                    raise CodecError(f"{name!r} is not a shared command name")
-                if "nibble" not in var:
-                    self.entries.append((int(code), name, ref, var))
+        for code, var in command_variants(spec):
+            name = str(var.get("name", f"command {code}"))
+            ref = var.get("ref")
+            if ref is not None and ref not in rtypes:
+                raise CodecError(f"{name} references unknown type {ref!r}")
+            if "name" not in var:
+                self.unnamed[code] = ref
+                continue
+            if name not in COMMAND_NAMES:
+                raise CodecError(f"{name!r} is not a shared command name")
+            if "nibble" not in var:
+                self.entries.append((code, name, ref, var))
         self.entries += [(ENVELOPE - k, n, None, {}) for k, n in enumerate(envelope_names(spec))]
         self.rtypes = rtypes
 

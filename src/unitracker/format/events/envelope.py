@@ -7,7 +7,7 @@ from its override, which must leave it unchanged; overrides last until the next 
 
 import functools
 
-from unitracker.format.codec import ENVELOPE, envelope_names
+from unitracker.format.codec import ENVELOPE, command_variants, envelope_names
 from unitracker.format.events.lifetime import order, starts
 from unitracker.player.vm import event_commands
 
@@ -66,11 +66,9 @@ class Envelope:
         self.rtype = rtypes.get(self.ins_type)
         self.legato = ((pr.get("modulators") or {}).get("legato") or {}).get("command")
         self.native = {}
-        for code, variants in (pr.get("commands") or {}).items():
-            for var in variants if isinstance(variants, list) else [variants]:
-                if "nibble" in var:
-                    spec = (str(var["name"]), int(var["nibble"]), int(var["slot"]))
-                    self.native[int(code)] = spec
+        for code, var in command_variants(pr.get("commands")):
+            if "nibble" in var:
+                self.native[code] = (str(var["name"]), int(var["nibble"]), int(var["slot"]))
         self.codes = {v: c for c, v in self.native.items()}
         self.names = envelope_names(pr.get("commands"))
 

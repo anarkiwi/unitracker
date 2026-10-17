@@ -29,7 +29,7 @@ from unitracker.format.codec import (
     row_place,
     written_value,
 )
-from unitracker.format.events import envelope, fold, instrument, lifetime, restart
+from unitracker.format.events import column, envelope, fold, instrument, lifetime, restart
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.xexpr import ExpressionError, text_of
@@ -108,10 +108,10 @@ def _refuse(problem) -> None:
 
 
 def _player(pr, call, *args):
-    """``call(*args)``, its lifetime and envelope errors the player's."""
+    """``call(*args)``, its lifetime, envelope and column errors the player's."""
     try:
         return call(*args)
-    except (lifetime.LifetimeError, envelope.EnvelopeError) as exc:
+    except (lifetime.LifetimeError, envelope.EnvelopeError, column.ColumnError) as exc:
         raise SongFormatError(f"{pr['name']}: {exc}") from exc
 
 
@@ -143,6 +143,7 @@ class _Writer:
         self.names = {}
         self.row = 0
         self.phrase_names = {}
+        _player(self.pr, column.check, self.pr, ir["phrases"])
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         native = (self.pr.get("instrument") or {}).get("type")
         written = lifetime.Lifetime(self.pr, self.rtypes).written
@@ -897,7 +898,9 @@ class _Reader:
             "tracks": tracks,
             "phrases": events,
         }
-        return _player(self.pr, envelope.Envelope(self.pr, self.rtypes).read, ir, self.records)
+        ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).read, ir, self.records)
+        _player(self.pr, column.check, self.pr, ir["phrases"])
+        return ir
 
     @staticmethod
     def _entry(entry):

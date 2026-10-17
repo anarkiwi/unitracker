@@ -20,6 +20,9 @@ lifetime:
   filter: {field: filter, flag: {flags: 0x80}}
 note_offset: 1
 onset: onset
+# The FX column holds one command: any below $100 but legato, and !run on a row that names an
+# instrument (on one that names none it plays in the instrument column).
+exclusive: "code != 0x3F and code < 0x100 and not (code == 0x70 and not instrument)"
 started: started
 # !ad and !sr: small FX $2x/$3x/$5x/$6x set the envelope register's nibble at shift `nibble`, in
 # the FX column (event slot 1) or, from $100, the instrument column (slot 0); see envelope.py.

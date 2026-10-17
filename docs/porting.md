@@ -242,8 +242,9 @@ the existing ports do.
 The writer and reader resolve the context these forms need by walking each voice's plays:
 `src/unitracker/format/events/`: `lifetime.py` (the instrument a note plays), `envelope.py` (an
 envelope nibble command as the byte it writes), and the event folds `fold.py`, `instrument.py` (the
-record an event's columns arm) and `restart.py` (a restart run on the steps before its note). They read the playroutine's
-`lifetime`, `commands` with `nibble`, `instrument: writes_as` and `restart` declarations, so a port
+record an event's columns arm) and `restart.py` (a restart run on the steps before its note), and
+`column.py` refuses two commands on one event for a column that holds one. They read the playroutine's
+`lifetime`, `commands` with `nibble`, `instrument: writes_as`, `restart` and `exclusive` declarations, so a port
 declares them rather than codes them; each raises its own error naming what has no written form.
 
 **Files:** the playroutine's `restart` record type, `lifetime`, `restart`, `instrument`, codec
