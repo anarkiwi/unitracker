@@ -182,6 +182,10 @@ functions:
   ktd:
     args: [k, d]
     expr: "ex((k + (d & 0xFF)) & 0xFF) - ex(((k + (d & 0xFF)) & 0xFF) - 1) - 1 + ((k + (d & 0xFF)) >> 8)"
+  # The filter cutoff high byte's keyboard-track term: EXPTABH at the sum, plus its carry.
+  fkd:
+    args: [k, d]
+    expr: "0 if k == 0 else ex((k + (d & 0xFF)) & 0xFF) + ((k + (d & 0xFF)) >> 8)"
   pwtrack:
     args: [k, d]
     expr: "0 if k == 0 else (ktd(k, d) & 0xFF) + (ktd(k, d) >= 0)"
@@ -201,6 +205,8 @@ global:
   fcutlo: {width: 8}
   fshift: {width: 8}
   fsweep: {width: 8}
+  fkt: {width: 8}
+  fdp: {width: 8}
   target: {width: 8}
   nv: {width: 8}
   ntl: {width: 8}
@@ -523,9 +529,17 @@ procs:
     - set: {t6: "pwlo + t2"}
     - set: {pwlo: t6}
     - {if: "t6 > 0xFF", then: [{set: {pwhi: "pwhi + 1"}}]}
+  # FLADVAN: the row's third byte is the keyboard-track amount ($80-$8F, which set the routing
+  # nibble instead, are not covered).
+  filt_advance:
+    - set: {fkt: "flttab[fpos].k", fpos: "flttab[fpos].next", fsweep: 0}
   # The filter table runs for the one voice that controls the filter.
   tick_filt:
-    - {if: "fctl != vi or ci == 0 or ins[ci].filter == 0 or fpos == 0", then: [{return: true}]}
+    - {if: "fctl != vi or ci == 0 or ins[ci].filter == 0", then: [{return: true}]}
+    - call: filt_row
+  # One step of the controlling voice's filter program.
+  filt_row:
+    - {if: "fpos == 0", then: [{return: true}]}
     - set: {t1: "flttab[fpos].a", t2: "flttab[fpos].b"}
     - if: "t1 & 0x80"
       then:
@@ -536,10 +550,9 @@ procs:
             fcutlo: 0
             fres: "(flttab[fpos].res & 0x0F) << 4"
             fmv: "(fmv & 0x0F) | (t1 & 0x70)"
-            fpos: "flttab[fpos].next"
-            fsweep: 0
+        - call: filt_advance
         - return: true
-    - {if: "fsweep >= t1", then: [{set: {fpos: "flttab[fpos].next", fsweep: 0}}, {return: true}]}
+    - {if: "fsweep >= t1", then: [{call: filt_advance}, {return: true}]}
     - set: {fsweep: "fsweep + 1", t3: "(((vfhi << 3) | (vflo & 7)) + s8(t2)) & 0x7FF"}
     - set: {vflo: "t3 & 7", vfhi: "t3 >> 3", fcutlo: "t3 & 7", fcuthi: "t3 >> 3"}
   # The voice's register values for this tick.
@@ -607,6 +620,7 @@ procs:
     - for_voices: [{if: "vi == target", then: [{call: tick_voice}]}]
     - set: {target: 0}
     - for_voices: [{if: "vi == target", then: [{call: tick_voice}]}]
+    - for_voices: [{if: "vi == fctl", then: [{set: {fdp: "note + oct"}}]}]
     - for_voices: [{call: write_regs}]
 init:
   - for_voices:
@@ -616,7 +630,7 @@ init:
 tick:
   - call: frame
 ghost:
-  global: {0x15: fcutlo, 0x16: "fcuthi + fshift", 0x17: "(fres & 0xF0) | (fswitch & 0x0F)", 0x18: fmv}
+  global: {0x15: fcutlo, 0x16: "fcuthi + fkd(fkt, fdp) + fshift + ((fcuthi + fkd(fkt, fdp)) >> 8)", 0x17: "(fres & 0xF0) | (fswitch & 0x0F)", 0x18: fmv}
   voice: {0: r0, 1: r1, 2: r2, 3: "r3 & 0x0F", 4: r4, 5: r5, 6: r6}
 # The modulators (see goattracker2.yaml). W is the speed table the vibrato and slide speeds
 # index: exptab below 107, then the frequency words.
@@ -671,10 +685,16 @@ modulators:
     - name: filter
       key: cut
       cell: "vfhi:vflo:3"
+      # The cutoff: the cell's high byte plus the keyboard-track term at the controlling voice's
+      # note (a sum past $FF also adds its carry to $D416, which no expression can state).
+      chip:
+        width: 11
+        value: "(((vfhi + fkd(fkt, note + oct)) & 0xFF) << 3) | (vflo & 7)"
+        store: {vfhi: "(value >> 3) - fkd(fkt, note + oct)", vflo: "value & 7"}
       mirror: "fcuthi:fcutlo:3"
-      fire: [tick_filt]
-      pre: procs.tick_filt
+      fire: [filt_row]
+      pre: procs.filt_row
       label: [fpos]
       x: "flttab[fpos].x"
-      site: {record: flttab, index: fpos, field: x, clear: {a: "a if a >= 0x80 else 0", b: 0}}
+      site: {record: flttab, index: fpos, field: x, clear: {a: "a if a >= 0x80 else 0", b: 0, k: 0}}
       hooks: [{at: procs.start_note, written: [fpos]}]

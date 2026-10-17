@@ -478,7 +478,7 @@ the unit to the playroutine's own firing.
 |---|---|
 | `freq` | the 16-bit voice frequency word (GoatTracker); in defMON and SID-Wizard, the 16-bit offset the player adds to the note's frequency |
 | `pw` | the pulse width: 12 bits (GoatTracker); the 12-bit register (SID-Wizard: the pair `pwhi:pwlo` plus its row's keyboard-track term); a 16-bit cell whose low 12 bits are the register (defMON) |
-| `cut` | the 11-bit cutoff (GoatTracker, SID-Wizard); defMON's 17-bit ACID accumulator, the offset `cp` in its high byte (see Filter) |
+| `cut` | the 11-bit cutoff (GoatTracker; SID-Wizard: the cell plus its row's keyboard-track term); defMON's 17-bit ACID accumulator, the offset `cp` in its high byte (see Filter) |
 
 A unit with `scale: s` keeps its value in a cell that holds the chip value divided by
 `s`: the player evaluates the expression with `v` as the cell times `s` and stores the
@@ -538,7 +538,7 @@ song hears fails it too.
 |---|---|---|---|---|---|
 | `pitch` | `freq` | `voff` | every tick but the one a note starts on | a row writes `voff` or changes the vibrato or slide state, at the row or at its deferred FX | the instrument's `freq` for an instrument vibrato; else `!freq:@x` (FX 16) |
 | `pulse` | `pw` | `pwhi:pwlo`, as the register: plus the row's keyboard-track term | every tick but the one a note starts on | a note starts the pulse program | the program's first row (instrument `pw`) |
-| `filter` | `cut` | `vfhi:vflo:3`, mirrored to the global cutoff | every tick but the one a note starts on | a note starts the filter program | the program's first row (instrument `filter`) |
+| `filter` | `cut` | `vfhi:vflo:3`, mirrored to the global cutoff, as the cutoff: plus the row's keyboard-track term | every tick the voice controls the filter but the one a note starts on | a note starts the filter program | the program's first row (instrument `filter`) |
 
 A `!freq` lasts until a note starts the instrument (which selects its `freq`) or another
 pitch effect replaces it. Big FX $01-$03, note-column vibrato ($60-$77) and glide ($78)
@@ -549,7 +549,12 @@ term of the note to the register's high nibble from the row until a later row's 
 replaces it: with `y` the sum `N + 1 + k` wrapped to a byte and `c` its carry, `256·(E[y] -
 E[y - 1] + c - [E[y] - E[y - 1] + c < 1])` over the table `E[i]`, the player's EXPTABH (0 below 11,
 then the frequency high bytes from index `i - 11`, size 256). A lifted program writes it as
-its `pw` expression in `N`. The filter program runs for the voice that controls the filter.
+its `pw` expression in `N`. The filter program runs for the voice that controls the filter,
+and a filter row's amount adds `E[y] + c` to the cutoff's high byte, with `y` and `c` from the
+controlling voice's note, from the row until a later row's amount replaces it: a lifted
+program writes it as its `cut` expression in `N`. A sum past $FF also adds its carry to
+`$D416`, which no cutoff value states, so a song that reaches it fails the lift; a third byte
+of $80-$8F sets the routing instead, which the lifter does not cover.
 
 ### defMON
 
@@ -782,7 +787,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing |
 | `hooks` | the starts: `{at: function, written: [cells], key: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `key` cells, or writes a `pointer` to a program that sets one of `program.fields` |
 | `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start |
-| `mirror` | a cell that takes the expression's value when it held the playroutine's |
+| `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
 | `label` | the cells that group a unit's occurrences for the lifter |
 | `relative` | cells a start reads as `N` plus their offset from the note (GoatTracker's `lastnote`) |
 | `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
@@ -949,7 +954,7 @@ to 126 the player adds to the frequency word from that row until a later row set
 keeps, and the lifter refuses one that keeps different detunes on its loop's passes). Pulse
 set rows use `pw`, and a program with a keyboard-tracked row is its `pw` expression in `N` (see
 Modulators); filter set rows `mode`, `cut` and
-`res`. A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there,
+`res`, and a program with a keyboard-tracked row is its `cut` expression in `N`. A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there,
 each row with that row's waveform, which the player writes on every chord step. A chord
 small FX ($7x) holds until the voice's next note, so on a note it becomes `!run` of the
 instrument's program with that chord inlined. `!run` plays in the instrument column on an

@@ -96,6 +96,9 @@ def testfilter_records_split_mode_and_resonance():
         "k": 0,
     }
     assert sidwizard.filter_record(bytes([0x04, 0xE0, 0])) == {"a": 4, "b": 0xE0, "k": 0}
+    assert sidwizard.filter_record(bytes([0x04, 0xE0, 0x90]))["k"] == 0x90
+    with pytest.raises(LiftError, match=r"routing byte \$83"):
+        sidwizard.filter_record(bytes([0x04, 0xE0, 0x83]))
 
 
 def test_chords_loop_return_and_open_end():
@@ -470,14 +473,14 @@ def test_a_vibrato_across_empty_steps_is_written_once(csillag):
     assert sum("note" not in e for e, _ in cmds) <= CSILLAG_EMPTY_STEP_COMMANDS
 
 
-@pytest.mark.parametrize("name", ["pulse"])
+@pytest.mark.parametrize("name", ["pulse", "filter"])
 def test_a_keyboard_tracked_chip_map_inverts_its_store(name):
     pr = songio.library("sidwizard")
     chip = next(u for u in pr["modulators"]["units"] if u["name"] == name)["chip"]
     ev = Evaluator(pr["functions"], pr["tables"])
     width = {c: int(pr["voice"][c]["width"]) for c in chip["store"]}
     for amount, note in itertools.product((0, 1, 5, 0x7F, 0xF4, 0xFF), range(0, 96, 5)):
-        env = {"pwkt": amount, "note": note, "oct": 0}
+        env = {"pwkt": amount, "fkt": amount, "note": note, "oct": 0}
         for v in range(0, 1 << int(chip["width"]), 7):
             cells = {
                 c: ev(e, {**env, "value": v}) % (1 << width[c]) for c, e in chip["store"].items()
