@@ -101,18 +101,54 @@ _INS_FIELDS = (
     ("filter", "filter_ptr"),
     ("speed", "vibrato_param"),
     ("vd", "vibrato_delay"),
-    ("gt", "gateoff_timer"),
-    ("fw", "first_wave"),
 )
+NO_GATEOFF, NO_PRESET = 0x40, 0x80
 
 
-def instrument_records(instruments) -> dict:
-    """Instruments 1..63 as records of their nonzero byte fields."""
-    out = {}
+def restart_rows(timer: int, first: int, adparam: int) -> list[dict]:
+    """The hard-restart program of gate timer byte ``timer`` and first wave ``first``.
+
+    Bits 0-5 of the timer are the lookahead; unless bit 6, the gate goes off then and, unless
+    bit 7 too, the envelope is preset to ``adparam``. A first wave $FE/$FF writes only the
+    gate on the note's first tick, another nonzero one the waveform with the gate on.
+    """
+    ahead = {"hold": timer & 0x3F}
+    if not timer & NO_GATEOFF:
+        ahead["gate"] = 0
+        if not timer & NO_PRESET:
+            ahead.update(ad=adparam >> 8, sr=adparam & 0xFF)
+    if first >= 0xFE:
+        note = {"gate": first & 1}
+    else:
+        note = {"ctrl": first, "gate": 1} if first else {}
+    return [ahead, note]
+
+
+def instrument_records(instruments, adparam: int) -> tuple[dict, dict]:
+    """Instruments 1..63 as records of their nonzero byte fields, and their restart programs.
+
+    Instruments with one gate timer and first wave share one program. An instrument without
+    one reads the voice's next step on its note's first tick, as gate timer 0 does: an empty
+    instrument, or one whose gate timer 0 leaves the gate and first wave alone.
+    """
+    out, restarts, entry = {}, {}, {}
     for num, ins in enumerate(instruments[: C.MAX_INSTR - 1], start=1):
         rec = {k: getattr(ins, attr) & 0xFF for k, attr in _INS_FIELDS}
-        out[num] = {k: v for k, v in rec.items() if v}
-    return out
+        rec = {k: v for k, v in rec.items() if v}
+        key = (ins.gateoff_timer & 0xFF, ins.first_wave & 0xFF)
+        out[num] = rec
+        if not key[0] & 0x3F:
+            idle = key[0] & NO_GATEOFF and not key[1]
+            if not idle and (rec or key != (0, 0)):
+                raise LiftError(f"instrument {num}: a hard restart on gate timer 0 is not covered")
+            continue
+        if key not in entry:
+            entry[key] = start = len(restarts) + 1
+            rows = restart_rows(*key, adparam)
+            for k, row in enumerate(rows):
+                restarts[start + k] = {**row, "next": start + k + 1 if k + 1 < len(rows) else 0}
+        rec["restart"] = entry[key]
+    return out, restarts
 
 
 def phrase(rows) -> list:
@@ -255,6 +291,7 @@ def lift(dec, expressions: bool = True) -> dict:
     deftempo = build.deftempo if build.deftempo is not None else _default_tempo(song)
     playroutine["constants"] = {"adparam": adparam, "deftempo": deftempo}
     freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
+    instruments, restarts = instrument_records(song.instruments, adparam)
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
     phrases = _phrases(song, tracks)
     header = dec.header
@@ -272,7 +309,8 @@ def lift(dec, expressions: bool = True) -> dict:
             "ftab": [int(v) for v in freq],
         },
         "records": {
-            "ins": instrument_records(song.instruments),
+            "ins": instruments,
+            "restart": restarts,
             "ctrltab": wave_records(song.wavetable),
             "pulsetab": pulse_records(song.pulsetable),
             "filttab": filter_records(song.filtertable),

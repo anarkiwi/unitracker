@@ -1,4 +1,4 @@
-"""v1.7 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.8 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -9,6 +9,11 @@ from unitracker.vm import SongError, SongPlayer
 GT = songio.library("goattracker2")["tables"]
 SW = songio.library("sidwizard")["tables"]
 DM = songio.library("defmon")["tables"]
+# A plain gated instrument whose hard restart turns the gate off two ticks ahead.
+INS = (
+    "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], "
+    "restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]"
+)
 
 
 def voice0(text, ticks):
@@ -24,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.7
+unitracker: 1.8
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -39,12 +44,30 @@ loop: ~
 GT_SONG = doc(
     "goattracker2, constants: {deftempo: 6}",
     """      ins:
-        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, pw: '1024 + 16*min(3, φ)'}
+        i1: """
+    + INS
+    + """, pw: '1024 + 16*min(3, φ)'}
       x:
         x1: (v + 300) % 65536
         x2: 0""",
     "[C4.i1, -!freq:@x1, -!freq:@x1, D4!legato:0!freq:@x2, -]",
 )
+
+
+@pytest.mark.parametrize(
+    "playroutine,ins,match",
+    [
+        ("goattracker2", "{sr: 240, gt: 2}", "ins.gt is retired in v1.8: write the hard restart"),
+        ("goattracker2", "{fw: 9}", "ins.fw is retired in v1.8"),
+        ("sidwizard", "{hrad: 15}", "ins.hrad is retired in v1.8"),
+        ("sidwizard", "{hrsr: 0}", "ins.hrsr is retired in v1.8"),
+        ("sidwizard", "{firstctrl: 9}", "ins.firstctrl is retired in v1.8"),
+        ("sidwizard", "{flags: 26}", "ins.flags bits 0x0f are retired in v1.8"),
+    ],
+)
+def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.loads(doc(playroutine, f"      ins:\n        i1: {ins}", "[C4.i1]"))
 
 
 def test_goattracker_freq_command_pulse_expression_and_legato():
@@ -105,7 +128,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.7", "unitracker: 1.6", "not a unitracker v1.7 document"),
+        ("unitracker: 1.8", "unitracker: 1.7", "not a unitracker v1.8 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
@@ -146,15 +169,9 @@ def test_floor_division_floors_toward_minus_infinity():
 
 @pytest.mark.parametrize("key,value", [("cut", 1024), ("cut", 0)])
 def test_a_constant_expression_in_a_filter_row_reads_back_as_written(key, value):
-    ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: "
+    ins = INS + ", filter: "
     rows = f"[{{{key}: '{value}', res: 12, route: 1, mode: 16}}, {{{key}: 512}}, end]"
-    text = songio.dumps(
-        songio.loads(
-            GT_SONG.replace(
-                "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9,", ins + rows + ",", 1
-            )
-        )
-    )
+    text = songio.dumps(songio.loads(GT_SONG.replace(INS + ",", ins + rows + ",", 1)))
     assert f"{key}: '{value}'" in text and f"{key}: 512" in text
     assert songio.dumps(songio.loads(text)) == text
 

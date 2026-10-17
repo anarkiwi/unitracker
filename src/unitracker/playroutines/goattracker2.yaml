@@ -35,8 +35,36 @@ record_types:
     none: 0
     pin: [1]
     form: map
-    fields: {ad: 0, sr: 0, ctrl: 0, pw: 0, filter: 0, speed: 0, vd: 0, gt: 0, fw: 0}
-    refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab}
+    fields: {ad: 0, sr: 0, ctrl: 0, pw: 0, filter: 0, speed: 0, vd: 0, restart: 0}
+    refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, restart: restart}
+  # Hard restart: a lookahead row, read hold ticks before the note (the gate timer), that
+  # may turn the gate off and then preset the envelope to adparam; then the note's first-tick
+  # row, which writes the first waveform with the gate on, or only the gate. -1: absent.
+  restart:
+    prefix: r
+    none: 0
+    chain: next
+    form: map
+    fields: {hold: 0, ctrl: -1, gate: -1, ad: -1, sr: -1, next: 0}
+    codec:
+      - when: "first and not last and hold >= 1 and hold <= 0x3F and ctrl < 0 and gate <= 0 and ((ad < 0 and sr < 0) or (gate == 0 and ad == adparam >> 8 and sr == (adparam & 0xFF)))"
+        keys:
+          hold: {value: hold, omit: "hold == 1"}
+          gate: {value: gate, omit: "gate < 0"}
+          ad: {value: ad, omit: "ad < 0"}
+          sr: {value: sr, omit: "sr < 0"}
+        raw:
+          hold: "hold if has_hold else 1"
+          gate: "gate if has_gate else -1"
+          ad: "ad if has_ad else -1"
+          sr: "sr if has_sr else -1"
+      - when: "last and not first and hold == 0 and ad < 0 and sr < 0 and ((ctrl < 0 and gate <= 1) or (ctrl >= 1 and ctrl < 0xFE and gate == 1))"
+        keys:
+          ctrl: {value: ctrl, omit: "ctrl < 0"}
+          gate: {value: gate, omit: "gate < 0"}
+        raw:
+          ctrl: "ctrl if has_ctrl else -1"
+          gate: "gate if has_gate else -1"
   speedtab:
     prefix: s
     none: 0
@@ -122,6 +150,10 @@ record_types:
         else: [{set: {filtercutoff: row.r}}]
     each: [{accumulate: filtercutoff, step: row.r}]
 functions:
+  # The row of restart program r on the note's first tick: its last.
+  hrnote:
+    args: [r]
+    expr: "restart[r].next if restart[r].next else r"
   spd:
     args: [i]
     expr: >-
@@ -173,7 +205,7 @@ voice:
   sr: {width: 8}
   skip: {width: 1}
   fetchtick: {width: 1}
-  fw: {width: 8}
+  hr: {width: 8}
   arg: {width: 8}
   n: {width: 8}
   T: {width: 16}
@@ -309,12 +341,10 @@ procs:
   new_note_init:
     - set: {onset: 1, note: newnote, command: 0, vibdelay: "ins[ii].vd", cmddata: "ins[ii].speed"}
     - {if: legato, then: [{return: true}]}
-    - set: {fw: "ins[ii].fw"}
-    - if: fw
-      then:
-        - if: "fw >= 0xFE"
-          then: [{set: {gate: fw}}]
-          else: [{set: {wave: fw, gate: 0xFF}}]
+    - set: {hr: "hrnote(ins[ii].restart)"}
+    - if: "restart[hr].ctrl >= 0"
+      then: [{set: {wave: "restart[hr].ctrl", gate: 0xFF}}]
+      else: [{if: "restart[hr].gate >= 0", then: [{set: {gate: "0xFE | restart[hr].gate"}}]}]
     - set: {wptr: "ins[ii].ctrl"}
     - {if: "ins[ii].pw", then: [{set: {pptr: "ins[ii].pw", ptime: 0}}]}
     - {if: "ins[ii].filter", then: [{set: {fptr: "ins[ii].filter", ftime: 0}}]}
@@ -331,16 +361,16 @@ procs:
     - if: "ev_kind == 1"
       then:
         - set: {newnote: ev_note, hasnew: 1}
-        - if: "not legato and not (ins[instr & 0x3F].gt & 0x40)"
+        - if: "not legato"
           then:
-            - set: {gate: 0xFE}
-            - if: "not (ins[instr & 0x3F].gt & 0x80)"
-              then: [{set: {ad: "adparam >> 8", sr: "adparam & 0xFF"}}]
+            - set: {hr: "ins[instr & 0x3F].restart"}
+            - {if: "restart[hr].gate == 0", then: [{set: {gate: 0xFE}}]}
+            - {if: "restart[hr].ad >= 0", then: [{set: {ad: "restart[hr].ad", sr: "restart[hr].sr"}}]}
   play_channel:
     - set: {ii: "instr & 0x3F", tick: "tick - 1", skip: 0}
     - if: "tick == 0"
       then:
-        - set: {gatetimer: "ins[ii].gt & 0x3F"}
+        - set: {gatetimer: "restart[ins[ii].restart].hold"}
         - {if: hasnew, then: [{call: new_note_init}]}
         - run: {record: tick0, index: newcommand, field: do}
         - if: hasnew
@@ -379,7 +409,7 @@ init:
           tick: 1
           tempo: deftempo
           instr: 1
-          gatetimer: "ins[1].gt & 0x3F"
+          gatetimer: "restart[ins[1].restart].hold"
 
 tick:
   - {if: "state == 2", then: [{return: true}]}

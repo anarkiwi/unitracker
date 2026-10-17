@@ -1,4 +1,4 @@
-# unitracker song format (v1.7)
+# unitracker song format (v1.8)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,16 +13,18 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.7
+unitracker: 1.8
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
 song:
   - def:
+      restart:
+        r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]
       ins:
         i1: {ad: 1, sr: 136, ctrl: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: =68},
             {ctrl: 65, note: +0}, end], pw: 16*abs((φ - 32) % 128 - 64) + 512, filter: [{cut: 1024, res: 12,
-              route: 1, mode: 16}, end], gt: 4, fw: 9}
+              route: 1, mode: 16}, end], restart: r1}
         ...
       ctrltab:
         c1: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 81, note: +0}, {ctrl: 65, note: +0}, {wait: 1,
@@ -52,7 +54,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.7`; readers reject any other version |
+| `unitracker` | `1.8`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -149,6 +151,7 @@ Program rows and commands use one vocabulary in every song, in chip units.
 | row key | meaning |
 |---|---|
 | `ctrl` | control register value |
+| `gate` | the gate the control register is written with until a row, note or `off`/`on` sets it: 0 off, 1 on |
 | `note` | `+n` / `-n` relative to the event note, `=n` absolute (format numbering, C2 = 24); omitted: no change |
 | `wait` | ticks before the row applies |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
@@ -186,18 +189,23 @@ SID-Wizard's effect commands are its own: they have no identical shared form.
 
 A shared key means the same wherever it appears: in program rows, in initial-state
 records, and in instruments, where `ctrl` names the program run on the control register
-(GoatTracker's `ctrl: [...]` or `ctrl: c1`). A row or command a player can't express is
+(GoatTracker's `ctrl: [...]` or `ctrl: c1`) and `restart` the hard restart (see Hard restart). A row or command a player can't express is
 rejected on reading, naming the key or command and the player (`goattracker2: the player
 can't express !notevib:1`); the writer refuses to write a value that would not read back
 (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
 - **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
-  command rows (list rows), `!vib:@s` and the instrument keys.
+  command rows (list rows), `!vib:@s` and the instrument keys `speed` and `vd`.
 - **defMON:** the sidTAB columns `wgl`, `cp`; `af` below $80 (a fixed offset).
 - **SID-Wizard:** WF rows that hold a row (`w` below $10), play a chord (`a` $7F) or set a
   detune (list rows `[w, a, d]`), pulse and filter sweep rows and keyboard-tracked rows
-  (list rows), `!notevib` and the instrument keys.
+  (list rows), `!notevib` and the instrument keys `flags` (bits 4-7 of the header's control
+  byte: the vibrato type, and keeping the pulse and filter programs across notes),
+  `vibrato`, `vibdelay`, `arpspeed`, `chord` and `octave`.
 
+The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
+`flags` (SID-Wizard) are retired in v1.8: a document using them is rejected, naming them
+(`ins.gt is retired in v1.8: write the hard restart as the instrument's restart program`).
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
 using them is rejected (`record type 'mod' is retired in v1.5`, `!mod is retired in v1.5`,
@@ -238,6 +246,30 @@ expression over `v` cannot read.
 
 The sidTAB columns `fv` (`mode`), `re` (`res` and `route`) and `acid` (`cut`) and the row key
 `resfilt` (`res` and `route`) are refused (`fv is retired in v1.7`).
+### Hard restart
+
+An instrument's `restart` is a program (record type `restart`, prefix `r`) anchored to its
+notes: the last row applies on the note's first tick, and each earlier row that many ticks
+before it as the rows after it hold. A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`:
+
+```yaml
+restart:
+  r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]
+```
+
+Four ticks before the note the gate goes off with envelope $0F00; on its first tick the
+control register takes $09 with the gate on. A note with `!legato:0` runs no restart, and an
+instrument without `restart` has none. Each player plays the shapes its codec accepts (a
+row's place in its program is part of its shape, see Codecs):
+
+| player | lookahead row | first-tick row |
+|---|---|---|
+| GoatTracker 2 | exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n, gate: 1}` (n $01-$FD, the first wave), `{gate: g}`, or `{}` |
+| SID-Wizard | at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform), or `{}` |
+
+GoatTracker reads the voice's next step its instrument's gate timer ahead of each note, and an
+instrument without a restart reads it on the note's first tick. A GoatTracker note keeps the
+gate as the restart left it, so its first-tick row sets it; a SID-Wizard note sets it itself.
 
 ## Modulators
 
@@ -430,7 +462,9 @@ ctrltab:
 
 ### Codecs
 
-A codec shape has a `when` over the raw fields, `keys` (`{key: {value, omit, abs, expr}}`:
+A codec shape has a `when` over the raw fields, the playroutine's constants, and for a
+program row its place: `first` and `last` are 1 for the program's first row and for the
+row before its `end`; `keys` (`{key: {value, omit, abs, expr}}`:
 the shared key's value from the raw fields, when to leave it out, for `note` whether
 it is absolute, and the raw field holding the key's expression), `raw` (each raw field
 from the written keys, with `has_<key>` and `note_abs` defined) and `keep` (raw fields
@@ -615,7 +649,8 @@ native register grid exactly over that window; otherwise the lift fails.
 | `sidwizard` | SID-Wizard 1.x export, normal build (pysidwizard) | one pattern row | the decoded module |
 
 **GoatTracker 2.** The playroutine counts ticks per row itself, and `fetch` runs on its
-gate-timer lookahead. Instrument 1 is pinned because every voice starts on it. A
+gate-timer lookahead, the hold of the restart's first row. Instruments with one gate timer and
+first wave share a restart program; a hard restart on gate timer 0 is not covered. Instrument 1 is pinned because every voice starts on it. A
 filter parameter row carries the following cutoff row's value as `cut`, because the
 player reads both in one tick.
 
@@ -637,11 +672,12 @@ becomes the playroutine constants `floor` and `dbl`. The ghost masks pulse-width
 to a nibble, as the reference grid does.
 
 **SID-Wizard.** The playroutine runs each voice's tempo counter, reads a row at TICK_0,
-applies it at TICK_2 and writes the next instrument's hard-restart ADSR on the ticks
-between, ticking the voices in the player's reverse order. An instrument is its header
-(`flags`, `hrad`, `hrsr`, `ad`, `sr`, `vibrato`, `vibdelay`, `arpspeed`, `chord`,
-`octave`, `firstctrl`), its WF/arp, pulse and filter programs (`ctrl`, `pw`, `filter`)
-and its pitch expression (`freq`). WF rows use `ctrl` and `note`; pulse set rows `pw`;
+applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking
+the voices in the player's reverse order. An instrument is its header (`flags`, `ad`, `sr`,
+`vibrato`, `vibdelay`, `arpspeed`, `chord`, `octave`), its WF/arp, pulse, filter and
+restart programs (`ctrl`, `pw`, `filter`, `restart`) and its pitch expression (`freq`).
+The header's hard-restart bytes and control bits 0-3 become the restart program; a
+restart on both ticks before the note (control bits 0 and 1) is not covered. WF rows use `ctrl` and `note`; pulse set rows `pw`;
 filter set rows `mode`, `cut` and `res`; chords are programs of `note` offsets that loop
 or end. Note names are offset by one index: SID-Wizard index 49 is `C4`. The lifter
 requires each voice's first note to select an instrument: a note that selects none on a

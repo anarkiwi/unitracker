@@ -37,7 +37,7 @@ LIBS = {"goattracker2": (GT, GT_TYPES), "sidwizard": (SW, SW_TYPES), "defmon": (
 
 def codec(pr_name, name):
     pr, types = LIBS[pr_name]
-    ev = Evaluator(pr.get("functions"), pr.get("tables"))
+    ev = Evaluator(pr.get("functions"), pr.get("tables"), pr.get("constants"))
     return RowCodec(types[name], types[name].codec, int(pr.get("note_offset", 0)), ev)
 
 
@@ -108,6 +108,59 @@ def test_goattracker_leftover_rows_have_no_shape(name, raw):
 def test_goattracker_rejects_what_it_cannot_express(name, shared, match):
     with pytest.raises(CodecError, match=match):
         codec("goattracker2", name).decode(shared)
+
+
+FIRST, MIDDLE, LAST, ONLY = (
+    {"first": 1, "last": 0},
+    {"first": 0, "last": 0},
+    {"first": 0, "last": 1},
+    {"first": 1, "last": 1},
+)
+HR = {"gate": 0, "ad": 0x0F, "sr": 0}
+
+
+@pytest.mark.parametrize(
+    "pr_name,place,shared",
+    [
+        ("goattracker2", FIRST, {"hold": 4, **HR}),
+        ("goattracker2", FIRST, {"hold": 63, "gate": 0}),
+        ("goattracker2", FIRST, {}),
+        ("goattracker2", LAST, {"ctrl": 9, "gate": 1}),
+        ("goattracker2", LAST, {"gate": 0}),
+        ("goattracker2", LAST, {}),
+        ("sidwizard", FIRST, {"hold": 2, "ctrl": 0x18, **HR}),
+        ("sidwizard", FIRST, {**HR, "ad": 0x2F}),
+        ("sidwizard", LAST, {"ctrl": 9}),
+        ("sidwizard", ONLY, {}),
+    ],
+)
+def test_restart_rows_read_back_at_their_place(pr_name, place, shared):
+    c = codec(pr_name, "restart")
+    assert c.encode(c.decode(shared, place), place) == shared
+
+
+@pytest.mark.parametrize(
+    "pr_name,place,shared",
+    [
+        ("goattracker2", FIRST, {"hold": 64, "gate": 0}),
+        ("goattracker2", FIRST, {**HR, "ad": 0x1F}),
+        ("goattracker2", FIRST, {"ad": 0x0F, "sr": 0}),
+        ("goattracker2", FIRST, {"ctrl": 9}),
+        ("goattracker2", MIDDLE, {"hold": 2}),
+        ("goattracker2", LAST, {"hold": 2}),
+        ("goattracker2", LAST, {"ctrl": 9}),
+        ("goattracker2", LAST, {"ctrl": 0xFE, "gate": 1}),
+        ("goattracker2", ONLY, {"ctrl": 9, "gate": 1}),
+        ("sidwizard", FIRST, {"hold": 3, **HR}),
+        ("sidwizard", FIRST, {"hold": 2, "ctrl": 0x20, **HR}),
+        ("sidwizard", FIRST, {"hold": 2, "ad": 0x0F, "sr": 0}),
+        ("sidwizard", MIDDLE, {"hold": 1, **HR}),
+        ("sidwizard", LAST, {"gate": 0}),
+    ],
+)
+def test_restart_programs_hold_only_what_the_player_plays(pr_name, place, shared):
+    with pytest.raises(CodecError, match=f"restart: the player can't express row {shared!r}"):
+        codec(pr_name, "restart").decode(shared, place)
 
 
 @pytest.mark.parametrize(
@@ -358,7 +411,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": 1.7,
+        "unitracker": 1.8,
         "playroutine": {"ref": "defmon"},
         "song": [
             {"def": {"sidtab": {"t1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}
@@ -500,15 +553,18 @@ def test_note_offsets_follow_the_frequency_tables():
 
 
 PROGRAM_TYPES = {
-    "goattracker2": {"ctrl": "ctrltab", "pw": "pulsetab", "filter": "filttab"},
-    "sidwizard": {"ctrl": "wftab", "pw": "pwtab", "filter": "flttab"},
+    "goattracker2": {
+        "ctrl": "ctrltab",
+        "pw": "pulsetab",
+        "filter": "filttab",
+        "restart": "restart",
+    },
+    "sidwizard": {"ctrl": "wftab", "pw": "pwtab", "filter": "flttab", "restart": "restart"},
 }
 INS_KEYS = {
-    "goattracker2": {"ad", "sr", "ctrl", "pw", "filter", "speed", "vd", "gt", "fw"},
+    "goattracker2": {"ad", "sr", "ctrl", "pw", "filter", "speed", "vd", "restart"},
     "sidwizard": {
         "flags",
-        "hrad",
-        "hrsr",
         "ad",
         "sr",
         "vibrato",
@@ -516,7 +572,7 @@ INS_KEYS = {
         "arpspeed",
         "chord",
         "octave",
-        "firstctrl",
+        "restart",
         "ctrl",
         "pw",
         "filter",
@@ -545,6 +601,7 @@ SHARED_OUTSIDE_ROWS = {
     ("defmon", "vinit"): {"ctrl", "note", "ad", "sr", "pw"},
     ("defmon", "ginit"): {"res", "route", "mode"},
 }
+PROGRAMS = ("ctrltab", "pulsetab", "filttab", "sidtab", "wftab", "pwtab", "flttab", "restart")
 INS_FORMS = {"ctrl": (list, str), "pw": (list, str, int), "freq": (str, int)}
 INIT_KEYS = {
     "vinit": {"flo", "fhi", "sacc", "tbase", "rowA", "cntA", "rowB", "cntB"} | DM_KEEP,
@@ -591,7 +648,7 @@ def _check_def(pr_name, tname, value):
     elif tname in INIT_KEYS:
         assert set(value) <= INIT_KEYS[tname] | SHARED_OUTSIDE_ROWS[(pr_name, tname)], value
         _check_shared_outside_rows(pr_name, tname, value)
-    elif tname in ("ctrltab", "pulsetab", "filttab", "sidtab", "wftab", "pwtab", "flttab"):
+    elif tname in PROGRAMS:
         _check_program(pr_name, tname, value)
     elif tname == "chordtab":
         _check_rows(tname, value, set())
@@ -602,7 +659,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.7 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.8 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -663,7 +720,7 @@ def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, cs
     for i, mine in enumerate(keys):
         for j, theirs in enumerate(keys):
             if i != j:
-                assert mine & theirs <= set(ROW_KEYS) | {"filter"}
+                assert mine & theirs <= set(ROW_KEYS) | {"filter", "restart"}
     assert not keys[2] & (set(COMMAND_NAMES) - {"chord"} - set(ROW_KEYS))
 
 
@@ -671,7 +728,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": 1.7,
+                "unitracker": 1.8,
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -713,7 +770,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.7
+unitracker: 1.8
 playroutine: {ref: defmon}
 song:
   - def:

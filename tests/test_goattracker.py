@@ -60,9 +60,44 @@ def test_speed_records():
     }
 
 
+@pytest.mark.parametrize(
+    "timer,first,rows",
+    [
+        (0x04, 0x09, [{"hold": 4, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9, "gate": 1}]),
+        (0x83, 0xFE, [{"hold": 3, "gate": 0}, {"gate": 0}]),
+        (0xC1, 0xFF, [{"hold": 1}, {"gate": 1}]),
+        (0x42, 0x00, [{"hold": 2}, {}]),
+    ],
+)
+def test_restart_rows_follow_the_gate_timer_and_first_wave(timer, first, rows):
+    assert gt.restart_rows(timer, first, 0x0F00) == rows
+
+
 def test_instruments_and_default_tempo():
-    recs = gt.instrument_records([Instrument(attack_decay=0x12, wave_ptr=3, gateoff_timer=0x82)])
-    assert recs == {1: {"ad": 0x12, "ctrl": 3, "gt": 0x82}}
+    instruments = [
+        Instrument(attack_decay=0x12, wave_ptr=3, gateoff_timer=0x82),
+        Instrument(gateoff_timer=0x82),
+        Instrument(),
+        Instrument(sustain_release=0xF0, gateoff_timer=0x40),
+        Instrument(gateoff_timer=0x82, first_wave=0x41),
+    ]
+    recs, restarts = gt.instrument_records(instruments, 0x0F00)
+    assert recs == {
+        1: {"ad": 0x12, "ctrl": 3, "restart": 1},
+        2: {"restart": 1},
+        3: {},
+        4: {"sr": 0xF0},
+        5: {"restart": 3},
+    }
+    assert restarts == {
+        1: {"hold": 2, "gate": 0, "next": 2},
+        2: {"next": 0},
+        3: {"hold": 2, "gate": 0, "next": 4},
+        4: {"ctrl": 0x41, "gate": 1, "next": 0},
+    }
+    for bad in (Instrument(attack_decay=1), Instrument(first_wave=9, gateoff_timer=0x40)):
+        with pytest.raises(gt.LiftError, match="gate timer 0"):
+            gt.instrument_records([bad], 0x0F00)
     song = Song(instruments=[Instrument() for _ in range(63)])
     assert gt._default_tempo(song) == 5  # pylint: disable=protected-access
     song.instruments[62] = Instrument(attack_decay=7)

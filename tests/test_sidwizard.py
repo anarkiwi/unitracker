@@ -142,7 +142,30 @@ def test_build_and_header_checks():
         sidwizard.check_build(bad, SimpleNamespace(name="light"))
     marked = SimpleNamespace(filter_table=bytes([0xFF]))
     with pytest.raises(LiftError, match="unfiltered"):
-        sidwizard.instrument_record(marked, sidwizard.Tables(), {})
+        sidwizard.instrument_record(marked, sidwizard.Tables(), {}, sidwizard.Restarts())
+
+
+@pytest.mark.parametrize(
+    "control,rows",
+    [
+        (0x1A, [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0x10}, {"ctrl": 9}]),
+        (0x05, [{"hold": 1, "ctrl": 0x18, "gate": 0, "ad": 0x0F, "sr": 0x10}, {}]),
+        (0x08, [{"ctrl": 9}]),
+        (0x14, []),
+    ],
+)
+def test_restart_rows_follow_the_control_byte(control, rows):
+    got = sidwizard.restart_rows(control, 0x0F, 0x10, 9)
+    assert [dict(r) for r in got] == rows
+    restarts = sidwizard.Restarts()
+    entry = restarts.program(got)
+    assert restarts.program(got) == entry == (1 if rows else 0)
+    assert len(restarts.records) == len(rows)
+
+
+def test_a_restart_on_both_ticks_is_refused():
+    with pytest.raises(LiftError, match="both ticks"):
+        sidwizard.restart_rows(0x03, 0x0F, 0, 9)
 
 
 def test_csillag_lifts_and_is_detected(csillag):
@@ -169,7 +192,13 @@ def test_a_reference_past_the_instruments_plays_the_emptyinstrument_record(csill
     monkeypatch.setattr(sidwizard, "parse_sid_song", patched)
     ir = sidwizard.lift(csillag.read_bytes(), expressions=False)
     empty = ir["records"]["ins"][len(ir["records"]["ins"])]
-    assert empty == {"flags": 0x1A, "hrad": 0x0F, "sr": 0xF0, "chord": 1}
+    assert empty == {"flags": 0x10, "sr": 0xF0, "chord": 1, "restart": empty["restart"]}
+    path, entry = [], empty["restart"]
+    while entry:
+        row = ir["records"]["restart"][entry]
+        path.append({k: v for k, v in row.items() if k != "next"})
+        entry = row["next"]
+    assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9}]
     SongPlayer(ir).render_grid(20)
 
 

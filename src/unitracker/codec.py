@@ -14,6 +14,7 @@ ROW_KEYS = (
     "wait",
     "hold",
     "ctrl",
+    "gate",
     "note",
     "ad",
     "sr",
@@ -74,15 +75,15 @@ class CodecError(ValueError):
 
 
 class _Env(Resolver):
-    """Expressions over one mapping of names (a missing name reads as 0) and the
-    playroutine's tables and functions."""
+    """Expressions over one mapping of names (a missing name reads as the playroutine's
+    constant of that name, else 0) and the playroutine's tables and functions."""
 
     def __init__(self, functions=None, tables=()):
         super().__init__(functions)
         self.tables = set(tables)
 
     def name(self, name):
-        return f"E.get({name!r}, 0)"
+        return f"E.get({name!r}, C.get({name!r}, 0))"
 
     def table(self, name, index):
         if name not in self.tables:
@@ -95,12 +96,14 @@ def _tg(table, index):
 
 
 class Evaluator:
-    """Evaluates codec expressions with a playroutine's functions and a song's tables."""
+    """Evaluates codec expressions with a playroutine's functions and constants and a song's
+    tables."""
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, functions=None, tables=None):
+    def __init__(self, functions=None, tables=None, constants=None):
         self.tables = {k: [int(x) for x in v] for k, v in (tables or {}).items()}
+        self.constants = {k: int(v) for k, v in (constants or {}).items()}
         self.resolver = _Env(functions, self.tables)
         self.codes = {}
 
@@ -113,7 +116,7 @@ class Evaluator:
             except ExprError as exc:
                 raise CodecError(str(exc)) from exc
             self.codes[text] = code
-        glob = {"E": env, "T": self.tables, "_tg": _tg}
+        glob = {"E": env, "C": self.constants, "T": self.tables, "_tg": _tg}
         return int(eval(code, glob))  # pylint: disable=eval-used
 
 
@@ -264,13 +267,20 @@ class RowCodec:
                 out[field] = row[field]
         return out
 
-    def encode(self, row: dict) -> dict | None:
-        """Shared keys for a raw row, notes as ``(absolute, number)``; None if no shape fits."""
+    def encode(self, row: dict, place: dict | None = None) -> dict | None:
+        """Shared keys for a raw row, notes as ``(absolute, number)``; None if no shape fits.
+
+        ``place`` gives a program row's position to the shapes' ``when``: ``first`` and
+        ``last`` (the row before ``end``) are 1 or 0.
+        """
         full = self._full(row)
         for shape in self.shapes:
-            if shape.when is None or self.ev(shape.when, full):
+            if self._fits(shape, full, place):
                 return self._encode(shape, full)
         return None
+
+    def _fits(self, shape, full: dict, place) -> bool:
+        return shape.when is None or bool(self.ev(shape.when, {**full, **(place or {})}))
 
     def _env(self, shape, norm) -> dict:
         env = {}
@@ -287,7 +297,7 @@ class RowCodec:
                 env[env_name(key)] = norm[key]
         return env
 
-    def _try(self, shape, norm) -> tuple[dict | None, str]:
+    def _try(self, shape, norm, place) -> tuple[dict | None, str]:
         extra = set(norm) - set(shape.keys) - set(shape.keep)
         if extra:
             return None, f"keys {sorted(extra)}"
@@ -304,7 +314,7 @@ class RowCodec:
             if field is not None:
                 raw[field] = value
             full = self._full(raw)
-            if shape.when is not None and not self.ev(shape.when, full):
+            if not self._fits(shape, full, place):
                 continue
             try:
                 back = self._encode(shape, full)
@@ -322,15 +332,16 @@ class RowCodec:
         """A written row with notes as ``(absolute, number)`` and routes as ``(relation, mask)``."""
         return {k: _FORMS[k][0](v) if k in _FORMS else v for k, v in written.items()}
 
-    def decode(self, written: dict) -> dict:
-        """Raw fields for a written row; raises CodecError naming what the player can't express."""
+    def decode(self, written: dict, place: dict | None = None) -> dict:
+        """Raw fields for a written row at ``place`` (see :meth:`encode`); raises CodecError
+        naming what the player can't express."""
         for key in written:
             if key in RETIRED_ROW_KEYS and not any(key in s.keep for s in self.shapes):
                 raise CodecError(f"{self.rtype.name}: {key} is {RETIRED_ROW_KEYS[key]}")
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:
-            raw, problem = self._try(shape, norm)
+            raw, problem = self._try(shape, norm, place)
             if raw is not None:
                 return raw
             problems.append(problem)
@@ -338,12 +349,12 @@ class RowCodec:
             f"{self.rtype.name}: the player can't express row {written!r} ({'; '.join(problems)})"
         )
 
-    def check_end(self, raw: dict, written: dict) -> None:
+    def check_end(self, raw: dict, written: dict, place: dict | None = None) -> None:
         """Raise unless ``raw`` (a program's last row after ``end``) still writes as ``written``.
 
         An expression key compares by presence: ``raw`` holds its reference, ``written`` its text.
         """
-        enc, norm = self.encode(raw), self.normalize(written)
+        enc, norm = self.encode(raw, place), self.normalize(written)
         exprs = {k for k, v in (enc or {}).items() if is_expr(v)}
         if (
             enc is None
