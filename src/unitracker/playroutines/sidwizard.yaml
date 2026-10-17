@@ -595,6 +595,7 @@ modulators:
     - name: pulse
       key: pw
       cell: "pwhi:pwlo"
+      chip: {width: 12, value: "((pwhi << 8) | pwlo) & 0xFFF", store: {pwhi: "value >> 8", pwlo: value}}
       fire: [tick_pw]
       pre: procs.tick_pw
       label: [ppos]

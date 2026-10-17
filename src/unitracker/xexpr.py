@@ -1,8 +1,8 @@
 """Modulator expressions: the format's grammar text, checked and compiled for the player.
 
-Integer literals, ``+ - *``, ``//`` (floor division), ``%`` (floor modulo), ``abs``, ``min``, ``max``, Iverson brackets
-``[a op b]`` (op one of ``== != < <= > >=``), ``v``, ``φ``, ``N``, ``F(k)`` (the frequency of
-note k) and ``T[k]`` for a named playroutine table ``T``.
+Integer literals, ``+ - *``, ``//`` (floor division), ``%`` (floor modulo), ``abs``, ``min``,
+``max``, Iverson brackets ``[a op b]`` (op one of ``== != < <= > >=``), ``v``, ``φ``, ``N``,
+``F(k)`` (the frequency of note k) and ``T[k]`` for a named playroutine table ``T``.
 """
 
 import ast

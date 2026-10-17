@@ -2,13 +2,17 @@
 
 A start opens an occurrence at the unit's next firing (its ``pre`` to ``post`` calls). While an
 expression is active each firing sets ``v' = f(v, φ, N)`` from the cell's value before the
-firing, then ``φ += 1``; otherwise the playroutine's own firing stands.
+firing, then ``φ += 1``; otherwise the playroutine's own firing stands. A unit with a ``chip``
+map drives the chip register value its cells give (``value``); an expression's result is stored
+through ``store`` when the cells do not already give it.
 """
 
 import dataclasses
 
 from unitracker.codec import evaluate
 from unitracker.records import record_types
+
+VALUE = "value"
 
 
 @dataclasses.dataclass
@@ -29,6 +33,8 @@ class Occurrence:  # pylint: disable=too-many-instance-attributes
     crossed: tuple | None = None
     error: str = ""
     key: object = None
+    v_in: int = 0
+    first: int | None = None
 
 
 def pair_parts(cell: str) -> tuple:
@@ -130,6 +136,12 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         self.voice_of = {id(v): i for i, v in enumerate(player.voice_cells)}
         self.active, self.pending, self.pre = {}, {}, {}
         self.occurrences, self.keep = [], keep
+        self.chips = {}
+        for i, unit in enumerate(self.units):
+            if unit.get("chip"):
+                cells = list(unit["chip"]["store"])
+                stores = [(c, self.ns[f"_cs_{i}_{k}"]) for k, c in enumerate(cells)]
+                self.chips[unit["name"]] = (self.ns[f"_cv_{i}"], stores)
         for unit in self.units:
             self.wrap(unit["pre"], lambda args, unit=unit: self.on_pre(unit, args), None)
             self.wrap(
@@ -267,6 +279,26 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             row = full.get(rtype.chain, 0)
         return False
 
+    def read(self, unit: dict, voice) -> int:
+        """The unit's value: its chip map's register value, else its cell's."""
+        chip = self.chips.get(unit["name"])
+        if chip is None:
+            return self.cells.get(unit["cell"], voice)
+        cells = self.player.voice_cells[voice] if voice is not None else None
+        return chip[0](cells) & ((1 << int(unit["chip"]["width"])) - 1)
+
+    def write(self, unit: dict, voice, value: int) -> None:
+        """Store a value in the unit's cells; a chip map's store runs only when they differ."""
+        chip = self.chips.get(unit["name"])
+        if chip is None:
+            self.cells.set(unit["cell"], voice, value)
+            return
+        if self.read(unit, voice) == value:
+            return
+        cells = self.player.voice_cells[voice] if voice is not None else None
+        for cell, fn in chip[1]:
+            self.cells.set(cell, voice, fn(cells, value))
+
     def note_of(self, voice) -> int:
         """The sounding format note ``N`` of a voice."""
         if voice is None or self.note is None:
@@ -280,11 +312,12 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             return
         key, voice = owner
         name = (unit["name"], key)
-        now = self.cells.get(unit["cell"], voice)
         snap = self.capture(unit, voice) if name in self.pending else None
-        self.pre[name] = (voice, now, snap)
         occ = self.active.get(name)
-        if occ is not None and snap is None and occ.crossed is None:
+        driven = snap.get("x") if snap is not None else occ is not None and occ.derived
+        now = self.read(unit, voice) if self.keep or driven else None
+        self.pre[name] = (voice, now, snap)
+        if now is not None and occ is not None and snap is None and occ.crossed is None:
             if now != occ.v and occ.firings:
                 occ.crossed = (self.tick, occ.phi, occ.v, now)
 
@@ -306,19 +339,21 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         if occ is None:
             return
         self.fired(unit, occ)
-        native = self.cells.get(unit["cell"], voice)
         if occ.derived is None:
-            occ.v = native
+            if self.keep:
+                occ.v = self.read(unit, voice)
+                occ.first = occ.v if occ.firings == 0 else occ.first
             occ.firings += 1
             return
+        native = self.read(unit, voice)
         phi = occ.phi
         occ.v, occ.phi = occ.derived.step(before, phi, self.note_of(voice))
         occ.firings += 1
         if occ.v != native and occ.mismatch is None:
             occ.mismatch = (self.tick, phi, before, native, occ.v)
         if self.override(occ):
-            self.cells.set(unit["cell"], voice, occ.v)
-            occ.v = self.cells.get(unit["cell"], voice)
+            self.write(unit, voice, occ.v)
+            occ.v = self.read(unit, voice)
             mirror = unit.get("mirror")
             if mirror and self.cells.get(mirror, voice) == native:
                 self.cells.set(mirror, voice, occ.v)
@@ -338,7 +373,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             snap,
             hook,
         )
-        occ.v = before
+        occ.v = occ.v_in = before
         occ.derived = self.select(unit, occ)
         self.active[name] = occ
         if self.keep:

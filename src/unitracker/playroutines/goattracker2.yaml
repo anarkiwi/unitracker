@@ -72,7 +72,9 @@ record_types:
         then: [{set: {wave: "row.w & 0x0F"}}]
         else: [{if: "row.w >= 0x10", then: [{set: {wave: row.w}}]}]
       - if: "row.n != 0x80"
-        then: [{call: wnote, with: {n: "(row.n & 0x7F) if row.n >= 0x80 else ((note + row.n) & 0x7F)"}}]
+        then:
+          - set: {arp: row.n}
+          - {call: wnote, with: {n: "(row.n & 0x7F) if row.n >= 0x80 else ((note + row.n) & 0x7F)"}}
   # Pulsetable row: l $80+ sets the width from (l & $0F, r); otherwise l ticks of a signed r sweep.
   # x: the expression a program of that one row is (see modulators).
   pulsetab:
@@ -137,6 +139,8 @@ voice:
   ii: {width: 8}
   note: {width: 8}
   lastnote: {width: 8}
+  # The last wavetable note row's n: the frequency base is ftab[n] of the note it gives.
+  arp: {width: 8}
   hasnew: {width: 1}
   newnote: {width: 8}
   freq: {width: 16}
@@ -391,7 +395,7 @@ ghost:
 # The modulators: per unit, the cell its expression drives, the calls that are one firing
 # (pre to post), what starts it (hooks), which expression a start selects (x) and where
 # that expression is written: key, and the site (a record) or the command of the event. The
-# expression's value is scale times the cell's: cut is the 11-bit cutoff, the cell its top 8 bits.
+# expression's value is the chip register value its chip map reads from the cells.
 modulators:
   freq: {word: ftab}
   notes: [note]
@@ -400,6 +404,7 @@ modulators:
     - name: command
       key: freq
       cell: freq
+      chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
       fire: [{run: {record: tickn, index: command, field: do}}]
       pre: records.tickn.do
       label: [command, cmddata]
@@ -425,7 +430,7 @@ modulators:
       scope: global
       key: cut
       cell: filtercutoff
-      scale: 8
+      chip: {width: 11, value: "filtercutoff << 3", store: {filtercutoff: "value >> 3"}}
       fire: [filter_exec]
       pre: procs.filter_exec
       label: [fptr]

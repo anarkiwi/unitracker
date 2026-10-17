@@ -42,7 +42,7 @@ GT_SONG = doc(
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, pw: '1024 + 16*min(3, φ)'}
       x:
         x1: (v + 300) % 65536
-        x2: F(N)""",
+        x2: 0""",
     "[C4.i1, -!freq:@x1, -!freq:@x1, D4!legato:0!freq:@x2, -]",
 )
 
@@ -59,7 +59,7 @@ def test_goattracker_freq_command_pulse_expression_and_legato():
 
 def test_constant_and_text_expressions_read_back_as_written():
     song = songio.loads(GT_SONG)
-    assert sorted(song["exprs"].values()) == ["(v + 300) % 65536", "1024 + 16*min(3, φ)", "F(N)"]
+    assert sorted(song["exprs"].values()) == ["(v + 300) % 65536", "0", "1024 + 16*min(3, φ)"]
     text = songio.dumps(song)
     assert "pw: '1024 + 16*min(3, φ)'" in text and "!legato:0!freq:@x2" in text
     assert songio.dumps(songio.loads(text)) == text
@@ -221,11 +221,11 @@ def test_csillag_wrong_delay_constant_breaks_the_grid(csillag):
     assert not np.array_equal(grid_of(later, ticks), native(raw, ticks))
 
 
-def test_crosseyed_wrong_carried_direction_breaks_the_grid(crosseyed):
+def test_crosseyed_wrong_carried_constant_breaks_the_grid(crosseyed):
     raw, text = lifted(crosseyed)
     ticks = 95 + 2 * 1152 + 100
     want = native(raw, ticks)
     assert np.array_equal(grid_of(text, ticks), want)
-    start = "*[φ >= 1] + 81919"
-    assert start in text
-    assert not np.array_equal(grid_of(text.replace(start, "*[φ >= 1] + 16384"), ticks), want)
+    carried = "16*[φ >= 1]"
+    assert carried in text
+    assert not np.array_equal(grid_of(text.replace(carried, "8*[φ >= 1]"), ticks), want)

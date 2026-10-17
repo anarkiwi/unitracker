@@ -92,6 +92,14 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
             return {}
         final = paths[0][1]
         out = {c: t for c, t in final.items() if not isinstance(t, int) and "N" in atoms(t)}
+        if machine.chip:
+            stored = [c for c in machine.parts - {machine.cell} if final.get(c, c) != c]
+            written = machine.form.wrap(
+                machine.cell, machine.form.expr(machine.chip["value"], final)
+            )
+            if stored and not atoms(written) & machine.parts:
+                out[machine.cell] = written
+            return out
         written = final.get(machine.cell, machine.cell)
         if machine.cell not in machine.form.pair and written != machine.cell:
             out[machine.cell] = written
@@ -113,7 +121,7 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
             if c in machine.reads or c in machine.control:
                 if self.evaluate(machine, t, n) == occ.start.get(c):
                     values[c] = t
-        v0 = lay.get(unit["cell"])
+        v0 = lay.get(machine.cell)
         if v0 is not None and self.evaluate(machine, v0, n) != occ.v:
             v0 = None
         try:

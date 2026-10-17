@@ -12,6 +12,7 @@ import z3
 from unitracker.modfit import grammar as G
 from unitracker import songio
 from unitracker.modfit.cli import main
+from unitracker.modfit import convert
 from unitracker.modfit.convert import analyse, groups
 from unitracker.modfit.exprs import Analysis, Result
 from unitracker.modfit.exprs_report import load, native_grid
@@ -301,18 +302,21 @@ def general_forms(conv) -> list:
     return out
 
 
-def test_acid_direction_is_an_input_and_a_wrong_input_is_caught(crosseyed):
+def test_acid_carries_its_hidden_carry_and_clamp_in_as_a_start_constant(crosseyed):
     conv = analyse(load(crosseyed).ir, workers=4)
-    got, live = next((r, live) for r, live in general_forms(conv) if r.kind == "input")
-    assert got.cells == ["sub"] and "every value of sub" in got.proof
-    sub = sympy.Symbol("sub", integer=True)
-    f = G.compiled(got.update[1], ("v", "phi", "N", "sub"))
-    flipped = G.compiled(got.update[1].xreplace({sub: 1 - sub}), ("v", "phi", "N", "sub"))
-    for r in live:
-        want, s = G.compiled(r.derived.update[1]), dict(r.start)["sub"]
-        points = [(v, phi) for v in (0, 300, 40000, 65535) for phi in range(8)]
-        assert all(f(v, phi, 0, s) == want(v, phi, 0) for v, phi in points)
-        assert any(flipped(v, phi, 0, s) != want(v, phi, 0) for v, phi in points)
+    an, seen = conv.analysis, set()
+    floor = an.ir["playroutine"]["constants"]["floor"]
+    for occ in conv.obs["occurrences"]:
+        d = conv.found[occ.key][0] if occ.unit == "acid B" else None
+        if d is None or d.identity:
+            continue
+        acc, cp = occ.start["acc"], occ.start["cp"]
+        cf = ((acc & 0xFFFF) >> 8) + cp + (acc >> 16)
+        rising = convert.carried(an, occ, d.phase, d.value)
+        hidden = 8 * (max(cf, floor) - cf) + 8 * (acc >> 16)
+        assert rising in (0, hidden)
+        seen.add((rising, hidden))
+    assert {(0, 0), (8, 8), (16, 16)} <= seen
 
 
 def test_a_carried_delay_counter_is_a_gate(csillag_song):

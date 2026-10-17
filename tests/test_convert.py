@@ -1,12 +1,10 @@
-"""Lift-time conversion: record and event sites, clones, phrase variants and scaled units."""
-
-import random
+"""Lift-time conversion: record and event sites, clones, phrase variants and chip units."""
 
 import numpy as np
 import pytest
 import sympy
 
-from unitracker import songio
+from unitracker import songio, xexpr
 from unitracker.modfit import convert
 from unitracker.modfit import grammar as G
 from unitracker.modulation import Occurrence
@@ -36,33 +34,39 @@ def regs(ir, ticks):
     return SongPlayer(ir).render_grid(ticks).astype(int)
 
 
-# ---- scaled units -----------------------------------------------------------------------
+# ---- chip units -------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "e",
+    "e,r,m,lo,hi",
     [
-        sympy.Mod(V + 3, 256),
-        sympy.Mod(V - 7 * G.ge(PHI, 4) + 2 * PHI, 256),
-        G.ge(V, 100) * 5 + G.lt(V, 30) * sympy.Mod(V + 1, 256),
-        sympy.Abs(V - 128) + sympy.Min(V, 200) - sympy.Max(V, 50) + G.eq(V, 7),
-        sympy.floor((V + 9) / 4) + 3 * sympy.Mod(V, 16),
+        (8 * sympy.floor(V / 8) + 24, 0, 8, 0, 2040),
+        (sympy.Mod(256 * sympy.floor(V / 8) - 513, 65536), 0, 8, 16, 1016),
+        (4 * sympy.floor((V + 9) / 4) + 3 * sympy.Mod(V, 16), 4, 16, 4, 4084),
+        (sympy.Mod(V + 3, 4096) + G.ge(V, 100) * 5, 0, 1, 0, 4000),
+        (sympy.Mod(V - 7 * G.ge(PHI, 4) + 2 * PHI, 256), 0, 1, 0, 255),
     ],
 )
-def test_scaled_reads_v_as_the_scaled_cell(e):
-    f, g = G.compiled(e), G.compiled(G.scaled(e, 8))
-    rng = random.Random(3)
-    for _ in range(300):
-        c, phi = rng.randrange(0, 256), rng.randrange(0, 40)
-        assert g(8 * c, phi, 0) == 8 * f(c, phi, 0)
+def test_on_domain_agrees_on_every_chip_value(e, r, m, lo, hi):
+    f, g = G.compiled(e), G.compiled(G.on_domain(e, r, m, lo, hi))
+    for v in range(lo, hi + 1):
+        if v % m == r:
+            assert all(g(v, phi, 0) == f(v, phi, 0) for phi in range(8))
 
 
-def test_scaled_text_and_forms_it_refuses():
-    assert G.text(G.scaled(sympy.Mod(V + 3, 256), 8)) == "(v + 24) % 2048"
-    assert G.text(G.scaled(4 * PHI + 128, 8)) == "32*φ + 1024"
-    assert G.scaled(V * PHI, 1) == V * PHI
-    with pytest.raises(ValueError, match="not linear"):
-        G.scaled(V * V, 8)
+def test_on_domain_takes_floors_and_remainders_as_linear():
+    assert G.on_domain(8 * sympy.floor(V / 8) + 24, 0, 8) == V + 24
+    assert G.on_domain(8 * sympy.Mod(sympy.floor(V / 8) + 3, 256), 0, 8) == sympy.Mod(V + 24, 2048)
+    assert G.on_domain(sympy.Mod(V + 3, 4096), 0, 1, 0, 4000) == V + 3
+    assert G.on_domain(sympy.Mod(V + 3, 4096), 0, 1, 0, 4095) == sympy.Mod(V + 3, 4096)
+    assert G.on_domain(sympy.Mod(V * V, 8), 0, 8) == sympy.Mod(V * V, 8)
+
+
+def test_a_phase_that_is_not_one_per_firing_is_refused():
+    derived = type("D", (), {"order": type("O", (), {"kind": "time"})()})()
+    assert convert.checked(derived, sympy.Integer(1), V + PHI) == "v + φ"
+    with pytest.raises(convert.ConversionError, match="not one per firing"):
+        convert.checked(derived, sympy.Integer(2), V + PHI)
 
 
 def test_a_filter_sweep_is_written_in_cutoff_units():
@@ -101,15 +105,6 @@ def test_the_player_floors_a_scaled_expression_to_the_cell():
     cut = regs(ir, 40)[:, 22]
     run = [int(x) for x in cut[np.argmax(cut > 0) :][:8]]
     assert run == [(1024 + 12 * min(phi, 6)) // 8 for phi in range(8)]
-
-
-def test_a_unit_with_no_scaled_form_is_refused():
-    derived = type("D", (), {"order": type("O", (), {"kind": "time"})()})()
-    assert convert.checked(derived, sympy.Integer(1), V + PHI, 8) == "v + 8*φ"
-    with pytest.raises(convert.ConversionError, match="no scale 8 form"):
-        convert.checked(derived, sympy.Integer(1), V * V + PHI, 8)
-    with pytest.raises(convert.ConversionError, match="not one per firing"):
-        convert.checked(derived, sympy.Integer(2), V + PHI, 8)
 
 
 # ---- rewriting from occurrences ---------------------------------------------------------
@@ -153,7 +148,17 @@ def test_an_event_command_becomes_a_freq_expression_and_keeps_its_legato():
     out = convert.convert(ir, cache=None, workers=1)
     (variant,) = [p["phrase"] for p in out["tracks"][0]["plays"]]
     assert out["phrases"][variant][1]["commands"] == [[17, 0], [16, 1]]
-    assert "min(F(N), (v + 64) % 65536)" in out["exprs"][1]
+    ftab = songio.library("goattracker2")["tables"]["ftab"]
+    glide = xexpr.compile_expr(out["exprs"][1], {"_F": lambda k: ftab[k], "_T": {}})
+    v, offsets = (ftab[48] - ftab[50]) % 65536, []
+    for phi in range(40):
+        v = glide(v, phi, 50)
+        offsets.append(v)
+    rise = (ftab[50] - ftab[48] + 63) // 64
+    assert (
+        offsets[rise - 1 :] == [0] * (41 - rise)
+        and offsets[0] == (ftab[48] - ftab[50] + 64) % 65536
+    )
     assert np.array_equal(regs(out, 60), want)
     out["phrases"][variant][1]["command"] = out["phrases"][variant][1].pop("commands")[1]
     assert not np.array_equal(regs(out, 60), want)

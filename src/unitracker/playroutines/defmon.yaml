@@ -314,6 +314,7 @@ modulators:
     - name: pulse A
       key: pw
       cell: pw
+      chip: {width: 12, value: "pw & 0xFFF", store: {pw: value}}
       fire: [layer_a, pulse]
       pre: procs.layer_a
       post: procs.pulse
@@ -326,6 +327,10 @@ modulators:
       scope: global
       key: cut
       cell: acc
+      chip:
+        width: 11
+        value: "(floor if ((((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)) >= 0x80 or (((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000)) < floor) else (((acc & 0xFFFF) >> 8) + cp + (acc >= 0x10000))) << dbl << 3"
+        store: {acc: "((value >> 3 >> dbl) - cp) << 8"}
       fire: [layer_b, acid_step]
       pre: procs.layer_b
       post: procs.acid_step
