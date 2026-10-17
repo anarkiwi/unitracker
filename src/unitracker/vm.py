@@ -311,7 +311,9 @@ class _Codegen:
         return "\n".join(self.lines + self.tail)
 
     def modulators(self) -> str:
-        """Source of the modulator helpers: ``_F``, ``_T``, ``_n`` and each unit's selector."""
+        """Source of the modulator helpers: ``_F``, ``_T``, ``_n``, each unit's selector and its
+        chip map (``_cv_i`` its value, ``_cs_i_k`` its stores)."""
+        # pylint: disable=too-many-locals
         spec = modulation.declared(self.playroutine)
         if not spec:
             return "_T = {}"
@@ -341,6 +343,14 @@ class _Codegen:
         for i, unit in enumerate(modulation.units(self.playroutine)):
             if "x" in unit:
                 out.append(f"def _x_{i}(v):\n    return {scope.compile(unit['x'])}")
+            chip = unit.get("chip")
+            if chip:
+                store = _Scope(self, True, (modulation.VALUE,))
+                out.append(f"def _cv_{i}(v):\n    return {scope.compile(chip['value'])}")
+                out += [
+                    f"def _cs_{i}_{k}(v, {modulation.VALUE}):\n    return {store.compile(e)}"
+                    for k, e in enumerate(chip["store"].values())
+                ]
         return "\n".join(out)
 
     def ghost(self):
@@ -642,16 +652,16 @@ class SongPlayer:
 
 
 class _Stepper:
-    """One expression's firing: ``(f(v, φ, N), φ + 1)``, ``v`` in units of ``1/scale`` cells."""
+    """One expression's firing: ``(f(v, φ, N), φ + 1)``."""
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, fn, scale: int = 1):
-        self.fn, self.scale = fn, scale
+    def __init__(self, fn):
+        self.fn = fn
 
     def step(self, v: int, phi: int, n: int) -> tuple:
         """``(v', φ')``."""
-        return self.fn(v * self.scale, phi, n) // self.scale, phi + 1
+        return self.fn(v, phi, n), phi + 1
 
 
 class _Driven(modulation.Modulation):
@@ -684,6 +694,4 @@ class _Driven(modulation.Modulation):
             return None
         if occ.key not in self.steppers:
             raise SongError(f"{unit['name']} selects expression {occ.key}, which is undefined")
-        stepper = self.steppers[occ.key]
-        scale = int(unit.get("scale", 1))
-        return stepper if scale == 1 else _Stepper(stepper.fn, scale)
+        return self.steppers[occ.key]

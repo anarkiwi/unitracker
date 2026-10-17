@@ -12,6 +12,10 @@ from unitracker.expr import ExprError, Resolver
 
 ROW_KEYS = ("wait", "hold", "ctrl", "note", "ad", "sr", "pw", "cut", "resfilt", "mode", "freq")
 EXPR = "x"
+RETIRED = {
+    "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
+    " row's `pw`, `cut` or `freq`)"
+}
 COMMAND_NAMES = (
     "run",
     "run2",
@@ -340,10 +344,16 @@ class CommandCodec:
 
     def decode(self, name: str, value) -> tuple[int, int]:
         """``(code, arg)`` for a written command; ``value`` as :meth:`encode` returns it."""
+        if name in RETIRED:
+            raise CodecError(f"!{name} is {RETIRED[name]}")
         for code, ename, ref, var in self.entries:
             arg = self._arg(ref, var, value) if ename == name else None
             if arg is None:
                 continue
+            if ref is not None and not 0 <= arg <= 0xFF:
+                raise CodecError(
+                    f"!{name} names {ref} {arg}: a command's argument is a byte (0-255)"
+                )
             try:
                 if self.encode(code, arg) == (name, value):
                     return code, arg

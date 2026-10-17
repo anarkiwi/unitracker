@@ -12,12 +12,13 @@ import pickle
 from pathlib import Path
 
 import numpy as np
+import sympy
 
 from unitracker import reach
 from unitracker.codec import evaluate
 from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
-from unitracker.modfit.replay import Replay
+from unitracker.modfit.replay import Replay, Stepper
 from unitracker.modulation import declared
 from unitracker.songio import codecs
 from unitracker.records import record_types
@@ -27,9 +28,18 @@ from unitracker.xexpr import ExpressionError, source
 CACHE = Path("out/modfit/cache")
 IDENTITY = "v"
 _HERE = Path(__file__).resolve().parent
-SOURCES = [_HERE / f for f in ("convert.py", "exprs.py", "phase.py", "grammar.py", "form.py")] + [
-    _HERE.parent / f for f in ("modulation.py", "vm.py", "records.py", "codec.py")
-]
+SOURCES = [
+    _HERE / f
+    for f in (
+        "convert.py",
+        "exprs.py",
+        "phase.py",
+        "grammar.py",
+        "form.py",
+        "chipinv.py",
+        "invariant.py",
+    )
+] + [_HERE.parent / f for f in ("modulation.py", "vm.py", "records.py", "codec.py")]
 
 
 class ConversionError(ValueError):
@@ -154,15 +164,11 @@ def derive_task(ir: dict, key: str, start: tuple, cache: Path | None):
     return _cached(where, lambda: _analysis(ir, key).derived(start), _load, _save)
 
 
-def checked(derived, a, f, scale: int = 1) -> str:
-    """The grammar text of value update ``f`` with phase update ``a``: one per firing, over
-    ``scale`` times the cell."""
+def checked(derived, a, f) -> str:
+    """The grammar text of value update ``f`` with phase update ``a``: one per firing."""
     if derived.order.kind != "time" or int(a) != int(G.PHI in f.free_symbols):
         raise ConversionError(f"phase {G.text(a)} is not one per firing: {G.text(f)}")
-    try:
-        return G.text(G.scaled(f, scale))
-    except ValueError as exc:
-        raise ConversionError(f"{G.text(f)}: no scale {scale} form: {exc}") from exc
+    return G.text(f)
 
 
 def groups(occs: list) -> dict:
@@ -173,11 +179,32 @@ def groups(occs: list) -> dict:
     return out
 
 
+def carried(an: Analysis, occ, a, f) -> int:
+    """The constant a start carries in: ``f``'s first value less the player's first value."""
+    if occ.first is None:
+        return 0
+    st = Stepper(a, f, an.tables, an.freq, an.offset)
+    st.note = occ.start.get(an.spec["notes"][0], 0) - an.shift(occ.start)
+    return st.step(occ.v_in, 0)[0] - occ.first
+
+
+def with_carried(an: Analysis, occ, d, pair: tuple) -> tuple:
+    """``(a, f)`` of an occurrence: ``pair`` with the constant its start carries in, ``f - c·[φ <
+    1]``; a closed form that misses its first value gives way to the recurrence."""
+    c = carried(an, occ, *pair)
+    if c and d.closed is not None and pair[1] is not d.value:
+        pair = (d.phase, d.value)
+        c = carried(an, occ, *pair)
+    if not c:
+        return pair
+    return sympy.Integer(1), pair[1] - c * G.lt(G.PHI, 1)
+
+
 def group_texts(an: Analysis, occs: list, found: dict) -> list:
     """Each occurrence's expression text (None: no modulation), by the canonical rule.
 
     Within a unit and label the shared closed form, else the shared recurrence, else each
-    start's own.
+    start's own; a start that carries a constant in adds it at its first firing.
     """
     # pylint: disable=too-many-locals
     for occ in occs:
@@ -189,20 +216,21 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
                 f"{occ.unit} at tick {occ.tick}: not proved: {d.error or d.proof}"
             )
     out = [None] * len(occs)
-    for (unit, _), members in groups(occs).items():
-        scale = int(an.unit(unit).get("scale", 1))
+    for members in groups(occs).values():
         live = {occs[i].key: found[occs[i].key][0] for i in members}
         live = {k: d for k, d in live.items() if not d.identity}
         closed = {G.text(d.closed) for d in live.values() if d.closed is not None}
         recur = {G.text(d.value) for d in live.values()}
         shared, first = None, next(iter(live.values()), None)
         if len(closed) == 1 and all(d.closed is not None for d in live.values()):
-            shared = checked(first, *first.update, scale)
+            shared = first.update
         elif len(recur) == 1 and live:
-            shared = checked(first, first.phase, first.value, scale)
+            shared = (first.phase, first.value)
         for i in members:
             d = found[occs[i].key][0]
-            out[i] = None if d.identity else (shared or checked(d, *d.update, scale))
+            if not d.identity:
+                a, f = with_carried(an, occs[i], d, shared or d.update)
+                out[i] = checked(d, a, f)
     tables = set((declared(an.ir["playroutine"]).get("tables") or {}))
     for text in {t for t in out if t is not None}:
         try:
@@ -461,6 +489,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
 
     def event_sites(self) -> None:
         """Each event's native modulator commands as its expression's ``!freq`` command."""
+        # pylint: disable=too-many-locals
         occs = self.obs["occurrences"]
         legato = self.spec.get("legato") or {}
         for (unit, instance), i in sorted(self.obs["events"].items(), key=repr):
@@ -485,7 +514,10 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 and [legato["command"], 0] not in cmds
             ):
                 cmds.insert(0, [legato["command"], 0])
-            cmds.append([spec["command"], self.x(text or IDENTITY)])
+            index = self.x(text or IDENTITY)
+            if index > 0xFF:
+                raise ConversionError(f"!freq names expression {index}: an argument is a byte")
+            cmds.append([spec["command"], index])
             _set_cmds(ev, cmds)
 
     # -- phrases and tracks --

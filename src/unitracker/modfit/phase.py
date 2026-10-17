@@ -5,6 +5,7 @@ the reachable control states form a graph whose order is the phase: elapsed firi
 state has one successor, turns when a state stays until a test of ``v`` advances it.
 """
 
+# pylint: disable=too-many-lines
 import dataclasses
 import functools
 import itertools
@@ -13,13 +14,17 @@ import typing
 import sympy
 import z3
 
+from unitracker.modfit import chipinv
 from unitracker.modfit import grammar as G
 from unitracker.modfit.flow import Writes
 from unitracker.modfit.form import INF, Form, Programs, atoms, lin, mk, record_data, show
 from unitracker.modfit.invariant import Slicer
 from unitracker.codec import Evaluator
+from unitracker.modulation import VALUE
 
 PHI_BOUND = 1 << 20
+FIRE = "_fire"
+DOMAIN = ("_lo", "_hi", "_r", "_m")
 
 
 class Player(Programs):
@@ -102,11 +107,12 @@ def player_form(song: dict, spec: dict | None = None) -> Player:
     return form
 
 
-class Lift:
+class Lift:  # pylint: disable=too-many-instance-attributes
     """Form terms of one player as grammar expressions: the cell is ``v``, ``N`` the note."""
 
-    def __init__(self, form: Form, cell: str, freq: dict, extra: dict | None = None):
+    def __init__(self, form: Form, cell: str, freq: dict, extra: dict | None = None, alias=None):
         self.form, self.cell, self.freq = form, cell, freq
+        self.alias = dict(alias or {})
         self.offset = int(form.pr.get("note_offset", 0))
         self.extra = dict(extra or {})
         self.unknown = set()
@@ -129,6 +135,8 @@ class Lift:
         if isinstance(t, str):
             if t == self.cell:
                 return G.V
+            if t in self.alias:
+                return self.alias[t]
             if t == "N":
                 return G.N
             if t in self.extra:
@@ -351,24 +359,106 @@ class Machine:  # pylint: disable=too-many-instance-attributes
     def __init__(self, song: dict, unit: dict, spec: dict | None = None):
         self.form = form = player_form(song, spec)
         self.unit = unit
-        self.cell = unit["cell"]
-        self.parts = set(form.pair[self.cell][:2]) if self.cell in form.pair else {self.cell}
+        self.chip = unit.get("chip")
+        self.paired = bool(self.chip) and unit["cell"] in form.pair
         actions = dispatch(
             form.pr, [a if isinstance(a, dict) else {"call": a} for a in unit["fire"]]
         )
+        if self.chip and not self.paired:
+            self.cell = VALUE
+            form.width[VALUE] = int(self.chip["width"])
+            self.store = [{"set": dict(self.chip["store"])}]
+            form.pr["procs"] = {**(form.pr.get("procs") or {}), FIRE: actions}
+            form.procs[FIRE] = actions
+            actions = [{"call": FIRE}, {"set": {VALUE: self.chip["value"]}}]
+            self.parts = {VALUE, *(p for c in self.chip["store"] for p in self._parts(c))}
+        else:
+            self.cell = unit["cell"]
+            self.store = []
+            self.parts = self._parts(self.cell)
         slicer = Slicer(form.pr, Writes(form.pr), form.procs)
-        written = Writes(form.pr).of(actions)
-        need = set(self.parts)
+        full = self.store + actions
+        written = Writes(form.pr).of(full) | self.parts
+        need = {VALUE} if self.cell == VALUE else set(self.parts)
         while True:
-            self.actions, before = slicer.seq(actions, need, need)
+            self.actions, before = slicer.seq(full, need, need)
             grown = need | (before & written)
             if grown == need:
                 break
             need = grown
         self.reads = before - self.parts
         self.control = sorted((need & written) - self.parts)
-        self.mask = (1 << form.width[self.cell]) - 1
+        self.hidden = sorted(self.parts - {VALUE}) if self.chip else []
+        self.real = []
+        if self.chip:
+            fire = actions if self.paired else form.procs[FIRE]
+            need = set(self.hidden) | set(self.control)
+            while True:
+                self.real, before = slicer.seq(fire, need, need)
+                if need | (before & written) == need:
+                    break
+                need |= before & written
+        self.mask = (1 << int(self.chip["width"] if self.chip else form.width[self.cell])) - 1
         self.memo = {}
+
+    def domain(self, start) -> tuple:
+        """``(lo, hi, r, m)``: the chip values the cells give at control ``start`` lie in
+        ``[lo, hi]`` and are ``r`` modulo ``m`` (a power of two); ``(0, mask, 0, 1)`` without
+        a chip map."""
+        if not self.chip or self.paired:
+            return 0, self.mask, 0, 1
+        state = {c: v for c, v in dict(start).items() if c not in DOMAIN}
+        f = self.form
+        smt = f.solver()
+        x = smt.term(f.wrap(VALUE, f.expr(self.chip["value"], state)))
+
+        def holds(c) -> bool:
+            smt.solver.push()
+            smt.solver.add(z3.Not(c))
+            out = smt.solver.check() == z3.unsat
+            smt.solver.pop()
+            return out
+
+        def least(sign) -> int:
+            lo, hi = 0, self.mask
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if holds(x >= mid if sign > 0 else x <= self.mask - mid):
+                    lo = mid + 1
+                else:
+                    hi = mid
+            return lo - 1 if sign > 0 else self.mask - lo + 1
+
+        lo, hi = least(1), least(-1)
+        m = 1
+        while m <= self.mask and holds(z3.URem(x - lo, 2 * m) == 0):
+            m *= 2
+        return lo, hi, lo % m, m
+
+    def atom(self, state: dict):
+        """``(name, lo, m)`` of the index atom ``t`` of a chip value ``lo + m·t`` in ``state``,
+        ``t`` in ``[0, (hi - lo) / m]``; None without a chip map or for a pair."""
+        if not self.chip or self.paired:
+            return None
+        lo, hi, _, m = (state[c] for c in DOMAIN)
+        name = f"_t{(hi - lo) // m}"
+        self.form.ranges[name] = (0, (hi - lo) // m)
+        return name, lo, m
+
+    def bounds(self, state: dict) -> tuple:
+        """The conditions of the chip value's domain in ``state``."""
+        if not self.paired:
+            return ()
+        lo, hi, r, m = (state[c] for c in DOMAIN)
+        f, x = self.form, self.cell
+        return tuple(
+            c for c in (f.ge(x, lo), f.le(x, hi), f.eq(f.band(x, m - 1), r)) if c is not True
+        )
+
+    def _parts(self, cell: str) -> set:
+        """The cells a unit cell names: a pair's parts, or the cell."""
+        pair = self.form.pair
+        return set(pair[cell][:2]) if cell in pair else {cell}
 
     def step(self, state: tuple) -> list:
         """``[(conds, value, next control)]`` of one firing from control ``state``."""
@@ -378,13 +468,18 @@ class Machine:  # pylint: disable=too-many-instance-attributes
 
     def _step(self, state: dict) -> list:
         f, out = self.form, []
-        for conds, final in f.paths(self.actions, (), state):
+        known, index = self.bounds(state), self.atom(state)
+        if index is not None:
+            state = {**state, VALUE: f.add(index[1], f.scale(index[2], index[0]))}
+        for conds, final in f.paths(self.actions, known, state):
+            conds = conds[len(known) :]
             fused = f.fuse(conds, final) if self.cell in f.pair else final
             nxt = tuple((c, final.get(c, state.get(c, c))) for c in self.control)
-            bad = [c for c, val in nxt if self.parts & atoms(val)]
+            bad = [c for c, val in nxt if (self.parts | {index and index[0]}) & atoms(val)]
             if bad:
                 raise ValueError(f"control {', '.join(bad)} reads the value")
-            out.append((conds, fused.get(self.cell, self.cell), nxt))
+            value = fused.get(self.cell, self.cell)
+            out.append((conds, f.band(value, self.mask) if self.paired else value, nxt))
         return out if self.cell not in f.pair else self.project(out)
 
     def project(self, cases: list) -> list:
@@ -405,6 +500,8 @@ class Machine:  # pylint: disable=too-many-instance-attributes
         if missing:
             raise ValueError(f"no start value for {', '.join(missing)}")
         keep = {c: values[c] for c in sorted(self.reads | set(self.control))}
+        if self.chip:
+            keep.update(zip(DOMAIN, self.domain(tuple(keep.items()))))
         return tuple(sorted(keep.items(), key=lambda x: x[0]))
 
     def explore(self, start: tuple) -> Graph:
@@ -663,8 +760,10 @@ def _join(head: list, tail, start: int):
 class Prover:
     """z3 obligations of expressions against the player's paths of one unit."""
 
-    def __init__(self, machine: Machine, freq: dict, extra: dict | None = None):
+    def __init__(self, machine: Machine, freq: dict, extra=None, domain=None, index=None):
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
         self.machine, self.freq, self.extra = machine, freq, dict(extra or {})
+        self.domain, self.index = domain, index
         self.form = machine.form
         self.offset = int(self.form.pr.get("note_offset", 0))
 
@@ -694,7 +793,27 @@ class Prover:
             env["F"] = lambda x: 256 * hi(x + self.offset) + lo(x + self.offset)
         for name in f.tables:
             env.setdefault(name, table(name))
+        if self.index is not None:
+            env["v"] = self.index[1] + self.index[2] * smt.term(self.index[0])
+        elif self.domain is not None:
+            lo, hi, r, m = self.domain
+            v = env["v"]
+            smt.solver.add(v >= lo, v <= hi, z3.URem(v, m) == r)
         return env
+
+    def closure(self, graph: Graph) -> str | None:
+        """None when every firing leaves a chip value in the domain."""
+        lo, hi, r, m = self.domain
+        for i, row in enumerate(graph.cases):
+            for conds, val, _ in row:
+                smt = self.form.solver()
+                self.env(smt, z3.BitVecVal(0, G.BITS))
+                y = smt.term(val)
+                smt.solver.add(*(smt.cond(c) for c in conds))
+                smt.solver.add(z3.Or(y < lo, y > hi, z3.URem(y, m) != r))
+                if smt.solver.check() != z3.unsat:
+                    return f"state {i}: {witness(smt.solver)}"
+        return None
 
     def node(self, graph: Graph, cls: list, i: int, phi: int, value, adv) -> str | None:
         # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -773,7 +892,7 @@ def witness(solver) -> str:
 
 
 @dataclasses.dataclass
-class Derived:
+class Derived:  # pylint: disable=too-many-instance-attributes
     """The expressions of one start, with their proof status."""
 
     phase: typing.Any = None
@@ -783,6 +902,7 @@ class Derived:
     states: int = 0
     proof: list = dataclasses.field(default_factory=list)
     error: str = ""
+    invariant: typing.Any = None
 
     @property
     def exact(self) -> bool:
@@ -813,12 +933,16 @@ class Derived:
 def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = None) -> Derived:
     # pylint: disable=too-many-locals
     """The phase and value expressions of ``machine`` from control ``start``, proved."""
-    lift = Lift(machine.form, machine.cell, freq, extra)
+    index = machine.atom(dict(start))
+    alias = {index[0]: sympy.floor((G.V - index[1]) / index[2])} if index else None
+    lift = Lift(machine.form, machine.cell, freq, extra, alias)
     try:
         graph = machine.explore(start)
     except ValueError as exc:
         return Derived(error=str(exc))
     cls, values, edges = minimal(graph, lift)
+    lo, hi, r, m = (dict(start)[c] for c in DOMAIN) if machine.chip else machine.domain(start)
+    values = [G.shortest([x, G.on_domain(x, r, m, lo, hi)]) for x in values]
     if lift.unknown:
         return Derived(states=len(graph.nodes), error=f"reads {', '.join(sorted(lift.unknown))}")
     o = order(edges)
@@ -827,8 +951,8 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
             states=len(graph.nodes), error="more than one phase: a state advances on two tests"
         )
     out = Derived(order=o, states=len(graph.nodes))
-    prover = Prover(machine, freq, extra)
-    domain = (("v", 0, machine.mask), ("N", 0, (1 << machine.form.width["N"]) - 1))
+    prover = Prover(machine, freq, extra, (lo, hi, r, m), index)
+    domain = (("v", lo, hi), ("N", 0, (1 << machine.form.width["N"]) - 1))
     forms = value_forms(values, o, machine.mask)
     out.value = G.polar(G.shortest(forms), domain)
     reads = G.PHI in out.value.free_symbols
@@ -847,6 +971,10 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
     out.proof.append(
         (f"{len(graph.nodes)} states", not bad, f"state {bad[0][0]} {bad[0][1]}" if bad else "")
     )
+    if machine.chip:
+        out.invariant = chipinv.prove(machine, graph, (lo, hi, r, m), cls, o.seq, out.value, prover)
+        why = prover.closure(graph)
+        out.proof.append(("every firing stays in the chip values", why is None, why or ""))
     if o.period > 1 or o.kind == "turn":
         for name, e in (("value", out.value), ("phase", out.phase)):
             why = prover.periodic(e, o.prefix, o.period)

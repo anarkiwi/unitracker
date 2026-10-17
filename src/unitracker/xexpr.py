@@ -1,8 +1,8 @@
 """Modulator expressions: the format's grammar text, checked and compiled for the player.
 
-Integer literals, ``+ - * %`` (floor modulo), ``abs``, ``min``, ``max``, Iverson brackets
-``[a op b]`` (op one of ``== != < <= > >=``), ``v``, ``φ``, ``N``, ``F(k)`` (the frequency of
-note k) and ``T[k]`` for a named playroutine table ``T``.
+Integer literals, ``+ - *``, ``//`` (floor division), ``%`` (floor modulo), ``abs``, ``min``,
+``max``, Iverson brackets ``[a op b]`` (op one of ``== != < <= > >=``), ``v``, ``φ``, ``N``,
+``F(k)`` (the frequency of note k) and ``T[k]`` for a named playroutine table ``T``.
 """
 
 import ast
@@ -10,7 +10,7 @@ import ast
 PHI = "φ"
 NAMES = {"v": "v", PHI: "phi", "N": "N"}
 CALLS = {"abs": 1, "min": 2, "max": 2}
-_BINARY = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Mod: "%"}
+_BINARY = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.FloorDiv: "//", ast.Mod: "%"}
 _COMPARE = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
 
 

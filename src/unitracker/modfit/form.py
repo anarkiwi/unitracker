@@ -214,6 +214,7 @@ class Algebra:
 
     def __init__(self, width: dict, tables: dict, byte_fields: set, pairs: set):
         self.width, self.tables, self.byte_fields, self.pairs = width, tables, byte_fields, pairs
+        self.ranges = {}
         self.pair = {}
         for lo, hi, k in sorted(pairs):
             name = f"{hi}:{lo}" if k == width[lo] == 8 else f"{hi}:{lo}:{k}"
@@ -228,6 +229,8 @@ class Algebra:
         if isinstance(t, (bool, int)):
             return int(t), int(t)
         if isinstance(t, str):
+            if t in self.ranges:
+                return self.ranges[t]
             w = self.width.get(t)
             return (0, (1 << w) - 1) if w else (-INF, INF)
         head = t[0]

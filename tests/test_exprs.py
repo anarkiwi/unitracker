@@ -42,7 +42,7 @@ GT_SONG = doc(
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, pw: '1024 + 16*min(3, φ)'}
       x:
         x1: (v + 300) % 65536
-        x2: F(N)""",
+        x2: 0""",
     "[C4.i1, -!freq:@x1, -!freq:@x1, D4!legato:0!freq:@x2, -]",
 )
 
@@ -59,7 +59,7 @@ def test_goattracker_freq_command_pulse_expression_and_legato():
 
 def test_constant_and_text_expressions_read_back_as_written():
     song = songio.loads(GT_SONG)
-    assert sorted(song["exprs"].values()) == ["(v + 300) % 65536", "1024 + 16*min(3, φ)", "F(N)"]
+    assert sorted(song["exprs"].values()) == ["(v + 300) % 65536", "0", "1024 + 16*min(3, φ)"]
     text = songio.dumps(song)
     assert "pw: '1024 + 16*min(3, φ)'" in text and "!legato:0!freq:@x2" in text
     assert songio.dumps(songio.loads(text)) == text
@@ -106,11 +106,15 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
     "old,new,match",
     [
         ("unitracker: 1.5", "unitracker: 1.4", "not a unitracker v1.5 document"),
-        ("      x:\n", "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n", "type 'mod'"),
-        ("-!freq:@x1, -!freq:@x1,", "-!mod:@m1, -!freq:@x1,", "unknown name 'm1'"),
+        (
+            "      x:\n",
+            "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
+            "'mod' is retired",
+        ),
+        ("-!freq:@x1, -!freq:@x1,", "-!mod:@m1, -!freq:@x1,", "!mod is retired in v1.5"),
         ("-!freq:@x1, -!freq:@x1,", "-!noteglide:0, -!freq:@x1,", "can't express !noteglide"),
         ("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]", "keys"),
-        ("x1: (v + 300) % 65536", "x1: v // 2", "outside the grammar"),
+        ("x1: (v + 300) % 65536", "x1: v / 2", "outside the grammar"),
         ("x1: (v + 300) % 65536", "x1: W[N]", "unknown table 'W'"),
         ("x1: (v + 300) % 65536", "x1: '[0 < v < 9]'", "not one comparison"),
         ("x1: (v + 300) % 65536", "x1: sqrt(v)", "calls no grammar function"),
@@ -133,6 +137,42 @@ def test_expressions_compile_to_the_grammar_semantics():
         xexpr.text_of(True)
     with pytest.raises(xexpr.ExpressionError, match="takes 2"):
         xexpr.source("min(v)")
+
+
+def test_floor_division_floors_toward_minus_infinity():
+    f = xexpr.compile_expr("φ // 30 - v // 4", {"_T": {}})
+    assert [f(-5, phi, 0) for phi in (0, 29, 30, 61)] == [2, 2, 3, 4]
+
+
+@pytest.mark.parametrize("key,value", [("cut", 1024), ("cut", 0)])
+def test_a_constant_expression_in_a_filter_row_reads_back_as_written(key, value):
+    ins = "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9, filter: "
+    rows = f"[{{{key}: '{value}', resfilt: 193, mode: 16}}, {{{key}: 512}}, end]"
+    text = songio.dumps(
+        songio.loads(
+            GT_SONG.replace(
+                "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], gt: 2, fw: 9,", ins + rows + ",", 1
+            )
+        )
+    )
+    assert f"{key}: '{value}'" in text and f"{key}: 512" in text
+    assert songio.dumps(songio.loads(text)) == text
+
+
+def test_sidwizard_constant_cut_expression_reads_back_as_written():
+    ins = "freq: '[φ >= 2]*W[N + 25]'"
+    rows = ins + ", filter: [{cut: '1024', mode: 16}, {cut: 512, mode: 32}, end]"
+    text = songio.dumps(songio.loads(SW_SONG.replace(ins, rows, 1)))
+    assert "cut: '1024'" in text and "cut: 512" in text
+    assert songio.dumps(songio.loads(text)) == text
+
+
+def test_a_command_naming_an_expression_past_a_byte_is_refused():
+    many = "".join(f"        y{k}: {k}\n" for k in range(300))
+    text = GT_SONG.replace("      x:\n", "      x:\n" + many, 1)
+    text = text.replace("-!freq:@x1, -!freq:@x1", "-!freq:@y1, -!freq:@y299", 1)
+    with pytest.raises(songio.SongFormatError, match="argument is a byte"):
+        songio.loads(text)
 
 
 def test_a_selected_expression_must_exist():
@@ -181,11 +221,11 @@ def test_csillag_wrong_delay_constant_breaks_the_grid(csillag):
     assert not np.array_equal(grid_of(later, ticks), native(raw, ticks))
 
 
-def test_crosseyed_wrong_carried_direction_breaks_the_grid(crosseyed):
+def test_crosseyed_wrong_carried_constant_breaks_the_grid(crosseyed):
     raw, text = lifted(crosseyed)
     ticks = 95 + 2 * 1152 + 100
     want = native(raw, ticks)
     assert np.array_equal(grid_of(text, ticks), want)
-    start = "*[φ >= 1] + 81919"
-    assert start in text
-    assert not np.array_equal(grid_of(text.replace(start, "*[φ >= 1] + 16384"), ticks), want)
+    carried = "16*[φ >= 1]"
+    assert carried in text
+    assert not np.array_equal(grid_of(text.replace(carried, "8*[φ >= 1]"), ticks), want)
