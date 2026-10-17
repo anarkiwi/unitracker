@@ -42,8 +42,8 @@ def test_defmon_rows_and_timer_gates():
         rep.summary("cnt")
         == "timer cnt (-1): counts [0..127: p + 1] [128..255: 1] ticks for start cnt = p in 0..255"
     )
-    [acid] = rep.record_rows("procs.acid", "acc")
-    assert acid.role == "CUT[3:10]" and acid.kind == "reads v" and acid.basis == "cells astep, sub"
+    [acid] = rep.record_rows("procs.acid_step", "acc")
+    assert acid.role == "CUT[3:10]" and acid.status == "step reads x"
 
 
 def test_cli_generic(tmp_path, monkeypatch):
@@ -53,5 +53,5 @@ def test_cli_generic(tmp_path, monkeypatch):
     main(["--out", str(out), "generic", "defmon"])
     text = out.read_text()
     assert "# Grouping by role, respond and temporal kind" in text and "== defmon timers" in text
-    assert "defmon | procs.acid [always] | acc | CUT[3:10]" in text
+    assert "defmon | procs.acid_step [always] | acc | CUT[3:10]" in text
     assert "# Ping-pong orbits" in text and "== bounce 1" in text

@@ -30,24 +30,27 @@ def detect(raw: bytes) -> str:
     return "goattracker2"
 
 
-def lift(raw: bytes, subtune=None) -> dict:
-    """A unitracker song for ``raw``, lifted by the backend that recognises it."""
+def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
+    """A unitracker song for ``raw``, lifted by the backend that recognises it.
+
+    With ``expressions`` its modulations are written as the format's expressions.
+    """
     if subtune is None:
         subtune = _start_song(raw)
     backend = detect(raw)
     if backend == "defmon":
         from unitracker import defmon  # pylint: disable=import-outside-toplevel
 
-        return defmon.lift(raw, subtune)
+        return defmon.lift(raw, subtune, expressions)
     if backend == "sidwizard":
         from unitracker import sidwizard  # pylint: disable=import-outside-toplevel
 
-        return sidwizard.lift(raw, subtune)
+        return sidwizard.lift(raw, subtune, expressions)
     from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
 
     from unitracker import goattracker  # pylint: disable=import-outside-toplevel
 
-    return goattracker.lift(decompile_sid(raw, subtune=subtune))
+    return goattracker.lift(decompile_sid(raw, subtune=subtune), expressions)
 
 
 def native_player(raw: bytes, subtune=None):

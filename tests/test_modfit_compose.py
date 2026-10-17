@@ -128,11 +128,11 @@ def test_vibrato_counter_proved_under_its_invariant():
         assert under == {"accumulate": "vfc", "step": "255", "max": "((255 + vper) & 255)"}
 
 
-def test_acid_invariant_holds_but_the_reload_reads_the_cell():
-    invs = invariants("defmon", "procs.acid", "acc")
-    assert invs == ("acc < 32768",)
+def test_acid_carry_cell_is_no_single_accumulator():
+    invs = invariants("defmon", "procs.acid_step", "acc")
+    assert invs == ("acc < 131071",)
     fitter = Fitter(playroutine("defmon"))
-    actions = resolve(fitter.form.pr, "procs.acid")
+    actions = resolve(fitter.form.pr, "procs.acid_step")
     groups = fitter.fit(actions, "acc")
     assert len(groups) == 1 and groups[0][1] is None
     assert fit_under(fitter, actions, "acc", groups[0][0], invs) == (invs[0], None)
@@ -153,8 +153,8 @@ def pool(names) -> list:
 def items_fixture():
     return pool(
         {
-            "goattracker2": {"mod", "ad", "sr", "mark"},
-            "sidwizard": {"mod", "attack", "iattack"},
+            "goattracker2": {"freq", "ad", "sr", "mark"},
+            "sidwizard": {"freq", "attack", "iattack"},
         }
     )
 
@@ -163,11 +163,9 @@ def find(items, pr, label, code=None):
     return next(x for x in items if x.pr == pr and x.label == label and code in (None, x.key[0]))
 
 
-def test_slide_up_mods_are_one_effect_decoded_differently(items):
-    matches, v, reason = verdict(find(items, "sidwizard", "!mod", 1), items)
-    assert v == "same effect, different argument decoding"
-    assert [(m.label, m.key[0]) for m in matches] == [("!mod", 1)]
-    assert reason == "ACC+ note-relative vs ref speedtab"
+def test_freq_has_no_native_effect_its_modulator_drives_the_cell(items):
+    matches, v, reason = verdict(find(items, "sidwizard", "!freq"), items)
+    assert v == "no effect" and not matches and reason == "no register, timing or table effect"
 
 
 def test_attack_is_part_of_ad(items):
@@ -183,12 +181,6 @@ def test_iattack_differs_from_attack_on_note_rows(items):
     assert "pifx != 0" in reason
 
 
-def test_slide_down_mods_match(items):
-    matches, v, _ = verdict(find(items, "sidwizard", "!mod", 2), items)
-    assert v == "same effect, different argument decoding"
-    assert [(m.label, m.key[0]) for m in matches] == [("!mod", 2)]
-
-
 def test_no_effect(items):
     assert verdict(find(items, "goattracker2", "!mark"), items)[1] == "no effect"
 
@@ -197,7 +189,7 @@ def test_field_signatures():
     s = signer("goattracker2")
     assert ("PW", "ACC", "[0:7]→PW") in s.field("pulsetab", "r")["sig"]
     assert ("FREQ+TIMING", "REF", "ref speedtab") in s.field("ins", "speed")["sig"]
-    assert ("PW", "PTR", "ref pulsetab") in s.field("ins", "pulse")["sig"]
+    assert ("PW", "PTR", "ref pulsetab") in s.field("ins", "pw")["sig"]
 
 
 def test_cli_command_and_keywords(tmp_path):
@@ -213,6 +205,6 @@ def test_cli_command_and_keywords(tmp_path):
 
 
 def test_cli_fit_pair_reports_an_invariant(capsys):
-    main(["fit", "sidwizard:procs.tick_filt:vfhi:vflo:3", "defmon:procs.acid:acc"])
+    main(["fit", "sidwizard:procs.tick_filt:vfhi:vflo:3", "defmon:procs.acid_step:acc"])
     out = capsys.readouterr().out
-    assert "'accumulate': 'vfhi:vflo:3'" in out and "refuted under invariant acc < 32768" in out
+    assert "'accumulate': 'vfhi:vflo:3'" in out and "no single accumulator" in out

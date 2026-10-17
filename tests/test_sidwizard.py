@@ -6,7 +6,7 @@ import pytest
 from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, Transpose
 from pysidwizard.features import features_for_driver
 
-from unitracker import backends, songio, sidwizard
+from unitracker import backends, sidwizard
 from unitracker.sidwizard import LiftError
 from unitracker.vm import SongPlayer
 
@@ -90,7 +90,7 @@ def events():
         (Row(note=30, instrument=0x3F), {"note": 30, "command": [0x3F, 0]}),
         (Row(note=0x68), {"command": [0x260, 8]}),
         (Row(note=0x78), {"command": [0x278, 0]}),
-        (Row(note=40, fx=0x03, fx_value=0x40), {"note": 40, "command": [3, 0x40]}),
+        (Row(note=40, fx=0x03, fx_value=0x40), {"note": 40, "commands": [[63, 0], [3, 0x40]]}),
         (Row(fx=0x2D), {"command": [0x20, 0x0D]}),
         (Row(fx=0x72), {"command": [0x70, 4]}),
         (Row(instrument=0x65), {"command": [0x160, 5]}),
@@ -170,10 +170,10 @@ def test_a_reference_past_the_instruments_plays_the_emptyinstrument_record(csill
         return swm
 
     monkeypatch.setattr(sidwizard, "parse_sid_song", patched)
-    ir = sidwizard.lift(csillag.read_bytes())
+    ir = sidwizard.lift(csillag.read_bytes(), expressions=False)
     empty = ir["records"]["ins"][len(ir["records"]["ins"])]
     assert empty == {"flags": 0x1A, "hrad": 0x0F, "sr": 0xF0, "chord": 1}
-    SongPlayer(songio.loads(songio.dumps(ir))).render_grid(20)
+    SongPlayer(ir).render_grid(20)
 
 
 def test_initial_registers_and_frequency_tables():

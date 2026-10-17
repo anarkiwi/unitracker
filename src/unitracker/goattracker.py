@@ -7,10 +7,13 @@ from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
 from unitracker.songio import song_meta
+from unitracker.modfit.convert import convert
 from unitracker.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
+# The playroutine's legato command: the note does not retrigger, as a toneporta's.
+LEGATO = 17
 
 
 class LiftError(ValueError):
@@ -94,7 +97,7 @@ _INS_FIELDS = (
     ("ad", "attack_decay"),
     ("sr", "sustain_release"),
     ("ctrl", "wave_ptr"),
-    ("pulse", "pulse_ptr"),
+    ("pw", "pulse_ptr"),
     ("filter", "filter_ptr"),
     ("speed", "vibrato_param"),
     ("vd", "vibrato_delay"),
@@ -132,7 +135,9 @@ def _row_event(row) -> dict:
         raise LiftError(f"bad note byte {row.note:#04x}")
     if row.instrument:
         event["instrument"] = row.instrument
-    if row.command:
+    if row.command == C.CMD_TONEPORTA and isinstance(event.get("note"), int):
+        event["commands"] = [[LEGATO, 0], [row.command, row.data]]
+    elif row.command:
         event["command"] = [row.command, row.data]
     return event
 
@@ -233,8 +238,12 @@ def _check_build(info) -> None:
         raise LiftError("not covered by the goattracker2 playroutine yet: " + ", ".join(missing))
 
 
-def lift(dec) -> dict:
-    """A unitracker song dict for a ``pygoattracker.decompile_sid`` result."""
+def lift(dec, expressions: bool = True) -> dict:
+    """A unitracker song dict for a ``pygoattracker.decompile_sid`` result.
+
+    With ``expressions`` its modulations are written as the format's expressions.
+    """
+    # pylint: disable=too-many-locals
     info = dec.info
     _check_build(info)
     song = dec.typed.to_song()
@@ -255,7 +264,7 @@ def lift(dec) -> dict:
     tps = ticks_per_step(phrases, tracks, deftempo)
     if tps is not None:
         hints["ticks_per_step"] = tps
-    return {
+    ir = {
         "unitracker": "ir",
         "hints": hints,
         "meta": song_meta(header, f"goattracker2 subtune {dec.subtune}"),
@@ -276,3 +285,4 @@ def lift(dec) -> dict:
         "phrases": phrases,
         "playroutine": playroutine,
     }
+    return convert(ir) if expressions else ir

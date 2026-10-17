@@ -3,7 +3,9 @@
 `unitracker-modfit` reads modulation procs straight from the playroutine library
 (`src/unitracker/playroutines/*.yaml`) and tries to rewrite each one as a compact
 bounded accumulator (see *The bounded accumulator* in [format.md](format.md)). It proves
-every rewrite it reports, or shows where none holds. It also composes each keyword's
+every rewrite it reports, or shows where none holds. It derives and proves each song
+modulator's expression (see *Modulators* in [format.md](format.md)), which the lifters
+use to convert native modulations. It also composes each keyword's
 setup and per-tick effect, and matches keywords and record fields across playroutines
 by what they do to the SID.
 
@@ -187,12 +189,13 @@ by what they do to the SID.
 14. **Phase and value expressions** (`phase`, `grammar`, `replay`, `exprs`). A modulator is
    a pair of integer expressions applied per firing on the state before it:
    `φ' = φ + a(v, φ)` and `v' = f(v, φ)`, with `φ = 0` and `v` the cell's incoming value at
-   its start. The grammar is integers, `+ - * // % & | ^`, `abs`, `min`, `max`, Iverson
-   brackets, `v`, `φ`, `N` (the voice's sounding note), `F(k)` (the player's frequency of
-   format note `k`), player tables `name[k]` and other modulators by name; shifts and
-   all-ones masks fold into `*`, `//` and `%`.
-   - A unit (`specs.yaml` `exprs:`) names the modulated cell and the action list of one
-     firing. The list is sliced to the cell; the cells it reads before writing them and the
+   its start. The derivation's grammar is integers, `+ - * // % & | ^`, `abs`, `min`, `max`,
+   Iverson brackets, `v`, `φ`, `N` (the voice's sounding note), `F(k)` (the player's
+   frequency of format note `k`) and player tables `name[k]`; shifts and all-ones masks fold
+   into `*`, `//` and `%`. A written expression must fall in the format's grammar (see
+   *Modulators* in [format.md](format.md)).
+   - The units are the playroutine's `modulators:` declaration (`exprs.Analysis`). A unit's
+     `fire` list is sliced to its cell; the cells it reads before writing them and the
      cells it writes that are needed again are the control.
    - From a start's concrete control (note cells as `N`) every firing runs through `Form` with
      the value symbolic; the reachable control states and their guarded cases are a graph,
@@ -205,8 +208,8 @@ by what they do to the SID.
      form met as intervals. The value update is the shortest (tokens, then characters, then
      text) of the position-indexed form and, when every class adds or sets, the add form;
      cycles are rotated to start at a change. The player's frequency words fold to `F`, and
-     SID-Wizard's speed functions read the table `W` (`exptab` below 107, then frequencies),
-     checked equal to `fmlo`/`fmhi` on every argument byte.
+     the playroutine's named tables (`modulators: tables:`) replace the functions it rewrites
+     over them (`modulators: functions:`), checked equal on every argument byte.
    - A closed form `g(φ)` (the value after the firing at `φ`) is built when the start value
      is known (a set row, or a value the start hook writes) and every class adds or sets: a
      window ramp `Σ d·min(max(x − s, 0), L)` over the cycle from a turning value, with its
@@ -219,31 +222,50 @@ by what they do to the SID.
      paths, `f` and `a` at that state's phase equal the player's value and advance;
      `f(v, φ + P) = f(v, φ)` and the same for `a` from the prefix on; `g(0) = f(v0, 0)` and
      `g(φ + 1) = f(g(φ), φ + 1)`.
-   - The song is replayed with the unit's firing functions and start hooks wrapped in the
-     compiled player. A hook restarts the unit when it writes `written` cells, changes `key`,
-     or writes a `pointer` to a program that sets one of the unit's fields; the hook is run
-     again symbolically with the note as `N` for the start's terms (amplitudes, start values).
-     Each firing applies the expressions and compares them with the native cell; a write of
-     the cell between firings is reported. A second replay drives every modulator's cells with
-     its expressions and its register grid is compared with the native player's.
-   - Occurrences group by their document form. A form whose starts give more than one
-     expression reads cells the modulator before it left (`inherit`). It is derived once more
-     with the start cells that differ between its starts symbolic: when it is proved, those cells
-     are inputs of one expression, read when the modulator starts, proved for every value of
-     their widths and equal to each start's expression. A cell the firing counts from its
-     inherited value is a phase instead: every start's state must lie on the run of the longest
-     start, entered at `φ0` (its position), proved with z3 for every `φ`, and `φ0` is one sum
-     with the cell. Otherwise the reason is reported. Equal canonical texts across forms and players, and texts equal up to their
-     constants, are listed. The token count rewrites each proved form as an `x` record
-     `{a, v}`, deduplicated by text, named by its commands, programs and instrument fields.
-   - The driven replay steps an expression with inputs bound to the cells at each occurrence's
-     start.
+   - Starts and firings come from the compiled player (`unitracker.modulation`): each unit's
+     `pre`/`post` functions bound a firing and its `hooks` mark a restart, which opens an
+     occurrence at the next firing. The hook is run again symbolically with the note as `N`
+     for the start's terms (amplitudes, start values).
+15. **Conversion** (`convert`). The lifters write a song's modulations as expressions with
+   `convert.convert`; `convert.analyse` returns the whole conversion.
+   - The song, its repeats written out, is replayed natively to the recurrence of its state
+     and one period more (`reach.table_reads`), recording each occurrence with its start
+     cells and the event instance (voice, play count, step) that started it.
+   - Each occurrence's start key (unit, start control, start value term) is computed; each
+     distinct key is derived and proved once.
+   - Occurrences group by unit and `label`. A group shares its closed form when every live
+     start has the same one, else its recurrence when every start has the same one, else
+     each start keeps its own. A unit with `scale` is written over the chip value
+     (`grammar.scaled`). A start that does not modulate writes nothing, or `v` where an
+     event's native command must be replaced.
+   - Each text is written at the unit's `site` (the program's first row or the instrument
+     field, the unit's `clear` fields removed and its `first` fields set) when its `when`
+     holds, else as the event's `command` (`!freq`) in place of the unit's native
+     `commands`, with `!legato:0` when the start's legato cell is set. A record whose
+     occurrences need several texts is copied per text and each starting event points at its
+     copy; changed events go into phrase variants (`p3~1`), unrolling a track's loop where
+     its passes differ. A unit whose texts are all constants stays in a program's own rows
+     when the program has other data the format writes as it is.
+   - The rewritten song's register grid must equal the native song's over the whole window;
+     otherwise the conversion raises `ConversionError`.
+   - Values a start carries from earlier playback are constants of its text. The report
+     proves one general form over them (`inherit`): the start cells that differ between a
+     group's starts are made symbolic and derived once more. A cell the firing never counts
+     becomes an input, proved for every value of its width and equal to each start's
+     expression; one carried counter the firing counts down by one is a delay gate
+     `[φ >= d]` into the run of the start whose counter ran out. Otherwise the reason is
+     reported.
    - Stages run in one process pool (`--workers`, default the host's cores, two BLAS threads
-     each): per song the native grid and the start-collecting replay, then start keys in
-     chunks, then each distinct start's derivation and proofs, then one driven replay per song.
-     Lifted texts, native grids, collected starts and derivations are cached in
-     `out/modfit/cache/` under the sha256 of the tune, the playroutine library and the code they
-     depend on.
+     each): start keys in chunks, then each distinct start's derivation and proofs.
+     Native replays, conversions and derivations are cached in `out/modfit/cache/` under the
+     sha256 of the song and the code they depend on.
+   - The `exprs` report (`exprs_report`) lifts each tune with `expressions=False`, converts
+     it, and gives per song the occurrences over the window, the grid check, whether its
+     v1.5 text read back plays the native player's grid, and any named-table function that
+     differs from the player's. Per unit and label it gives the occurrences and distinct
+     starts, each start's phase, value update, closed form and proof, each written text
+     with where the document writes it, and the general form when the texts differ. It
+     ends with each song's token count as v1.3 (`--before`), v1.4 (`--after`) and v1.5.
 
 ## Assumptions
 
@@ -269,7 +291,8 @@ unitracker-modfit --out out/modfit/keywords.txt keywords
 unitracker-modfit generic [PLAYROUTINE ...] [--ticks N]  # factorised events, grouping, timers, vibrato
 unitracker-modfit --out out/modfit/generic.txt generic
 unitracker-modfit sweeps [SONG ...]                  # bounce orbits, fused pair fits, table programs
-unitracker-modfit exprs [SONG ...] [--ticks N]       # phase and value expressions, proved and replayed
+unitracker-modfit exprs [SONG ...] [--before DIR] [--after DIR] [--workers N]
+                                                     # songs' modulators as proved expressions
                                                      # (writes out/modfit/exprs.txt)
 unitracker-modfit --out out/modfit/sweeps.txt sweeps \
   .tunecache/MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid \
@@ -342,12 +365,12 @@ Not expressible yet:
 
 | Keyword composition | Effect |
 | --- | --- |
-| SID-Wizard big FX $01 / $02 (`!mod`) | `svib := $81`/`$82`; per tick `voff ± fm(arg, note+oct)` when `ci ≠ 0`, 0 when `arg = 0` |
+| SID-Wizard big FX $01 / $02 | `svib := $81`/`$82`; per tick `voff ± fm(arg, note+oct)` when `ci ≠ 0`, 0 when `arg = 0` |
 | SID-Wizard `!attack` | `aov := arg`, `dov := −1`, `sad := (arg << 4) \| (ins[ci].ad & 15)` when `ci ≠ 0` |
 | SID-Wizard `!iattack` … `!irelease` | setup and ticks equal the plain small FX on a row without a note |
 | SID-Wizard `!iattack` on a note row | `note_setup` test `… and pifx != 0` sets `carry` |
 | GoatTracker `!ad` | `ad := arg` |
-| GoatTracker command 3 (`!mod`) | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
+| GoatTracker command 3 | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
 | defMON `!run2` | `rowB := arg`, `cntB := 0`; per tick `layer_b` runs the sidTAB row |
 
 The keyword and field table is written by `unitracker-modfit keywords` (one row per keyword
@@ -408,33 +431,32 @@ every `m` and `fc`:
 `fc` (the pitch carry) is read per tick: with it held the forms are exact, otherwise a phase
 lasts between its forms at `fc = 0` and `fc = 1`.
 
-Phase and value expressions (`exprs.txt`, the three conformance songs over their conformance
-tick counts): every modulator's cells driven by its expressions give each native register
-grid exactly, and every form has one proved expression. Four read what the modulator before
-them left:
+Phase and value expressions (`exprs.txt`, the three conformance songs): every
+modulator's occurrences over the conversion window have one proved expression, the
+rewritten song plays the native register grid exactly over it, and its v1.5 text read back
+plays the native player's grid. Four groups carry values from the modulator before them;
+each has one proved general form:
 
-| Form | Inherited | Expression reads |
+| Form | Carried | General form |
 | --- | --- | --- |
-| defMON `t6` acid | the direction `sub` (`astep` is overwritten before it is read) | input `sub` |
-| SW `!legato:0` glide | the speed's low byte `fml` (`fmh` is set to `$7F`), and `ci` | inputs `fml`, `ci` |
-| SW glide after `!noteglide:0` | the whole speed `fmh:fml` | input `fmh:fml` |
-| SW `!notevib:8` | the instrument vibrato's delay counter `vdc`, which counts | `φ0 = 15 − vdc` into the run from `vdc = 15` |
+| defMON `acid B` | the ACID direction `sub` | input `sub` |
+| SW `pitch`, `!legato:0` glide | the speed's low byte `fml` | input `fml` |
+| SW `pitch`, `!legato:0` glide on another instrument | the whole speed `fmh:fml` | input `fmh:fml` |
+| SW `pitch`, note-column vibrato | the instrument vibrato's delay counter `vdc` | delay gate `[φ >= d]` over `vdc` |
 
-The grammar as used: integers, `+ - * % abs min max`, Iverson brackets, `v`, `φ`, `N`,
-`F(k)`, the table `W[k]` and the start cells above as inputs (`fmh:fml` is the pair's 16-bit
-value). Examples:
+The grammar as written: integers, `+ - * % abs min max`, Iverson brackets, `v`, `φ`, `N`,
+`F(k)` and the table `W[k]`. Examples:
 
-| Form | `a; f` (closed form where the start value is known) |
+| Form | Written |
 | --- | --- |
-| GT `m1` slide, from a note | `1; (32*φ + F(N) + 32) % 65536` |
-| GT `!vib:@s1` | `1; (v + 64*[(φ - 3) % 12 >= 6] - 32) % 65536` |
-| GT Metal Warrior pulse `i1` | `1; 16*abs((φ - 32) % 128 - 64) + 512` |
-| defMON `t2` slide | `0; (v - 139) % 65536` |
-| SW Csillag pulse `i1` | `1; 2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048` |
-| SW `i1` vibrato | `1; ((-abs(φ % 6 - 3) + 1)*W[N + 13]*[φ >= 32]) % 65536` |
-| SW `m1` slide | `0; (v + W[N + 25]) % 65536` |
-
-Written as expression records the three songs take more tokens than as v1.4 records.
+| GT slide (command 1), `!freq:@x1` | `(v + 32) % 65536` |
+| GT toneporta (command 3), `!legato:0!freq:@x2` | `-F(N)*[v != F(N)] + [v < F(N)]*min(F(N), (v + 32) % 65536) + [v > F(N)]*max(F(N), (v - 32) % 65536) + F(N)` |
+| GT vibrato (command 4), `!freq:@x3` | `(v + 64*[(φ - 3) % 12 >= 6] - 32) % 65536` |
+| GT Metal Warrior pulse `i1` | `16*abs((φ - 32) % 128 - 64) + 512` |
+| defMON `t2` slide | `(v - 139) % 65536` |
+| SW Csillag pulse `i1` | `2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048` |
+| SW Csillag `i1` vibrato | `[φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)` |
+| SW slide, `!freq:@x1` | `(v + W[N + 25]) % 65536` |
 
 Reference-song table programs (`sweeps.txt`):
 

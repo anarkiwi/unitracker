@@ -1,8 +1,8 @@
 """Shared vocabulary: a playroutine's own row fields and command codes as the format's keys.
 
 A record type's ``codec`` shapes map raw fields to shared keys and back; a written row is
-accepted only if encoding its inverse gives the row again. Commands map codes to names, or
-to a ``mod`` record built from the command code and its argument.
+accepted only if encoding its inverse gives the row again. A key may hold an expression,
+a reference ``("x", index)`` to the format's expression records.
 """
 
 import keyword
@@ -10,18 +10,8 @@ import re
 
 from unitracker.expr import ExprError, Resolver
 
-MOD_KEYS = ("reg", "step", "rel", "to", "lo", "hi", "at", "every", "delay", "for")
-ROW_KEYS = ("wait", "hold", "ctrl", "note", "ad", "sr", "pw", "cut", "resfilt", "mode") + MOD_KEYS
-MOD = "mod"
-NOTE_SYMBOL = "note"
-SYMBOLS = {"reg": ("freq", "pw", "cut"), "at": ("hold", "wrap", "reflect", "reload")}
-NOTE_KEYS = ("rel", "to", "for")
-REG_WIDTH = {"freq": 16, "pw": 12, "cut": 11}
-# Expression names for the symbolic values; `note` reads as -1.
-SYMBOL_VALUES = {
-    **{s.upper(): i for values in SYMBOLS.values() for i, s in enumerate(values)},
-    "NOTE": -1,
-}
+ROW_KEYS = ("wait", "hold", "ctrl", "note", "ad", "sr", "pw", "cut", "resfilt", "mode", "freq")
+EXPR = "x"
 COMMAND_NAMES = (
     "run",
     "run2",
@@ -34,7 +24,7 @@ COMMAND_NAMES = (
     "tempo",
     "vtempo",
     "funk",
-    "mod",
+    "freq",
     "vib",
     "mark",
     # Player-specific: SID-Wizard.
@@ -50,7 +40,6 @@ COMMAND_NAMES = (
     "irelease",
     "ichord",
     "notevib",
-    "noteglide",
 )
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
@@ -61,16 +50,14 @@ class CodecError(ValueError):
 
 
 class _Env(Resolver):
-    """Expressions over one mapping of names (a missing name reads as 0), the symbolic
-    values, and the playroutine's tables and functions."""
+    """Expressions over one mapping of names (a missing name reads as 0) and the
+    playroutine's tables and functions."""
 
     def __init__(self, functions=None, tables=()):
         super().__init__(functions)
         self.tables = set(tables)
 
     def name(self, name):
-        if name in SYMBOL_VALUES:
-            return str(SYMBOL_VALUES[name])
         return f"E.get({name!r}, 0)"
 
     def table(self, name, index):
@@ -119,56 +106,6 @@ def env_name(key: str) -> str:
     return f"{key}_" if keyword.iskeyword(key) else key
 
 
-def _mod_value(key, value):
-    """A written mod key's value, checked against the key's vocabulary."""
-    if key in SYMBOLS:
-        ok = value in SYMBOLS[key]
-    elif key == "rel":
-        ok = value == NOTE_SYMBOL
-    else:
-        ok = (isinstance(value, int) and not isinstance(value, bool)) or (
-            key in NOTE_KEYS and value == NOTE_SYMBOL
-        )
-    if not ok:
-        raise CodecError(f"bad {key} {value!r}")
-    return value
-
-
-def _mod_code(key, value) -> int:
-    """The integer an expression reads for a written mod value."""
-    if key in SYMBOLS:
-        return SYMBOLS[key].index(value)
-    return SYMBOL_VALUES["NOTE"] if value == NOTE_SYMBOL else value
-
-
-def _mod_text(key, value):
-    """The written form of the integer a shape gives mod key ``key``."""
-    if key in SYMBOLS:
-        if not 0 <= value < len(SYMBOLS[key]):
-            raise CodecError(f"{key} value {value} has no name")
-        return SYMBOLS[key][value]
-    if key in NOTE_KEYS and value == SYMBOL_VALUES["NOTE"]:
-        return NOTE_SYMBOL
-    if key == "rel":
-        raise CodecError(f"rel value {value} has no name")
-    return value
-
-
-_MISSING = object()
-
-
-def mod_defaults(norm: dict, implies: dict) -> dict:
-    """``norm`` without the mod keys that hold their default (see docs/format.md)."""
-    reg = norm.get("reg", implies.get("reg"))
-    defaults = {"every": 1, "delay": 0, "lo": 0, "at": "hold" if "to" in norm else "wrap"}
-    if "to" not in norm:
-        defaults["step"] = 0
-    if reg in REG_WIDTH:
-        defaults["hi"] = (1 << REG_WIDTH[reg]) - 1
-    defaults.update(implies)
-    return {k: v for k, v in norm.items() if k not in MOD_KEYS or defaults.get(k, _MISSING) != v}
-
-
 def note_value(value) -> tuple[bool, int]:
     """``(absolute, number)`` for a written ``note``: an int is relative, ``"=n"`` absolute."""
     if isinstance(value, bool):
@@ -190,7 +127,7 @@ class _Shape:
     """One way to write a row: forward keys, inverse raw fields, fields kept as they are.
 
     A raw field given as ``{search: [lo, hi]}`` is the first value in that range whose row
-    writes back as the written one; ``implies`` names mod keys the record type fixes.
+    writes back as the written one. A key's ``expr`` names the raw field of its expression.
     """
 
     # pylint: disable=too-few-public-methods
@@ -215,9 +152,11 @@ class _Shape:
         clash = set(self.keep) & set(ROW_KEYS)
         if clash:
             raise CodecError(f"kept fields {sorted(clash)} collide with shared keys")
-        self.implies = {k: _mod_value(k, v) for k, v in (spec.get("implies") or {}).items()}
-        if set(self.implies) - set(MOD_KEYS) or set(self.implies) & set(self.keys):
-            raise CodecError(f"implies {sorted(self.implies)} must be unwritten mod keys")
+
+
+def is_expr(value) -> bool:
+    """True for a written key's expression reference ``("x", index)``."""
+    return isinstance(value, tuple) and len(value) == 2 and value[0] == EXPR
 
 
 class RowCodec:
@@ -229,6 +168,16 @@ class RowCodec:
         self.offset = offset
         self.ev = evaluator or _PLAIN
 
+    def expr_keys(self) -> dict:
+        """``{key: number}`` of the keys that hold an expression; ``number`` when a key may also
+        hold a plain value."""
+        out = {}
+        for shape in self.shapes:
+            for key, kspec in shape.keys.items():
+                if "expr" in kspec:
+                    out[key] = out.get(key, False) or "value" in kspec
+        return out
+
     def _full(self, row: dict) -> dict:
         return {f: int(row.get(f, d)) for f, d in self.rtype.fields.items()}
 
@@ -236,14 +185,18 @@ class RowCodec:
         out = {}
         for key in ROW_KEYS:
             kspec = shape.keys.get(key)
-            if kspec is None or ("omit" in kspec and self.ev(kspec["omit"], row)):
+            if kspec is None:
+                continue
+            field = kspec.get("expr")
+            if field is not None and row[field] != self.rtype.default(field):
+                out[key] = (EXPR, row[field])
+                continue
+            if "value" not in kspec or ("omit" in kspec and self.ev(kspec["omit"], row)):
                 continue
             value = self.ev(kspec["value"], row)
             if key == "note":
                 absolute = "abs" in kspec and bool(self.ev(kspec["abs"], row))
                 out[key] = (absolute, value - self.offset if absolute else value)
-            elif key in MOD_KEYS:
-                out[key] = _mod_text(key, value)
             else:
                 out[key] = value
         for field in shape.keep:
@@ -262,23 +215,27 @@ class RowCodec:
     def _env(self, shape, norm) -> dict:
         env = {}
         for key in shape.keys:
-            env[f"has_{key}"] = int(key in norm)
-            if key == "note" and key in norm:
+            plain = key in norm and not is_expr(norm[key])
+            env[f"has_{key}"] = int(plain)
+            if key == "note" and plain:
                 absolute, number = norm[key]
                 env["note_abs"] = int(absolute)
                 env["note"] = number + self.offset if absolute else number
-            elif key in norm:
-                env[env_name(key)] = _mod_code(key, norm[key]) if key in MOD_KEYS else norm[key]
+            elif plain:
+                env[env_name(key)] = norm[key]
         return env
 
     def _try(self, shape, norm) -> tuple[dict | None, str]:
-        norm = mod_defaults(norm, shape.implies)
         extra = set(norm) - set(shape.keys) - set(shape.keep)
         if extra:
             return None, f"keys {sorted(extra)}"
+        for key, value in norm.items():
+            if is_expr(value) and "expr" not in shape.keys.get(key, {}):
+                return None, f"{key} holds no expression here"
         env = self._env(shape, norm)
         raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
+        raw.update({shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)})
         field, values = shape.search or (None, [None])
         problem = "no shape"
         for value in values:
@@ -300,16 +257,8 @@ class RowCodec:
 
     @staticmethod
     def normalize(written: dict) -> dict:
-        """A written row with notes as ``(absolute, number)`` and mod values checked."""
-        out = {}
-        for key, value in written.items():
-            if key == "note":
-                out[key] = note_value(value)
-            elif key in MOD_KEYS:
-                out[key] = _mod_value(key, value)
-            else:
-                out[key] = value
-        return out
+        """A written row with notes as ``(absolute, number)``."""
+        return {k: note_value(v) if k == "note" else v for k, v in written.items()}
 
     def decode(self, written: dict) -> dict:
         """Raw fields for a written row; raises CodecError naming what the player can't express."""
@@ -325,69 +274,36 @@ class RowCodec:
         )
 
     def check_end(self, raw: dict, written: dict) -> None:
-        """Raise unless ``raw`` (a program's last row after ``end``) still writes as ``written``."""
-        if self.encode(raw) != mod_defaults(self.normalize(written), {}):
+        """Raise unless ``raw`` (a program's last row after ``end``) still writes as ``written``.
+
+        An expression key compares by presence: ``raw`` holds its reference, ``written`` its text.
+        """
+        enc, norm = self.encode(raw), self.normalize(written)
+        exprs = {k for k, v in (enc or {}).items() if is_expr(v)}
+        if (
+            enc is None
+            or not exprs <= set(norm)
+            or {k: v for k, v in enc.items() if k not in exprs}
+            != {k: v for k, v in norm.items() if k not in exprs}
+        ):
             raise CodecError(f"{self.rtype.name}: row {written!r} can't end a program")
 
 
 class CommandCodec:
-    """A playroutine's command codes as shared names.
-
-    A ``mod`` variant writes its command as a ``mod`` record whose raw fields are the
-    variant's ``mod`` constants and the argument: ``arg`` for a plain one, or for one that
-    indexes record type ``from``, ``arg`` 1 and the indexed row's fields (``arg`` 0 for none).
-    """
+    """A playroutine's command codes as shared names."""
 
     def __init__(self, spec: dict, rtypes: dict):
-        self.entries, self.mods = [], {}
+        self.entries = []
         for code, variants in (spec or {}).items():
             for var in variants if isinstance(variants, list) else [variants]:
                 name = str(var["name"])
                 if name not in COMMAND_NAMES:
                     raise CodecError(f"{name!r} is not a shared command name")
-                if "mod" in var:
-                    self._add_mod(int(code), var, rtypes)
-                    continue
                 ref = var.get("ref")
                 if ref is not None and ref not in rtypes:
                     raise CodecError(f"command {name} references unknown type {ref!r}")
                 self.entries.append((int(code), name, ref, var))
         self.rtypes = rtypes
-
-    def _add_mod(self, code, var, rtypes):
-        src = var.get("from")
-        if var["name"] != MOD or MOD not in rtypes or code in self.mods:
-            raise CodecError(f"command {code}: a mod variant is the one {MOD!r} for its code")
-        if src is not None and (src not in rtypes or rtypes[src].none is None):
-            raise CodecError(f"command {code}: mod argument type {src!r} needs a none index")
-        self.mods[code] = ({str(k): int(v) for k, v in var["mod"].items()}, src)
-
-    def is_mod(self, code: int) -> bool:
-        """Whether command ``code`` is written as a ``mod`` record."""
-        return code in self.mods
-
-    def mod_row(self, code: int, arg: int, row_of) -> dict:
-        """The raw ``mod`` row for command ``code`` with ``arg``; ``row_of(type, index)``."""
-        fields, src = self.mods[code]
-        row = dict(fields)
-        if src is None:
-            row["arg"] = arg
-            return row
-        rtype = self.rtypes[src]
-        row["arg"] = int(arg != rtype.none)
-        if arg != rtype.none:
-            source = row_of(src, arg)
-            row.update(
-                (f, int(source.get(f, d))) for f, d in rtype.fields.items() if f != rtype.chain
-            )
-        return row
-
-    def mod_command(self, row: dict) -> tuple[int, str | None]:
-        """``(code, from type)`` of the command a raw ``mod`` row is."""
-        for code, (fields, src) in self.mods.items():
-            if all(row.get(k) == v for k, v in fields.items()):
-                return code, src
-        raise CodecError(f"no command writes mod row {row}")
 
     def ref(self, code: int) -> str | None:
         """The record type command ``code``'s argument references, if any."""

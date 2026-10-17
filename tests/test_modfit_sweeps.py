@@ -80,7 +80,7 @@ def test_fused_pair_fit_is_one_accumulate():
 
 def gt_song(rows: dict, **extra) -> dict:
     pr = playroutine("goattracker2")
-    records = {"pulsetab": rows, "ins": {1: {"pulse": 1}}}
+    records = {"pulsetab": rows, "ins": {1: {"pw": 1}}}
     return {"playroutine": pr, "records": records, "phrases": extra.get("phrases", {}),
             "tables": {}}  # fmt: skip
 
@@ -158,7 +158,7 @@ def test_sidwizard_fused_pulse_crosses_the_low_byte():
     pr = playroutine("sidwizard")
     rows = {1: {"a": 0x88, "b": 4, "next": 2}, 2: {"a": 3, "b": 0xF8, "next": 3},
             3: {"a": 3, "b": 8, "next": 2}}  # fmt: skip
-    song = {"playroutine": pr, "records": {"pwtab": rows, "ins": {1: {"pulse": 1}}}, "tables": {}}
+    song = {"playroutine": pr, "records": {"pwtab": rows, "ins": {1: {"pw": 1}}}, "tables": {}}
     stepper = Stepper(song, SW_PULSE)
     run = stepper.run(1, {"ci": 1})
     assert run.ops[:5] == [("set", 0x804), ("add", -8), ("add", -8), ("add", -8), ("add", 0)]
@@ -177,7 +177,7 @@ def test_unsteppable_runs_and_simulation():
 def test_reference_songs(metal_warrior, csillag):
     gt = "\n".join(song_lines(metal_warrior))
     assert "row 1 (ins 1): set 1024, then accumulate step 16 [512, 1536] reflect, first +16" in gt
-    assert "row 6 (ins 3): set 512, then accumulate step 40 [272, 2032] reflect, first +40" in gt
+    assert "row 6 (ins 2): set 512, then accumulate step 40 [272, 2032] reflect, first +40" in gt
     sw = "\n".join(song_lines(csillag))
     assert "not one accumulator: step sizes +2 x64, -8 x64" in sw
     assert "set 128, then accumulate step 1 [-, 240] clamp" in sw

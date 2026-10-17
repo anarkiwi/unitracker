@@ -6,6 +6,7 @@ from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
 
 from unitracker.songio import library, song_meta
+from unitracker.modfit.convert import convert
 from unitracker.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
@@ -21,6 +22,7 @@ NOTE_FX, NOTE_GLIDE = 0x60, 0x78
 SMALL_FX = (0x20, 0x30, 0x50, 0x60, 0x70)
 CHORD_FX = 0x70
 BIG_FX = (0x01, 0x02, 0x03)
+GLIDE = 0x03
 INST_COLUMN = 0x100
 NOTE_COLUMN = 0x200
 
@@ -130,7 +132,7 @@ def instrument_record(ins, tables: Tables, chord_starts: dict) -> dict:
         "octave": ins.octave_shift,
         "firstctrl": ins.effective_first_waveform,
         "ctrl": tables.program("wftab", ins.wf_table, wf_record),
-        "pulse": tables.program("pwtab", ins.pw_table, pw_record),
+        "pw": tables.program("pwtab", ins.pw_table, pw_record),
         "filter": tables.program("flttab", ins.filter_table, filter_record),
     }
     return rec
@@ -199,6 +201,9 @@ class Events:
             self.note_column(row.note, event, commands)
         if row.fx is not None:
             self.fx_column(row, commands)
+        if row.fx == GLIDE and "note" in event and isinstance(event["note"], int):
+            if (LEGATO, 0) not in commands:
+                commands.insert(0, (LEGATO, 0))
         if len(commands) > 2:
             raise LiftError("a row with three effects is not covered")
         if len(commands) == 1:
@@ -309,8 +314,12 @@ def initial_registers(sid_init: bytes) -> list[int]:
     return list(regs)
 
 
-def lift(raw: bytes, subtune: int = 0) -> dict:
-    """A unitracker song dict for SID-Wizard tune ``raw``."""
+def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
+    """A unitracker song dict for SID-Wizard tune ``raw``.
+
+    With ``expressions`` its modulations are written as the format's expressions.
+    """
+    # pylint: disable=too-many-locals
     swm = parse_sid_song(raw, subtune + 1)
     features = features_for_driver(swm.driver_type)
     check_build(swm, features)
@@ -330,7 +339,7 @@ def lift(raw: bytes, subtune: int = 0) -> dict:
     first_note_selects(tracks, phrases)
     playroutine = library("sidwizard")
     playroutine["constants"], hints = tempo(swm)
-    return {
+    ir = {
         "unitracker": "ir",
         "hints": hints,
         "meta": song_meta(SidImage.from_bytes(raw).header, f"sidwizard subtune {subtune}"),
@@ -353,3 +362,4 @@ def lift(raw: bytes, subtune: int = 0) -> dict:
         "phrases": phrases,
         "playroutine": playroutine,
     }
+    return convert(ir) if expressions else ir

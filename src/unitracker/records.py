@@ -14,7 +14,9 @@ META_KEYS = {
     "refs",
     "codec",
     "end",
+    "expr",
 }
+EXPR = "x"
 
 
 class RecordTypeError(ValueError):
@@ -57,12 +59,15 @@ class RecordType:
             self.refs[str(field)] = out
         self.codec = list(spec.get("codec") or [])
         self.end = dict(spec.get("end") or {})
+        self.expr = spec.get("expr")
         self.templates = {k: v for k, v in spec.items() if k not in META_KEYS}
         for key, actions in self.templates.items():
             if not isinstance(actions, list):
                 raise RecordTypeError(f"{name}.{key}: a template must be an action list")
         if self.chain is not None and self.chain not in self.fields:
             raise RecordTypeError(f"{name}: chain field {self.chain!r} is not a field")
+        if self.expr is not None and self.refs.get(self.expr) != [(EXPR, None)]:
+            raise RecordTypeError(f"{name}: expr field {self.expr!r} must reference {EXPR}")
 
     def default(self, field: str) -> int:
         """The value a missing ``field`` reads as."""
@@ -70,8 +75,13 @@ class RecordType:
 
 
 def record_types(playroutine: dict) -> dict:
-    """``{name: RecordType}`` for a playroutine's ``record_types``."""
-    return {
-        name: RecordType(name, spec or {})
-        for name, spec in (playroutine.get("record_types") or {}).items()
-    }
+    """``{name: RecordType}`` for a playroutine's ``record_types``, and the format's expressions.
+
+    The expression type ``x`` holds modulator expressions (see docs/format.md).
+    """
+    specs = playroutine.get("record_types") or {}
+    if EXPR in specs:
+        raise RecordTypeError(f"{EXPR!r} is the format's expression type")
+    out = {name: RecordType(name, spec or {}) for name, spec in specs.items()}
+    out[EXPR] = RecordType(EXPR, {"prefix": EXPR, "none": 0, "max": 0xFFFF})
+    return out

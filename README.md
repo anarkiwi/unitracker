@@ -1,17 +1,19 @@
 # unitracker
 
-A generic tracker song format for the C64 SID, GoatTracker 2, defMON and SID-Wizard
-lifters, and a generic player. A song is a compact YAML document: a header naming its
-playroutine (integer cells, bounded accumulators and event handlers, from the library in
-`src/unitracker/playroutines/`), then one timeline that defines each instrument,
-program and phrase where it is first used. Rows and commands share one vocabulary across
-players, pitch, pulse and filter modulations are one bounded-accumulator record (`mod`), and
+A generic tracker song format (v1.5) for the C64 SID, GoatTracker 2, defMON and
+SID-Wizard lifters, and a generic player. A song is a compact YAML document: a header
+naming its playroutine (integer cells, bounded accumulators, event handlers and modulator
+units, from the library in `src/unitracker/playroutines/`), then one timeline that defines
+each instrument, program, expression and phrase where it is first used. Rows and commands
+share one vocabulary across players, pitch, pulse and filter modulations are integer
+expressions in `v` and `φ` (`pw: 16*abs((φ - 32) % 128 - 64) + 512`, `!freq:@x1`), and
 notes are named by real pitch. The player has no player-specific knowledge,
 and its register writes are flushed in one canonical order.
 
 Format specification: [docs/format.md](docs/format.md).
 
-Modulation-to-accumulator rewrites (`unitracker-modfit`): [docs/modfit.md](docs/modfit.md).
+Modulation analysis and the proved conversion to expressions (`unitracker-modfit`):
+[docs/modfit.md](docs/modfit.md).
 
 ## Install
 

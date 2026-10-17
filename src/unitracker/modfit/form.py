@@ -530,9 +530,8 @@ class Form(Algebra):
         }
         byte_fields = set()
         for name, rt in (pr.get("record_types") or {}).items():
-            fields = rt.get("fields") or []
-            defaults = fields if isinstance(fields, dict) else dict.fromkeys(fields, 0)
-            byte_fields |= {(name, f) for f, d in defaults.items() if isinstance(d, int) and d >= 0}
+            fill = defaults(rt)
+            byte_fields |= {(name, f) for f, d in fill.items() if isinstance(d, int) and d >= 0}
         self.table_data = pr.get("tables") or {}
         super().__init__(
             width,
@@ -858,3 +857,52 @@ class Form(Algebra):
             upd = {k: v for k, v in final.items() if v != k and k not in self.scratch}
             out.append((conds, self.fuse(conds, upd)))
         return out
+
+
+class Rows(dict):
+    """A record type's rows; a missing row or field reads as the field's default."""
+
+    def __init__(self, rows: dict, fill: dict):
+        super().__init__(rows)
+        self.defaults = fill
+
+    def get(self, key, default=None):
+        """The row at ``key`` with its defaults filled in."""
+        del default
+        return {**self.defaults, **super().get(key, {})}
+
+
+def defaults(rtype: dict) -> dict:
+    """``{field: default}`` of a record type."""
+    fields = rtype.get("fields") or []
+    return dict(fields) if isinstance(fields, dict) else dict.fromkeys(fields, 0)
+
+
+class Programs(Form):
+    """A form over a song's records that also runs record templates with ``row`` bound."""
+
+    def opaque(self, a: dict, rest, conds, state) -> list:
+        """A template ``run`` on its row, then the rest; other actions are unsupported."""
+        run = a.get("run") or {}
+        template = (
+            (self.pr.get("record_types") or {}).get(run.get("record"), {}).get(run.get("field"))
+        )
+        if not isinstance(template, list):
+            return super().opaque(a, rest, conds, state)
+        row = ("rec", run["record"], self.num(self.expr(run["index"], state)))
+        out = []
+        for cs, st in self.paths(template, conds, {**state, "row": row}):
+            st = {**st, "row": state.get("row", "row")}
+            out += self.paths(rest, cs, st)
+        return out
+
+
+def record_data(song: dict, rtypes: dict) -> dict:
+    """``{record type: Rows}`` of a song, every record type present."""
+    data = {
+        name: Rows(rows, defaults(rtypes.get(name) or {}))
+        for name, rows in (song.get("records") or {}).items()
+    }
+    for name, rtype in rtypes.items():
+        data.setdefault(name, Rows({}, defaults(rtype)))
+    return data

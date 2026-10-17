@@ -1,0 +1,627 @@
+"""Lift-time conversion of a song's native modulations to the format's expressions.
+
+The song is replayed until its state recurs, and one period more. Each occurrence's start is
+derived and proved (in parallel, cached by content) and its expression written where its data
+lives: a record site (a program's first row, an instrument field) or the event's ``!freq``.
+"""
+
+import copy
+import dataclasses
+import json
+import pickle
+from pathlib import Path
+
+import numpy as np
+
+from unitracker import reach
+from unitracker.codec import evaluate
+from unitracker.modfit import grammar as G
+from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
+from unitracker.modfit.replay import Replay
+from unitracker.modulation import declared
+from unitracker.songio import codecs
+from unitracker.records import record_types
+from unitracker.vm import SongPlayer
+from unitracker.xexpr import ExpressionError, source
+
+CACHE = Path("out/modfit/cache")
+IDENTITY = "v"
+_HERE = Path(__file__).resolve().parent
+SOURCES = [_HERE / f for f in ("convert.py", "exprs.py", "phase.py", "grammar.py", "form.py")] + [
+    _HERE.parent / f for f in ("modulation.py", "vm.py", "records.py", "codec.py")
+]
+
+
+class ConversionError(ValueError):
+    """A modulation the format's expressions do not cover."""
+
+
+def expand_repeats(ir: dict) -> dict:
+    """``ir`` with each repeated play written out, so every play is one phrase run."""
+    out = copy.deepcopy(ir)
+    for track in out["tracks"]:
+        plays, index = [], {}
+        for i, play in enumerate(track["plays"]):
+            index[i] = len(plays)
+            one = {k: v for k, v in play.items() if k != "repeat"}
+            plays += [dict(one) for _ in range(int(play.get("repeat", 1)))]
+        if track.get("loop") is not None:
+            track["loop"] = index[track["loop"]]
+        track["plays"] = plays
+    return out
+
+
+class Observer(Replay):
+    """A native replay that records the event instance each occurrence belongs to.
+
+    An instance is ``(voice, play count, step)``; ``events`` maps ``(unit, instance)`` to the
+    occurrence a start hook of the unit was applying when that event was the voice's last.
+    """
+
+    def __init__(self, ir: dict):
+        super().__init__(ir, lambda unit, occ: None)
+        voices = len(self.player.voice_cells)
+        self.count, self.last = [0] * voices, [None] * voices
+        self.plays = [[] for _ in range(voices)]
+        self.hooked, self.started, self.events = {}, {}, {}
+        fetch = self.ns["_fetch"]
+
+        def observed(v):
+            voice, cursor = self.voice_of[id(v)], v[-1]
+            self.last[voice] = None
+            if not cursor.ended:
+                if cursor.step == 0:
+                    self.plays[voice].append(cursor.index)
+                    self.count[voice] += 1
+                self.last[voice] = (voice, self.count[voice] - 1, cursor.step)
+            fetch(v)
+
+        self.ns["_fetch"] = observed
+
+    def applied(self, unit: dict, voice) -> None:
+        self.hooked[(unit["name"], voice)] = None if voice is None else self.last[voice]
+
+    def restart(self, unit: dict, voice, hook: tuple) -> None:
+        super().restart(unit, voice, hook)
+        key = (unit["name"], None if unit.get("scope") == "global" else voice)
+        self.started[key] = None if voice is None else self.last[voice]
+
+    def open(self, unit: dict, name: tuple, voice, snap: dict, before: int) -> None:
+        super().open(unit, name, voice, snap, before)
+        occ = self.active[name]
+        occ.instance, occ.index = self.started.pop(name, None), len(self.occurrences) - 1
+
+    def fired(self, unit: dict, occ) -> None:
+        inst = self.hooked.pop((unit["name"], occ.voice), None)
+        if inst is not None:
+            self.events.setdefault((unit["name"], inst), occ.index)
+
+
+def ir_key(ir: dict) -> str:
+    """The content key of an internal song and the sources its conversion depends on."""
+    text = json.dumps(ir, sort_keys=True, default=repr)
+    return content_key(text, *(p.read_text() for p in SOURCES))
+
+
+def window(ir: dict) -> int:
+    """Ticks that play every state the song reaches twice: to its recurrence and a period more."""
+    _, ticks, period = reach.table_reads(ir)
+    return ticks + period
+
+
+def observe(ir: dict, ticks: int, cache: Path | None) -> Observer:
+    """The song's native occurrences and event attribution over ``ticks``, cached by content."""
+
+    def compute():
+        obs = Observer(ir)
+        obs.run(ticks, desc="starts")
+        return {k: getattr(obs, k) for k in ("occurrences", "events", "plays")}
+
+    where = cache / f"convert-observe-{ir_key(ir)}-{ticks}.pkl" if cache else None
+    return _cached(where, compute, _load, _save)
+
+
+def _load(path: Path):
+    return pickle.loads(path.read_bytes())
+
+
+def _save(path: Path, obj) -> None:
+    path.write_bytes(pickle.dumps(obj))
+
+
+_ANALYSES = {}
+
+
+def _analysis(ir: dict, key: str) -> Analysis:
+    if key not in _ANALYSES:
+        _ANALYSES[key] = Analysis(ir)
+    return _ANALYSES[key]
+
+
+def keys_task(ir: dict, key: str, occurrences: list) -> list:
+    """``(start key, error)`` of a chunk of occurrences."""
+    an = _analysis(ir, key)
+    out = []
+    for occ in occurrences:
+        start = an.key(an.unit(occ.unit), occ)
+        out.append((start, occ.error))
+    return out
+
+
+def derive_task(ir: dict, key: str, start: tuple, cache: Path | None):
+    """The proved expressions of one start, cached by content."""
+    where = cache / "derived" / f"{content_key(key, repr(start))}.pkl" if cache else None
+    return _cached(where, lambda: _analysis(ir, key).derived(start), _load, _save)
+
+
+def checked(derived, a, f, scale: int = 1) -> str:
+    """The grammar text of value update ``f`` with phase update ``a``: one per firing, over
+    ``scale`` times the cell."""
+    if derived.order.kind != "time" or int(a) != int(G.PHI in f.free_symbols):
+        raise ConversionError(f"phase {G.text(a)} is not one per firing: {G.text(f)}")
+    try:
+        return G.text(G.scaled(f, scale))
+    except ValueError as exc:
+        raise ConversionError(f"{G.text(f)}: no scale {scale} form: {exc}") from exc
+
+
+def groups(occs: list) -> dict:
+    """``{(unit, label): [occurrence index]}`` in order of first start."""
+    out = {}
+    for i, occ in enumerate(occs):
+        out.setdefault((occ.unit, occ.label), []).append(i)
+    return out
+
+
+def group_texts(an: Analysis, occs: list, found: dict) -> list:
+    """Each occurrence's expression text (None: no modulation), by the canonical rule.
+
+    Within a unit and label the shared closed form, else the shared recurrence, else each
+    start's own.
+    """
+    # pylint: disable=too-many-locals
+    for occ in occs:
+        if occ.key is None:
+            raise ConversionError(f"{occ.unit} at tick {occ.tick}: {occ.error}")
+        d, _ = found[occ.key]
+        if d.error or not d.exact:
+            raise ConversionError(
+                f"{occ.unit} at tick {occ.tick}: not proved: {d.error or d.proof}"
+            )
+    out = [None] * len(occs)
+    for (unit, _), members in groups(occs).items():
+        scale = int(an.unit(unit).get("scale", 1))
+        live = {occs[i].key: found[occs[i].key][0] for i in members}
+        live = {k: d for k, d in live.items() if not d.identity}
+        closed = {G.text(d.closed) for d in live.values() if d.closed is not None}
+        recur = {G.text(d.value) for d in live.values()}
+        shared, first = None, next(iter(live.values()), None)
+        if len(closed) == 1 and all(d.closed is not None for d in live.values()):
+            shared = checked(first, *first.update, scale)
+        elif len(recur) == 1 and live:
+            shared = checked(first, first.phase, first.value, scale)
+        for i in members:
+            d = found[occs[i].key][0]
+            out[i] = None if d.identity else (shared or checked(d, *d.update, scale))
+    tables = set((declared(an.ir["playroutine"]).get("tables") or {}))
+    for text in {t for t in out if t is not None}:
+        try:
+            source(text, tables)
+        except ExpressionError as exc:
+            raise ConversionError(f"{text}: outside the fixed grammar: {exc}") from exc
+    return out
+
+
+def derive_all(ir: dict, obs: dict, cache: Path | None, workers=None) -> tuple:
+    """``(start derivations, each occurrence's text)``, every distinct start derived in parallel."""
+    # pylint: disable=too-many-locals
+    key = ir_key(ir)
+    occs = obs["occurrences"]
+    chunks = [occs[i : i + CHUNK] for i in range(0, len(occs), CHUNK)]
+    pool = Pool(workers, max(len(chunks), 1))
+    try:
+        got = pool.map(keys_task, [(ir, key, c) for c in chunks], "start keys")
+        for chunk, keys in zip(chunks, got):
+            for occ, (start, error) in zip(chunk, keys):
+                occ.key, occ.error = start, error
+        starts = list(dict.fromkeys(o.key for o in occs if o.key is not None))
+        found = dict(
+            zip(starts, pool.map(derive_task, [(ir, key, s, cache) for s in starts], "derivations"))
+        )
+    finally:
+        pool.close()
+    return found, group_texts(_analysis(ir, key), occs, found)
+
+
+# ---- rewriting -----------------------------------------------------------------------
+
+
+def _program(rows: dict, rtype, entry: int) -> tuple:
+    """``(row indices, loop position or None)`` of the program starting at ``entry``."""
+    path, pos, index = [], {}, entry
+    while index not in pos:
+        row = {**rtype.fields, **rows.get(index, {})}
+        pos[index] = len(path)
+        path.append(index)
+        if rtype.stop is not None and evaluate(rtype.stop, row):
+            return path, None
+        index = row[rtype.chain]
+        if rtype.none is not None and index == rtype.none:
+            return path, None
+    return path, pos[index]
+
+
+class Rewrite:  # pylint: disable=too-many-instance-attributes
+    """A song's modulations rewritten as expressions, from its occurrences and their texts."""
+
+    def __init__(self, ir: dict, obs: dict, texts: list):
+        self.ir = copy.deepcopy(ir)
+        self.pr = self.ir["playroutine"]
+        self.rtypes = record_types(self.pr)
+        self.spec = declared(self.pr)
+        self.units = {u["name"]: u for u in self.spec.get("units") or []}
+        self.obs, self.texts = obs, texts
+        self.exprs = {}
+        self.events = {}
+        self.instrument = self.pr.get("instrument") or {}
+        self.records = self.ir.setdefault("records", {})
+        self.codecs = codecs(self.pr, self.ir.get("tables"))
+
+    def x(self, text: str) -> int:
+        """The index of an expression text."""
+        return self.exprs.setdefault(text, len(self.exprs) + 1)
+
+    def site(self, occ):
+        """``(record, index)`` of the record an occurrence's expression is written in, or None."""
+        spec = self.units[occ.unit].get("site")
+        if spec is None or ("when" in spec and not evaluate(spec["when"], occ.start)):
+            return None
+        return spec["record"], evaluate(spec["index"], occ.start)
+
+    def run(self) -> dict:
+        """The rewritten internal song."""
+        occs = self.obs["occurrences"]
+        sites = {}
+        for i, occ in enumerate(occs):
+            where = self.site(occ)
+            if where is not None:
+                sites.setdefault(where, {}).setdefault(occ.unit, {}).setdefault(
+                    self.texts[i], []
+                ).append(occ)
+        for where, by_unit in sites.items():
+            self.record_site(where, by_unit)
+        self.event_sites()
+        self.phrases()
+        self.ir["exprs"] = {i: t for t, i in self.exprs.items()}
+        return self.ir
+
+    # -- record sites --
+    def record_site(self, where: tuple, by_unit: dict) -> None:
+        """Write a record's units' expressions; a unit with several gets one copy per text."""
+        texts = {u: {t: o for t, o in got.items() if t is not None} for u, got in by_unit.items()}
+        texts = {u: got for u, got in texts.items() if got and not self.native(where, u, got)}
+        if not texts:
+            return
+        many = [u for u, got in texts.items() if len(got) > 1]
+        if len(many) > 1:
+            raise ConversionError(f"{where}: units {many} each need several expressions")
+        single = {u: next(iter(got)) for u, got in texts.items() if u not in many}
+        if not many:
+            self.redirect(where, self.written(where, single))
+            return
+        unit = many[0]
+        ordered = sorted(texts[unit].items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        for text, occs in ordered[1:]:
+            clone = self.written(where, {**single, unit: text}, copy_row=True)
+            for occ in occs:
+                self.select(occ, where, clone)
+        self.redirect(where, self.written(where, {**single, unit: ordered[0][0]}))
+
+    def native(self, where: tuple, unit: str, texts: dict) -> bool:
+        """True when a unit's constant values stay the program's own rows: rows with other data
+        that the format writes as they are."""
+        name, index = where
+        rtype, rows = self.rtypes[name], self.records.get(name, {})
+        if rtype.chain is None or not all(_integer(t) for t in texts):
+            return False
+        spec = self.units[unit]["site"]
+        path, _ = _program(rows, rtype, index)
+        full = [{**rtype.fields, **rows.get(i, {})} for i in path]
+        if not any(self.effective(rtype, {**r, **self.cleared(spec, r)}) for r in full):
+            return False
+        codec = self.codecs.get(name)
+        return codec is None or all(codec.encode(r) is not None for r in full)
+
+    def written(self, where: tuple, texts: dict, copy_row: bool = False) -> int:
+        """The record (a program copy, or one row) with the units' expressions written."""
+        # pylint: disable=too-many-locals
+        name, index = where
+        rtype, rows = self.rtypes[name], self.records.setdefault(name, {})
+        specs = [self.units[u]["site"] for u in texts]
+        if rtype.chain is None:
+            row = dict(rows.get(index, {}))
+            for unit, spec in zip(texts, specs):
+                if index not in rtype.pin:
+                    row.update(self.cleared(spec, {**rtype.fields, **row}))
+                row[spec["field"]] = self.x(texts[unit])
+            if copy_row:
+                return self.allocate(rtype, [row])
+            rows[index] = row
+            return index
+        path, loop = _program(rows, rtype, index)
+        out = []
+        for k, i in enumerate(path):
+            row = {f: v for f, v in rows.get(i, {}).items() if f != rtype.chain}
+            for spec in specs:
+                row.update(self.cleared(spec, {**rtype.fields, **row}))
+                if k == 0:
+                    row.update({f: int(v) for f, v in (spec.get("first") or {}).items()})
+            out.append(row)
+        for unit, spec in zip(texts, specs):
+            out[0][spec["field"]] = self.x(texts[unit])
+        live = [k for k, row in enumerate(out) if self.effective(rtype, row)]
+        last = live[-1] if live else 0
+        if loop is None or loop > last:
+            out, loop = out[: last + 1], None
+        if loop is None and rtype.end:
+            out[-1].update({f: int(v) for f, v in rtype.end.items()})
+        return self.allocate(rtype, out, loop)
+
+    @staticmethod
+    def cleared(spec: dict, row: dict) -> dict:
+        """A row's fields with the unit's data cleared."""
+        return {f: int(evaluate(str(e), row)) for f, e in (spec.get("clear") or {}).items()}
+
+    @staticmethod
+    def effective(rtype, row: dict) -> bool:
+        """True when a row sets anything: a field off its default."""
+        return any(row.get(f, d) != d for f, d in rtype.fields.items() if f != rtype.chain)
+
+    def allocate(self, rtype, rows: list, loop=None) -> int:
+        """New rows of a record type, chained as a program when it is one; the first index."""
+        table = self.records.setdefault(rtype.name, {})
+        start = max([rtype.first - 1, *table]) + 1
+        if start + len(rows) - 1 > rtype.max:
+            raise ConversionError(f"{rtype.name}: more than {rtype.max} rows")
+        for k, row in enumerate(rows):
+            if rtype.chain is not None:
+                last = k + 1 == len(rows)
+                end = rtype.none if rtype.none is not None else 0
+                row = {**row, rtype.chain: (start + loop if loop is not None else end)
+                       if last else start + k + 1}  # fmt: skip
+            table[start + k] = row
+        return start
+
+    def redirect(self, where: tuple, new: int) -> None:
+        """Every reference to a record (other than a program's chain) to its rewritten copy."""
+        name, old = where
+        for tname, rows in self.records.items():
+            rtype = self.rtypes.get(tname)
+            for row in rows.values() if rtype is not None else ():
+                for field, targets in rtype.refs.items():
+                    if field == rtype.chain or row.get(field) != old:
+                        continue
+                    full = {**rtype.fields, **row}
+                    if any(t == name and (w is None or evaluate(w, full)) for t, w in targets):
+                        row[field] = new
+        commands = self.commands(name)
+        for events in [*self.ir["phrases"].values(), list(self.events.values())]:
+            for event in events:
+                self.point(event, name, old, new, commands)
+
+    def commands(self, name: str) -> set:
+        """The command codes whose argument references record type ``name``."""
+        return {
+            int(code)
+            for code, var in (self.pr.get("commands") or {}).items()
+            for v in (var if isinstance(var, list) else [var])
+            if v.get("ref") == name
+        }
+
+    def point(self, event: dict, name: str, old: int, new: int, commands: set) -> bool:
+        """Make an event's reference to record ``old`` of ``name`` reference ``new``."""
+        hit = False
+        base = int(self.instrument.get("base", 0))
+        if self.instrument.get("type") == name and event.get("instrument") == old + base:
+            event["instrument"], hit = new + base, True
+        cmds = event.get("commands") or ([event["command"]] if event.get("command") else [])
+        for cmd in cmds:
+            if int(cmd[0]) in commands and int(cmd[1]) == old:
+                cmd[1], hit = new, True
+        return hit
+
+    def select(self, occ, where: tuple, clone: int) -> None:
+        """Make the event that started ``occ`` select record copy ``clone``."""
+        if occ.instance is None:
+            raise ConversionError(f"{occ.unit} at tick {occ.tick}: no event selects {where}")
+        event = self.edit(occ.instance)
+        if not self.point(event, where[0], where[1], clone, self.commands(where[0])):
+            raise ConversionError(f"{occ.unit} at tick {occ.tick}: its event does not name {where}")
+
+    # -- event sites --
+    def event_at(self, instance: tuple) -> tuple:
+        """``(phrase name, event index)`` of an instance, or None when no event starts there."""
+        voice, count, step = instance
+        play = self.ir["tracks"][voice]["plays"][self.obs["plays"][voice][count]]
+        events, pos = self.ir["phrases"][play["phrase"]], 0
+        for k, event in enumerate(events):
+            if pos == step:
+                return play["phrase"], k
+            pos += int(event.get("steps", 1))
+        return None
+
+    def edit(self, instance: tuple) -> dict:
+        """The instance's own copy of its event, to be written into its phrase's variant."""
+        if instance not in self.events:
+            where = self.event_at(instance)
+            if where is None:
+                raise ConversionError(f"no event starts at {instance}")
+            self.events[instance] = copy.deepcopy(self.ir["phrases"][where[0]][where[1]])
+        return self.events[instance]
+
+    def event_sites(self) -> None:
+        """Each event's native modulator commands as its expression's ``!freq`` command."""
+        occs = self.obs["occurrences"]
+        legato = self.spec.get("legato") or {}
+        for (unit, instance), i in sorted(self.obs["events"].items(), key=repr):
+            spec, occ, text = self.units[unit], occs[i], self.texts[i]
+            if "command" not in spec or self.site(occ) is not None:
+                continue
+            where = self.event_at(instance)
+            if where is None:
+                continue
+            event = self.ir["phrases"][where[0]][where[1]]
+            native = [c for c in _cmds(event) if int(c[0]) in spec.get("commands", ())]
+            started = occ.instance == instance
+            if not (native or (started and text is not None)):
+                continue
+            ev = self.edit(instance)
+            cmds = [c for c in _cmds(ev) if int(c[0]) not in spec.get("commands", ())]
+            if (
+                started
+                and isinstance(ev.get("note"), int)
+                and legato
+                and occ.start.get(legato["cell"])
+                and [legato["command"], 0] not in cmds
+            ):
+                cmds.insert(0, [legato["command"], 0])
+            cmds.append([spec["command"], self.x(text or IDENTITY)])
+            _set_cmds(ev, cmds)
+
+    # -- phrases and tracks --
+    def phrases(self) -> None:
+        """Phrase variants for instances whose events changed, tracks unrolled where needed."""
+        # pylint: disable=too-many-locals
+        variants, names = {}, {}
+        per = {}
+        for (voice, count, step), event in self.events.items():
+            per.setdefault((voice, count), {})[step] = event
+        for voice, track in enumerate(self.ir["tracks"]):
+            counts = self.obs["plays"][voice]
+            n, loop = len(track["plays"]), track.get("loop")
+            by_pos = {}
+            for count, pos in enumerate(counts):
+                cycle = 0 if count < n else 1 + (count - n) // max(1, n - (loop or 0))
+                edits = per.get((voice, count), {})
+                frozen = tuple(sorted((s, _frozen(e)) for s, e in edits.items()))
+                key = (track["plays"][pos]["phrase"], frozen)
+                by_pos.setdefault(pos, []).append((cycle, key, edits))
+            plays = [dict(p) for p in track["plays"]]
+            tail = None
+            for pos, seen in by_pos.items():
+                first = seen[0]
+                later = {k for c, k, _ in seen if c > 0}
+                if len(later) > 1:
+                    raise ConversionError(f"voice {voice} play {pos}: its loop passes differ")
+                plays[pos]["phrase"] = self.variant(first[1], first[2], variants, names)
+                if later and later != {first[1]}:
+                    tail = tail or {}
+                    edits = next(e for c, k, e in seen if c > 0)
+                    tail[pos] = self.variant(next(iter(later)), edits, variants, names)
+            if tail is not None:
+                extra = []
+                for pos in range(loop, n):
+                    extra.append({**plays[pos], "phrase": tail.get(pos, plays[pos]["phrase"])})
+                plays += extra
+                track["loop"] = n
+            track["plays"] = plays
+
+    def variant(self, key: tuple, edits: dict, variants: dict, names: dict) -> str:
+        """The phrase of ``key``: the phrase itself, or a copy with the instance's events."""
+        phrase, changed = key
+        if not changed:
+            return phrase
+        if key not in variants:
+            events = copy.deepcopy(self.ir["phrases"][phrase])
+            steps, pos = {}, 0
+            for k, event in enumerate(events):
+                steps[pos] = k
+                pos += int(event.get("steps", 1))
+            for step, event in edits.items():
+                events[steps[step]] = copy.deepcopy(event)
+            names[phrase] = names.get(phrase, 0) + 1
+            variants[key] = f"{phrase}~{names[phrase]}"
+            self.ir["phrases"][variants[key]] = events
+        return variants[key]
+
+
+def _integer(text: str) -> bool:
+    try:
+        int(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _cmds(event: dict) -> list:
+    return [
+        list(c)
+        for c in (event.get("commands") or ([event["command"]] if event.get("command") else []))
+    ]
+
+
+def _set_cmds(event: dict, cmds: list) -> None:
+    event.pop("command", None)
+    event.pop("commands", None)
+    if len(cmds) > 2:
+        raise ConversionError(f"an event needs three commands: {cmds}")
+    if len(cmds) == 1:
+        event["command"] = cmds[0]
+    elif cmds:
+        event["commands"] = cmds
+
+
+def _frozen(event: dict) -> str:
+    return json.dumps(event, sort_keys=True)
+
+
+def convert(ir: dict, cache: Path | None = CACHE, workers=None) -> dict:
+    """``ir`` with every native modulation its playroutine declares written as an expression.
+
+    Raises ConversionError when a modulation has no expression or the rewritten song plays
+    differently from the native one.
+    """
+    if not declared(ir["playroutine"]):
+        return ir
+    ir = expand_repeats(ir)
+    where = cache / f"convert-{ir_key(ir)}.pkl" if cache else None
+    return _cached(where, lambda: _converted(ir, cache, workers), _load, _save)
+
+
+@dataclasses.dataclass
+class Conversion:
+    """A song's conversion: its occurrences, their starts' derivations and texts, the result."""
+
+    ir: dict
+    ticks: int
+    obs: dict
+    found: dict
+    texts: list
+    out: dict
+
+    @property
+    def analysis(self) -> Analysis:
+        """The analysis of the song's units."""
+        return _analysis(self.ir, ir_key(self.ir))
+
+
+def analyse(ir: dict, cache: Path | None = CACHE, workers=None) -> Conversion:
+    """A song's conversion, verified: its expressions play its native register grid exactly
+    from start to its state's recurrence and one period more."""
+    ir = expand_repeats(ir)
+    ticks = window(ir)
+    obs = observe(ir, ticks, cache)
+    found, texts = derive_all(ir, obs, cache, workers)
+    out = Rewrite(ir, obs, texts).run()
+    want = SongPlayer(ir).render_grid(ticks)
+    got = SongPlayer(out).render_grid(ticks)
+    diff = np.argwhere(want != got)
+    if len(diff):
+        tick, reg = (int(x) for x in diff[0])
+        raise ConversionError(f"the expressions play differently: tick {tick}, register {reg}")
+    return Conversion(ir, ticks, obs, found, texts, out)
+
+
+def _converted(ir: dict, cache: Path | None, workers) -> dict:
+    """``convert`` of a song with its repeats written out."""
+    return analyse(ir, cache, workers).out

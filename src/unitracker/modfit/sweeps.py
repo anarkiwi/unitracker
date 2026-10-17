@@ -15,7 +15,7 @@ from unitracker.modfit import resolve, specs
 from unitracker.modfit.bounce import bounce_lines
 from unitracker.modfit.fit import src
 from unitracker.modfit.flow import Writes
-from unitracker.modfit.form import Form, lin
+from unitracker.modfit.form import Form, Programs, defaults, lin, record_data
 from unitracker.modfit.invariant import Slicer
 from unitracker.modfit.keywords import role_text, signer
 from unitracker.modfit.orbit import pingpong
@@ -23,30 +23,11 @@ from unitracker.modfit.timer import runs
 from unitracker.vm import _acc
 
 
-class Rows(dict):
-    """A record type's rows; a missing row or field reads as the field's default."""
-
-    def __init__(self, rows: dict, fill: dict):
-        super().__init__(rows)
-        self.defaults = fill
-
-    def get(self, key, default=None):
-        """The row at ``key`` with its defaults filled in."""
-        del default
-        return {**self.defaults, **super().get(key, {})}
-
-
-def defaults(rtype: dict) -> dict:
-    """``{field: default}`` of a record type."""
-    fields = rtype.get("fields") or []
-    return dict(fields) if isinstance(fields, dict) else dict.fromkeys(fields, 0)
-
-
 def load(path: Path) -> dict:
-    """The internal representation of a song YAML, or of a tune lifted and written canonically."""
+    """The internal form of a song YAML, or of a tune lifted with its native modulations."""
     if path.suffix in (".yaml", ".yml"):
         return songio.loads(path.read_text(encoding="utf-8"))
-    return songio.loads(songio.dumps(backends.lift(path.read_bytes(), None)))
+    return backends.lift(path.read_bytes(), None, expressions=False)
 
 
 def entries(song: dict, record: str) -> dict:
@@ -89,25 +70,6 @@ def command_starts(song: dict, record: str):
                     yield int(arg), ("command", code)
 
 
-class Programs(Form):
-    """A form over a song's records that also runs record templates with ``row`` bound."""
-
-    def opaque(self, a: dict, rest, conds, state) -> list:
-        """A template ``run`` on its row, then the rest; other actions are unsupported."""
-        run = a.get("run") or {}
-        template = (
-            (self.pr.get("record_types") or {}).get(run.get("record"), {}).get(run.get("field"))
-        )
-        if not isinstance(template, list):
-            return super().opaque(a, rest, conds, state)
-        row = ("rec", run["record"], self.num(self.expr(run["index"], state)))
-        out = []
-        for cs, st in self.paths(template, conds, {**state, "row": row}):
-            st = {**st, "row": state.get("row", "row")}
-            out += self.paths(rest, cs, st)
-        return out
-
-
 @dataclasses.dataclass
 class Run:
     """A program's ticks: each op (``("set", c)`` or ``("add", d)``) and the cycle's start."""
@@ -115,17 +77,6 @@ class Run:
     ops: list
     loop: int
     error: str = ""
-
-
-def record_data(song: dict, rtypes: dict) -> dict:
-    """``{record type: Rows}`` of a song, every record type present."""
-    data = {
-        name: Rows(rows, defaults(rtypes.get(name) or {}))
-        for name, rows in (song.get("records") or {}).items()
-    }
-    for name, rtype in rtypes.items():
-        data.setdefault(name, Rows({}, defaults(rtype)))
-    return data
 
 
 class Stepper:

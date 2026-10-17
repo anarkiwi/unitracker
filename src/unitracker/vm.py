@@ -5,9 +5,10 @@ from collections.abc import Iterator
 import numpy as np
 from tqdm import tqdm
 
+from unitracker import modulation, xexpr
 from unitracker.canonical import CANONICAL_ORDER, REG_COUNT
 from unitracker.expr import ExprError, Resolver
-from unitracker.records import record_types
+from unitracker.records import EXPR, record_types
 
 IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
@@ -147,16 +148,19 @@ def _cells(spec) -> dict:
 
 
 class _Scope(Resolver):
-    """Name resolution for code running in global or voice scope."""
+    """Name resolution for code running in global or voice scope, with optional locals."""
 
-    def __init__(self, gen, voice: bool):
+    def __init__(self, gen, voice: bool, local=()):
         super().__init__()
         self.functions = gen.resolver_functions
         self.gen = gen
         self.voice = voice
+        self.local = set(local)
 
     def name(self, name):
         gen = self.gen
+        if name in self.local:
+            return name
         if self.voice and name in gen.vindex:
             return f"v[{gen.vindex[name]}]"
         if name in gen.gindex:
@@ -193,8 +197,9 @@ class _Codegen:
 
     # pylint: disable=too-many-instance-attributes
 
-    def __init__(self, song):
+    def __init__(self, song, watch=()):
         playroutine = song["playroutine"]
+        self.watch = set(watch)
         self.playroutine = playroutine
         self.constants = {k: int(v) for k, v in (playroutine.get("constants") or {}).items()}
         self.tables = {k: [int(x) for x in v] for k, v in (song.get("tables") or {}).items()}
@@ -302,7 +307,41 @@ class _Codegen:
             self.lines.append(f"def {name}({', '.join(args)}):")
             self.lines.extend(body or ["    pass"])
         self.lines.append(self.ghost())
+        self.lines.append(self.modulators())
         return "\n".join(self.lines + self.tail)
+
+    def modulators(self) -> str:
+        """Source of the modulator helpers: ``_F``, ``_T``, ``_n`` and each unit's selector."""
+        spec = modulation.declared(self.playroutine)
+        if not spec:
+            return "_T = {}"
+        scope, offset = _Scope(self, True), int(self.playroutine.get("note_offset", 0))
+        freq = spec.get("freq") or {}
+        if "word" in freq:
+            word = f"_tg(T[{freq['word']!r}], k + {offset})"
+        else:
+            word = " | ".join(
+                f"(_tg(T[{freq[b]!r}], k + {offset}) << {s})" for b, s in (("hi", 8), ("lo", 0))
+            )
+        out = [f"def _F(k):\n    return {word}"]
+        names = []
+        for name, table in (spec.get("tables") or {}).items():
+            entry = _Scope(self, True, ("i",)).compile(table["entry"])
+            out.append(
+                f"def _T_{name}(i):\n    return ({entry}) if 0 <= i < {int(table['size'])} else 0"
+            )
+            names.append(f"{name!r}: _T_{name}")
+        out.append(f"_T = {{{', '.join(names)}}}")
+        notes = spec.get("notes") or []
+        if notes:
+            note = scope.compile(notes[0])
+            if spec.get("transpose"):
+                note = f"{note} + {scope.compile(spec['transpose'])}"
+            out.append(f"def _n(v):\n    return {note} - {offset}")
+        for i, unit in enumerate(modulation.units(self.playroutine)):
+            if "x" in unit:
+                out.append(f"def _x_{i}(v):\n    return {scope.compile(unit['x'])}")
+        return "\n".join(out)
 
     def ghost(self):
         """Source of ``f_ghost(out)``, filling the 25 register values."""
@@ -333,6 +372,13 @@ class _Codegen:
         """Append a width-wrapped assignment."""
         store, mask = self.target(cell, voice)
         out.append(f"{pad}{store} = {src}" if mask is None else f"{pad}{store} = ({src}) & {mask}")
+        self.count(cell, store, out, pad)
+
+    def count(self, cell, store, out, pad):
+        """Append the write count of a watched cell (see :mod:`unitracker.modulation`)."""
+        if cell in self.watch:
+            key = f"({'id(v)' if store.startswith('v[') else 0}, {cell!r})"
+            out.append(f"{pad}_W[{key}] = _W.get({key}, 0) + 1")
 
     def block(self, actions, voice, out, depth):
         """Append source for an action list."""
@@ -400,6 +446,7 @@ class _Codegen:
         val, hit = self.tmp(), self.tmp()
         out.append(f"{pad}{val}, {hit} = _acc({', '.join(args)})")
         out.append(f"{pad}{store} = {val}")
+        self.count(action["accumulate"], store, out, pad)
         if action.get("on_bound"):
             out.append(f"{pad}if {hit}:")
             self.block(action["on_bound"], voice, out, depth + 1)
@@ -483,13 +530,17 @@ class SongPlayer:
 
     # pylint: disable=too-many-instance-attributes
 
-    def __init__(self, song: dict, record_reads: bool = False):
+    def __init__(self, song: dict, record_reads: bool = False, watch: bool | None = None):
         if song.get("unitracker") != IR_VERSION:
             raise SongError("not an expanded unitracker song; read files with unitracker.songio")
         if len(song["tracks"]) != int(song.get("voices", 3)):
             raise SongError("one track per voice is required")
         self.song = song
-        gen = _Codegen(song)
+        exprs = song.get("exprs") or {}
+        if watch is None:
+            watch = bool(exprs)
+        pr = song["playroutine"]
+        gen = _Codegen(song, modulation.watched(pr) if watch else ())
         self.globals = [init for _, init in gen.gcells.values()]
         self._index = (gen.gindex, gen.vindex)
         self.voice_cells = _voice_cells(song, gen)
@@ -502,10 +553,17 @@ class SongPlayer:
             "_tg": self._reader(gen.tables) if record_reads else _tg,
             "_acc": _acc,
             "_fetch": _fetcher(gen),
+            "_W": {},
         }
-        code = compile(gen.build(), f"<playroutine {song['playroutine'].get('name', '')}>", "exec")
+        code = compile(gen.build(), f"<playroutine {pr.get('name', '')}>", "exec")
         exec(code, namespace)  # pylint: disable=exec-used
+        self.namespace = namespace
+        self._masks = (
+            {n: m for n, (m, _) in gen.gcells.items() if m is not None},
+            {n: m for n, (m, _) in gen.vcells.items() if m is not None},
+        )
         self._entry = (namespace["f_init"], namespace["f_tick"], namespace["f_ghost"])
+        self.modulation = _Driven(self, exprs) if exprs else None
         regs = song.get("registers") or [0] * REG_COUNT
         if len(regs) != REG_COUNT:
             raise SongError(f"registers must have {REG_COUNT} values")
@@ -526,12 +584,13 @@ class SongPlayer:
         return tg
 
     def state(self) -> tuple:
-        """The complete playback state: every cell, cursor position and register."""
+        """The complete playback state: every cell, cursor position, register and modulator."""
         voices = tuple(
             (*cells[:-1], c.index, c.repeat, c.step, c.ended)
             for cells, c in ((cells, cells[-1]) for cells in self.voice_cells)
         )
-        return (tuple(self.globals), voices, tuple(self.regs))
+        mods = self.modulation.state() if self.modulation is not None else ()
+        return (tuple(self.globals), voices, tuple(self.regs), mods)
 
     def cell(self, name: str, voice: int | None = None) -> int:
         """The current value of a global cell, or of ``voice``'s cell ``name``."""
@@ -580,3 +639,51 @@ class SongPlayer:
             self.iter_flushes(n), total=n, desc="render", unit="tick", disable=not progress
         )
         return render_wav(flushes, path, model=model, cycles_per_frame=cycles, clock_frequency=hz)
+
+
+class _Stepper:
+    """One expression's firing: ``(f(v, φ, N), φ + 1)``, ``v`` in units of ``1/scale`` cells."""
+
+    # pylint: disable=too-few-public-methods
+
+    def __init__(self, fn, scale: int = 1):
+        self.fn, self.scale = fn, scale
+
+    def step(self, v: int, phi: int, n: int) -> tuple:
+        """``(v', φ')``."""
+        return self.fn(v * self.scale, phi, n) // self.scale, phi + 1
+
+
+class _Driven(modulation.Modulation):
+    """The units of a song with expressions: a start runs the expression its selector names."""
+
+    def __init__(self, player, exprs: dict):
+        ns = player.namespace
+        self.steppers = {}
+        for index, text in exprs.items():
+            try:
+                self.steppers[int(index)] = _Stepper(xexpr.compile_expr(str(text), ns))
+            except xexpr.ExpressionError as exc:
+                raise SongError(f"{EXPR}{index}: {exc}") from exc
+        pr = player.song["playroutine"]
+        self.selectors = {
+            u["name"]: ns[f"_x_{i}"] for i, u in enumerate(modulation.units(pr)) if "x" in u
+        }
+        super().__init__(player, self.choose, keep=False)
+
+    def capture(self, unit: dict, voice) -> dict:
+        """The expression index the unit's selector names before its first firing."""
+        fn = self.selectors.get(unit["name"])
+        cells = self.player.voice_cells[voice] if voice is not None else None
+        return {"x": fn(cells) if fn is not None else 0}
+
+    def choose(self, unit: dict, occ) -> object:
+        """The stepper of an occurrence's expression, or None for the playroutine's own."""
+        occ.key = occ.start["x"]
+        if not occ.key:
+            return None
+        if occ.key not in self.steppers:
+            raise SongError(f"{unit['name']} selects expression {occ.key}, which is undefined")
+        stepper = self.steppers[occ.key]
+        scale = int(unit.get("scale", 1))
+        return stepper if scale == 1 else _Stepper(stepper.fn, scale)

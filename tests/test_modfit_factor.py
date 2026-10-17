@@ -89,13 +89,13 @@ def test_sidwizard_sweeps_on_fused_pairs(units, path, cell, field):
 
 
 def test_defmon_slide_pulse_bounce_and_acid(units):
-    [slide] = unit(units, "defmon", "procs.pitch", "sacc")
+    [slide] = unit(units, "defmon", "procs.pitch_acc", "sacc")
     assert slide.proved and slide.hit == "-"
     pulse = unit(units, "defmon", "procs.pulse", "pw")
     assert len(pulse) == 2 and all(g.proved and g.kinds == ("bounce",) for g in pulse)
     assert all("(v0 >> 8)" in g.hit for g in pulse)
-    [acid] = unit(units, "defmon", "procs.acid", "acc")
-    assert acid.proved and acid.kinds == ("reads v",) and acid.respond == "(512 + (v & 255))"
+    [acid] = unit(units, "defmon", "procs.acid_step", "acc")
+    assert not acid.proved and acid.kinds == ()
 
 
 @pytest.mark.parametrize(
