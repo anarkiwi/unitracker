@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tokenizers>=0.20"]
+dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tokenizers>=0.20", "zstandard>=0.21"]
 
 [project.scripts]
 unitracker-lift = "unitracker.cli:lift_main"
