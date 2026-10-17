@@ -714,7 +714,7 @@ class _Reader:
             row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
         except ValueError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        return {**row, **named, **names}, set(row)
+        return {**row, **named, **names}, set(row) - set(named)
 
     @staticmethod
     def _list_row(rtype, codec, value, place) -> dict:

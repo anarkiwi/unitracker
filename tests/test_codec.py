@@ -777,6 +777,31 @@ def defmon_doc(vinit, ginit):
     )
 
 
+def test_defmon_init_reads_back_its_written_program_name():
+    ir = songio.loads(
+        yaml.safe_dump(
+            {
+                "unitracker": "1.16",
+                "playroutine": {"ref": "defmon"},
+                "song": [
+                    {
+                        "def": {
+                            "sidtab": {"t1": [{"ctrl": 65, "hold": 4}, {"ctrl": 64}, "end"]},
+                            "vinit": {0: {"rowA": "t1"}},
+                            "phrase": {"p1": ["-*4"]},
+                        },
+                        "play": ["p1"] * 3,
+                    }
+                ],
+                "loop": 0,
+            }
+        )
+    )
+    assert (ir["records"]["vinit"][0]["rowA"], ir["records"]["vinit"][0]["cntA"]) == (0, 0)
+    text = songio.dumps(ir)
+    assert "rowA: t1" in text and songio.dumps(songio.loads(text)) == text
+
+
 def test_defmon_init_keys_mean_what_they_mean_in_rows():
     ir = defmon_doc(
         {"pw": 0x0567, "ctrl": "65^1", "ad": 0x12, "sr": 0x34, "note": "=36"},
