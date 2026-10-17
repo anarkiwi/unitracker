@@ -13,7 +13,7 @@ from unitracker.modfit.exprs import Result
 from unitracker.modfit.inherit import inherit
 from unitracker.modfit.phase import unproved_functions
 from unitracker.modulation import declared
-from unitracker.vm import SongPlayer, first_mismatch
+from unitracker.vm import SongPlayer
 
 KEYS = ("freq", "pw", "cut")
 
@@ -139,9 +139,7 @@ def song_lines(song: Song, workers) -> tuple:
     an = conv.analysis
     text = songio.dumps(conv.out)
     ticks = TICKS[song.player]
-    player = SongPlayer(songio.loads(text))
-    ours = player.render_grid(ticks)
-    exact = first_mismatch(ours, native_grid(song, ticks), player.starts) is None
+    exact = SongPlayer(songio.loads(text)).mismatch(native_grid(song, ticks)) is None
     lines = [f"## {song.path.stem} ({song.player})"]
     occs = conv.obs["occurrences"]
     lines.append(f"  occurrences {len(occs)} over {conv.ticks} ticks (to the state's recurrence "
