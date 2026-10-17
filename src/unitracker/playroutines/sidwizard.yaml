@@ -30,7 +30,16 @@ commands:
   80: {name: sr, nibble: 4, slot: 1}
   96: {name: sr, nibble: 0, slot: 1}
   112: {name: run, ref: wftab}
-  63: {name: legato}
+  63: {name: legato, when: "arg == 0"}
+  # The tempo FX: $11 every voice's swing pair (high nibble, then low), $12 every voice's tempo
+  # (the player's FX $10, whose code !freq takes) and $13 this voice's; a tempo 0 plays as 6.
+  17:
+    when: "((arg >> 4) == 0 or (arg >> 4) >= 3) and ((arg & 0x0F) == 0 or (arg & 0x0F) >= 3)"
+    name: funk
+    args: {a: "(arg >> 4) if arg >> 4 else 6", b: "(arg & 0x0F) if arg & 0x0F else 6"}
+    raw: "(a << 4) | b"
+  18: {name: tempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg}
+  19: {name: vtempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg}
   288: {name: ad, nibble: 4, slot: 0}
   304: {name: ad, nibble: 0, slot: 0}
   336: {name: sr, nibble: 4, slot: 0}
@@ -182,6 +191,8 @@ global:
   fsweep: {width: 8}
   target: {width: 8}
   nv: {width: 8}
+  ntl: {width: 8}
+  ntr: {width: 8}
 voice:
   vi: {width: 8}
   seqend: {width: 1}
@@ -374,6 +385,13 @@ procs:
     - {if: xifx, then: [{call: small_fx, with: {sfc: xifx, sa: xia}}]}
     - {if: "xfc >= 0x20", then: [{call: small_fx, with: {sfc: xfc, sa: xfv}}, {return: true}]}
     - {if: "xfc == 16", then: [{set: {fx: xfv}}, {return: true}]}
+    # A tempo FX rewinds the swing to its first tempo, which the row it is on already counts.
+    - if: "xfc == 17 or xfc == 18"
+      then:
+        - set: {ntl: "(xfv >> 4) if xfc == 17 else xfv & 0x7F", ntr: "(xfv & 0x0F) if xfc == 17 else xfv & 0x7F"}
+        - for_voices: [{set: {tl: ntl, tr: ntr, tog: 0}}]
+        - return: true
+    - {if: "xfc == 19", then: [{set: {tl: "xfv & 0x7F", tr: "xfv & 0x7F", tog: 0}}, {return: true}]}
     - {if: "xfc == 1", then: [{set: {svib: 0x81, fx: 0}}, {call: slide_speed}]}
     - {if: "xfc == 2", then: [{set: {svib: 0x82, fx: 0}}, {call: slide_speed}]}
     - if: "xfc == 3"

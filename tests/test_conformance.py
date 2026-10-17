@@ -1,4 +1,4 @@
-"""Lifted songs, written as v1.17 text and read back, play identically to their native players."""
+"""Lifted songs, written as v1.18 text and read back, play identically to their native players."""
 
 import dataclasses
 from pathlib import Path
@@ -9,7 +9,7 @@ from pydefmon import DefmonPlayer
 from pygoattracker import decompile_sid
 from pysidwizard import SWMPlayer, parse_sid_song
 
-from conftest import gt_tune
+from conftest import gt_tune, sw_fx
 from unitracker import defmon, sidwizard, songio
 from unitracker.goattracker import lift
 from unitracker.vm import SongPlayer
@@ -160,3 +160,30 @@ def test_goattracker_filter_writes_sound_after_the_filter_step(tune, regs):
     begun = min(s for s in player.starts if s is not None)
     for reg, value in regs.items():
         assert value in theirs[begun:, reg]
+
+
+# Tempo FX that keep the voices in step: every voice's tempo and swing, restored to the
+# subtune's, and each voice's own tempo and equal swing while it is the subtune's.
+STEP_TEMPOS = {
+    (10, 16): (0x10, 4),
+    (10, 32): (0x10, 0),
+    (11, 40): (0x11, 0x57),
+    (11, 56): (0x10, 0x86),
+    (9, 0): (0x13, 6),
+    (12, 0): (0x14, 0x66),
+}
+
+
+def test_csillag_with_tempo_changes_exact(csillag, monkeypatch):
+    raw = csillag.read_bytes()
+    swm = sw_fx(raw, STEP_TEMPOS)
+    monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
+    text = songio.dumps(sidwizard.lift(raw))
+    assert "!tempo:4" in text and "!funk:5/7" in text and "!vtempo:6" in text
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    n = CSILLAG_LOOP + 600
+    theirs = np.asarray(SWMPlayer(sw_fx(raw, STEP_TEMPOS)).render_grid(n), dtype=np.uint8)
+    plain = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(n), dtype=np.uint8)
+    assert not np.array_equal(theirs, plain)
+    assert SongPlayer(song).mismatch(theirs) is None

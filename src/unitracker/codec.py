@@ -265,6 +265,18 @@ class _Shape:
             raise CodecError(f"kept fields {sorted(clash)} collide with shared keys")
 
 
+def is_values(value) -> bool:
+    """True for a command argument of several values, ``(a, b)`` for ``!funk:a/b``."""
+    return isinstance(value, tuple) and all(
+        isinstance(v, int) and not isinstance(v, bool) for v in value
+    )
+
+
+def arg_text(value) -> str:
+    """A command argument as written: several values joined by ``/``."""
+    return "/".join(map(str, value)) if is_values(value) else str(value)
+
+
 def is_expr(value) -> bool:
     """True for a written key's expression reference ``("x", index)``."""
     return isinstance(value, tuple) and len(value) == 2 and value[0] == EXPR
@@ -511,11 +523,18 @@ class CommandCodec:
                 return ref
         return None
 
+    def values(self, name: str) -> bool:
+        """Whether command ``name`` takes several values that are no record's row."""
+        return any(n == name and "args" in var for _, n, _, var in self.entries)
+
     def encode(self, code: int, arg: int) -> tuple[str, object]:
-        """``(name, value)``: value is an int, ``(type, index)`` for a reference, or ``none``."""
+        """``(name, value)``: value is an int, a tuple of ints for an entry with ``args``,
+        ``(type, index)`` for a reference, or ``none``."""
         for ecode, name, ref, var in self.entries:
             if ecode != code or ("when" in var and not evaluate(var["when"], {"arg": arg})):
                 continue
+            if "args" in var:
+                return name, tuple(evaluate(e, {"arg": arg}) for e in var["args"].values())
             if ref is None:
                 return name, evaluate(var["arg"], {"arg": arg}) if "arg" in var else arg
             if arg != self.rtypes[ref].none:
@@ -527,6 +546,9 @@ class CommandCodec:
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
     def _arg(self, ref, var, value):
+        if "args" in var:
+            fits = is_values(value) and len(value) == len(var["args"])
+            return evaluate(var["raw"], dict(zip(var["args"], value))) if fits else None
         if ref is not None:
             if value == NONE:
                 return self.rtypes[ref].none
@@ -554,4 +576,4 @@ class CommandCodec:
                     return code, arg
             except CodecError:
                 continue
-        raise CodecError(f"the player can't express !{name}:{value}")
+        raise CodecError(f"the player can't express !{name}:{arg_text(value)}")

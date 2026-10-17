@@ -1,4 +1,4 @@
-"""v1.17 expressions: each key and command drives its cell as docs/format.md says."""
+"""v1.18 expressions: each key and command drives its cell as docs/format.md says."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def moves(words):
 
 def doc(playroutine, defs, phrase, extra=""):
     return f"""
-unitracker: 1.17
+unitracker: 1.18
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -218,7 +218,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "old,new,match",
     [
-        ("unitracker: 1.17", "unitracker: 1.8", "not a unitracker v1.17 document"),
+        ("unitracker: 1.18", "unitracker: 1.8", "not a unitracker v1.18 document"),
         (
             "      x:\n",
             "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",

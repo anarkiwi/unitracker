@@ -1,10 +1,14 @@
 """Lift a SID-Wizard 1.x tune (pysidwizard's decoded .sid) to a unitracker song."""
 
+from functools import cache
+
 from pysidtracker import SidImage
 from pysidwizard import End, Loop, PlayPattern, parse_sid_song
 from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
 
+from unitracker.codec import CodecError, CommandCodec
+from unitracker.records import record_types
 from unitracker.songio import library, song_meta
 from unitracker.modfit.convert import convert
 from unitracker.vm import fold_empty
@@ -29,6 +33,11 @@ SMALL_FX = (0x20, 0x30, 0x50, 0x60, 0x70)
 CHORD_FX = 0x70
 BIG_FX = (0x01, 0x02, 0x03)
 GLIDE = 0x03
+# The tempo FX as the playroutine's codes: every voice's tempo (the player's $10, whose code
+# !freq takes) and swing, this voice's tempo and swing, which the playroutine does not declare.
+VOICE_TEMPO, VOICE_SWING = 0x13, 0x14
+TEMPO_FX = {0x10: 0x12, 0x11: 0x11, VOICE_TEMPO: VOICE_TEMPO, VOICE_SWING: VOICE_SWING}
+TEMPO_CODES = set(TEMPO_FX.values())
 INST_COLUMN = 0x100
 NOTE_COLUMN = 0x200
 HR_TIMER, HR_STACCATO, HR_FIRSTCTRL, FLAGS = 0x03, 0x04, 0x08, 0xF0
@@ -265,6 +274,29 @@ def instrument_record(ins, tables: Tables, wave: int, restarts: Restarts) -> dic
     return rec
 
 
+@cache
+def shared_commands() -> CommandCodec:
+    """The sidwizard playroutine's commands."""
+    pr = library("sidwizard")
+    return CommandCodec(pr["commands"], record_types(pr))
+
+
+def tempo_command(fx: int, value: int) -> tuple[int, int]:
+    """A tempo FX as ``(command, argument)``. One voice's swing of two equal tempos is that
+    voice's tempo; any other has no shared form."""
+    code, arg = TEMPO_FX[fx], value
+    if fx == VOICE_SWING and value >> 4 == value & 0x0F:
+        code, arg = VOICE_TEMPO, value & 0x0F
+    try:
+        shared_commands().encode(code, arg)
+    except CodecError as exc:
+        raise LiftError(
+            f"tempo FX ${fx:02X} ${value:02X} is not covered: a tempo is 3-127 ticks (0: 6),"
+            " a swing for every voice"
+        ) from exc
+    return code, arg
+
+
 class Events:
     """Pattern rows as events: commands in column order, instrument column first."""
 
@@ -308,6 +340,8 @@ class Events:
             commands.append(self.small(row.fx, 0))
         elif row.fx in BIG_FX:
             commands.append((row.fx, row.fx_value or 0))
+        elif row.fx in TEMPO_FX:
+            commands.append(tempo_command(row.fx, row.fx_value or 0))
         else:
             raise LiftError(f"big FX ${row.fx:02X} is not covered")
 
@@ -331,9 +365,15 @@ class Events:
             event["commands"] = [list(c) for c in commands]
         return event
 
-    def phrase(self, pattern) -> list:
-        """A pattern's rows as events, empty rows folded into ``steps``."""
-        events = fold_empty(self.event(row) for row in pattern.rows)
+    def phrase(self, pattern, number: int = 0) -> list:
+        """Pattern ``number``'s rows as events, empty rows folded into ``steps``."""
+        rows = []
+        for k, row in enumerate(pattern.rows):
+            try:
+                rows.append(self.event(row))
+            except LiftError as exc:
+                raise LiftError(f"pattern ${number:02X} row ${k:02X}: {exc}") from exc
+        events = fold_empty(rows)
         if not events:
             raise LiftError("empty pattern")
         return events
@@ -513,14 +553,20 @@ class Instruments:
         return empty
 
 
-def tempo(swm) -> tuple[dict, dict]:
-    """The subtune's tempo pair as playroutine constants, and the hints it gives."""
+def tempo(swm, phrases: dict) -> tuple[dict, dict]:
+    """The subtune's tempo pair as playroutine constants, and the hints it and the phrases'
+    tempo commands give."""
     left, right = swm.subtune_tempos[0] if swm.subtune_tempos else (6, 6)
     if left & 0x80 and right & 0x80:
         right = left
-    hints = {}
-    if left & 0x7F == right & 0x7F:
-        hints["ticks_per_step"] = (left & 0x7F) or 6
+    ticks = {(left & 0x7F) or 6, (right & 0x7F) or 6}
+    for events in phrases.values():
+        for event in events:
+            for code, arg in _commands(event):
+                if code in TEMPO_CODES:
+                    value = shared_commands().encode(code, arg)[1]
+                    ticks.update(value if isinstance(value, tuple) else (value,))
+    hints = {"ticks_per_step": ticks.pop()} if len(ticks) == 1 else {}
     return {"tempol": left & 0x7F, "tempor": right & 0x7F}, hints
 
 
@@ -548,14 +594,14 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
     if len(tracks) != 3:
         raise LiftError("a subtune needs three orderlists")
     phrases = {
-        name: events.phrase(swm.patterns[int(name[1:], 16) - 1])
+        name: events.phrase(swm.patterns[int(name[1:], 16) - 1], int(name[1:], 16))
         for name in sorted({p["phrase"] for t in tracks for p in t["plays"]})
     }
     first_note_selects(tracks, phrases)
     chord_runs(tracks, phrases, instruments.waves)
     fold_octaves(tracks, phrases, instruments.records)
     playroutine = library("sidwizard")
-    playroutine["constants"], hints = tempo(swm)
+    playroutine["constants"], hints = tempo(swm, phrases)
     ir = {
         "unitracker": "ir",
         "hints": hints,

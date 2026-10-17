@@ -15,7 +15,7 @@ AD, SR = 5, 6
 
 def song(phrases, rows="    play: [p1, p1, p1]\n", loop="~"):
     phrase = "".join(f"        {name}: [{atoms}]\n" for name, atoms in phrases.items())
-    return f"""unitracker: 1.17
+    return f"""unitracker: 1.18
 playroutine: {{ref: sidwizard}}
 song:
   - def:

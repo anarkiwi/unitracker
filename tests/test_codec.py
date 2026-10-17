@@ -452,7 +452,7 @@ def test_check_end_compares_expression_keys_by_presence():
 
 def test_defmon_document_ends_on_freeze():
     doc = {
-        "unitracker": "1.17",
+        "unitracker": "1.18",
         "playroutine": {"ref": "defmon"},
         "song": [{"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}],
     }
@@ -515,7 +515,6 @@ def test_command_rejections():
         ("sidwizard", 16, 3, ("freq", ("x", 3))),
         ("sidwizard", 16, 0, ("freq", "none")),
         ("sidwizard", 63, 0, ("legato", 0)),
-        ("sidwizard", 63, 1, ("legato", 1)),
         ("sidwizard", 112, 5, ("run", ("wftab", 5))),
         ("sidwizard", 112, 0, ("run", "none")),
     ],
@@ -532,7 +531,7 @@ def test_freq_and_legato_commands(pr_name, code, arg, shared):
 def test_retired_and_unplayable_commands_are_refused(pr_name):
     pr, types = LIBS[pr_name]
     cmds = CommandCodec(pr["commands"], types)
-    for name, value in [("noteglide", 1), ("freq", 5), ("freq", ("pwtab", 1))]:
+    for name, value in [("noteglide", 1), ("freq", 5), ("freq", ("pwtab", 1)), ("legato", 1)]:
         with pytest.raises(CodecError, match="can't express"):
             cmds.decode(name, value)
     with pytest.raises(CodecError, match="retired in v1.5"):
@@ -693,7 +692,7 @@ def _check_def(pr_name, tname, value):
 
 
 def vocabulary(doc):
-    """Assert a song uses only the fixed v1.17 vocabulary, each shared key in its one meaning."""
+    """Assert a song uses only the fixed v1.18 vocabulary, each shared key in its one meaning."""
     pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
     commands = set()
     for item in doc["song"]:
@@ -753,7 +752,7 @@ def defmon_doc(vinit, ginit):
     return songio.loads(
         yaml.safe_dump(
             {
-                "unitracker": "1.17",
+                "unitracker": "1.18",
                 "playroutine": {"ref": "defmon"},
                 "song": [
                     {
@@ -809,7 +808,7 @@ def test_defmon_init_rejects_what_has_no_written_form(vinit, match):
 
 
 DM_ROUTES = """
-unitracker: 1.17
+unitracker: 1.18
 playroutine: {ref: defmon}
 song:
   - def:
@@ -923,7 +922,7 @@ def test_sidwizard_wf_rows_refuse_holds_the_player_cannot_set(hold):
 
 
 SW_CHORD = """
-unitracker: 1.17
+unitracker: 1.18
 playroutine: {ref: sidwizard}
 song:
   - def:

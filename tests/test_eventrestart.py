@@ -11,7 +11,7 @@ LAYER_B = 1
 
 def song(phrase, restart="[{hold: 3, ctrl: ^8}, {}, end]", ins="i1: {ctrl: [{ctrl: 64^1}, end]}"):
     return f"""
-unitracker: 1.17
+unitracker: 1.18
 playroutine: {{ref: defmon}}
 song:
   - def:
