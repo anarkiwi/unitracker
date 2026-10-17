@@ -1,4 +1,4 @@
-"""The v1.9 document: canonical writing, reading back, and the errors a reader reports."""
+"""The v1.10 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
 
@@ -11,6 +11,7 @@ from unitracker import songio
 from unitracker.goattracker import lift
 from unitracker.songio import SongFormatError
 from unitracker.vm import SongPlayer
+from unitracker.yamlstyle import parse
 
 PLAYROUTINE = {
     "name": "mini",
@@ -112,14 +113,14 @@ def test_roundtrip_plays_identically_and_is_canonical():
     back = songio.loads(text)
     np.testing.assert_array_equal(grid(back), grid(ir))
     assert songio.dumps(back, embed=True) == text
-    doc = yaml.safe_load(text)
+    doc = parse(text)
     assert list(doc) == ["unitracker", "playroutine", "meta", "hints", "song", "loop"]
     assert doc["meta"] == {"title": "Mini", "author": "Test", "released": "2026"}
     assert doc["hints"] == {"ticks_per_step": 1, "phrase_steps": 4}
 
 
 def test_programs_split_named_inline_and_by_first_use():
-    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc = parse(songio.dumps(song(), embed=True))
     first = doc["song"][0]["def"]
     assert first["init"] == {0: {"o": 5}}
     assert first["prog"] == {"w1": [[10], [20], [30], {"loop": 0}], "w2": [[60], "end"]}
@@ -136,7 +137,7 @@ def test_programs_split_named_inline_and_by_first_use():
 
 def test_reference_form_patches_library_tables(metal_warrior):
     ir = lift(decompile_sid(metal_warrior.read_bytes(), subtune=0))
-    doc = yaml.safe_load(songio.dumps(ir))
+    doc = parse(songio.dumps(ir))
     assert doc["playroutine"]["ref"] == "goattracker2"
     assert doc["playroutine"]["constants"] == {"deftempo": 11}
     assert "tables" not in doc["playroutine"]
@@ -215,7 +216,7 @@ DEF = ("song", 0, "def")
     ],
 )
 def test_reader_errors(change, match):
-    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc = parse(songio.dumps(song(), embed=True))
     change(doc)
     text = yaml.safe_dump(doc, sort_keys=False)
     if match is None:
@@ -226,7 +227,7 @@ def test_reader_errors(change, match):
 
 
 def test_reader_rejects_the_retired_registers_key():
-    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc = parse(songio.dumps(song(), embed=True))
     doc["registers"] = {24: 0}
     with pytest.raises(SongFormatError, match="registers is retired in v1.6: the player starts"):
         songio.loads(yaml.safe_dump(doc))
@@ -238,18 +239,78 @@ def test_retired_raw_rows_are_refused_both_ways():
     with pytest.raises(SongFormatError, match=r"prog: row .* is retired in v0.1: gone"):
         songio.dumps(ir, embed=True)
     ir["records"]["prog"][2]["v"] = 21
-    doc = yaml.safe_load(songio.dumps(ir, embed=True))
+    doc = parse(songio.dumps(ir, embed=True))
     doc["song"][0]["def"]["prog"]["w1"][1] = [20]
     with pytest.raises(SongFormatError, match=r"prog: row \[20\] is retired in v0.1: gone"):
         songio.loads(yaml.safe_dump(doc, sort_keys=False))
 
 
+LIST_SONG = """
+unitracker: 1.10
+playroutine: {{ref: {pr}}}
+song:
+  - def:
+      {tname}:
+        {name}1: [{row}, end]
+      phrase:
+        p1: [off]
+    play: [p1, p1, p1]
+loop: ~
+"""
+SWEEP = r"retired in v1\.10: a sweep, stall or keyboard-tracked row is its program's expression"
+
+
+@pytest.mark.parametrize(
+    "pr,tname,row,match",
+    [
+        ("goattracker2", "pulsetab", "[32, 16]", rf"pulsetab: row \[32, 16\] is {SWEEP}"),
+        ("goattracker2", "filttab", "[5, 1]", "filttab: row .* is retired in v1.10"),
+        ("goattracker2", "ctrltab", "[65, 128]", "write row .* with shared keys"),
+        ("goattracker2", "ctrltab", "[0xF5, 9]", "with shared keys"),
+        ("sidwizard", "pwtab", "[16, 4]", SWEEP),
+        ("sidwizard", "flttab", "[16, 4]", "flttab: row .* is retired in v1.10"),
+        ("sidwizard", "wftab", "[2, 5, 0, 2]", "with shared keys"),
+        ("sidwizard", "wftab", "[65, 5, 255]", r"retired in v1\.10: write the row with the shared"),
+        ("sidwizard", "wftab", "[2, 5, 0, 1]", r"retired in v1\.10"),
+    ],
+)
+def test_reader_rejects_retired_list_rows(pr, tname, row, match):
+    prefix = songio.record_types(songio.library(pr))[tname].prefix
+    text = LIST_SONG.format(pr=pr, tname=tname, name=prefix, row=row)
+    with pytest.raises(SongFormatError, match=match):
+        songio.loads(text)
+
+
+def test_the_kept_list_rows_read():
+    ir = songio.loads(
+        LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="[0xF7, 65]")
+    )
+    assert list(ir["records"]["ctrltab"].values()) == [{"w": 0xF7, "n": 65, "next": 0}]
+
+
+def test_writer_refuses_a_list_row_the_format_retired():
+    ir = songio.loads(
+        LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="{ctrl: 65}")
+    )
+    ir["records"].update(ins={1: {"ctrl": 1, "pw": 1}}, pulsetab={1: {"l": 32, "r": 16, "next": 0}})
+    ir["phrases"]["p1"] = [{"note": 30, "instrument": 1}]
+    with pytest.raises(SongFormatError, match=rf"pulsetab: row .* is {SWEEP}"):
+        songio.dumps(ir)
+
+
+def test_the_version_is_its_text():
+    text = LIST_SONG.format(pr="goattracker2", tname="ctrltab", name="c", row="{ctrl: 65}")
+    assert songio.dumps(songio.loads(text)).startswith("unitracker: 1.10\n")
+    with pytest.raises(SongFormatError, match=r"not a unitracker v1\.10 document"):
+        songio.loads(text.replace("1.10", "1.1", 1))
+
+
 def test_reader_rejects_rows_beyond_max_and_bad_stop():
-    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc = parse(songio.dumps(song(), embed=True))
     doc["playroutine"]["record_types"]["prog"]["max"] = 3
     with pytest.raises(SongFormatError, match="more than 3"):
         songio.loads(yaml.safe_dump(doc))
-    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc = parse(songio.dumps(song(), embed=True))
     doc["song"][0]["def"]["stopped"] = {"t1": [[5], "end"]}
     with pytest.raises(SongFormatError, match="stop row"):
         songio.loads(yaml.safe_dump(doc))
@@ -261,7 +322,7 @@ def test_reader_rejects_rows_beyond_max_and_bad_stop():
 
 
 def test_reader_table_patch_needs_a_default():
-    doc = yaml.safe_load(songio.dumps(song(), embed=True))
+    doc = parse(songio.dumps(song(), embed=True))
     doc["playroutine"] = {"ref": "goattracker2", "tables": {"zz": {0: 1}}}
     with pytest.raises(SongFormatError, match="no library default"):
         songio.loads(yaml.safe_dump(doc))

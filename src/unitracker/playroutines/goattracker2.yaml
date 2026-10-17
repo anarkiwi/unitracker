@@ -135,6 +135,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: [l, r, next, x]
     refs: {x: x}
     codec:
@@ -150,6 +153,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {l: 0, r: 0, cut: -1, next: 0, x: 0}
     refs: {x: x}
     codec:

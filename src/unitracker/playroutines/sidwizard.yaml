@@ -81,6 +81,7 @@ record_types:
     fields: {w: 0, a: 128, d: 0, h: 0, next: 0}
     retired:
       "a == 0x7F": "retired in v1.9: a chord is the program's own rows of relative notes"
+      "a != 0x7F": "retired in v1.10: write the row with the shared keys"
     codec:
       - when: "w >= 0x10 and a != 0x7F and d != 0xFF and 0 <= h <= 0x3F"
         keys:
@@ -110,6 +111,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {a: 0, b: 0, k: 0, next: 0, x: 0}
     refs: {x: x}
     codec:
@@ -124,6 +128,9 @@ record_types:
     none: 0
     chain: next
     expr: x
+    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
+    retired:
+      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {a: 0, b: 0, res: 0, k: 0, next: 0, x: 0}
     refs: {x: x}
     codec:

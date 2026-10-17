@@ -205,7 +205,7 @@ def test_lift_document(metal_warrior):
 
 
 COMMANDS_SONG = """
-unitracker: 1.9
+unitracker: 1.10
 playroutine: {ref: goattracker2, constants: {deftempo: 6}}
 song:
   - def:

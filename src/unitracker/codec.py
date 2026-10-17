@@ -43,9 +43,6 @@ RETIRED_ROW_KEYS = {
     "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
     "wgl": "retired in v1.8: write the control mask as `ctrl: ^n`",
 }
-RETIRED_FORMS = {
-    "list": "retired in v1.9: write the row with the shared keys",
-}
 COMMAND_NAMES = (
     "run",
     "run2",

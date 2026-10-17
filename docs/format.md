@@ -1,4 +1,4 @@
-# unitracker song format (v1.9)
+# unitracker song format (v1.10)
 
 A unitracker song is one YAML document. A backend lifts a native tune into it
 (`unitracker-lift` reads GoatTracker 2, defMON and SID-Wizard), and the generic player
@@ -13,7 +13,7 @@ references from the library in `src/unitracker/playroutines/`.
 The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
-unitracker: 1.9
+unitracker: 1.10
 playroutine: {ref: goattracker2, constants: {deftempo: 11}}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 hints: {ticks_per_step: 16, phrase_steps: 48}
@@ -55,7 +55,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.9`; readers reject any other version |
+| `unitracker` | `1.10`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see Embedding) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | derived facts, such as `ticks_per_step` and `phrase_steps`; the player ignores them |
@@ -107,8 +107,9 @@ playroutine needs.
 - **Rows** use the shared row keys (see Shared vocabulary) wherever the playroutine's
   codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
   written in the type's `form`: a `list` row holds the fields in declaration order, with
-  trailing defaults left out (a GoatTracker pulse sweep `[32, 16]`); a `map` row holds
-  the fields that differ from their defaults (`{ad: 1, sr: 136, gt: 4}`).
+  trailing defaults left out (a GoatTracker wavetable portamento step `[241, 1]`); a `map`
+  row holds the fields that differ from their defaults. A type's `retired` rows have no
+  written form.
 - **Programs** are the rows of a chained type, in the order they run, followed by
   `end` or `{loop: k}` (k is a row of the same program). A program is cut from the
   player's chained tables at every entry point. A tail two programs share is written
@@ -197,18 +198,21 @@ rejected on reading, naming the key or command and the player (`goattracker2: th
 can't express !notevib:1`); the writer refuses to write a value that would not read back
 (a defMON pulse cell over `$0FFF`). Player-specific leftovers keep their v1 form:
 
-- **GoatTracker 2:** pulse and filter sweep and stall rows (list rows `[l, r]`), wavetable
-  command rows (list rows), `!vib:@s` and the instrument keys `speed` and `vd`.
+- **GoatTracker 2:** the wavetable command rows with no shared form (list rows `[w, n]`, see
+  the GoatTracker 2 backend), `!vib:@s` and the instrument keys `speed` and `vd`.
 - **defMON:** the sidTAB column `cp`; `af` below $80 (a fixed offset).
-- **SID-Wizard:** pulse and filter sweep rows and keyboard-tracked rows (list rows),
-  `!notevib` and the instrument keys `flags` (bits 4-7 of the header's control byte: the
-  vibrato type, and keeping the pulse and filter programs across notes), `vibrato`,
-  `vibdelay` and `octave`.
+- **SID-Wizard:** `!notevib` and the instrument keys `flags` (bits 4-7 of the header's
+  control byte: the vibrato type, and keeping the pulse and filter programs across notes),
+  `vibrato`, `vibdelay` and `octave`.
 
 The instrument keys `gt`, `fw` (GoatTracker), `hrad`, `hrsr`, `firstctrl` and bits 0-3 of
 `flags` (SID-Wizard) and defMON's `wgl` column are retired in v1.8: a document using them is
 rejected, naming them (`ins.gt is retired in v1.8: write the hard restart as the
-instrument's restart program`, `sidtab: wgl is retired in v1.8`). A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
+instrument's restart program`, `sidtab: wgl is retired in v1.8`). The list rows of
+GoatTracker's pulse and filter tables and SID-Wizard's pulse, filter and WF tables are retired
+in v1.10 (`pulsetab: row [32, 16] is retired in v1.10: a sweep, stall or keyboard-tracked row
+is its program's expression`): such a row is part of its program's `pw` or `cut` expression,
+which the lifter proves or fails on (see Lifting). A control mask is defMON's: GoatTracker and SID-Wizard reject it (`ctrl holds
 no mask here`).
 The format has no `mod` record type, no `!mod` or `!noteglide` command and no mod row
 keys (`reg`, `step`, `rel`, `to`, `lo`, `hi`, `at`, `every`, `delay`, `for`); a document
@@ -468,7 +472,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see Codecs) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field (a reference to `x`) holding a row's modulator expression; a program of one row that sets only it is written as the expression |
-| `retired` | `{expression: reason}`: raw rows the format no longer has; the reader and the writer refuse a row for which an expression holds |
+| `retired` | `{expression: reason}`: raw rows no codec shape covers that the format no longer has; the reader and the writer refuse such a row for which an expression holds |
 | any other key | a template: an action list run for a row |
 
 The record type `x` is the format's own: it holds the expressions, and a playroutine
