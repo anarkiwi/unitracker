@@ -127,8 +127,8 @@ record_types:
     refs: {x: x}
     codec:
       - when: "a >= 0x80 and k == 0 and (x == 0 or b == 0)"
-        keys: {mode: "a & 0x70", res: "res & 0x0F", cut: {value: "b << 3", expr: x}}
-        raw: {a: "0x80 | mode", b: "cut >> 3", res: res}
+        keys: {mode: "a & 0x70", res: "res & 0x0F", cut: {byte: b, expr: x}}
+        raw: {a: "0x80 | mode", b: cut, res: res}
 functions:
   # The row of restart program r on the note's first tick: its last.
   hrnote:

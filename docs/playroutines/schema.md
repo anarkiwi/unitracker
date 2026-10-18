@@ -76,7 +76,7 @@ ctrltab:
 
 A codec shape has a `when` over the raw fields, the playroutine's constants, and for a program row
 its place: `first` and `last` are 1 for the program's first row and for the row before its `end`;
-`keys` (`{key: {value, omit, abs, rel, expr, eor}}`: the shared key's value from the raw fields, when
+`keys` (`{key: {value, byte, omit, abs, rel, expr, eor}}`: the shared key's value from the raw fields, when
 to leave it out, for `note` whether it is absolute, for `route` its relation to the program's voice
 (1 adds it, -1 removes it, default 0), the raw field holding the key's expression, and for `ctrl`
 its mask as `{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
@@ -86,14 +86,17 @@ reference is written as a name). An `optional` field `f` that is a shared key gi
 key `f: {value: f, omit: "f < 0"}` and the raw field `f: "f if has_f else -1"`; a shape that gives
 key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one. A key with `expr` is written as the expression
 when that field is set; a key with both `value` and `expr` reads an integer as a value and a string
-as an expression. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
+as an expression. A `cut` key given as `{byte: b}` is a cutoff the player stores as its top
+byte: its value is `b << 3`, and `raw` reads `cut` as that byte, the written value `>> 3`; a
+written `cut` with any of its low three bits set does not read back. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
 written as the record's name (`run: pw1`); the reader takes the shape whose `ref` is the type the
 name has. A key given as `{none: true}` is written `none` (`pw: none`) and reads only from `none`.
 The writer uses the first shape whose `when` holds and refuses a row that would not read back; a
 `map` row no shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or `x` for an
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
-raw), checked the same way; `args` (`{a: expr, b: expr}`) writes the argument as several values
+raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
+written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
 joined by `/`, which `raw` reads by those names (`!funk:6/7`). An entry `{name, none: n}` writes
 argument `n` as `none` (`!funk:none`) and matches no other argument. An entry `{name: ad,
 nibble: s, slot: k}` is an envelope command: the code sets the nibble at shift `s` of the register

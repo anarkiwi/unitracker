@@ -48,6 +48,7 @@ COMMAND_NAMES = (
     "restart",
     "legato",
 )
+BYTE_SHIFT = {"cut": 3}
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
@@ -190,6 +191,18 @@ def written_value(key: str, value):
     return _FORMS[key][1](value) if key in _FORMS else value
 
 
+def byte_form(name: str, spec: dict, field: str) -> dict:
+    """``spec`` with its ``byte`` form, the top byte of shared key or command ``name``, as the
+    ``field`` expression of the value it gives (``byte << 3`` for ``cut``)."""
+    if "byte" not in spec:
+        return spec
+    if name not in BYTE_SHIFT:
+        raise CodecError(f"{name} has no byte form")
+    if field in spec:
+        raise CodecError(f"{name}: a byte form has no {field}")
+    return {**spec, field: f"({spec['byte']}) << {BYTE_SHIFT[name]}"}
+
+
 def optional_codec(optional) -> tuple[dict, dict]:
     """``(keys, raw)`` a shape gets for its record type's optional fields that are shared keys:
     the key is the field, left out when it is :data:`ABSENT`, and reads back as it."""
@@ -218,7 +231,9 @@ class _Shape:
         for key, kspec in {**gen_keys, **own}.items():
             if key not in ROW_KEYS:
                 raise CodecError(f"{key!r} is not a shared row key")
-            self.keys[key] = kspec if isinstance(kspec, dict) else {"value": kspec}
+            self.keys[key] = byte_form(
+                key, kspec if isinstance(kspec, dict) else {"value": kspec}, "value"
+            )
             if ("ref" in self.keys[key]) != ("field" in self.keys[key]):
                 raise CodecError(f"{key}: a reference key has both ref and field")
         self.refs = {k for k, s in self.keys.items() if "ref" in s}
@@ -353,7 +368,8 @@ class RowCodec:
                 env["has_eor"], env["has_ctrl"] = 1, int(literal is not None)
                 env.update({"ctrl": literal} if literal is not None else {})
             elif plain:
-                env[env_name(key)] = norm[key]
+                shift = BYTE_SHIFT[key] if "byte" in shape.keys[key] else 0
+                env[env_name(key)] = norm[key] >> shift
         return env
 
     @staticmethod
@@ -483,7 +499,7 @@ class CommandCodec:
             if name not in COMMAND_NAMES:
                 raise CodecError(f"{name!r} is not a shared command name")
             if "nibble" not in var:
-                self.entries.append((code, name, ref, var))
+                self.entries.append((code, name, ref, byte_form(name, var, "arg")))
         self.entries += [(ENVELOPE - k, n, None, {}) for k, n in enumerate(envelope_names(spec))]
         self.rtypes = rtypes
 
@@ -520,7 +536,7 @@ class CommandCodec:
             return name, NONE
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
-    def _arg(self, ref, var, value):
+    def _arg(self, name, ref, var, value):
         if value == NONE or "none" in var:
             none = var.get("none", None if ref is None else self.rtypes[ref].none)
             return none if value == NONE else None
@@ -530,7 +546,8 @@ class CommandCodec:
         if ref is not None:
             return value[1] if isinstance(value, tuple) and value[0] == ref else None
         if isinstance(value, int) and not isinstance(value, bool):
-            return evaluate(var["raw"], {"arg": value}) if "raw" in var else value
+            arg = value >> BYTE_SHIFT[name] if "byte" in var else value
+            return evaluate(var["raw"], {"arg": arg}) if "raw" in var else arg
         return None
 
     def decode(self, name: str, value) -> tuple[int, int]:
@@ -538,7 +555,7 @@ class CommandCodec:
         if name not in COMMAND_NAMES:
             raise CodecError(f"unknown command !{name}")
         for code, ename, ref, var in self.entries:
-            arg = self._arg(ref, var, value) if ename == name else None
+            arg = self._arg(name, ref, var, value) if ename == name else None
             if arg is None:
                 continue
             if ref is not None and not 0 <= arg <= 0xFF:
