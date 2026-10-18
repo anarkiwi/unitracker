@@ -1,5 +1,6 @@
 """Modulators as phase and value expressions: grammar, derivation, proofs, replay and report."""
 
+import functools
 import random
 import re
 import types
@@ -155,7 +156,14 @@ def test_a_closed_form_is_proved_as_its_text_reads():
 
 def test_z3_division_and_modulo_are_floored():
     env = {"v": z3.BitVecVal(-5, G.BITS)}
-    for e, want in ((sympy.Mod(V, 3), 1), (sympy.floor(V / 2), -3), (sympy.Abs(V), 5)):
+    cases = (
+        (sympy.Mod(V, 3), 1),
+        (sympy.Mod(V, 4), 3),
+        (sympy.floor(V / 2), -3),
+        (sympy.floor(V / 3), -2),
+        (sympy.Abs(V), 5),
+    )
+    for e, want in cases:
         assert z3.simplify(G.to_z3(e, env)).as_signed_long() == want == G.compiled(e)(-5, 0, 0)
 
 
@@ -209,6 +217,96 @@ def test_the_display_form_is_shorter_and_equivalent(e, domain, check):
     e = G.canon(e)
     shown = G.polar(e) if domain is None else G.polar(e, domain)
     assert check(shown, e) and equal(e, shown)
+
+
+@functools.lru_cache(maxsize=None)
+def _enumerated(e, context=(), domain=()):
+    """``display`` by every combination of its four forms per bracket, each cofactor shown
+    again under every choice of the brackets before it."""
+    # pylint: disable=protected-access
+    e = G.products(e, context, domain)
+    flat = G.denest(e, domain) if not context else e
+    forms = [_enumerated(flat, context, domain)] if flat != e else []
+    brackets = sorted(e.atoms(G.Iv), key=sympy.default_sort_key)
+    if not brackets:
+        return G.shortest([*forms, e, sympy.factor_terms(e)])
+    b = brackets[0]
+    no, yes = context + ((b, 0),), context + ((b, 1),)
+    rest = G.products(e.subs(b, 0), context, domain)
+    full = G.products(e.subs(b, 1), context, domain)
+    whole, y = G.products(full, yes, domain), G.products(rest, no, domain)
+    forms += [
+        e,
+        G._plus(G._times(b, G.canon(whole - rest)), _enumerated(rest, context, domain)),
+        G._plus(G._times(G._complement(b), G.canon(y - full)), _enumerated(full, context, domain)),
+    ]
+    if y != 0:
+        forms.append(
+            G._plus(
+                G._times(b, _enumerated(whole, yes, domain)),
+                G._times(G._complement(b), _enumerated(y, no, domain)),
+            )
+        )
+    return G.shortest(forms)
+
+
+def _set_rows(n: int) -> dict:
+    """A goattracker2 pulse program of ``n`` set rows, then a loop 32 up by 16, 32 down by 16."""
+    rows = {k: {"l": 0x80 + k % 8, "r": 37 * k % 256, "next": k + 1} for k in range(1, n + 1)}
+    return {
+        **rows,
+        n + 1: {"l": 32, "r": 16, "next": n + 2},
+        n + 2: {"l": 32, "r": 0xF0, "next": n + 1},
+    }
+
+
+def _value(table: dict):
+    """``(value term, domain)`` of a goattracker2 pulse program's start at its first row."""
+    m = machine("goattracker2", {"cell": "pulse", "fire": ["pulse_exec"]}, pulsetab=table)
+    start = m.start({"pptr": 1, "ptime": 0})
+    _, raw, edges, lengths = P.minimal(m.explore(start), P.Lift(m.form, m.cell, GT_FREQ))
+    lo, hi, r, k = m.domain(start)
+    values = [G.shortest([x, G.on_domain(x, r, k, lo, hi)]) for x in raw]
+    order = P.order(edges, lengths, raw)
+    return G.canon(G.shortest(P.value_forms(values, order, m.mask))), (("v", lo, hi),)
+
+
+@pytest.mark.parametrize(
+    "e,domain",
+    [
+        (_value(_set_rows(3))[0], _value(_set_rows(3))[1]),
+        (G.canon(G.ge(PHI, 1) * sympy.Mod(V - 16, 4096) - 1024 * G.ge(PHI, 1) + 1024), ()),
+        (G.canon(G.ge(PHI, 1) * (V - 1024) + 1024), (("v", 0, 4095),)),
+        (G.canon(G.eq(_SIGNED, 0) * 7 + G.ge(_SIGNED, 1) * V), (("v", 0, 65535),)),
+        (
+            G.canon(
+                G.eq(PHI, 0) * 16384
+                + G.eq(PHI, 1) * sympy.Mod(V - 1, 65536)
+                + G.ge(PHI, 2) * (G.ge(_U, 32768) * sympy.Mod(V - 1, 256) + G.lt(_U, 32768) * _U)
+            ),
+            (),
+        ),
+    ],
+)
+def test_the_display_form_is_the_enumerated_shortest(e, domain):
+    assert G.text(G.polar(e, domain)) == G.text(_enumerated(e, (), domain))
+
+
+def test_a_long_prefix_of_set_rows_displays_in_calls_linear_in_its_brackets(monkeypatch):
+    e, domain = _value(_set_rows(20))
+    brackets = len(e.atoms(G.Iv))
+    inner, calls = G.display.__wrapped__, []
+
+    @functools.lru_cache(maxsize=None)
+    def counted(*args):
+        calls.append(args)
+        return inner(*args)
+
+    monkeypatch.setattr(G, "display", counted)
+    shown = G.polar(e, domain)
+    assert brackets == 21 and len(calls) <= 3 * brackets
+    assert G.text(shown).count("(φ >= ") + G.text(shown).count("(φ < ") <= brackets
+    assert equal(shown, e, bounds=((domain[0][1], domain[0][2] + 1),))
 
 
 # ---- derivation and proof ---------------------------------------------------------------

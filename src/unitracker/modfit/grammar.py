@@ -235,7 +235,8 @@ def display(e, context: tuple = (), domain: tuple = ()):
 
     ``e = b*X + Y`` is shown as itself, as ``b*X' + Y'``, ``(1 - b)*(-X)' + (X + Y)'`` or
     ``b*(X + Y)' + (1 - b)*Y'``, the primed parts shown the same way; a deterministic function
-    of ``e`` and ``domain``.
+    of ``e`` and ``domain``. Each of a bracket's cofactors ``Y`` and ``X + Y`` is shown once
+    (see :func:`_cofactors`), so the calls grow with the brackets, not with their combinations.
     """
     e = products(e, context, domain)
     if not context:
@@ -246,22 +247,21 @@ def display(e, context: tuple = (), domain: tuple = ()):
 
 
 def _split(e, context: tuple, domain: tuple):
-    """``display`` of ``e`` without un-nesting its brackets first.
-
-    The parts are shown recursively: ``Y`` and ``X + Y`` over the context, ``X + Y`` where
-    ``b`` holds and ``Y`` where it does not; differences of them are kept canonical.
-    """
+    """``display`` of ``e`` without un-nesting its brackets first; a case ``b`` or ``1 - b`` is
+    shown under the facts that decide its brackets (see :func:`_within`, :func:`_relevant`)."""
     brackets = sorted(e.atoms(Iv), key=sympy.default_sort_key)
     if not brackets:
         return shortest([e, sympy.factor_terms(e)])
     b = brackets[0]
-    no, yes = context + ((b, 0),), context + ((b, 1),)
+    no, yes = _within(context, b, 0, domain), _within(context, b, 1, domain)
     rest, full = products(e.subs(b, 0), context, domain), products(e.subs(b, 1), context, domain)
     whole, y = products(full, yes, domain), products(rest, no, domain)
+    shown_rest, shown_full = _cofactors(rest, full, context, domain)
+    yes, no = _relevant(yes, whole, domain), _relevant(no, y, domain)
     forms = [
         e,
-        _plus(_times(b, canon(whole - rest)), display(rest, context, domain)),
-        _plus(_times(_complement(b), canon(y - full)), display(full, context, domain)),
+        _plus(_times(b, canon(whole - rest)), shown_rest),
+        _plus(_times(_complement(b), canon(y - full)), shown_full),
     ]
     if y != 0:
         forms.append(
@@ -271,6 +271,103 @@ def _split(e, context: tuple, domain: tuple):
             )
         )
     return shortest(forms)
+
+
+def _within(context: tuple, b, value: int, domain: tuple) -> tuple:
+    """``context`` and ``b = value`` in sort order, without each earlier fact the others force:
+    one key per set of facts, so a case nested in cases it implies is shown once."""
+    kept = list(context + ((b, value),))
+    for fact in context:
+        others = tuple(f for f in kept if f != fact)
+        if forced(others, fact[0], domain) == fact[1]:
+            kept = list(others)
+    return tuple(sorted(kept, key=lambda f: sympy.default_sort_key(f[0])))
+
+
+def _relevant(context: tuple, e, domain: tuple) -> tuple:
+    """``context`` without the facts that cut no cell of the ranges of ``e``.
+
+    A fact on one symbol whose every bracket in ``e`` and ``context`` is a range or point of
+    that same symbol is dropped when each cell of those brackets meets the fact wherever it
+    meets the others: it then decides no bracket of ``e`` under any of its cases.
+    """
+    brackets = e.atoms(Iv)
+    return tuple(f for f in context if not _uncut(f, context, brackets, domain))
+
+
+def _uncut(fact, context: tuple, brackets, domain: tuple) -> bool:
+    """True when ``fact`` (a ``(bracket, value)`` of one symbol) cuts no cell of ``brackets``
+    where the rest of ``context`` holds."""
+    x = _line(fact[0])
+    if x is None:
+        return False
+    sym = x[0]
+    near = [b for b in brackets if sym in b.free_symbols]
+    others = [f for f in context if f != fact and sym in f[0].free_symbols]
+    lines = [_line(b) for b in near] + [_line(b) for b, _ in others]
+    if any(line is None or line[0] != sym for line in lines):
+        return False
+    bounds = [(lo, hi) for name, lo, hi in domain if name == sym.name]
+    lo, hi = bounds[0] if bounds else (0 if sym.is_nonnegative else None, None)
+    points = {p for _, kind, c in [x, *lines] for p in ((c, c + 1) if kind == "eq" else (c,))}
+    points |= {p for p in (lo, None if hi is None else hi + 1) if p is not None}
+    points = sorted(points)
+    seen = {}
+    for p in [points[0] - 1, *points]:
+        if (lo is not None and p < lo) or (hi is not None and p > hi):
+            continue
+        if all(_holds(_line(b), p) == v for b, v in others):
+            cell = tuple(_holds(_line(b), p) for b in near)
+            seen.setdefault(cell, set()).add(_holds(x, p) == fact[1])
+    return all(True in kept for kept in seen.values())
+
+
+def _line(b):
+    """``(symbol, kind, c)`` of a bracket ``[symbol >= c]`` or ``[symbol == c]``, else None."""
+    rel = b.args[0]
+    const, rest = rel.lhs.as_coeff_Add()
+    if not (rest.is_Symbol and const.is_Integer):
+        return None
+    return rest, "eq" if isinstance(rel, sympy.Eq) else "ge", int(-const)
+
+
+def _holds(line, p: int) -> int:
+    """The value of a bracket ``line`` at ``p``."""
+    _, kind, c = line
+    return int(p == c if kind == "eq" else p >= c)
+
+
+def _cofactors(rest, full, context: tuple, domain: tuple) -> tuple:
+    """``(rest, full)`` as shown: the cofactors ``e|b=0`` and ``e|b=1`` of a bracket ``b``.
+
+    When their difference has no bracket, ``full`` is ``rest`` as shown with that difference
+    added to its bracket-free terms, the polarity of ``b`` moving only that difference;
+    otherwise the cofactor with fewer products (then bracket factors, then sort order) is
+    shown and the other kept as it is.
+    """
+    x = canon(full - rest)
+    if not x.has(Iv):
+        shown = display(rest, context, domain)
+        return shown, _moved(shown, x) if rest.has(Iv) else display(full, context, domain)
+    if _size(rest) <= _size(full):
+        return display(rest, context, domain), full
+    return rest, display(full, context, domain)
+
+
+def _size(e) -> tuple:
+    """``(products, bracket factors, sort key)`` of a canonical sum."""
+    terms = sympy.Add.make_args(e)
+    return len(terms), sum(len(t.atoms(Iv)) for t in terms), sympy.default_sort_key(e)
+
+
+def _moved(form, x):
+    """``form + x`` with bracket-free ``x`` summed into the bracket-free terms of ``form``."""
+    terms = _addends(form) if form.is_Add else [form]
+    shown = [t for t in terms if t.has(Iv, IvLt, IvNe)]
+    out = canon(sympy.Add(*(t for t in terms if not t.has(Iv, IvLt, IvNe))) + x)
+    for t in shown:
+        out = _plus(t, out)
+    return out
 
 
 def _times(a, b):
@@ -661,6 +758,12 @@ def compiled(e, names=("v", "phi", "N")):
     return eval(f"lambda {args}: {pysrc(e)}")  # pylint: disable=eval-used
 
 
+def _power(k) -> bool:
+    """True when ``k`` is a positive integer power of two: a floor ``%`` by it keeps the low bits
+    of a two's complement bit-vector and a floor ``//`` shifts it arithmetically."""
+    return bool(k.is_Integer and k > 0 and int(k) & (int(k) - 1) == 0)
+
+
 def _fmod(a, k):
     """Floor modulo of bit-vectors for a positive divisor ``k``."""
     r = z3.SRem(a, k)
@@ -735,12 +838,18 @@ def to_z3(e, env: dict):
         return out
     if isinstance(e, sympy.Mod):
         cyc = _cycle(*e.args, env)
-        return cyc[1] if cyc else _fmod(to_z3(e.args[0], env), to_z3(e.args[1], env))
+        if cyc:
+            return cyc[1]
+        if _power(e.args[1]):
+            return to_z3(e.args[0], env) & (int(e.args[1]) - 1)
+        return _fmod(to_z3(e.args[0], env), to_z3(e.args[1], env))
     fd = _floordiv(e)
     if fd:
         cyc = _cycle(*fd, env)
         if cyc:
             return cyc[0]
+        if _power(fd[1]):
+            return to_z3(fd[0], env) >> (int(fd[1]).bit_length() - 1)
         a, k = to_z3(fd[0], env), to_z3(fd[1], env)
         return (a - _fmod(a, k)) / k
     if isinstance(e, sympy.Abs):
