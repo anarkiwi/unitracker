@@ -42,6 +42,7 @@ WIDTH = 100
 PHRASE = "phrase"
 DOC_KEYS = ("unitracker", "playroutine", "meta", "hints", "clock", "voices", "song", "loop")
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
+DEFAULTS = {"clock": {"cycles_per_tick": 19656, "clock_hz": 985248}, "voices": 3}
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -58,8 +59,13 @@ def _library_text(name: str) -> str:
 
 
 def library(name: str) -> dict:
-    """The library definition of playroutine ``name``."""
-    return yaml.safe_load(_library_text(name))
+    """The library definition of playroutine ``name``, named by its file."""
+    return {"name": name, **yaml.safe_load(_library_text(name))}
+
+
+def defaults(pr: dict) -> dict:
+    """The ``clock`` and ``voices`` a song of playroutine ``pr`` has unless it says otherwise."""
+    return {**DEFAULTS, **(pr.get("defaults") or {})}
 
 
 def song_meta(header, source: str) -> dict:
@@ -514,10 +520,10 @@ class _Writer:
 
     def environment(self) -> dict:
         """``clock`` and ``voices`` where they differ from the defaults."""
-        defaults = self.pr.get("defaults") or {}
+        base = defaults(self.pr)
         env = {}
         for key in ("clock", "voices"):
-            if key in self.ir and self.ir[key] != defaults.get(key):
+            if key in self.ir and self.ir[key] != base[key]:
                 env[key] = FlowMap(self.ir[key]) if isinstance(self.ir[key], dict) else self.ir[key]
         return env
 
@@ -589,7 +595,7 @@ class _Reader:
             self.tables = {
                 k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()
             }
-            self.defaults = pr.get("defaults") or {}
+            self.defaults = defaults(pr)
             return pr
         pr = library(spec["ref"])
         pr["constants"] = {**(pr.get("constants") or {}), **(spec.get("constants") or {})}
@@ -603,7 +609,7 @@ class _Reader:
                 for i, v in diff.items():
                     tables[name][int(i)] = int(v)
         self.tables = tables
-        self.defaults = pr.get("defaults") or {}
+        self.defaults = defaults(pr)
         return pr
 
     def _alloc(self, rtype, count) -> int:
@@ -880,14 +886,14 @@ class _Reader:
             for name, atoms in phrases.items()
         }
         lengths = {name: len(compile_phrase(ev)) for name, ev in events.items()}
-        voices = int(doc.get("voices", self.defaults.get("voices", 3)))
+        voices = int(doc.get("voices", self.defaults["voices"]))
         tracks = timeline.from_rows(rows, doc.get("loop"), lengths, voices)
         _player(self.pr, self.lifetime.read, tracks, events, self.records, self.names)
         ir = {
             "unitracker": IR_VERSION,
             "meta": dict(doc.get("meta") or {}),
             "hints": dict(doc.get("hints") or {}),
-            "clock": dict(doc.get("clock") or self.defaults.get("clock") or {}),
+            "clock": dict(doc.get("clock") or self.defaults["clock"]),
             "voices": voices,
             "tables": self.tables,
             "playroutine": self.pr,

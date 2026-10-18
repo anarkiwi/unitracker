@@ -14,6 +14,7 @@ from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT
 IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
 MAX_COMMANDS = 2
+ONSET = "onset"
 PSEUDO = (
     "ev_kind",
     "ev_note",
@@ -577,8 +578,7 @@ class SongPlayer:
         )
         self._entry = (namespace["f_init"], namespace["f_tick"], namespace["f_ghost"])
         self.modulation = _Driven(self, exprs) if exprs else None
-        onset = pr.get("onset")
-        self._onset = gen.vindex[onset] if onset else None
+        self._onset = gen.vindex.get(ONSET)
         self.starts: list[int | None] = [None] * len(song["tracks"])
         self.regs = [0] * REG_COUNT
         self.ticks = 0

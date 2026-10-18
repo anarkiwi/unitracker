@@ -70,7 +70,7 @@ order:
 
 | replay | playroutine |
 |---|---|
-| build constants, default tempo | `constants`, which the lifter sets per tune; `defaults` (clock, voices) |
+| build constants, default tempo | `constants`, which the lifter sets per tune; `defaults` (clock, voices) where they are not PAL and 3 |
 | frequency and other lookup tables | `tables` (a song patches them, see [Document](format/document.md)); `note_offset` |
 | zero-page and self-modified operands, per voice or shared | `voice` and `global` cells, each with the `width` of its 6502 location; a scratch value has no width |
 | jump tables (command dispatch) | playroutine-owned `records`, run with `run: {record, index, field}` |
@@ -111,8 +111,8 @@ cells (`defmon`'s `latch` proc and `o_*` cells).
 
 **The `onset` cell and the zeroed SID.** The player starts from a zeroed SID and carries none of the
 native init writes ([Checking against the native
-player](playroutines/schema.md#checking-against-the-native-player)). Declare a 1-bit voice cell, set
-it on the tick the voice's registers first hold its first note, and name it in `onset:`. The check
+player](playroutines/schema.md#checking-against-the-native-player)). Declare a 1-bit voice cell named
+`onset` and set it on the tick the voice's registers first hold its first note. The check
 compares each voice from its onset and `$D415`-`$D418` from the earliest onset. Set it where the
 replay writes the note's frequency, which need not be where the event is read (`goattracker2` sets
 it in `wnote`, when a wavetable row first sets the frequency).

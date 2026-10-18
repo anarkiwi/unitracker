@@ -1,12 +1,12 @@
 # The playroutine
 
-The library holds one definition per player build:
+The library holds one definition per player build, named by its file
+(`playroutines/<name>.yaml`); an embedded definition carries its `name`:
 
 ```yaml
-name: str
+name: str                                 # embedded definitions only
 constants: {name: int}
-defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3}
-onset: onset     # the voice cell that is 1 once the voice's registers hold its first note
+defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3}   # optional; these are the default
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
 note_offset: 0                            # frequency-table index of format note 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
@@ -101,7 +101,10 @@ playroutine's functions. A list row a shape covers is rejected: it has a shared-
 ## Cells and expressions
 
 Every assignment wraps to the target cell's `width`, using two's complement for
-negative values. Expressions use Python syntax, restricted to:
+negative values. The voice cell `onset` is 1 once the voice's registers hold its first note
+(see [Checking against the native player](#checking-against-the-native-player)); every
+library playroutine declares it, and a voice of a playroutine without it is checked from its
+first tick. Expressions use Python syntax, restricted to:
 
 - integers;
 - names, which resolve as a voice cell (in voice scope), then a global cell, then a constant;
