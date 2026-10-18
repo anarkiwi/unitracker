@@ -4,6 +4,7 @@ from functools import cache
 
 from pysidtracker import SidImage
 from pysidwizard import End, Loop, PlayPattern, parse_sid_song
+from pysidwizard.constants import INST_WF_TABLE_POS, TABLE_END
 from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
 
@@ -16,7 +17,6 @@ from unitracker.player.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 TABLE_JUMP = 0xFE
-TABLE_END = 0xFF
 CHORD_RETURN = 0x7E
 CHORD_LOOP = 0x7F
 # A WF row's arp byte that plays the chord; a row's waveform byte from $10; the arp speed bits
@@ -59,9 +59,10 @@ class Tables:
     def __init__(self):
         self.records = {"wftab": {}, "pwtab": {}, "flttab": {}}
 
-    def program(self, name: str, data: bytes, decode) -> int:
-        """Allocate ``data``'s 3-byte rows as a program; its entry index, 0 when empty."""
-        return self.allocate(name, [decode(row) for row in table_rows(name, data)])
+    def program(self, name: str, ins, decode) -> int:
+        """Allocate instrument ``ins``'s ``name`` program; its entry index, 0 when empty."""
+        rows, loop = table_rows(name, ins)
+        return self.allocate(name, [decode(row) for row in rows], loop)
 
     def allocate(self, name: str, rows: list, loop: int | None = None) -> int:
         """Allocate ``rows`` as a program that ends, or loops to row ``loop``; its entry, 0 when
@@ -73,18 +74,48 @@ class Tables:
         return start
 
 
-def table_rows(name: str, data: bytes) -> list[bytes]:
-    """A table's rows up to its end marker; jumps and partial rows are not covered."""
-    rows = []
-    for pos in range(0, len(data), 3):
-        if data[pos] == TABLE_END:
-            break
-        if data[pos] == TABLE_JUMP:
-            raise LiftError(f"{name}: table jumps are not covered")
-        if pos + 3 > len(data):
+def table_rows(name: str, ins) -> tuple[list[bytes], int | None]:
+    """The 3-byte rows instrument ``ins``'s ``name`` program plays, following its jumps, and the
+    row its last continues to (None: it ends).
+
+    A jump's target is an offset in the instrument's memory image. A pulse or filter jump to
+    itself rests as the end does, and to a sweep row spends a tick (a sweep of none).
+    """
+    image, wave = ins.memory_image(), name == "wftab"
+    tables = (ins.wf_table, ins.pw_table)[: ("wftab", "pwtab", "flttab").index(name)]
+    pos = INST_WF_TABLE_POS + sum(len(table) + 1 for table in tables)
+    rows, seen = [], {}
+    while pos < len(image) and image[pos] != TABLE_END:
+        if pos + 3 > len(image):
             raise LiftError(f"{name}: a table ends in a partial row")
-        rows.append(data[pos : pos + 3])
-    return rows
+        if image[pos] != TABLE_JUMP:
+            seen[pos] = len(rows)
+            rows.append(image[pos : pos + 3])
+            pos += 3
+            continue
+        target = image[pos + 1]
+        if not rows:
+            raise LiftError(f"{name}: a program that starts with a jump is not covered")
+        if wave and target >= 0x80:
+            raise LiftError(
+                f"wftab: a jump to ${target:02X}, which rests without the end's pitch carry, is"
+                " not covered"
+            )
+        if target == pos and not wave:
+            break
+        first = image[target] if target + 3 <= len(image) else TABLE_END
+        if first in (TABLE_JUMP, TABLE_END):
+            raise LiftError(
+                f"{name}: a jump to ${target:02X}, which lands on no row, is not covered"
+            )
+        if wave and first < WAVEFORM:
+            raise LiftError(f"wftab: a jump to ${target:02X}, a hold row, is not covered")
+        if not wave and first < 0x80:
+            rows.append(bytes([0, 0, rows[-1][2]]))
+        if target in seen:
+            return rows, seen[target]
+        pos = target
+    return rows, None
 
 
 def pw_record(row: bytes) -> dict:
@@ -168,11 +199,12 @@ def wf_rows(ins, chord) -> tuple[list, int | None]:
     and the next offset, so each chord row carries both; it leaves the detune, which a row
     clears unless the program sets none.
     """
-    rows = table_rows("wftab", ins.wf_table)
+    rows, loop = table_rows("wftab", ins)
     hold = ins.arp_speed & ARP_SPEED
     detune = 0 if all(row[2] in (0, NO_DETUNE) for row in rows) else NO_DETUNE
-    out = []
+    out, index = [], []
     for k, (wave, arp, det) in enumerate(rows):
+        index.append(len(out))
         if arp != CHORD_ROW:
             out.append({"w": wave, "a": arp, "d": det, "h": hold})
             continue
@@ -181,13 +213,14 @@ def wf_rows(ins, chord) -> tuple[list, int | None]:
         offsets, loops = chord
         if max(offsets) >= 0x80:
             raise LiftError(f"chord offset ${max(offsets):02X} is not covered")
-        if not loops and (wave < WAVEFORM or (k + 1 < len(rows) and rows[k + 1][0] < WAVEFORM)):
+        after = k + 1 if k + 1 < len(rows) else loop
+        if not loops and (wave < WAVEFORM or (after is not None and rows[after][0] < WAVEFORM)):
             raise LiftError("a chord returning to or from a WF hold row is not covered")
-        start = len(out)
         out += [{"w": wave, "a": n, "d": detune, "h": hold} for n in offsets]
         if loops:
-            return settled(out, start), start
-    return settled(out, None), None
+            return settled(out, index[-1]), index[-1]
+    loop = None if loop is None else index[loop]
+    return settled(out, loop), loop
 
 
 def settled(rows: list, loop: int | None) -> list:
@@ -242,7 +275,7 @@ class Waves:
             return 0
         native = self.instruments[ins - 1]
         chosen = None
-        if any(row[1] == CHORD_ROW for row in table_rows("wftab", native.wf_table)):
+        if any(row[1] == CHORD_ROW for row in table_rows("wftab", native)[0]):
             chosen = self.chords.get(chord, self.chords.get(native.default_chord))
         key = (ins, chosen)
         if key not in self.entries:
@@ -266,8 +299,8 @@ def instrument_record(ins, tables: Tables, wave: int, restarts: Restarts) -> dic
         "vibdelay": ins.vibrato_delay,
         "octave": ins.octave_shift,
         "ctrl": wave,
-        "pw": tables.program("pwtab", ins.pw_table, pw_record),
-        "filter": tables.program("flttab", ins.filter_table, filter_record),
+        "pw": tables.program("pwtab", ins, pw_record),
+        "filter": tables.program("flttab", ins, filter_record),
         "restart": restarts.program(rows),
     }
     return rec
