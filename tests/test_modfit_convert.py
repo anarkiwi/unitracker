@@ -383,7 +383,7 @@ def test_the_player_floors_a_scaled_expression_to_the_cell():
 
 def occurrence(unit, instance, start, index, label=()):
     occ = Occurrence(unit, instance[0], 0, label, start, ())
-    occ.instance, occ.index = instance, index
+    occ.instance, occ.index, occ.fetched = instance, index, instance
     return occ
 
 
@@ -472,6 +472,28 @@ def test_a_command_on_a_note_naming_no_instrument_selects_its_lifetimes_copy(phr
     assert [e.get("instrument") for e in out["phrases"][play["phrase"]]] == named
 
 
+def test_a_start_without_modulation_plays_the_identity_where_its_site_holds_an_expression():
+    ir = gt_ir("[C4.i1*4, D4.i2*4, E4*4, F4*4]", INS + "}\n        i2: " + INS + "}")
+    at_site = {"command": 0, "onset": 1, "fired": 0, "ii": 2}
+    occs = [
+        occurrence("command", (0, 0, 0), at_site, 0, (0, 5)),
+        occurrence("command", (0, 0, 8), at_site, 1, (0, 0)),
+        occurrence("command", (0, 0, 12), {**at_site, "fired": 1}, 2, (0, 0)),
+    ]
+    occs[0].fetched = (0, 0, 4)
+    events = {("command", (0, 0, 12)): 2}
+    out = convert.Rewrite(ir, obs_of(occs, events), ["v + 1", None, None]).run()
+    (play,) = out["tracks"][0]["plays"]
+    steps = convert._steps(out["phrases"][play["phrase"]])  # pylint: disable=protected-access
+    freq = {i: out["exprs"][r["freq"]] for i, r in out["records"]["ins"].items() if "freq" in r}
+    assert [freq.get(steps[k].get("instrument")) for k in (4, 8)] == ["v + 1", "v"]
+    assert steps[12]["command"] == [16, {t: i for i, t in out["exprs"].items()}["v"]]
+    native = set(regs(ir, 130)[:, 0:2] @ [1, 256])
+    _, d4, e4, _ = sorted(native - {0})
+    ramp = set(regs(out, 130)[:, 0:2] @ [1, 256]) - native
+    assert ramp and all(d4 < w < e4 for w in ramp)
+
+
 def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own():
     ir = gt_ir("[C4.i1*4, D4*4, E4*4]")
     ir["phrases"]["p1"][2]["command"] = [16, 1]
@@ -523,6 +545,24 @@ def test_a_referenced_program_no_start_proves_is_a_named_lift_error():
         convert.Rewrite(ir, obs_of([]), []).run()
     ir["records"]["pulsetab"][2] = {"l": 0x89, "r": 0}
     assert convert.Rewrite(ir, obs_of([]), []).run()["records"]["pulsetab"][2]["l"] == 0x89
+
+
+def test_a_program_looping_to_its_first_row_is_written_as_its_one_expression():
+    ir = gt_ir("[C4.i1*16, D4*16]")
+    ir["records"]["ins"][1]["pw"] = 1
+    ir["records"]["pulsetab"] = {
+        1: {"l": 0x88, "r": 0, "next": 2},
+        2: {"l": 6, "r": 0x20, "next": 3},
+        3: {"l": 0x84, "r": 0, "next": 4},
+        4: {"l": 6, "r": 0xE0, "next": 1},
+    }
+    got = convert.analyse(ir, None, 1)
+    entry = got.out["records"]["ins"][1]["pw"]
+    row = got.out["records"]["pulsetab"][entry]
+    assert row == {"l": 0, "r": 0, "x": row["x"], "next": 0}
+    pw = [int(w) for w in regs(got.out, got.ticks)[:, 2:4] @ [1, 256]]
+    assert pw == [int(w) for w in regs(ir, got.ticks)[:, 2:4] @ [1, 256]]
+    assert {0x800, 0x8C0, 0x400, 0x340} <= set(pw)
 
 
 def test_an_unproved_start_names_its_program_and_start():
