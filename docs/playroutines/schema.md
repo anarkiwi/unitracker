@@ -40,7 +40,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `chain` | the field holding the next row: the type is a table of programs |
 | `none` | the index that means "no row"; references equal to it are plain numbers |
 | `stop` | an expression over a row's fields after which a program ends |
-| `first`, `max` | the indices the reader allocates (default `none + 1`, or 0; up to 255) |
+| `max` | the last index the reader allocates (from `none + 1`, or 0; default 255) |
 | `pin` | indices the playroutine reads directly; they are defined first |
 | `fixed` | the rows keep their indices |
 | `refs` | `{field: type}`, or `{field: [{type: t, when: expr}, ...]}` for a reference that depends on the row |
@@ -73,10 +73,11 @@ ctrltab:
 
 A codec shape has a `when` over the raw fields, the playroutine's constants, and for a program row
 its place: `first` and `last` are 1 for the program's first row and for the row before its `end`;
-`keys` (`{key: {value, omit, abs, expr, eor}}`: the shared key's value from the raw fields, when to
-leave it out, for `note` whether it is absolute, the raw field holding the key's expression, and for
-`ctrl` its mask as `{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
-`note_abs`, and for a mask `has_eor` and `eor` defined) and `keep` (raw fields written under their
+`keys` (`{key: {value, omit, abs, rel, expr, eor}}`: the shared key's value from the raw fields, when
+to leave it out, for `note` whether it is absolute, for `route` its relation to the program's voice
+(1 adds it, -1 removes it, default 0), the raw field holding the key's expression, and for `ctrl`
+its mask as `{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
+`note_abs`, `route_rel`, and for a mask `has_eor` and `eor` defined) and `keep` (raw fields written under their
 own names; a kept reference is written as a name). A key with `expr` is written as the expression
 when that field is set; a key with both `value` and `expr` reads an integer as a value and a string
 as an expression. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
@@ -94,8 +95,7 @@ nibble: s, slot: k}` is an envelope command: the code sets the nibble at shift `
 `name` over the instrument's field `name`, played from event slot `k`, and is written as the byte it
 writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).
 
-A raw field given as `{search: [lo, hi]}` is the first value in that range whose row
-writes back as the written one. Codec expressions may read the song's tables and the
+Codec expressions may read the song's tables and the
 playroutine's functions. A list row a shape covers is rejected: it has a shared-key form.
 
 ## Cells and expressions

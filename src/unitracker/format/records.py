@@ -8,7 +8,6 @@ META_KEYS = {
     "chain",
     "none",
     "stop",
-    "first",
     "max",
     "pin",
     "fixed",
@@ -48,7 +47,7 @@ class RecordType:
         self.chain = spec.get("chain")
         self.none = spec.get("none")
         self.stop = spec.get("stop")
-        self.first = int(spec.get("first", 0 if self.none is None else int(self.none) + 1))
+        self.first = 0 if self.none is None else int(self.none) + 1
         self.pin = [int(i) for i in spec.get("pin") or []]
         self.max = int(spec.get("max", 255))
         self.fixed = bool(spec.get("fixed", False))
