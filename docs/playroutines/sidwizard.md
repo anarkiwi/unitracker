@@ -17,7 +17,7 @@ The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame,
 
 | record type | native table | notes |
 |---|---|---|
-| `ins` | instrument header | keys `ad`, `sr`, `ctrl`, `pw`, `filter`, `freq`, `restart`; the header's vibrato is its `freq` expression, its hard-restart bytes and control bits 0-3 its `restart`, control bits 6 and 7 its notes' `!pulse:0` and `!filter:0` (see Lifetime), and its octave shift is in the notes it plays, each written as the pitch it sounds |
+| `ins` | instrument header | keys `ad`, `sr`, `ctrl`, `pw`, `filter`, `freq`, `restart`; the header's vibrato is its `freq` expression, its hard-restart bytes and control bits 0-3 its `restart`, control bits 6 and 7 its notes' `!pw` and `!filter` (see Lifetime), and its octave shift is in the notes it plays, each written as the pitch it sounds |
 | `ctrl` | WF/arp table (`wftab`) | see Control programs |
 | `pw` | pulse table (`pwtab`) | set rows use `pw`; a program with a sweep or keyboard-tracked row is its `pw` expression |
 | `filter` | filter table (`flttab`) | set rows use `mode` (bits 4-6), `cut` and `res`; a program with a sweep or keyboard-tracked row is its `cut` expression; `route` is refused |
@@ -40,6 +40,8 @@ instrument-column form (`!ad` or `!sr` in the first slot of an event that names 
 | command | argument |
 |---|---|
 | `!run` | `ctrl` name, `none` |
+| `!pw` | no argument |
+| `!filter` | no argument |
 | `!ad` | 0-255, at most one nibble from the instrument's |
 | `!sr` | 0-255, at most one nibble from the instrument's |
 | `!tempo` | 3-127 |
@@ -47,8 +49,6 @@ instrument-column form (`!ad` or `!sr` in the first slot of an event that names 
 | `!funk` | 3-15/3-15 |
 | `!freq` | `x` name, `none` |
 | `!legato` | no argument |
-| `!pulse` | 0 |
-| `!filter` | 0 |
 
 Every other command is refused by name.
 
@@ -108,7 +108,7 @@ A note sets the gate itself.
 
 ## Lifetime
 
-`!pulse:0` and `!filter:0` are the header's control bits 6 and 7 (`flag` `{flags: 0x40}` and
+`!pw` and `!filter` are the header's control bits 6 and 7 (`flag` `{flags: 0x40}` and
 `{flags: 0x80}`), which keep the program running on a note that selects no instrument. A note
 that names an instrument restarts both programs. A phrase note played under instruments of which
 one keeps a program and another restarts it is refused when writing.

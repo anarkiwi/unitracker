@@ -35,6 +35,8 @@ EXPR = "x"
 ENVELOPE = -2
 COMMAND_NAMES = (
     "run",
+    "pw",
+    "filter",
     "ad",
     "sr",
     "ctrl",
@@ -601,11 +603,19 @@ class CommandCodec:
                 return name, evaluate(var["arg"], {"arg": arg}) if "arg" in var else arg
             if arg != self.rtypes[ref].none:
                 return name, (ref, arg)
-            codes = {c for c, n, r, _ in self.entries if n == name and r is not None}
-            if len(codes) > 1:
-                raise CodecError(f"!{name}:{NONE} can't say which of commands {sorted(codes)}")
-            return name, NONE
+            if var.get("inline"):
+                break
+            return self.spelled(name, ref, NONE), NONE
         raise CodecError(f"command {code} with argument {arg} has no shared name")
+
+    def spelled(self, name: str, ref: str | None, value) -> str:
+        """The name command ``name`` of reference ``ref`` is written with for ``value``: ``none``
+        of a program stops its slot, ``!run:none`` the control program's and ``!pw:none`` and
+        ``!filter:none`` the others (the type's written name)."""
+        if value != NONE or ref is None or self.rtypes[ref].chain is None:
+            return name
+        written = self.rtypes[ref].written
+        return name if written == "ctrl" else written
 
     def _arg(self, name, ref, var, value):
         if (name in ARGLESS) != (value is None):
@@ -629,7 +639,8 @@ class CommandCodec:
         if name not in COMMAND_NAMES:
             raise CodecError(f"unknown command !{name}")
         for code, ename, ref, var in self.entries:
-            arg = self._arg(name, ref, var, value) if ename == name else None
+            spelled = self.spelled(ename, ref, value)
+            arg = self._arg(ename, ref, var, value) if spelled == name else None
             if arg is None:
                 continue
             if ref is not None and not 0 <= arg <= 0xFF:

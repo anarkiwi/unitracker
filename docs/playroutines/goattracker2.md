@@ -37,7 +37,9 @@ other; otherwise the slots are only an order.
 
 | command | argument |
 |---|---|
-| `!run` | `ctrl` name, `pw` name, `filter` name |
+| `!run` | `ctrl` name, `pw` name, `filter` name, `none` |
+| `!pw` | no argument, `none` |
+| `!filter` | no argument, `none` |
 | `!ad` | 0-255 |
 | `!sr` | 0-255 |
 | `!ctrl` | 0-255 |
@@ -46,12 +48,10 @@ other; otherwise the slots are only an order.
 | `!cut` | 0-2040 step 8 |
 | `!tempo` | 3-127 |
 | `!vtempo` | 3-127 |
-| `!funk` | 0-255/0-255, `none` |
+| `!funk` | 0-255/0-255 |
 | `!freq` | `x` name, `none` |
 | `!mark` | 16-255 |
 | `!legato` | no argument |
-| `!pulse` | 0 |
-| `!filter` | 0 |
 
 Every other command is refused by name.
 
@@ -60,6 +60,8 @@ Every other command is refused by name.
 - `!funk:a/b` is command $E, its argument the speed-table row's two bytes; `!funk:none` swings on
   the pair already set.
 - `!vol` is command $D below $10; from $10 it is `!mark`.
+- `!run:none`, `!pw:none` and `!filter:none` are commands 8, 9 and 10 with argument 0, which stop
+  the control, pulse and filter programs.
 - `!legato` is command 17: the lifter writes a native toneporta on a note as `!legato` plus
   the toneporta, so the note does not retrigger.
 - `!freq` is command 16, which plays every expression.
@@ -128,7 +130,7 @@ restart left it, so its first-tick row sets it.
 
 `lifetime` declares no `flag`: a note starts the instrument's `pw` and `filter` programs, and
 wavetable `run` rows ($F9, $FA) start them where the composer put them. The reader accepts
-`!pulse:0` and `!filter:0` on a note whose instrument starts no such program, through its fields
+`!pw` and `!filter` on a note whose instrument starts no such program, through its fields
 or its programs' rows, and whose event runs none (`!run`); the writer leaves them out.
 
 ## Modulators

@@ -64,7 +64,7 @@ _EDIT_KINDS = {
     "hoist": (VOCABULARY, "canonicalise: a command every note of an instrument carries is a field"),
     "drop_command": (KEY, "canonicalise: the writer drops a command its context already plays"),
     "drop_instrument": (KEY, "canonicalise: name an instrument only where the voice changes it"),
-    "drop_keep": (KEY, "canonicalise: !pulse:0 and !filter:0 only where the note restarts one"),
+    "drop_keep": (KEY, "canonicalise: !pw and !filter only where the note restarts one"),
     "merge": (SONG, "optimiser: one record for two that play alike"),
     "truncate": (SONG, "optimiser: rows no start reaches drop"),
     "reloop": (SONG, "optimiser: a loop is written with its shortest cycle"),

@@ -237,7 +237,10 @@ COMMAND_ROWS = {
         (16, 3, ("freq", ("x", 3))),
         (16, 0, ("freq", NONE)),
         (17, 0, ("legato", None)),
-        (14, 0, ("funk", NONE)),
+        (14, 0, None),
+        (8, 0, ("run", NONE)),
+        (9, 0, ("pw", NONE)),
+        (10, 0, ("filter", NONE)),
         (14, 6, ("funk", ("speedtab", 6))),
         (15, 0, None),
         (17, 1, None),
@@ -532,12 +535,10 @@ def test_command_names_the_player_cannot_say_are_refused(player):
             continue
         with pytest.raises(CodecError, match="a byte"):
             cmds.decode(name, (ref, 256))
-        codes = {c for c, n, r, _ in cmds.entries if n == name and r is not None}
-        if len(codes) > 1:
-            with pytest.raises(
-                CodecError, match=re.escape(f"can't say which of commands {sorted(codes)}")
-            ):
-                cmds.encode(code, TYPES[player][ref].none)
+        if TYPES[player][ref].chain is not None:
+            slot = cmds.spelled(name, ref, NONE)
+            assert cmds.encode(code, TYPES[player][ref].none) == (slot, NONE)
+            assert cmds.decode(slot, NONE) == (code, TYPES[player][ref].none)
     assert all(cmds.ref(code) == ref for code, ref in cmds.unnamed.items())
 
 
@@ -847,14 +848,18 @@ def accepted(player: str) -> dict:
     for name in envelope_names(pr.get("commands")):
         cells[name] += ", at most one nibble from the instrument's"
     for name, names in refs.items():
-        try:
+        with contextlib.suppress(CodecError):
             names += [f"`{NONE}`"] if cmds.decode(name, NONE) else []
-        except CodecError:
-            pass
         cells[name] = ", ".join(names)
+    for slot in ("pw", "filter"):
+        stops = []
+        with contextlib.suppress(CodecError):
+            stops = [f"`{NONE}`"] if cmds.decode(slot, NONE) else []
+        lives = ["no argument"] if slot in (pr.get(lifetime.NAME) or ()) else []
+        if stops or lives:
+            cells[slot] = ", ".join(lives + stops)
     if pr.get(restart.NAME):
         cells[restart.NAME] = f"`{restart.NAME}` name"
-    cells.update({n: "0" for n in pr.get(lifetime.NAME) or {}})
     return cells
 
 
@@ -888,7 +893,7 @@ def documented(player: str, header: str) -> list[str]:
 @pytest.mark.parametrize("player", PLAYERS)
 def test_the_documented_tables_are_the_playroutines(player):
     cells, keys = accepted(player), key_forms(player)
-    names = (n for n in (*COMMAND_NAMES, *lifetime.NAMES) if n in cells)
+    names = (n for n in COMMAND_NAMES if n in cells)
     commands = [HEADER, "|---|---|"] + [f"| `!{n}` | {cells[n]} |" for n in names]
     row_keys = [KEYS_HEADER, "|---|---|"] + [
         f"| `{k}` | {keys[k]} |" for k in ROW_KEYS if k in keys
@@ -958,7 +963,9 @@ def used_keys(pr: dict):
     yield from (("top", k) for k in pr)
     nested = [pr.get("instrument") or {}, (pr.get("instrument") or {}).get("event") or {}]
     nested += [pr.get("restart") or {}, pr.get("defaults") or {}]
-    nested += [*(pr.get("lifetime") or {}).values(), *pr["voice"].values(), *pr["global"].values()]
+    life = pr.get("lifetime") or {}
+    nested += [*(life.values() if isinstance(life, dict) else []), *pr["voice"].values()]
+    nested += [*pr["global"].values()]
     yield from (("block", k) for d in nested if isinstance(d, dict) for k in d)
     for spec in pr["record_types"].values():
         for k, v in spec.items():

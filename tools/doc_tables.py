@@ -19,7 +19,7 @@ import test_format_codec as T  # noqa: E402  pylint: disable=wrong-import-positi
 def tables(player: str) -> dict:
     """``{header: lines}`` of a playroutine's two generated tables."""
     cells, keys = T.accepted(player), T.key_forms(player)
-    names = (n for n in (*T.COMMAND_NAMES, *T.lifetime.NAMES) if n in cells)
+    names = (n for n in T.COMMAND_NAMES if n in cells)
     commands = [T.HEADER, "|---|---|"] + [f"| `!{n}` | {cells[n]} |" for n in names]
     rows = [T.KEYS_HEADER, "|---|---|"] + [
         f"| `{k}` | {keys[k]} |" for k in T.ROW_KEYS if k in keys

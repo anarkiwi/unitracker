@@ -23,7 +23,8 @@ record type is one player's own.
 
 | command | meaning |
 |---|---|
-| `!run:x` | start program `x` in the slot its kind implies; `!run:none` stops it |
+| `!run:x` | start program `x` in the slot its kind implies: the control, pulse or filter program; `!run:none` stops the control program |
+| `!pw:none`, `!filter:none` | stop the pulse / filter program |
 | `!ad:`, `!sr:`, `!ctrl:` | set the register to the byte |
 | `!resfilt:n` | set `$D417` whole, `n = 16*res + route` |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
@@ -34,7 +35,7 @@ record type is one player's own.
 | `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
 | `!mark:n` | a timing mark that changes no sound |
 | `!restart:r` | the note's hard restart, for a player whose instruments have none (see [Hard restart](#hard-restart)) |
-| `!pulse:0`, `!filter:0` | the note does not restart the instrument's pulse / filter program (see [Lifetime](#lifetime)) |
+| `!pw`, `!filter` (no argument) | the note does not restart the instrument's pulse / filter program (see [Lifetime](#lifetime)) |
 
 A playroutine takes the commands its `commands`, `restart` and `lifetime` declare, over the
 arguments its codec accepts; each playroutine's file
@@ -93,12 +94,12 @@ note with a free command slot, and its program ends and fits in the steps.
 ## Lifetime
 
 Whether a note restarts its instrument's pulse or filter program is a property of the note:
-`!pulse:0` and `!filter:0` mean it does not, as `!legato` means it does not retrigger. They
+`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. They
 need a note and refuse one that itself starts the program. A note that names no instrument plays
 the voice's last one; the reader finds it by walking each voice's plays twice through its loop.
 The playroutine declares the commands it plays as
-`lifetime: {pulse: {field: pw, flag: {flags: 0x40}}, filter: {...}}`, `field` the instrument key
-of the program:
+`lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`, or `lifetime: [pw, filter]` when no entry
+has a key; an entry's `field` is the instrument key of the program (default: the slot's name):
 
 | declaration | the command |
 |---|---|

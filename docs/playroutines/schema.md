@@ -13,7 +13,7 @@ instrument: {type: ins, base: 0}          # the record type .name refers to; ind
                                           # default: the type written as ins, base 0
                                           # event: {type, column, commands}: see Instrument columns
 restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
-lifetime: {pulse: {field: pw, flag: {flags: 0x40}}}   # !pulse:0 and !filter:0 (see Lifetime)
+lifetime: {pw: {flag: {flags: 0x40}}, filter: {}}     # !pw and !filter, or [pw, filter] (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions

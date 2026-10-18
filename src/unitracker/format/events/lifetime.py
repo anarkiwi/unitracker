@@ -1,7 +1,8 @@
-"""Program lifetime: a note's ``!pulse:0`` or ``!filter:0``, that it does not restart that program.
+"""Program lifetime: a note's ``!pw`` or ``!filter``, that it does not restart that program.
 
-A playroutine declares ``lifetime: {name: {field: f, flag: {g: mask}}}``: ``f`` is the instrument
-field naming the program, and ``flag`` the header bit that keeps it (docs/format/vocabulary.md).
+A playroutine declares ``lifetime: {slot: {field: f, flag: {g: mask}}}``, or the list of slots
+whose entries are empty: ``f`` is the instrument field naming the program (default: the slot), and
+``flag`` the header bit that keeps it (docs/format/vocabulary.md).
 """
 
 import numpy as np
@@ -11,11 +12,16 @@ from unitracker.format.records import program_path, ref_type
 from unitracker.player.vm import event_commands
 
 NAME = "lifetime"
-NAMES = ("pulse", "filter")
+NAMES = ("pw", "filter")
 
 
 class LifetimeError(ValueError):
     """A lifetime command the player can't play where it is written."""
+
+
+def is_lifetime(name: str, arg) -> bool:
+    """Whether written command ``name`` with argument ``arg`` is a lifetime command."""
+    return name in NAMES and arg is None
 
 
 def bit(name: str) -> int:
@@ -91,7 +97,9 @@ class Lifetime:
         inst = pr.get("instrument") or {}
         self.ins_type, self.base = inst.get("type"), int(inst.get("base", 0))
         self.rtypes, self.rtype = rtypes, rtypes.get(self.ins_type)
-        self.specs = dict(pr.get(NAME) or {})
+        specs = pr.get(NAME) or {}
+        specs = dict.fromkeys(specs) if isinstance(specs, list) else specs
+        self.specs = {k: {"field": k, **(v or {})} for k, v in specs.items()}
         self.flagged = {n: _flag(s) for n, s in self.specs.items() if "flag" in s}
         self.legato = command_code(pr.get("commands"), "legato")
 
@@ -100,18 +108,19 @@ class Lifetime:
         return self.rtype.refs[self.specs[name]["field"]][0][0]
 
     def mask(self, commands, kind: int, refs: set) -> int:
-        """The mask of an event's lifetime commands among ``commands`` (``(name, arg)``), for an
-        event of note ``kind`` whose other commands reference record types ``refs``."""
+        """The mask of an event's lifetime commands among ``commands`` (``(name, arg)``; a
+        lifetime command has no argument), for an event of note ``kind`` whose other commands
+        reference record types ``refs``."""
         out = 0
         for cmd, arg in commands:
-            if cmd not in NAMES:
+            if cmd not in NAMES or arg is not None:
                 continue
-            if arg != 0 or cmd not in self.specs:
-                raise LifetimeError(f"the player can't express !{cmd}:{arg}")
+            if cmd not in self.specs:
+                raise LifetimeError(f"the player can't express !{cmd}")
             if kind != 1:
-                raise LifetimeError(f"!{cmd}:0 needs a note")
+                raise LifetimeError(f"!{cmd} needs a note")
             if self.target(cmd) in refs:
-                raise LifetimeError(f"!{cmd}:0 on a note that starts the program")
+                raise LifetimeError(f"!{cmd} on a note that starts the program")
             out |= bit(cmd)
         return out
 
@@ -164,12 +173,12 @@ class Lifetime:
         for cmd in names(mask):
             if cmd in self.flagged and selects:
                 raise LifetimeError(
-                    f"!{cmd}:0 on a note that selects an instrument, which restarts the {cmd}"
+                    f"!{cmd} on a note that selects an instrument, which restarts the {cmd}"
                     " program"
                 )
             if cmd not in self.flagged and ins and self.target(cmd) in self.starts(records, ins):
                 raise LifetimeError(
-                    f"!{cmd}:0 on a note whose instrument {label[ins]} starts the {cmd} program"
+                    f"!{cmd} on a note whose instrument {label[ins]} starts the {cmd} program"
                 )
 
     def read(self, tracks, phrases: dict, records: dict, labels: dict) -> None:
@@ -206,4 +215,4 @@ def _marks(phrases: dict) -> dict:
 
 
 _MIXED = "a note of phrase {} plays under instruments that keep and restart the {} program"
-_DISAGREE = "!{}:0 is on some notes that start instrument {} without selecting it and not on others"
+_DISAGREE = "!{} is on some notes that start instrument {} without selecting it and not on others"

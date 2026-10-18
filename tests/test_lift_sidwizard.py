@@ -489,7 +489,7 @@ def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, mon
     swm = kept(sw_fx(tracked, STEP_TEMPOS))
     monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
     song, text = lifted(tracked)
-    assert "!pulse:0" in text and "!filter:0" in text and "flags" not in text
+    assert "!pw" in text and "!filter" in text and "flags" not in text
     assert "!tempo:4" in text and "!funk:5/7" in text and "!vtempo:6" in text
     assert "E[" in text and not re.search(r"\bk:", text)
     plain = swm_grid(parse_sid_song(base, 1))

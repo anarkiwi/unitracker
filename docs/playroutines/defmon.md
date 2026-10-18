@@ -114,7 +114,7 @@ starts on its first tick, so the restart's last row is empty.
 
 ## Lifetime
 
-`!pulse:0` and `!filter:0` are refused: an instrument's programs start on every event that names
+`!pw` and `!filter` are refused: an instrument's programs start on every event that names
 it.
 
 ## Modulators
