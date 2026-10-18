@@ -4,8 +4,8 @@ A port brings another C64 playroutine (a tracker's replay) into unitracker: its 
 documents in the shared vocabulary and play on the generic player with the native replay's
 register grid. This guide assumes you know 6502 and the target player. Terms and section names
 in *italics* are those of [format.md](format.md); the modulator machinery is
-[modfit.md](modfit.md), the optimiser [optimise.md](optimise.md) and its report
-[orthogonality.md](orthogonality.md).
+[modfit.md](modfit.md), the optimiser and its report [optimise.md](optimise.md), and each existing
+port's support and limits [playroutines/](playroutines/).
 
 In a worktree the venv's editable install points at the main checkout, so every command runs
 with `PYTHONPATH=src`. `TUNE.sid` is the port's reference tune, `<name>` the playroutine's name.
@@ -24,7 +24,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | round trip, native grid and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
 | proofs, closed forms, command composition, keyword signatures | `unitracker-modfit {exprs,command,keywords,fit,poly,generic,sweeps,orbit}` (modfit.md) |
-| redundancy the lifter writes | `unitracker-optimise song.yaml -o OUT --report orthogonality.md` |
+| redundancy the lifter writes | `unitracker-optimise song.yaml -o OUT --report report.md` (optimise.md, *Report*) |
 | document size | `tools/token_report.py song.yaml` |
 | how many tunes of the player lift, by failure cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |
 | a reference tune in the tests | `conftest.hvsc_tune(name, "MUSICIANS/...", doc)` |
@@ -51,9 +51,9 @@ Start from the existing port closest to the target player:
 
 | port | player | read it for |
 |---|---|---|
-| `goattracker2` | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `tickn`, `wavecmd`), one codec shape per command row, the gate-timer lookahead |
-| `sidwizard` | an instrument header plus WF/arp, pulse and filter programs; a pattern row with an instrument column and an FX column | header bytes as instrument keys, two event slots, envelope nibble commands, `lifetime` flags |
-| `defmon` | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: writes_as`, event restarts (`restart: {command}`), `fixed` init records, a `global` unit |
+| [`goattracker2`](playroutines/goattracker2.md) | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `tickn`, `wavecmd`), one codec shape per command row, the gate-timer lookahead |
+| [`sidwizard`](playroutines/sidwizard.md) | an instrument header plus WF/arp, pulse and filter programs; a pattern row with an instrument column and an FX column | header bytes as instrument keys, two event slots, envelope nibble commands, `lifetime` flags |
+| [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: writes_as`, event restarts (`restart: {command}`), `fixed` init records, a `global` unit |
 
 **Files:** none yet. **Verify** the toolchain and the existing ports:
 `PYTHONPATH=src .venv/bin/python tools/reference_check.py out/porting` prints
@@ -147,7 +147,7 @@ Declare each native table as a record type (*Record types*):
 | rows whose effect depends on their kind | templates (any other key, such as `do` and `each`), reading `row.<field>` |
 | module state carried through init | `fixed: true` (`defmon`'s `vinit`, `ginit`) |
 | a modulated program | `expr: x`, the field holding a row's expression |
-| raw rows the format no longer has | `retired: {expression: reason}` |
+| raw rows with no written form | `retired: {expression: reason}` |
 
 `writes_as` names the record type the table is written as (`ins`, `ctrl`, `pw`, `filter`,
 `restart`; the table in *Definitions*), and `prefix` its name prefix when that is not the written
@@ -167,12 +167,13 @@ player cannot play has no shape, so the reader refuses it naming the key or comm
 player (`sidwizard: the player can't express !tempo:2`), and the writer refuses a raw value that
 would not read back. Never add a key for one player: resolve the native row at lift time into a
 form that has shared keys (section 6), or fail the lift naming it. A shared form two players need
-and the format lacks is a format change (`songio.VERSION`, the `RETIRED` and `RETIRED_ROW_KEYS`
-patterns in `codec.py` and `retired.FIELDS`, format.md), not part of the port.
+and the format lacks is a format change (`songio.VERSION`, the shared vocabulary `ROW_KEYS` and
+`COMMAND_NAMES` in `codec.py`, format.md), not part of the port.
 
-**The vocabulary and command-table tests.** `tests/test_command_table.py` generates format.md's
-command table and `ctrl` row key table from every YAML in the library, so a new playroutine adds a
-column; the failing assertion prints the expected table to paste into format.md.
+**The vocabulary and command-table tests.** `tests/test_command_table.py` generates each
+playroutine's command table and `ctrl` row key table from its YAML and checks them against
+`docs/playroutines/<name>.md`, so a new playroutine needs that file, laid out as the existing
+ones; the failing assertion prints the expected table to paste into it.
 `tests/test_codec.py`'s `vocabulary(doc)` checks that a lifted document uses only the fixed
 vocabulary, each shared key in its one meaning: add the player to `LIBS`, `INS_KEYS`,
 `SHARED_OUTSIDE_ROWS` (and `ROW_KEEP`, `INIT_KEYS` where they apply), and the reference tune
@@ -184,7 +185,7 @@ is written via and its signature against the other playroutines' (modfit.md, *Si
 field with another player's effect under a different key is a vocabulary error.
 
 **Files:** the playroutine's `record_types` and `commands`; `tests/test_codec.py`;
-`docs/format.md` (the two generated tables, the *Definitions* table). **Verify:**
+`docs/playroutines/<name>.md` (*Records*, the two generated tables). **Verify:**
 `PYTHONPATH=src .venv/bin/python -m pytest -n auto tests/test_codec.py tests/test_command_table.py`
 and `PYTHONPATH=src .venv/bin/unitracker-modfit --out out/porting/keywords.txt keywords <name>`.
 
@@ -252,13 +253,13 @@ the existing ports do.
 
 | feature | shared form | declare | each player's codec constraints |
 |---|---|---|---|
-| hard restart | a `restart` program anchored to the note: lookahead rows with `hold`, `gate`, `ctrl`, `ad`, `sr`, then the note's first-tick row (*Hard restart*) | a `restart` record type with shapes on `first` and `last`; an instrument field `restart`, or `restart: {command: c}` for a player whose notes arm it on the steps before them | the lookahead and first-tick table in *Hard restart* |
-| chords and arpeggios | a `ctrl` program of relative-note rows, a different chord started with `!run` (*Chords*) | `note: +n` in the wave or arp table's shapes; the lifter inlines a separate chord table into the program | the *SID-Wizard* backend paragraph |
-| filter | `res`, `route` (a mask, or the edit `+ m`, `-`), `mode`, `cut`, and `!vol` (*Filter*) | filter program shapes; `rel` on `route` for an edit | the player table in *Filter* |
-| lifetime | `!pulse:0`, `!filter:0` on the note (*Lifetime*) | `lifetime: {pulse: {field, flag}, filter: {field, flag}}` | the player table in *Lifetime* |
+| hard restart | a `restart` program anchored to the note: lookahead rows with `hold`, `gate`, `ctrl`, `ad`, `sr`, then the note's first-tick row (*Hard restart*) | a `restart` record type with shapes on `first` and `last`; an instrument field `restart`, or `restart: {command: c}` for a player whose notes arm it on the steps before them | each playroutine file's *Hard restart* |
+| chords and arpeggios | a `ctrl` program of relative-note rows, a different chord started with `!run` (*Chords*) | `note: +n` in the wave or arp table's shapes; the lifter inlines a separate chord table into the program | sidwizard.md, *Control programs* |
+| filter | `res`, `route` (a mask, or the edit `+ m`, `-`), `mode`, `cut`, and `!vol` (*Filter*) | filter program shapes; `rel` on `route` for an edit | each playroutine file's *Filter* or *Records* |
+| lifetime | `!pulse:0`, `!filter:0` on the note (*Lifetime*) | `lifetime: {pulse: {field, flag}, filter: {field, flag}}` | each playroutine file's *Lifetime* |
 | relative control | `ctrl: ^n`, the exclusive-or mask the voice's control output keeps (*Shared vocabulary*) | `eor` on the `ctrl` key | `defmon` only; the others refuse it |
-| legato | `!legato:0` (*Legato*) | `modulators.legato: {cell, command}` | the command table |
-| tempo | the tempo commands and constants (*Shared vocabulary*) | `commands` entries with `when`, `arg`, `raw` | the command table; a tempo command no entry declares is refused by name |
+| legato | `!legato:0` (*Legato*) | `modulators.legato: {cell, command}` | each playroutine file's command table |
+| tempo | the tempo commands and constants (*Shared vocabulary*) | `commands` entries with `when`, `arg`, `raw` | each playroutine file's command table; a tempo command no entry declares is refused by name |
 
 The writer and reader resolve the context these forms need by walking each voice's plays:
 `src/unitracker/format/events/`: `lifetime.py` (the instrument a note plays), `envelope.py` (an
@@ -310,11 +311,11 @@ imply, so the lifter resolves what the native data leaves implicit:
 (`ctrltab row 12: wavetable command $F0 stops the playroutine: not lifted`, `voice 1's
 first note selects no instrument`). Never fall back to an
 approximation: acceptance is the exact grid, and an unproved modulation raises
-`ConversionError`. List what the lifter refuses in the port's paragraph of *Backends*.
+`ConversionError`. List what the lifter refuses in `docs/playroutines/<name>.md`, *Not covered*.
 
 **Files:** `src/unitracker/lift/<name>.py`, `src/unitracker/lift/backends.py`, `pyproject.toml` (the native
-package, the description), `docs/format.md` (the *Backends* table and paragraph, the timing and
-command subsets). **Verify:**
+package, the description), `docs/format.md` (the *Lifting* table), `docs/playroutines/<name>.md`
+(*Lifting*, *Commands*, *Not covered*). **Verify:**
 
 ```sh
 PYTHONPATH=src .venv/bin/unitracker-lift TUNE.sid -o out/porting/song.yaml
@@ -338,12 +339,12 @@ PYTHONPATH=src .venv/bin/unitracker-play out/porting/song.yaml --check TUNE.sid
 
 **The optimiser.** `unitracker-optimise` rewrites a song into a smaller document proved to play
 the same grid (optimise.md). Run it on the lifted reference tune, check the output against the
-native player, and read its `--report` (orthogonality.md): a kept edit on a freshly lifted tune is
+native player, and read its `--report` (optimise.md, *Report*): a kept edit on a freshly lifted tune is
 a redundancy the lifter or codec writes (a key the context already gives, a command every note of
 an instrument carries), which the lifter should not write.
 
 ```sh
-PYTHONPATH=src .venv/bin/unitracker-optimise out/porting/song.yaml -o out/porting/song.opt.yaml --report out/porting/orthogonality.md
+PYTHONPATH=src .venv/bin/unitracker-optimise out/porting/song.yaml -o out/porting/song.opt.yaml --report out/porting/report.md
 PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/song.opt.yaml TUNE.sid --ticks 3007 --to 0
 ```
 
@@ -377,7 +378,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -n auto --cov=unitracker --cov-fail-un
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |
 | 7 | lift with expressions; check against the native player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/song.yaml`, then `.venv/bin/unitracker-play out/porting/song.yaml --check TUNE.sid` |
 | 8 | the register grid from the voices' onsets | | `.venv/bin/python tools/grid_diff.py out/porting/song.yaml TUNE.sid --ticks 3007 --to 0` |
-| 9 | vocabulary and command tables; format.md | `tests/test_codec.py`, `docs/format.md` | `.venv/bin/python -m pytest -n auto tests/test_codec.py tests/test_command_table.py` |
+| 9 | vocabulary and command tables; the playroutine's doc | `tests/test_codec.py`, `docs/playroutines/<name>.md`, `docs/format.md` (*Lifting*) | `.venv/bin/python -m pytest -n auto tests/test_codec.py tests/test_command_table.py` |
 | 10 | conformance, dispatch and lifter tests | `tests/` | `.venv/bin/python -m pytest -n auto tests/test_conformance.py tests/test_backends.py tests/test_<name>.py` |
 | 11 | the optimiser on the lifted tune | `tests/conftest.py` | `.venv/bin/unitracker-optimise out/porting/song.yaml -o out/porting/song.opt.yaml`, then step 8 on it |
 | 12 | canonical round trip and forbidden names | `tools/reference_check.py` | `.venv/bin/python tools/reference_check.py out/porting --forbid <native names>` |
