@@ -149,13 +149,14 @@ def _complement(b):
 def _z3_free(e, env: dict, facts: list):
     """``to_z3`` with free symbols and functions as fresh bit-vectors and uninterpreted ones.
 
-    A nonnegative symbol adds its fact to ``facts``.
+    A nonnegative symbol adds its fact to ``facts``; ``φ`` is a :class:`Phase`.
     """
     for sym in e.free_symbols:
         if sym.name not in env:
-            env[sym.name] = z3.BitVec(sym.name, BITS)
+            x = z3.BitVec(sym.name, BITS)
+            env[sym.name] = Phase(lambda *cs: facts.extend(cs), x) if sym == PHI else x
             if sym.is_nonnegative:
-                facts.append(env[sym.name] >= 0)
+                facts.append(x >= 0)
     for f in e.atoms(sympy.core.function.AppliedUndef):
         name = type(f).__name__
         if name not in env:
@@ -561,6 +562,52 @@ def _fmod(a, k):
     return z3.If(r < 0, r + k, r)
 
 
+class Phase:
+    """``φ`` as the bit-vector ``base + shift`` with, per constant divisor ``k``, its floor
+    quotient and remainder as atoms tied linearly to it: ``base = k·q + r``, ``0 <= r < k``.
+
+    ``(φ + c) // k`` and ``(φ + c) % k`` are then ``q`` and ``r`` with at most one carry, so a
+    proof over phase cycles needs no division.
+    """
+
+    def __init__(self, add, base, shift: int = 0, cycles: dict | None = None):
+        self.add, self.base, self.shift = add, base, shift
+        self.cycles = {} if cycles is None else cycles
+
+    @property
+    def term(self):
+        """``φ`` as a bit-vector."""
+        return self.base + self.shift if self.shift else self.base
+
+    def __add__(self, k: int) -> "Phase":
+        return Phase(self.add, self.base, self.shift + k, self.cycles)
+
+    def divmod(self, k: int, c: int) -> tuple:
+        """``((φ + c) // k, (φ + c) % k)``."""
+        if k not in self.cycles:
+            q, r = z3.BitVec(f"φ//{k}", BITS), z3.BitVec(f"φ%{k}", BITS)
+            bound = (1 << (BITS - 2)) // k
+            self.add(self.base == k * q + r, r >= 0, r < k, q >= -bound, q <= bound)
+            self.cycles[k] = q, r
+        q, r = self.cycles[k]
+        e, d = divmod(self.shift + c, k)
+        if d == 0:
+            return q + e, r
+        carry = r >= k - d
+        bit = z3.If(carry, z3.BitVecVal(1, BITS), z3.BitVecVal(0, BITS))
+        return q + e + bit, r + d - k * bit
+
+
+def _cycle(a, k, env: dict):
+    """``(a // k, a % k)`` from the phase's cycle atoms when ``a`` is ``φ`` plus a constant and
+    ``k`` a positive constant, else None."""
+    phase = env.get(PHI.name)
+    if not isinstance(phase, Phase) or not (k.is_Integer and k > 0):
+        return None
+    c = sympy.expand(a - PHI)
+    return phase.divmod(int(k), int(c)) if c.is_Integer else None
+
+
 def to_z3(e, env: dict):
     """The 48-bit z3 bit-vector of ``e``; ``env`` maps symbol and function names.
 
@@ -571,7 +618,8 @@ def to_z3(e, env: dict):
     if e.is_Integer:
         return z3.BitVecVal(int(e), BITS)
     if e.is_Symbol:
-        return env[e.name]
+        x = env[e.name]
+        return x.term if isinstance(x, Phase) else x
     if e.is_Add:
         return z3.Sum([to_z3(a, env) for a in e.args])
     if e.is_Mul or e.is_Pow:
@@ -581,9 +629,13 @@ def to_z3(e, env: dict):
             out = out * to_z3(a, env)
         return out
     if isinstance(e, sympy.Mod):
-        return _fmod(to_z3(e.args[0], env), to_z3(e.args[1], env))
+        cyc = _cycle(*e.args, env)
+        return cyc[1] if cyc else _fmod(to_z3(e.args[0], env), to_z3(e.args[1], env))
     fd = _floordiv(e)
     if fd:
+        cyc = _cycle(*fd, env)
+        if cyc:
+            return cyc[0]
         a, k = to_z3(fd[0], env), to_z3(fd[1], env)
         return (a - _fmod(a, k)) / k
     if isinstance(e, sympy.Abs):

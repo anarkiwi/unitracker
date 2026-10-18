@@ -43,6 +43,14 @@ SW_PULSE = {
     3: {"a": 64, "b": 0xF8, "k": 0, "next": 0},
 }
 
+# A pulse program that sets the width, then rises 37 steps by 51 and falls 37 by 37, repeat:
+# each cycle drifts by 518, wrapping the 12-bit width.
+GT_DRIFT = {
+    1: {"l": 0x85, "r": 0, "next": 2},
+    2: {"l": 37, "r": 51, "next": 3},
+    3: {"l": 37, "r": 0xDB, "next": 2},
+}
+
 
 def from_text(text: str, tables: dict | None = None):
     """A Python function of ``(v, phi, N)`` parsed from grammar text, brackets innermost first;
@@ -59,11 +67,10 @@ def from_text(text: str, tables: dict | None = None):
 
 def equal(a, b, phi_from=0, bounds=((0, 1 << 16),)) -> bool:
     """True when two expressions over ``v`` and ``φ`` agree everywhere (z3)."""
-    env = {"v": z3.BitVec("v", G.BITS), "φ": z3.BitVec("φ", G.BITS), "N": z3.BitVec("N", G.BITS)}
     s = z3.Solver()
-    s.add(
-        env["φ"] >= phi_from, env["φ"] < 1 << 20, env["v"] >= bounds[0][0], env["v"] < bounds[0][1]
-    )
+    phi = z3.BitVec("φ", G.BITS)
+    env = {"v": z3.BitVec("v", G.BITS), "φ": G.Phase(s.add, phi), "N": z3.BitVec("N", G.BITS)}
+    s.add(phi >= phi_from, phi < 1 << 20, env["v"] >= bounds[0][0], env["v"] < bounds[0][1])
     s.add(G.to_z3(a, env) != G.to_z3(b, env))
     return s.check() == z3.unsat
 
@@ -112,6 +119,29 @@ def test_z3_division_and_modulo_are_floored():
     env = {"v": z3.BitVecVal(-5, G.BITS)}
     for e, want in ((sympy.Mod(V, 3), 1), (sympy.floor(V / 2), -3), (sympy.Abs(V), 5)):
         assert z3.simplify(G.to_z3(e, env)).as_signed_long() == want == G.compiled(e)(-5, 0, 0)
+
+
+def test_a_phase_floors_by_its_cycle_atoms():
+    rng = random.Random(2)
+    for _ in range(40):
+        k, c, shift = rng.choice((1, 3, 74, 113)), rng.randrange(-300, 300), rng.randrange(3)
+        s = z3.Solver()
+        base = z3.BitVec("φ", G.BITS)
+        env = {"φ": G.Phase(s.add, base) + shift}
+        e = sympy.floor((PHI + c) / k) * 1000 + sympy.Mod(PHI + c, k)
+        term = G.to_z3(e, env)
+        assert not any(x.decl().kind() == z3.Z3_OP_BSREM for x in _subterms(term))
+        phi = rng.randrange(0, 1000)
+        s.add(base == phi)
+        assert s.check() == z3.sat
+        got = s.model().eval(term).as_signed_long()
+        assert got == ((phi + shift + c) // k) * 1000 + (phi + shift + c) % k
+
+
+def _subterms(t):
+    yield t
+    for a in t.children():
+        yield from _subterms(a)
 
 
 _U = sympy.Mod(V - 513, 65536)
@@ -168,6 +198,22 @@ def test_the_display_form_is_shorter_and_equivalent(e, domain, check):
             "2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048",
             2048 + 2 * sympy.Min(PHI, 64) - 8 * sympy.Max(0, sympy.Min(PHI - 65, 64)),
             None,
+        ),
+        (
+            "goattracker2",
+            {"cell": "pulse", "fire": ["pulse_exec"]},
+            {"pulsetab": GT_DRIFT},
+            {"pptr": 1, "ptime": 0},
+            GT_FREQ,
+            "(-44*abs(φ % 74 - 37) + 7*(φ % 74) + 518*(φ // 74) - 1188) % 4096",
+            sympy.Mod(
+                1280
+                + 518 * sympy.floor(PHI / 74)
+                + 51 * sympy.Min(sympy.Mod(PHI, 74), 37)
+                - 37 * sympy.Max(0, sympy.Mod(PHI, 74) - 37),
+                4096,
+            ),
+            (1, 74),
         ),
     ],
 )
