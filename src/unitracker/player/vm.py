@@ -268,15 +268,18 @@ class _Codegen:
             raise SongError(f"unknown proc {name!r}")
         return self.request(self.fname("proc", voice, name), self.procs[name], voice)
 
-    def record_lists(self, record, field, voice):
-        """Dict source mapping record index to its generated action-list function.
+    def record_lists(self, run, voice):
+        """Dict source mapping record index to the generated action-list function of a ``run``.
 
         A record type's template serves every row: rows map to ``(fn, index)``.
         """
+        record = run["record"]
         if record not in self.records:
             raise SongError(f"unknown record {record!r}")
-        rtype = self.rtypes.get(record)
-        if rtype is not None and field in rtype.templates:
+        if "template" in run:
+            field, rtype = run["template"], self.rtypes.get(record)
+            if rtype is None or field not in rtype.templates:
+                raise SongError(f"unknown template {record}.{field}")
             fn = self.request(
                 self.fname("tpl", voice, record, field), rtype.templates[field], voice, record
             )
@@ -287,6 +290,7 @@ class _Codegen:
                 self.tail.append(f"{name} = {{i: ({fn}, i) for i in {rows!r}}}")
                 self.dispatch[name] = {i: (fn, i) for i in rows}
             return name
+        field = run["field"]
         items, table = [], {}
         for index, row in sorted(self.records[record].items()):
             actions = row.get(field)
@@ -436,7 +440,7 @@ class _Codegen:
             out.append(f"{pad}{self.proc(action['call'], voice)}({'v' if voice else ''})")
         elif "run" in action:
             run = action["run"]
-            table = self.record_lists(run["record"], run["field"], voice)
+            table = self.record_lists(run, voice)
             fn = self.tmp()
             out.append(f"{pad}{fn} = {table}.get({scope.compile(run['index'])})")
             out.append(f"{pad}if {fn} is not None:")

@@ -1,6 +1,6 @@
 """A song's modulator units: what starts each one, its firings, and the expression driving it.
 
-A start opens an occurrence at the unit's next firing (its ``pre`` to ``post`` calls). While an
+A start opens an occurrence at the unit's next firing (its first to last ``fire`` entry). While an
 expression is active each firing sets ``v' = f(v, φ, N)`` from the cell's value before the
 firing, then ``φ += 1``; otherwise the playroutine's own firing stands. A unit with a ``chip``
 map drives the chip register value its cells give (``value``); an expression's result is stored
@@ -107,6 +107,24 @@ def units(playroutine: dict) -> list:
     return list(declared(playroutine).get("units") or [])
 
 
+def function(item) -> dict:
+    """The function a ``fire`` entry names: ``{proc}``, ``{type, template}`` or ``{record, field}``
+    (see the schema's modulator declarations)."""
+    if isinstance(item, str):
+        return {"proc": item}
+    run = item["run"]
+    if "template" in run:
+        return {"type": run["record"], "template": run["template"]}
+    return {"record": run["record"], "field": run["field"]}
+
+
+def run_of(ref: dict) -> dict:
+    """The ``run`` spec, less its index, of a template or record function."""
+    if "type" in ref:
+        return {"record": ref["type"], "template": ref["template"]}
+    return {"record": ref["record"], "field": ref["field"]}
+
+
 def unit_command(playroutine: dict, unit: dict) -> int | None:
     """The code of the command naming a unit's expression (``!freq``): for a unit that replaces
     native ``commands``, the playroutine's command named its key that references ``x``."""
@@ -151,12 +169,9 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
                 stores = [(c, self.ns[f"_cs_{i}_{k}"]) for k, c in enumerate(cells)]
                 self.chips[unit["name"]] = (self.ns[f"_cv_{i}"], stores)
         for unit in self.units:
-            self.wrap(unit["pre"], lambda args, unit=unit: self.on_pre(unit, args), None)
-            self.wrap(
-                unit.get("post", unit["pre"]),
-                None,
-                lambda args, unit=unit: self.on_post(unit, args),
-            )
+            fire = unit["fire"]
+            self.wrap(function(fire[0]), lambda args, unit=unit: self.on_pre(unit, args), None)
+            self.wrap(function(fire[-1]), None, lambda args, unit=unit: self.on_post(unit, args))
             for hook in unit.get("hooks") or []:
                 self.wrap_hook(unit, hook)
 
@@ -166,24 +181,24 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         return self.player.ticks
 
     # wrapping ----------------------------------------------------------------------
-    def functions(self, ref: str) -> list:
+    def functions(self, ref: dict) -> list:
         """``(container, key, function, row)`` of every generated function named by ``ref``."""
-        parts = ref.split(".")
-        if parts[0] == "procs":
+        if "proc" in ref:
             return [
                 (self.ns, n, self.ns[n], None)
-                for n in (f"f_v_proc_{parts[1]}", f"f_g_proc_{parts[1]}")
+                for n in (f"f_v_proc_{ref['proc']}", f"f_g_proc_{ref['proc']}")
                 if n in self.ns
             ]
+        record, name = run_of(ref).values()
         out = []
         for scope in "vg":
-            table = self.ns.get(f"D_{scope}_{parts[1]}_{parts[2]}")
+            table = self.ns.get(f"D_{scope}_{record}_{name}")
             for k, (fn, row) in (table or {}).items():
-                if len(parts) < 4 or int(parts[3]) == k:
+                if ref.get("index") in (None, k):
                     out.append((table, k, fn, row))
         return out
 
-    def wrap(self, ref: str, before, after) -> None:
+    def wrap(self, ref: dict, before, after) -> None:
         """Call ``before(args)`` and ``after(args)`` around every function of ``ref``."""
         for container, key, fn, row in self.functions(ref):
 

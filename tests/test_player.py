@@ -207,6 +207,15 @@ SONG_ERRORS = [
         {"playroutine": {"tick": [{"run": {"record": "r", "index": 0, "field": "do"}}]}},
         "unknown record",
     ),
+    (
+        {
+            "playroutine": {
+                "records": {"r": {0: {"do": []}}},
+                "tick": [{"run": {"record": "r", "index": 0, "template": "do"}}],
+            }
+        },
+        "unknown template",
+    ),
     ({"playroutine": {"tick": ["x"]}}, "bad action"),
     ({"playroutine": {"tick": [{"jump": 1}]}}, "unknown action"),
     ({"playroutine": {"tick": {"set": {}}}}, "action list"),

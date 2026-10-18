@@ -18,7 +18,7 @@ import z3
 from unitracker.format.codec import Evaluator
 from unitracker.modfit import chipinv
 from unitracker.modfit import grammar as G
-from unitracker.modfit.flow import Writes
+from unitracker.modfit.flow import Writes, walk
 from unitracker.modfit.form import INF, Form, Programs, atoms, lin, mk, record_data, show
 from unitracker.modfit.invariant import Slicer
 from unitracker.player.modulation import VALUE
@@ -57,11 +57,17 @@ class Player(Programs):
 
 
 def dispatch(pr: dict, actions: list) -> list:
-    """``actions`` with each ``run`` of a playroutine record's lists as an ``if`` chain."""
+    """``actions`` with each ``run`` of a playroutine record's lists as an ``if`` chain; a call of
+    a proc that runs one and has no ``return`` is inlined."""
+    records, procs = pr.get("records") or {}, pr.get("procs") or {}
     out = []
     for a in actions:
+        body = procs.get(a.get("call"))
+        if body and not a.get("with") and inlined(body, records):
+            out += dispatch(pr, body)
+            continue
         run = a.get("run") or {}
-        rows = (pr.get("records") or {}).get(run.get("record"))
+        rows = records.get(run.get("record"))
         if rows is None:
             out.append(a)
             continue
@@ -366,6 +372,12 @@ class Graph:
     nodes: list
     cases: list
     error: str = ""
+
+
+def inlined(body: list, records: dict) -> bool:
+    """True when a proc's ``body`` runs a playroutine record's lists and has no ``return``."""
+    runs = any((a.get("run") or {}).get("record") in records for a in body)
+    return runs and not any("return" in d for d in walk(body))
 
 
 class Machine:  # pylint: disable=too-many-instance-attributes

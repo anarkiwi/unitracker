@@ -111,9 +111,8 @@ def action_lists(pr: dict) -> dict:
 
 def run_lists(pr: dict, run: dict) -> list:
     """The action lists a ``run`` action can execute."""
-    rt = record_types(pr).get(run["record"])
-    if rt is not None and run["field"] in rt.templates:
-        return [rt.templates[run["field"]]]
+    if "template" in run:
+        return [record_types(pr)[run["record"]].templates[run["template"]]]
     rows = (pr.get("records") or {}).get(run["record"]) or {}
     return [r[run["field"]] for r in rows.values() if (r or {}).get(run["field"])]
 
@@ -730,10 +729,10 @@ class Composed(Flow):
 
     def run(self, run: dict, env: dict, rec) -> list:
         """The environments after each action list a ``run`` can execute."""
-        rt = self.rtypes.get(run["record"])
-        if rt is not None and run["field"] in rt.templates:
+        if "template" in run:
             row = (run["record"], self.expr(run["index"], env, rec))
-            return [self.join(self.seq(rt.templates[run["field"]], env, row))]
+            body = self.rtypes[run["record"]].templates[run["template"]]
+            return [self.join(self.seq(body, env, row))]
         return [self.join(self.seq(body, env, rec)) for body in run_lists(self.pr, run)]
 
     def accumulate(self, a: dict, env: dict, rec) -> dict:

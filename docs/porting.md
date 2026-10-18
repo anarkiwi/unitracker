@@ -74,7 +74,7 @@ order:
 | frequency and other lookup tables | `tables` (a song patches them, see [Document](format/document.md)); `note_offset` |
 | zero-page and self-modified operands, per voice or shared | `voice` and `global` cells, each with the `width` of its 6502 location; a scratch value has no width |
 | jump tables (command dispatch) | playroutine-owned `records`, run with `run: {record, index, field}` |
-| module tables (instruments, wave, pulse, filter tables) | `record_types` and their templates (section 3) |
+| module tables (instruments, wave, pulse, filter tables) | `record_types` and their templates (section 3), run with `run: {record, index, template}` |
 | subroutines | `procs`, run with `call` and `with` |
 | the pattern's instrument column | `instrument: {type, base}`, the record type `.name` refers to |
 | the init call | `init`, global scope, run in place of `tick` on the first tick: it includes the play call when the native player plays on its init frame (`defmon`'s ends `call: play`) |
@@ -206,8 +206,8 @@ unit keys are in [Modulator declarations](playroutines/schema.md#modulator-decla
 | key | what it transcribes |
 |---|---|
 | `cell`, `scope` | the cell the replay modulates (`hi:lo[:k]` for a pair); `global` for one cell the voices share |
-| `fire`, `pre`, `post` | one firing: `v` is read before `pre` runs and the value stored after `post` |
-| `hooks`, `program` | the starts: a function writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields` |
+| `fire` | one firing, as proc names and `run` actions: `v` is read before the first entry runs and the value stored after the last |
+| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` or `{type: t, template: f}`) writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields` |
 | `x` | the expression a start selects; 0 leaves the playroutine's own firing |
 | `label` | the cells grouping occurrences, usually the program pointer |
 | `site`, `retire`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` (the `commands` entry named `key` with `ref: x`) replaces |

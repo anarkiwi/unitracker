@@ -54,7 +54,9 @@ The record type `x` is the format's own: it holds the expressions, and a playrou
 cannot declare it.
 
 A template reads the row it runs for as `row.<field>`. `run: {record: r, index: i,
-field: f}` runs record type `r`'s template `f` for row `i` when that row exists.
+template: t}` runs record type `r`'s template `t` for row `i` when that row exists.
+`field` always names a raw field: `run: {record: r, index: i, field: f}` runs the action list
+row `i` stores in field `f`.
 A control-program table, for example, decodes its bytes in a template:
 
 ```yaml
@@ -121,7 +123,7 @@ modulator expressions use the grammar of [Modulators](../modulation/expressions.
 | `set: {cell: expr, ...}` | Assign in order, each wrapped to its cell's width. |
 | `if: expr`, `then: [...]`, `else: [...]` | Conditional. |
 | `call: proc`, `with: {cell: expr}` | Assign the `with` cells, then run the proc. |
-| `run: {record: r, index: expr, field: f}` | Run a record type's template, or the action list stored in a record field. |
+| `run: {record: r, index: expr, template: t}` | Run record type `r`'s template `t` for row `index`. `run: {record: r, index: expr, field: f}` runs the action list row `index` stores in field `f`. |
 | `for_voices: [...]` | Run the list once per voice, in voice order, with that voice's cells bound. |
 | `fetch: true` | Read this voice's next step (see [The cursor](#the-cursor)). |
 | `return: true` | Leave the innermost proc, template, record action list, `for_voices` body, or `init`/`tick`. |
@@ -190,8 +192,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `cell` | the driven cell; a pair `hi:lo[:k]` is the value `hi << k \| lo & (2**k - 1)` (k 8 when omitted) |
 | `chip` | `{width, value, store}`: the unit's value is `value` over the cells, masked to `width` bits; `store` (reading `value`) writes a value back, run only when the cells do not already give it; each cell state the firings reach gives its own value, and `store` inverts `value` on those states |
 | `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it |
-| `fire` | the actions (or proc names) of one firing |
-| `pre`, `post` | the functions that bound one firing (`post` defaults to `pre`): `v` is read before `pre` runs, the expression's value is stored after `post` |
+| `fire` | one firing: proc names and `run` actions; `v` is read before the first entry's function runs and the expression's value is stored after the last's |
 | `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing |
 | `hooks` | the starts: `{at: function, written: [cells], key: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `key` cells, or writes a `pointer` to a program that sets one of `program.fields` |
 | `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start |
@@ -202,8 +203,10 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the document does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
 | `commands` | the native command codes the lifter replaces by the command named `key` that references `x` (`!freq`) |
 
-A function is named `procs.<proc>`, `records.<record>.<field>[.<index>]` or
-`record_types.<type>.<template>`.
+A function is `{proc: p}`, `{record: r, field: f}` (every row's action list in field `f`, or
+with `index: i` row `i`'s) or `{type: t, template: f}`. A `fire` entry names the function it
+runs: a proc name `{proc}`, a `run` with `field` `{record, field}`, a `run` with `template`
+`{type, template}`.
 
 ## The cursor
 

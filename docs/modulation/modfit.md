@@ -16,8 +16,8 @@ playroutine-level analyses (accumulator fits, keyword composition and signatures
 
 How a declaration feeds the analysis:
 
-- `fire` is the action list of one firing; `pre`/`post` bound a firing in the compiled player
-  (`unitracker.player.modulation`), and `hooks` mark a start, which opens an occurrence at the
+- `fire` is the action list of one firing; its first and last entries' functions bound a firing
+  in the compiled player (`unitracker.player.modulation`), and `hooks` mark a start, which opens an occurrence at the
   unit's next firing and runs to its next start. `scope: global` makes one occurrence per unit.
 - `cell` is the modulated value `v`; a pair `hi:lo[:k]` is fused into one value. With `chip`,
   `v` is the chip value `value` (`width` bits) and `store` writes it back; on a pair cell the
@@ -33,7 +33,7 @@ How a declaration feeds the analysis:
 A start is derived from its *start key*: the unit, its start control state and its start
 value term (`exprs.Analysis.key`).
 
-1. **Slice.** `fire` (record `run`s dispatched as `if` chains) is sliced to the cell. Cells it
+1. **Slice.** `fire` (record `run`s dispatched as `if` chains, through the procs that run them) is sliced to the cell. Cells it
    reads before writing and writes again are the *control*; other cells it reads are parameters.
    Note cells become `N`; the start hook is re-run with the note as `N`, and a cell it writes is
    kept as a term of `N` where that term gives the observed start value. The start value `v0`
