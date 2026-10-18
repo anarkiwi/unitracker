@@ -34,7 +34,7 @@ from unitracker.format.codec import (
     written_value,
 )
 from unitracker.format.events import lifetime, restart
-from unitracker.format.records import record_types
+from unitracker.format.records import RecordTypeError, record_types
 from unitracker.player.vm import SongPlayer
 
 PLAYERS = sorted(
@@ -560,6 +560,33 @@ def test_codec_declarations_are_checked(spec, match):
             RowCodec(types["ctrltab"], [spec], 0)
 
 
+def test_optional_fields_give_each_shape_their_keys_unless_it_gives_its_own():
+    expr = {"freq": {"expr": "x"}}
+    spec = {
+        **{"form": "map", "fields": ["x"], "optional": ["ad", "sr", "w"]},
+        "codec": [
+            {
+                "when": "w < 0",
+                "keys": {"sr": {"value": "sr * 2", "omit": "sr < 0"}, **expr},
+                "raw": {"ad": "ad + 1 if has_ad else -1", "sr": "sr // 2 if has_sr else -1"},
+            },
+            {"when": "w >= 0", "keys": expr, "raw": {"w": "x"}},
+        ],
+    }
+    rtype = record_types({"record_types": {"t": spec}})["t"]
+    assert rtype.fields == {"x": 0, "ad": -1, "sr": -1, "w": -1}
+    codec = RowCodec(rtype, rtype.codec, 0)
+    assert codec.encode({"ad": 4, "sr": 3}) == {"ad": 4, "sr": 6}
+    assert codec.encode({"w": 5, "x": 5}) == {"freq": ("x", 5)}
+    assert codec.decode({"sr": 6}) == {"ad": -1, "sr": 3}
+    assert codec.decode({"ad": 4}) == {"ad": 4, "sr": -1, "w": 0}
+    with pytest.raises(CodecError, match=re.escape("values of ['ad']")):
+        RowCodec(rtype, rtype.codec[:1], 0).decode({"ad": 4})
+    assert codec.decode({"freq": ("x", 5), "ad": 2}) == {"ad": 2, "sr": -1, "w": 5, "x": 5}
+    with pytest.raises(RecordTypeError, match="both fields and optional"):
+        record_types({"record_types": {"t": {"fields": {"ad": -1}, "optional": ["ad"]}}})
+
+
 def test_codec_expressions_read_only_declared_tables():
     assert Evaluator(None, {"t": [7]})("t[0] + t[5]", {}) == 7
     for call in (lambda: Evaluator()("t[0]", {}), lambda: evaluate("nope(", {})):
@@ -835,9 +862,8 @@ def key_forms(player: str) -> dict:
     rtypes = TYPES[player]
     rtype = next(t for t in rtypes.values() if t.written == "ctrl")
     forms = {}
-    for shape in rtype.codec:
-        for key, spec in (shape.get("keys") or {}).items():
-            spec = spec if isinstance(spec, dict) else {"value": spec}
+    for shape in RowCodec(rtype, rtype.codec, 0).shapes:
+        for key, spec in shape.keys.items():
             found = forms.setdefault(key, {})
             found.update(dict.fromkeys(["value"] if "value" in spec else []))
             found.update(dict.fromkeys(["`^n`"] if "eor" in spec else []))

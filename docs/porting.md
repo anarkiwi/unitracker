@@ -156,8 +156,10 @@ Declare each native table as a record type ([Record types](playroutines/schema.m
 
 `writes_as` names the record type the table is written as (`ins`, `ctrl`, `pw`, `filter`, `restart`;
 the table in [Definitions](format/document.md#definitions)), and `prefix` its name prefix when that
-is not the written name's first letter. A field for which 0 is meaningful defaults to -1, "absent"
-(the `restart` rows, `defmon`'s sidTAB columns).
+is not the written name's first letter. A field for which 0 is meaningful goes in `optional`, read as
+-1, "absent", when missing (the `restart` rows, `defmon`'s sidTAB columns); an optional field that is
+a shared key needs no `keys` or `raw` entry of its own. Read a signed byte or word with the builtins
+`s8` and `s16`.
 
 **Codec shapes.** Each `codec` entry is one row kind: `when` over the raw fields, the constants and,
 for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back;

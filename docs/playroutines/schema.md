@@ -34,6 +34,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | key | meaning |
 |---|---|
 | `fields` | a list of names, or `{name: default}`; a missing field reads as its default |
+| `optional` | `[field, ...]`: more fields, which read as -1, "absent", when missing; one that is a shared key gives each codec shape that key, left out when absent, and reads back as it (see [Codecs](#codecs)) |
 | `form` | `list` (default) or `map` |
 | `writes_as` | the record type a document writes it as (default: its own name; see [Definitions](../format/document.md#definitions)) |
 | `prefix` | the name prefix (default: the first letter of the written name); distinct from the other types' and from the phrases' `p` |
@@ -79,8 +80,11 @@ its place: `first` and `last` are 1 for the program's first row and for the row 
 to leave it out, for `note` whether it is absolute, for `route` its relation to the program's voice
 (1 adds it, -1 removes it, default 0), the raw field holding the key's expression, and for `ctrl`
 its mask as `{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
-`note_abs`, `route_rel`, and for a mask `has_eor` and `eor` defined) and `keep` (raw fields written under their
-own names; a kept reference is written as a name). A key with `expr` is written as the expression
+`note_abs`, `route_rel`, for a mask `has_eor` and `eor`, and each expression key's raw field, the
+expression's reference or 0, defined) and `keep` (raw fields written under their own names; a kept
+reference is written as a name). An `optional` field `f` that is a shared key gives each shape the
+key `f: {value: f, omit: "f < 0"}` and the raw field `f: "f if has_f else -1"`; a shape that gives
+key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one. A key with `expr` is written as the expression
 when that field is set; a key with both `value` and `expr` reads an integer as a value and a string
 as an expression. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
 written as the record's name (`run: pw1`); the reader takes the shape whose `ref` is the type the
@@ -111,7 +115,8 @@ first tick. Expressions use Python syntax, restricted to:
 - names, which resolve as a voice cell (in voice scope), then a global cell, then a constant;
 - `table[i]`, `record[i].field` and, in a template, `row.field`;
 - `+ - * // % & | ^ << >> ~`, comparisons, `and`, `or`, `not`, and `a if c else b`;
-- calls to `functions`.
+- calls to `functions`, and to the builtins `s8(x)` and `s16(x)`, byte and word `x` read as two's
+  complement.
 
 Arithmetic is unbounded; only assignment wraps. These are the playroutine's expressions; a song's
 modulator expressions use the grammar of [Modulators](../modulation/expressions.md#grammar).

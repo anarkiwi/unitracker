@@ -293,7 +293,7 @@ def test_register_roles():
 
 TEST = ("-", "TEST", "-")
 FIELDS = [
-    ("goattracker2", "pulsetab", "r", {TEST, ("PW", "ACC", "[0:7]→PW")}, True),
+    ("goattracker2", "pulsetab", "r", {("PW", "ACC", "[0:7]→PW")}, True),
     ("goattracker2", "pulsetab", "next", {TEST, ("PW", "PTR", "ref pulsetab")}, True),
     ("goattracker2", "ins", "speed", {("FREQ", "REF", "ref speedtab")}, False),
     ("goattracker2", "ins", "pw", {("PW", "PTR", "ref pulsetab")}, False),

@@ -27,7 +27,7 @@ record_types:
     none: 0
     max: 0xFFFF
     form: map
-    fields: {ctrl: -1, filter: -1}
+    optional: [ctrl, filter]
     refs: {ctrl: sidtab, filter: sidtab}
   # The restart a note names: lookahead rows of sidTAB columns, then the note's empty row.
   restart:
@@ -35,20 +35,17 @@ record_types:
     none: 0
     chain: next
     form: map
-    fields: {dl: 0, wgh: -1, wgl: -1, ad: -1, sr: -1, next: 0}
+    fields: [dl, next]
+    optional: [wgh, wgl, ad, sr]
     codec:
       - when: "not last and dl >= 0 and dl < 0x80"
         keys:
           hold: {value: "dl + 1", omit: "dl == 0"}
           ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
-          ad: {value: ad, omit: "ad < 0"}
-          sr: {value: sr, omit: "sr < 0"}
         raw:
           dl: "(hold - 1) if has_hold else 0"
           wgh: "ctrl if has_ctrl else -1"
           wgl: "eor if has_eor else -1"
-          ad: "ad if has_ad else -1"
-          sr: "sr if has_sr else -1"
       - when: "last and dl == 0 and wgh < 0 and wgl < 0 and ad < 0 and sr < 0"
   # sidTAB row: dl holds the row dl + 1 ticks ($80+ freezes the layer); each column, -1 when
   # absent, applies in the replay's bitmap-walk order ($16B0).
@@ -64,37 +61,29 @@ record_types:
     # keeps the routing and adds the voice and the low nibble under resonance re >> 4
     # (route + m), any other value is the byte (res, route).
     codec:
-      - when: "xf != 0 and af == 0x80 and pw < 0 and ps < 0 and cp < 0 and acid < 0"
+      - when: "(af == 0x80 if xf else af < 0) and pw < 0 and ps < 0 and cp < 0 and acid < 0"
         keys:
-          <<: &columns
-            hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
-            ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
-            note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
-            ad: {value: ad, omit: "ad < 0"}
-            sr: {value: sr, omit: "sr < 0"}
-            pw: {expr: xp}
-            cut: {expr: xc}
-            res: {value: "re >> 4", omit: "re <= 0"}
-            route: {value: "re & 0x0F", rel: "-1 if re == 0 else (1 if re & 0x08 else 0)", omit: "re < 0"}
-            mode: {value: "fv & 0xF0", omit: "fv < 0"}
+          hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
+          ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
+          note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
           freq: {expr: xf}
+          pw: {expr: xp}
+          cut: {expr: xc}
+          res: {value: "re >> 4", omit: "re <= 0"}
+          route: {value: "re & 0x0F", rel: "-1 if re == 0 else (1 if re & 0x08 else 0)", omit: "re < 0"}
+          mode: {value: "fv & 0xF0", omit: "fv < 0"}
         raw:
-          <<: &fields
-            dl: "(hold - 1) if has_hold else 0"
-            wgh: "ctrl if has_ctrl else -1"
-            wgl: "eor if has_eor else -1"
-            tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
-            ad: "ad if has_ad else -1"
-            sr: "sr if has_sr else -1"
-            re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
-            fv: "mode if has_mode else -1"
-          af: 0x80
-      - when: "xf == 0 and af < 0 and pw < 0 and ps < 0 and cp < 0 and acid < 0"
-        keys: *columns
-        raw: *fields
+          dl: "(hold - 1) if has_hold else 0"
+          wgh: "ctrl if has_ctrl else -1"
+          wgl: "eor if has_eor else -1"
+          tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
+          af: "0x80 if xf else -1"
+          re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
+          fv: "mode if has_mode else -1"
     # A frozen row ends a program.
     end: {dl: 0x80}
-    fields: {dl: 0, wgh: -1, wgl: -1, ad: -1, sr: -1, tr: -1, af: -1, pw: -1, ps: -1, re: -1, fv: -1, cp: -1, acid: -1, next: 0, xf: 0, xp: 0, xc: 0}
+    fields: [dl, next, xf, xp, xc]
+    optional: [wgh, wgl, ad, sr, tr, af, pw, ps, re, fv, cp, acid]
     refs: {xf: x, xp: x, xc: x}
     do:
       - {if: "row.wgh >= 0", then: [{set: {ctrl: row.wgh}}]}
@@ -133,7 +122,7 @@ record_types:
           # The written width is the 12-bit cell; a cell over $0FFF has no form that reads back.
           pw: {value: "pw if pw <= 0x0FFF else pw + 0x10000", omit: "pw == 0"}
           note: {value: tbase, abs: "1", omit: "tbase == 0"}
-          freq: {value: "((((fhi << 8) | flo) - nfreq(tbase) + 0x8000) & 0xFFFF) - 0x8000", omit: "((fhi << 8) | flo) == nfreq(tbase)"}
+          freq: {value: "s16((((fhi << 8) | flo) - nfreq(tbase)) & 0xFFFF)", omit: "((fhi << 8) | flo) == nfreq(tbase)"}
         keep: [sacc]
         raw:
           pw: "pw if has_pw else 0"

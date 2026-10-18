@@ -42,32 +42,19 @@ record_types:
     refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, freq: x, restart: restart}
   # Hard restart: a lookahead row, read hold ticks before the note (the gate timer), that
   # may turn the gate off and then preset the envelope to adparam; then the note's first-tick
-  # row, which writes the first waveform with the gate on, or only the gate. -1: absent.
+  # row, which writes the first waveform with the gate on, or only the gate.
   restart:
     prefix: r
     none: 0
     chain: next
     form: map
-    fields: {hold: 0, ctrl: -1, gate: -1, ad: -1, sr: -1, next: 0}
+    fields: [hold, next]
+    optional: [ctrl, gate, ad, sr]
     codec:
       - when: "first and not last and hold >= 1 and hold <= 0x3F and ctrl < 0 and gate <= 0 and ((ad < 0 and sr < 0) or (gate == 0 and ad == adparam >> 8 and sr == (adparam & 0xFF)))"
-        keys:
-          hold: {value: hold, omit: "hold == 1"}
-          gate: {value: gate, omit: "gate < 0"}
-          ad: {value: ad, omit: "ad < 0"}
-          sr: {value: sr, omit: "sr < 0"}
-        raw:
-          hold: "hold if has_hold else 1"
-          gate: "gate if has_gate else -1"
-          ad: "ad if has_ad else -1"
-          sr: "sr if has_sr else -1"
+        keys: {hold: {value: hold, omit: "hold == 1"}}
+        raw: {hold: "hold if has_hold else 1"}
       - when: "last and not first and hold == 0 and ad < 0 and sr < 0 and ((ctrl < 0 and gate <= 1) or (ctrl >= 1 and ctrl < 0xFE and gate == 1))"
-        keys:
-          ctrl: {value: ctrl, omit: "ctrl < 0"}
-          gate: {value: gate, omit: "gate < 0"}
-        raw:
-          ctrl: "ctrl if has_ctrl else -1"
-          gate: "gate if has_gate else -1"
   # The speed table: no written form.
   speedtab:
     prefix: s
@@ -165,7 +152,7 @@ record_types:
         keys: {pw: "((l & 0x0F) << 8) | r"}
         raw: {l: "0x80 | (pw >> 8)", r: "pw & 0xFF"}
     do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
-    each: [{accumulate: pulse, step: "row.r - 0x100 if row.r >= 0x80 else row.r"}]
+    each: [{accumulate: pulse, step: "s8(row.r)"}]
   # Filtertable row: l $80+ sets the mode and r, the $D417 byte (and cut, a cutoff the player
   # reads from the following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
   filttab:
@@ -173,7 +160,8 @@ record_types:
     none: 0
     chain: next
     expr: x
-    fields: {l: 0, r: 0, cut: -1, next: 0, x: 0}
+    fields: [l, r, next, x]
+    optional: [cut]
     refs: {x: x}
     codec:
       - when: "l >= 0x80 and (x == 0 or cut < 0)"

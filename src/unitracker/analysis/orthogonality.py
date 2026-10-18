@@ -14,12 +14,14 @@ from unitracker.format.codec import (
     COMMAND_NAMES,
     ROW_KEYS,
     CodecError,
+    RowCodec,
     evaluate,
     row_place,
     command_variants,
 )
 from unitracker.format.events.instrument import written_as
-from unitracker.format.records import META_KEYS
+from unitracker.format.expr import with_builtins
+from unitracker.format.records import META_KEYS, field_defaults, record_types
 from unitracker.format.refs import view
 from unitracker.optimise import programs_of
 from unitracker.player.vm import ONSET, PSEUDO
@@ -128,7 +130,7 @@ class Static:
     def __init__(self, pr: dict):
         self.pr = pr
         self.cells = {**(pr.get("global") or {}), **(pr.get("voice") or {})}
-        self.functions = pr.get("functions") or {}
+        self.functions = with_builtins(pr.get("functions"))
         self.deps, self.roots, self.writes = {}, set(), {}
         self.calls, self.fields, self.conditions = set(), set(), []
         for owner, actions in self._lists():
@@ -241,8 +243,7 @@ class Static:
         """``(type, field)`` of record fields the VM never reads."""
         out = []
         for tname, spec in (self.pr.get("record_types") or {}).items():
-            fields = (spec or {}).get("fields") or {}
-            for f in fields if isinstance(fields, list) else list(fields):
+            for f in field_defaults(spec or {}):
                 if (tname, f) not in self.fields:
                     out.append((tname, f))
         return out
@@ -462,9 +463,9 @@ def command_uses(ir: dict) -> dict:
 def _codec_keys(pr: dict) -> dict:
     """``{(type, shape index): shared keys}`` of a playroutine's codec shapes, by native type."""
     out = {}
-    for tname, spec in (pr.get("record_types") or {}).items():
-        for k, shape in enumerate((spec or {}).get("codec") or []):
-            out[(tname, k)] = sorted((shape.get("keys") or {}).keys())
+    for tname, rtype in record_types(pr).items():
+        for k, shape in enumerate(RowCodec(rtype, rtype.codec, 0).shapes):
+            out[(tname, k)] = sorted(shape.keys)
     return out
 
 

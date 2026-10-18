@@ -4,6 +4,7 @@ from unitracker.format.expr import ExprError, Resolver
 
 META_KEYS = {
     "fields",
+    "optional",
     "prefix",
     "chain",
     "none",
@@ -21,10 +22,25 @@ META_KEYS = {
 }
 EXPR = "x"
 PHRASE = "p"
+ABSENT = -1
 
 
 class RecordTypeError(ValueError):
     """A record type declaration is malformed."""
+
+
+def field_defaults(spec: dict) -> dict:
+    """``{field: default}`` of a record type's ``fields`` (a list's default 0) and its
+    ``optional`` fields (default :data:`ABSENT`)."""
+    fields = spec.get("fields") or {}
+    if isinstance(fields, list):
+        fields = dict.fromkeys(fields, 0)
+    out = {str(k): int(v) for k, v in fields.items()}
+    optional = [str(f) for f in spec.get("optional") or ()]
+    twice = sorted(set(out) & set(optional))
+    if twice:
+        raise RecordTypeError(f"fields {twice} are both fields and optional")
+    return {**out, **dict.fromkeys(optional, ABSENT)}
 
 
 class RecordType:
@@ -39,10 +55,8 @@ class RecordType:
 
     def __init__(self, name: str, spec: dict):
         self.name = name
-        fields = spec.get("fields") or {}
-        if isinstance(fields, list):
-            fields = {f: 0 for f in fields}
-        self.fields = {str(k): int(v) for k, v in fields.items()}
+        self.fields = field_defaults(spec)
+        self.optional = tuple(str(f) for f in spec.get("optional") or ())
         self.written = str(spec.get("writes_as", name))
         self.prefix = str(spec.get("prefix", self.written[0]))
         self.chain = spec.get("chain")

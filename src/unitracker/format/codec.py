@@ -10,6 +10,7 @@ import keyword
 import re
 
 from unitracker.format.expr import ExprError, Resolver
+from unitracker.format.records import ABSENT
 
 ROW_KEYS = (
     "wait",
@@ -189,28 +190,39 @@ def written_value(key: str, value):
     return _FORMS[key][1](value) if key in _FORMS else value
 
 
+def optional_codec(optional) -> tuple[dict, dict]:
+    """``(keys, raw)`` a shape gets for its record type's optional fields that are shared keys:
+    the key is the field, left out when it is :data:`ABSENT`, and reads back as it."""
+    fields = [f for f in optional if f in ROW_KEYS]
+    keys = {f: {"value": f, "omit": f"{f} < 0"} for f in fields}
+    return keys, {f: f"{f} if has_{f} else {ABSENT}" for f in fields}
+
+
 class _Shape:
     """One way to write a row: forward keys, inverse raw fields, fields kept as they are.
 
     A ``route`` key's ``rel`` gives its relation to the program's voice (see
     :func:`route_value`). A key's ``expr`` names the raw field of its expression, a key with
     ``ref`` is the reference to that record type its raw ``field`` holds, and a key with
-    ``none`` is written ``none``.
+    ``none`` is written ``none``. The record type's ``optional`` fields give the keys and raw
+    fields of :func:`optional_codec`; a key the shape gives replaces both, a raw field the raw.
     """
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, spec: dict):
+    def __init__(self, spec: dict, optional=()):
         self.when = spec.get("when")
+        own = spec.get("keys") or {}
+        gen_keys, gen_raw = optional_codec(f for f in optional if f not in own)
         self.keys = {}
-        for key, kspec in (spec.get("keys") or {}).items():
+        for key, kspec in {**gen_keys, **own}.items():
             if key not in ROW_KEYS:
                 raise CodecError(f"{key!r} is not a shared row key")
             self.keys[key] = kspec if isinstance(kspec, dict) else {"value": kspec}
             if ("ref" in self.keys[key]) != ("field" in self.keys[key]):
                 raise CodecError(f"{key}: a reference key has both ref and field")
         self.refs = {k for k, s in self.keys.items() if "ref" in s}
-        self.raw = dict(spec.get("raw") or {})
+        self.raw = {**gen_raw, **(spec.get("raw") or {})}
         bad = sorted(f for f, expr in self.raw.items() if isinstance(expr, dict))
         if bad:
             raise CodecError(f"raw {bad}: a raw field is an expression")
@@ -242,7 +254,7 @@ class RowCodec:
 
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
         self.rtype = rtype
-        self.shapes = [_Shape(s) for s in spec]
+        self.shapes = [_Shape(s, rtype.optional) for s in spec]
         self.keys = frozenset(k for s in self.shapes for k in (*s.keys, *s.keep))
         self.offset = offset
         self.ev = evaluator or _PLAIN
@@ -371,10 +383,11 @@ class RowCodec:
         unfit = self._unfit(shape, norm)
         if unfit is not None:
             return None, unfit
-        env = self._env(shape, {k: v for k, v in norm.items() if k not in shape.refs})
+        exprs = {shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)}
+        env = {**exprs, **self._env(shape, {k: v for k, v in norm.items() if k not in shape.refs})}
         raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
-        raw.update({shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)})
+        raw.update(exprs)
         raw.update({shape.keys[k]["field"]: v[1] for k, v in norm.items() if k in shape.refs})
         full = self._full(raw)
         if not self._fits(shape, full, place):
