@@ -27,6 +27,12 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 | `filter` | filter table (`filttab`) | see Filter |
 | `restart` | the instrument's gate timer and first wave | instruments with one gate timer and first wave share a restart program |
 
+A jump row ($FF, target) chains the row before it to its target. The player follows one jump
+and reads the row it lands on as data, so a jump to a jump row runs that row's bytes: in the
+wavetable a row that keeps the waveform and plays its target byte as a note, in the pulse table
+the width $F00 plus its target byte, in the filter table a parameter row of mode $70 setting
+`$D417` to it.
+
 The speed table has no written form: its vibrato and slide speeds are terms of the `freq`
 expressions, and `!tempo` and `!vtempo` write a swing's row inline.
 
@@ -120,6 +126,7 @@ A control mask (`ctrl: ^n`) is refused.
 | `res`, `route` (a mask) | filter parameter rows, which set both; `!resfilt` |
 | `mode` | filter parameter rows, bits 4-6 |
 | `cut` | the filter program's `cut` expression; a parameter row carries the following cutoff row's value, because the player reads both in one tick; `!cut` |
+| `hold` | a cutoff sweep row of speed 0 (`l` $01-$7F, `r` 0), which holds the cutoff, or the expression driving it, `l` ticks; the expression conversion clears each sweep row it replaces to one, keeping `l` |
 | volume | `!vol` |
 
 `res` and `route` are one byte, which a filter parameter row, `!resfilt:r/m` (command $B) and a

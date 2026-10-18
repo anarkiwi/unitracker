@@ -34,20 +34,20 @@ from unitracker.player.vm import SongPlayer, event_commands
             gt.wave_records,
             [(0x41, 0x00), (0x02, 0x81), (0xE1, 0x80), (0xF5, 0x40), (0xFF, 0x01)],
             ("w", "n", "next"),
-            [(0x41, 0x00, 2), (0x02, 0x81, 3), (0xE1, 0x80, 4), (0xF5, 0x40, 1)],
+            [(0x41, 0x00, 2), (0x02, 0x81, 3), (0xE1, 0x80, 4), (0xF5, 0x40, 1), (0x00, 0x01, 6)],
         ),
         (
             gt.pulse_records,
             [(0x84, 0x00), (0x20, 0xF0), (0x10, 0x10), (0xFF, 0x02)],
             ("l", "r", "next"),
-            [(0x84, 0x00, 2), (0x20, 0xF0, 3), (0x10, 0x10, 2)],
+            [(0x84, 0x00, 2), (0x20, 0xF0, 3), (0x10, 0x10, 2), (0x8F, 0x02, 5)],
         ),
         (
             gt.filter_records,
             [(0x90, 0xF1), (0x00, 0x40), (0x10, 0x02), (0x00, 0x22), (0xA0, 0x10), (0xFF, 0x00)],
             ("l", "r", "cut", "next"),
             [(0x90, 0xF1, 0x40, 3), (0, 0x40, None, 3), (0x10, 0x02, None, 4)]
-            + [(0, 0x22, None, 5), (0xA0, 0x10, None, 0)],
+            + [(0, 0x22, None, 5), (0xA0, 0x10, None, 0), (0xF0, 0x00, 0x00, 8)],
         ),
         (gt.speed_records, [(0x04, 0x20), (0x81, 0x02)], ("l", "r"), [(4, 32), (0x81, 2)]),
     ],
@@ -501,3 +501,40 @@ def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
     theirs = np.asarray(native.render_grid(400), dtype=np.uint8)
     assert SongPlayer(out).mismatch(theirs) is None
     assert gt.snapped(out) is out
+
+
+ZERO_SWEEPS = {
+    "a native zero sweep": ([(0x90, 0xF1), (0x00, 0x40), (0x05, 0x00), (0xA0, 0xF2)], {"hold": 5}),
+    "a sweep the expression replaces": (
+        [(0x90, 0xF1), (0x00, 0x40), (0x06, 0x03), (0xA0, 0xF2)],
+        {"hold": 6},
+    ),
+}
+
+
+@pytest.mark.parametrize("filt,held", ZERO_SWEEPS.values(), ids=ZERO_SWEEPS)
+def test_a_zero_sweep_holds_its_ticks(filt, held):
+    instruments = [{"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    text, _, theirs = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], instruments, filt=filt + [(0xFF, 0)]))
+    assert held in song_def(text)["ins"]["i1"]["filter"]
+    assert 0xF2 in theirs[:, 0x17]
+
+
+JUMPS_TO_JUMPS = {
+    "wave": {"wave": [(0x41, 0), (0xFF, 3), (0xFF, 0x05), (0x21, 0x80), (0xFF, 4)]},
+    "pulse": {
+        "wave": [(0x41, 0), (0xFF, 0)],
+        "pulse": [(0x84, 0), (0x08, 0x7F), (0xFF, 3), (0x87, 0x00), (0xFF, 0)],
+    },
+    "filter": {
+        "wave": [(0x41, 0), (0xFF, 0)],
+        "filt": [(0x90, 0xF1), (0x00, 0x40), (0x04, 0x02), (0xFF, 4), (0xA0, 0xF2), (0xFF, 0)],
+    },
+}
+
+
+@pytest.mark.parametrize("tune", JUMPS_TO_JUMPS.values(), ids=JUMPS_TO_JUMPS)
+def test_a_jump_to_a_jump_row_reads_that_row_as_data(tune):
+    ins = {"wave_ptr": 1, "pulse_ptr": 1 if "pulse" in tune else 0, "gateoff_timer": 2}
+    ins.update(sustain_release=0xF0, filter_ptr=1 if "filt" in tune else 0)
+    lifted(*gt_tune(instruments=[ins], **tune))
