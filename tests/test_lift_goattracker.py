@@ -18,6 +18,8 @@ from pygoattracker.model import (
 )
 
 from unitracker.format import songio
+from unitracker.format.codec import CodecError, CommandCodec, RowCodec
+from unitracker.format.records import record_types
 from unitracker.lift import goattracker as gt
 from unitracker.modfit.convert import ConversionError
 from unitracker.player.vm import SongPlayer
@@ -427,3 +429,16 @@ def test_funk_carries_its_tempos():
     grid = SongPlayer(songio.loads(text)).render_grid(120).astype(int)
     steps = np.diff([t for t in range(1, 120) if grid[t, 0] != grid[t - 1, 0]])
     assert set(steps[::2]) == {6} and set(steps[1::2]) == {9}
+
+
+def test_a_cutoff_byte_writes_its_top_eight_bits():
+    pr = songio.library("goattracker2")
+    rows, cmds = songio.codecs(pr, None), CommandCodec(pr["commands"], record_types(pr))
+    assert cmds.encode(12, 0x21) == ("cut", 0x108) and cmds.decode("cut", 0x108) == (12, 0x21)
+    assert rows["ctrltab"].decode({"cut": 0x108}) == {"w": 0xFC, "n": 0x21}
+    with pytest.raises(CodecError, match="can't express !cut:265"):
+        cmds.decode("cut", 0x109)
+    with pytest.raises(CodecError, match=r"values of \['cut'\]"):
+        rows["ctrltab"].decode({"cut": 0x109})
+    with pytest.raises(CodecError, match="a byte form has no value"):
+        RowCodec(record_types(pr)["ctrltab"], [{"keys": {"cut": {"byte": "n", "value": "n"}}}], 0)

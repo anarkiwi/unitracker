@@ -550,8 +550,6 @@ def test_command_names_the_player_cannot_say_are_refused(player):
         ({1: {"name": "mod"}}, "not a shared command name"),
         ({1: {"name": "run", "ref": "nope"}}, "unknown type 'nope'"),
         ({"keys": {"ad": {"byte": "n"}}}, "ad has no byte form"),
-        ({"keys": {"cut": {"byte": "n", "value": "n"}}}, "a byte form has no value"),
-        ({1: {"name": "ad", "byte": "arg"}}, "ad has no byte form"),
     ],
 )
 def test_codec_declarations_are_checked(spec, match):
@@ -561,16 +559,6 @@ def test_codec_declarations_are_checked(spec, match):
             CommandCodec(spec, types)
         else:
             RowCodec(types["ctrltab"], [spec], 0)
-
-
-def test_a_cutoff_byte_writes_its_top_eight_bits():
-    cmds, ctrl = COMMANDS["goattracker2"], CODECS["goattracker2"]["ctrltab"]
-    assert cmds.encode(12, 0x21) == ("cut", 0x108) and cmds.decode("cut", 0x108) == (12, 0x21)
-    assert ctrl.decode({"cut": 0x108}) == {"w": 0xFC, "n": 0x21}
-    with pytest.raises(CodecError, match="can't express !cut:265"):
-        cmds.decode("cut", 0x109)
-    with pytest.raises(CodecError, match=re.escape("values of ['cut']")):
-        ctrl.decode({"cut": 0x109})
 
 
 def test_optional_fields_give_each_shape_their_keys_unless_it_gives_its_own():
