@@ -217,7 +217,7 @@ def test_unsupported_builds_are_named():
         simplepulse=True, state=object(), init_regs=((0, 1),), live_vibrato=False
     )
     with pytest.raises(gt.LiftError, match="SIMPLEPULSE.*full-ghosting.*init-routine"):
-        gt.lift(SimpleNamespace(info=info))
+        gt.GoatTrackerLift(SimpleNamespace(info=info)).run()
 
 
 def test_the_reference_lift_holds_the_tunes_constants(references):
@@ -282,7 +282,7 @@ FIRST = {"ctrl": 65, "note": 0}
 def lifted(dec, native, ticks=400) -> tuple[str, SongPlayer, np.ndarray]:
     """``(canonical text, its player, native grid)`` of a synthetic tune's lift, asserting the
     text round-trips and plays as the native player."""
-    text = songio.dumps(gt.lift(dec))
+    text = songio.dumps(gt.GoatTrackerLift(dec).run())
     song = songio.loads(text)
     assert songio.dumps(song) == text
     theirs = np.asarray(native.render_grid(ticks), dtype=np.uint8)
@@ -411,7 +411,7 @@ def test_wavetable_rows_without_a_form_are_named(wave, rows, speed, error, match
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     dec, _ = gt_tune(wave, rows=rows, speed=speed)
     with pytest.raises(error, match=match):
-        gt.lift(dec)
+        gt.GoatTrackerLift(dec).run()
 
 
 VIBRATO = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "vibrato_param": 1}
@@ -493,7 +493,7 @@ def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
     rows = [(24, 1, 0, 0)] + [REST] * 3 + [(31, 0, 3, 0)] + [REST] * 3
     rows += [(36, 1, 0, 0)] + [REST] * 7
     dec, native = gt_tune([(0x41, 0), (0xFF, 0)], rows=rows)
-    out = gt.snapped(gt.lift(dec, expressions=False))
+    out = gt.snapped(gt.GoatTrackerLift(dec, expressions=False).run())
     cmds = [list(c) for e in out["phrases"]["p00"] for c in event_commands(e)]
     assert [3, 0] not in cmds and [gt.LEGATO, 0] in cmds
     (index,) = [a for c, a in cmds if c == gt.FREQ]

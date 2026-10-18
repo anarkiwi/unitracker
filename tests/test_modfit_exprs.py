@@ -755,7 +755,7 @@ def gt_song_fixture():
         speed=[(0, 32)],
         pulse=pulse,
     )
-    return goattracker.lift(dec, expressions=False), player
+    return goattracker.GoatTrackerLift(dec, expressions=False).run(), player
 
 
 def test_the_pool_maps_in_order_and_the_cache_reads_an_entry_written_while_it_waited(

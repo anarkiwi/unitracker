@@ -41,7 +41,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | playroutine | `src/unitracker/playroutines/<name>.yaml` | the replay transcribed as cells, procs, records and a ghost ([The playroutine](playroutines/schema.md)) |
 | record types and codecs | the playroutine's `record_types` and `commands` | the native table layouts, and each row kind and command code as shared keys and back, rejecting what the player cannot play ([Record types](playroutines/schema.md#record-types), [Codecs](playroutines/schema.md#codecs)) |
 | modulator units | the playroutine's `modulators` | the cells the song drives by expressions ([Modulator declarations](playroutines/schema.md#modulator-declarations)) |
-| lifter | `src/unitracker/lift/<name>.py` | native module data to the internal representation ([The internal representation](playroutines/lifting.md#the-internal-representation)) |
+| lifter | `src/unitracker/lift/<name>.py` | a `Lift` subclass: native module data to the internal representation ([Lifting](playroutines/lifting.md)) |
 | backend entry | `src/unitracker/lift/backends.py` | detection, and dispatch to the lifter and the native player |
 | reference tune | `tests/conftest.py` | an HVSC tune fetched into `.tunecache/` and checked against the native replay |
 
@@ -309,9 +309,22 @@ envelope nibbles, restarts, one-command columns) beside the existing players'. *
 
 ## 6. The lifter
 
-`src/unitracker/lift/<name>.py` defines `LiftError(ValueError)` and
-`lift(raw: bytes, subtune, expressions: bool = True) -> dict`, which decodes the module with the
-native package and returns the internal representation:
+`src/unitracker/lift/<name>.py` subclasses `unitracker.lift.base.Lift`, as
+`goattracker.GoatTrackerLift` does (defMON and SID-Wizard are to follow), and raises
+`base.LiftError`. The base runs the passes ([Lifting](playroutines/lifting.md)); the subclass
+supplies the player:
+
+| member | content |
+|---|---|
+| `playroutine` | the library name, `"<name>"` |
+| `decode(raw, subtune)` | the native package's decoded module, kept as `self.tune` |
+| `native()` | a fresh native player of the tune; state its passes share, read from it once, is a `functools.cached_property` (GoatTracker's `start`, the tempo cells after init) |
+| `check_build()` | raises `LiftError` naming the builds and features the playroutine does not cover |
+| `structure()` | the internal representation, below |
+| `normalisations` | the ordered player-specific passes `(lift, song) -> song`, each proved by a replay |
+| `convert(song)` | `modfit.convert.convert` by default; an override post-processes its song (GoatTracker's `snapped`) |
+
+`structure()` returns:
 
 | key | content |
 |---|---|
@@ -325,10 +338,11 @@ native package and returns the internal representation:
 | `phrases` | `{name: [event]}`; an event has `note` (the player's note index, `off` or `on`), `instrument`, `command: [code, arg]` or `commands: [[c, a], [c, a]]`, and `steps` (`vm.fold_empty`) |
 | `playroutine` | `songio.library("<name>")` with `constants` set from the build |
 
-It ends `return convert(ir) if expressions else ir` (`unitracker.modfit.convert.convert`).
+`run()` checks the build, runs `structure` and the normalisations, then `convert` with
+`expressions`; `passes()` names them in order and `stages()` yields each one's song.
 Register it in `backends.py`: `detect` recognises the image (before the GoatTracker fallback,
-which recognises a tune by decompiling it), and `lift` and `native_player` dispatch to the
-lifter and the native player. The CLI, the tools and the tests all go through these three.
+which recognises a tune by decompiling it), and `lift` and `native_player` dispatch to
+`<Name>Lift.from_sid(raw, subtune, expressions).run()` and `.native()`. The CLI, the tools and the tests all go through these three.
 
 **Resolved at lift time.** A document carries only what the composer's rows and definitions
 imply, so the lifter resolves what the native data leaves implicit:
@@ -367,7 +381,7 @@ PYTHONPATH=src .venv/bin/unitracker-play out/porting/song.yaml --check TUNE.sid
 | conformance | `tests/test_reference.py` `test_the_document_round_trips_and_plays_its_native_player` | the `references` fixture lifts once per session and renders the native grid over `REFERENCE_TICKS[name]` (the intro and two loops, in `tests/conftest.py`); the test checks the canonical round trip for `embed` False and True, a non-trivial grid (`len(np.unique(ref.native, axis=0))`) and `SongPlayer(song).mismatch(ref.native) is None`; add the tune to `TUNES` |
 | dispatch | `tests/test_reference.py` `test_the_tools_lift_detect_and_check_each_tune` | `backends.detect` against `BACKEND[name]`; the CLI's lift equals the session's lift (a deterministic lift); `--check` against the native player |
 | vocabulary, command tables | `tests/test_reference.py`, `tests/test_format_codec.py` | section 3 |
-| lifter | `tests/test_lift_<name>.py` | each `LiftError`, with `pytest.raises(LiftError, match=...)`, as `tests/test_lift_goattracker.py` |
+| lifter | `tests/test_lift_<name>.py` | each `LiftError`, with `pytest.raises(LiftError, match=...)`, as `tests/test_lift_goattracker.py`; the passes, as `tests/test_lift_base.py` |
 | exprs report | `unitracker-modfit exprs` | section 4 |
 | optimiser | `tests/conftest.py` `OPTIMISED` | the tune with a subset of passes that keeps the suite's time bounded |
 
@@ -406,7 +420,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under
 |---|---|---|---|
 | 1 | pick the closest port; fetch the reference tunes | `tests/conftest.py` | `.venv/bin/python tools/reference_check.py out/porting` |
 | 2 | transcribe the replay: cells, tables, procs, `init`, `tick`, ghost, `onset` | `playroutines/<name>.yaml` | the `expressions=False` snippet of section 2 prints `None` |
-| 3 | a first lifter and its registration | `lift/<name>.py`, `lift/backends.py`, `pyproject.toml` | the same snippet, through `backends.lift` and `backends.native_player` |
+| 3 | a first lifter (a `Lift` subclass) and its registration | `lift/<name>.py`, `lift/backends.py`, `pyproject.toml` | the same snippet, through `backends.lift` and `backends.native_player` |
 | 4 | record types, codec shapes and commands on the shared keys | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit keywords <name>` |
 | 5 | hard restart, chords, filter, lifetime, relative control in their shared forms | `playroutines/<name>.yaml` | `.venv/bin/python -m pytest -n 4 tests/test_format_events.py` |
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |

@@ -1,12 +1,16 @@
 """Lift a GoatTracker 2 tune (pygoattracker's decompiled .sid) to a unitracker song."""
 
+import functools
+
 import numpy as np
 from pygoattracker import constants as C
+from pygoattracker import decompile_sid
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
 from unitracker.format.songio import library, song_meta
 from unitracker.lift import placed
-from unitracker.modfit.convert import convert, window
+from unitracker.lift.base import Lift, LiftError
+from unitracker.modfit.convert import window
 from unitracker.player.vm import SongPlayer, event_commands, fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
@@ -14,10 +18,6 @@ NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
 # The playroutine's legato command: the note does not retrigger, as a toneporta's; its swing of
 # one voice on a named pair.
 LEGATO, VOICE_SWING, FREQ = 17, 18, 16
-
-
-class LiftError(ValueError):
-    """The tune uses something the GoatTracker 2 playroutine does not cover."""
 
 
 class _Table:
@@ -304,9 +304,10 @@ def _rewritten(ir: dict, start: dict, rewrite: placed.Rewrite, what: str) -> dic
     return out
 
 
-def explicit_swing(ir: dict, start: dict) -> dict:
-    """``ir``, played from the native tempo cells ``start``, with each command that swings on the
-    stored funk pair (:data:`STORED`) naming the pair it meets where it plays."""
+def explicit_swing(lift: "GoatTrackerLift", ir: dict) -> dict:
+    """``ir``, played from the native tempo cells ``lift.start``, with each command that swings
+    on the stored funk pair (:data:`STORED`) naming the pair it meets where it plays."""
+    start = lift.start
     speed = dict(ir["records"]["speedtab"])
     rewrite = placed.Rewrite(
         table="D_v_tick0_do",
@@ -327,9 +328,9 @@ def _unmarked(event: dict, j: int, running: tuple) -> None:
     _set_commands(event, cmds)
 
 
-def unmark(ir: dict, start: dict) -> dict:
-    """``ir``, played from the native tempo cells ``start``, with each $D10-$DFF, which keeps the
-    voice's continuous command and plays nothing else, as that command, or nothing when it is
+def unmark(lift: "GoatTrackerLift", ir: dict) -> dict:
+    """``ir``, played from the native tempo cells ``lift.start``, with each $D10-$DFF, which keeps
+    the voice's continuous command and plays nothing else, as that command, or nothing when it is
     none, once a replay proves the song unchanged."""
     rewrite = placed.Rewrite(
         table="D_v_cmd_do",
@@ -338,7 +339,7 @@ def unmark(ir: dict, start: dict) -> dict:
         default=(0, 0),
         apply=_unmarked,
     )
-    return _rewritten(ir, start, rewrite, "the rewritten $D10-$DFF commands")
+    return _rewritten(ir, lift.start, rewrite, "the rewritten $D10-$DFF commands")
 
 
 SNAP = (C.CMD_TONEPORTA, 0)
@@ -418,7 +419,7 @@ def _unpaused(row: dict) -> dict | None:
     return None
 
 
-def unpause(ir: dict) -> dict:
+def unpause(_lift: "GoatTrackerLift", ir: dict) -> dict:
     """``ir`` with each wavetable row whose only effect beyond its row form is to pause the
     tick's continuous effect (see :func:`_unpaused`) written in that form, once a replay to the
     song's recurrence and one period more proves the pause unheard.
@@ -448,59 +449,72 @@ def unpause(ir: dict) -> dict:
     return out
 
 
-def _check_build(info) -> None:
-    """Raise for player builds the goattracker2 playroutine does not cover yet."""
-    unsupported = {
-        "SIMPLEPULSE pulse tables": info.simplepulse,
-        "full-ghosting builds": info.state is not None,
-        "init-routine SID writes": bool(info.init_regs),
-        "instrument-vibrato-only builds": info.live_vibrato,
-    }
-    missing = [name for name, used in unsupported.items() if used]
-    if missing:
-        raise LiftError("not covered by the goattracker2 playroutine yet: " + ", ".join(missing))
+class GoatTrackerLift(Lift):
+    """A GoatTracker 2 tune, ``tune`` a ``pygoattracker.decompile_sid`` result."""
 
+    playroutine = "goattracker2"
+    normalisations = (unpause, explicit_swing, unmark)
 
-def lift(dec, expressions: bool = True) -> dict:
-    """A unitracker song dict for a ``pygoattracker.decompile_sid`` result.
+    @staticmethod
+    def decode(raw: bytes, subtune: int):
+        return decompile_sid(raw, subtune=subtune)
 
-    With ``expressions`` its modulations are written as the format's expressions.
-    """
-    # pylint: disable=too-many-locals
-    info = dec.info
-    _check_build(info)
-    song = dec.typed.to_song()
-    build = info.build
-    playroutine = library("goattracker2")
-    adparam = C.DEFAULT_ADPARAM
-    if build.adparam is not None:
-        adparam = build.adparam << 8 | build.srparam
-    start = native_start(dec.player())
-    freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
-    instruments, restarts = instrument_records(song.instruments, adparam)
-    tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
-    phrases = _phrases(song, tracks)
-    header = dec.header
-    ir = {
-        "unitracker": "ir",
-        "tempo": initial_tempo(start),
-        "meta": song_meta(header, f"goattracker2 subtune {dec.subtune}"),
-        "clock": NTSC_CLOCK if (header.flags >> 2) & 3 == 2 else PAL_CLOCK,
-        "voices": 3,
-        "tables": {
-            "ftab": [int(v) for v in freq],
-        },
-        "records": {
-            "ins": instruments,
-            "restart": restarts,
-            "ctrltab": wave_records(song.wavetable),
-            "pulsetab": pulse_records(song.pulsetable),
-            "filttab": filter_records(song.filtertable),
-            "speedtab": speed_records(song.speedtable),
-        },
-        "tracks": tracks,
-        "phrases": phrases,
-        "playroutine": playroutine,
-    }
-    ir = unmark(explicit_swing(unpause(ir), start), start)
-    return snapped(convert(ir)) if expressions else ir
+    def native(self):
+        return self.tune.player()
+
+    @functools.cached_property
+    def start(self) -> dict:
+        """The native tempo cells after init (see :func:`native_start`)."""
+        return native_start(self.native())
+
+    def check_build(self) -> None:
+        info = self.tune.info
+        unsupported = {
+            "SIMPLEPULSE pulse tables": info.simplepulse,
+            "full-ghosting builds": info.state is not None,
+            "init-routine SID writes": bool(info.init_regs),
+            "instrument-vibrato-only builds": info.live_vibrato,
+        }
+        missing = [name for name, used in unsupported.items() if used]
+        if missing:
+            raise LiftError(
+                f"not covered by the {self.playroutine} playroutine yet: " + ", ".join(missing)
+            )
+
+    def structure(self) -> dict:
+        dec = self.tune
+        info = dec.info
+        song = dec.typed.to_song()
+        start = self.start
+        build = info.build
+        adparam = C.DEFAULT_ADPARAM
+        if build.adparam is not None:
+            adparam = build.adparam << 8 | build.srparam
+        freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
+        instruments, restarts = instrument_records(song.instruments, adparam)
+        tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
+        header = dec.header
+        return {
+            "unitracker": "ir",
+            "tempo": initial_tempo(start),
+            "meta": song_meta(header, f"{self.playroutine} subtune {dec.subtune}"),
+            "clock": NTSC_CLOCK if (header.flags >> 2) & 3 == 2 else PAL_CLOCK,
+            "voices": 3,
+            "tables": {
+                "ftab": [int(v) for v in freq],
+            },
+            "records": {
+                "ins": instruments,
+                "restart": restarts,
+                "ctrltab": wave_records(song.wavetable),
+                "pulsetab": pulse_records(song.pulsetable),
+                "filttab": filter_records(song.filtertable),
+                "speedtab": speed_records(song.speedtable),
+            },
+            "tracks": tracks,
+            "phrases": _phrases(song, tracks),
+            "playroutine": library(self.playroutine),
+        }
+
+    def convert(self, song: dict) -> dict:
+        return snapped(super().convert(song))
