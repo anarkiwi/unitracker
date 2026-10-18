@@ -725,10 +725,12 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
 
     # -- phrases and tracks --
     def phrases(self) -> None:
-        """Phrase variants for instances whose events changed, tracks unrolled where needed."""
+        """Phrase variants for instances whose events changed, tracks unrolled where needed; a
+        phrase every play of which now plays a variant is dropped."""
         # pylint: disable=too-many-locals
         variants, names = {}, {}
         per = {}
+        played = _played(self.ir)
         for (voice, count, step), event in self.events.items():
             per.setdefault((voice, count), {})[step] = event
         for voice, track in enumerate(self.ir["tracks"]):
@@ -762,6 +764,8 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 plays += extra
                 track["loop"] = n
             track["plays"] = plays
+        for name in played - _played(self.ir):
+            del self.ir["phrases"][name]
 
     def variant(self, key: tuple, edits: dict, variants: dict, names: dict) -> str:
         """The phrase of ``key``: the phrase itself, or a copy with the instance's events."""
@@ -776,6 +780,11 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             variants[key] = f"{phrase}~{names[phrase]}"
             self.ir["phrases"][variants[key]] = fold_empty(events)
         return variants[key]
+
+
+def _played(ir: dict) -> set:
+    """The phrases a song's tracks play."""
+    return {p["phrase"] for track in ir["tracks"] for p in track["plays"]}
 
 
 def _integer(text: str) -> bool:

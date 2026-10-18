@@ -1,5 +1,7 @@
 """v1.20 expressions in documents and the lift-time conversion of native modulations to them."""
 
+import copy
+
 import numpy as np
 import pytest
 import sympy
@@ -542,6 +544,17 @@ def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own
     assert np.array_equal(regs(out, 80), want)
     events[1]["command"] = events[1].pop("commands")[1]
     assert not np.array_equal(regs(out, 80), want)
+
+
+def test_a_phrase_every_play_of_which_plays_a_variant_is_dropped():
+    ir = gt_ir("[C4.i1*4, D4*4, E4*4]")
+    ir["phrases"]["p1"][1]["command"] = [3, 0]
+    ir["phrases"]["unplayed"] = copy.deepcopy(ir["phrases"]["p1"][:1])
+    want = regs(ir, 80)
+    out = convert.convert(ir, cache=None, workers=1)
+    (variant,) = [p["phrase"] for p in out["tracks"][0]["plays"]]
+    assert variant == "p1~1" and "p1" not in out["phrases"] and "unplayed" in out["phrases"]
+    assert np.array_equal(regs(songio.loads(songio.dumps(out)), 80), want)
 
 
 def test_a_started_event_without_a_command_gets_the_identity_and_legato():
