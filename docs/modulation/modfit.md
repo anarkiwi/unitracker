@@ -100,7 +100,9 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
 4. **Write.** At the unit's `site` when it exists and its `when` holds over the start cells:
    - a program site: the program is copied with `clear` applied to every row, `first` set on
      its first row and the text in its first row's `field`; trailing rows that set nothing are
-     dropped; references to the program are redirected to the copy;
+     dropped, and a loop that reaches no row setting anything with them (a start alone reads the
+     text, so its row plays nothing when the program loops back); references to the program
+     are redirected to the copy;
    - a `row` site: the text at `φ = 0` is written in the row itself;
    - several texts for one unit: the most frequent takes the site, each other gets a copy and
      each starting event is pointed at its copy;

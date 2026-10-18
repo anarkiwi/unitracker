@@ -458,7 +458,13 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         return codec is None or all(codec.encode(r) is not None for r in full)
 
     def written(self, where: tuple, texts: dict, copy_row: bool = False) -> int:
-        """The record (a program copy, or one row) with the units' expressions written."""
+        """The record (a program copy, or one row) with the units' expressions written.
+
+        A program copy keeps its rows to the last that sets anything once its units' data is
+        cleared, and its loop when the loop reaches such a row. A start alone reads the
+        expression, so a row that sets nothing but it plays nothing when the program loops
+        back: a copy whose loop sets nothing is its first row, and ends.
+        """
         # pylint: disable=too-many-locals
         name, index = where
         rtype, rows = self.rtypes[name], self.records.setdefault(name, {})
@@ -482,12 +488,12 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 if k == 0:
                     row.update({f: int(v) for f, v in (spec.get("first") or {}).items()})
             out.append(row)
+        live = [k for k, row in enumerate(out) if self.effective(rtype, row)]
+        last = live[-1] if live else -1
+        if loop is None or loop > last:
+            out, loop = out[: max(last, 0) + 1], None
         for unit, spec in zip(texts, specs):
             out[0][spec["field"]] = self.x(texts[unit])
-        live = [k for k, row in enumerate(out) if self.effective(rtype, row)]
-        last = live[-1] if live else 0
-        if loop is None or loop > last:
-            out, loop = out[: last + 1], None
         if loop is None and rtype.end:
             out[-1].update({f: int(v) for f, v in rtype.end.items()})
         return self.allocate(rtype, out, loop)

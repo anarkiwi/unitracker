@@ -525,6 +525,24 @@ def test_a_referenced_program_no_start_proves_is_a_named_lift_error():
     assert convert.Rewrite(ir, obs_of([]), []).run()["records"]["pulsetab"][2]["l"] == 0x89
 
 
+def test_a_program_looping_to_its_first_row_is_written_as_its_one_expression():
+    ir = gt_ir("[C4.i1*16, D4*16]")
+    ir["records"]["ins"][1]["pw"] = 1
+    ir["records"]["pulsetab"] = {
+        1: {"l": 0x88, "r": 0, "next": 2},
+        2: {"l": 6, "r": 0x20, "next": 3},
+        3: {"l": 0x84, "r": 0, "next": 4},
+        4: {"l": 6, "r": 0xE0, "next": 1},
+    }
+    got = convert.analyse(ir, None, 1)
+    entry = got.out["records"]["ins"][1]["pw"]
+    row = got.out["records"]["pulsetab"][entry]
+    assert row == {"l": 0, "r": 0, "x": row["x"], "next": 0}
+    pw = [int(w) for w in regs(got.out, got.ticks)[:, 2:4] @ [1, 256]]
+    assert pw == [int(w) for w in regs(ir, got.ticks)[:, 2:4] @ [1, 256]]
+    assert {0x800, 0x8C0, 0x400, 0x340} <= set(pw)
+
+
 def test_an_unproved_start_names_its_program_and_start():
     an = convert.Analysis(gt_ir("[C4.i1*4, D4*4]"))
     occ = occurrence("pulse", (0, 0, 0), {"pptr": 3}, 0, (3,))
