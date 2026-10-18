@@ -503,6 +503,15 @@ def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
     assert gt.snapped(out) is out
 
 
+def test_an_arpeggio_under_a_toneporta_of_speed_0_keeps_one_freq():
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(31, 0, 3, 0)] + [REST] * 11
+    arpeggio = [(0x41, 0), (0x04, 0x00), (0x04, 0x03), (0xFF, 2)]
+    text, _, _ = lifted(*gt_tune(arpeggio, rows=rows))
+    first = song_def(text)
+    assert first["phrase"]["p1"] == ["C2.i1*4", "G2!freq:x1!legato", "-!freq:none*11"]
+    assert first["x"] == {"x1": 0}
+
+
 ZERO_SWEEPS = {
     "a native zero sweep": ([(0x90, 0xF1), (0x00, 0x40), (0x05, 0x00), (0xA0, 0xF2)], {"hold": 5}),
     "a sweep the expression replaces": (

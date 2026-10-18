@@ -161,8 +161,8 @@ start them where the composer put them; the playroutine declares no `lifetime`, 
 
 | unit | key | cell | value `v` | fires | starts | written |
 |---|---|---|---|---|---|---|
-| `command` | `freq` | `freq` | the offset from the frequency of the note (with the wavetable's arpeggio) | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, the instrument's `freq` |
-| `wave` | `freq` | `freq` | as `command` | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
+| `command` | `freq` | `freq` | the offset from `F(N)`, the frequency of the step's note: a wavetable note row sets `freq` to its own note's frequency and the command does not run that tick, so commands 1-4 work from the step's note, not the arpeggio's | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, the instrument's `freq` |
+| `wave` | `freq` | `freq` | the offset from the frequency of the sounding note (with the wavetable's arpeggio) | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!filter:none!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
