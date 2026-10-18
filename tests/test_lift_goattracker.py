@@ -320,7 +320,7 @@ WAVETABLE_TUNES = {
     "a volume from 16 is an empty row": (
         {"wave": [(0x41, 0), (0xFD, 0x10), (0xFD, 0xFF), (0x21, 0x80), (0xFF, 4)]},
         ("ins", "i1", "ctrl"),
-        [FIRST, {}, {}, {"ctrl": 33}, {"loop": 3}],
+        [FIRST, {"wait": 1}, {"ctrl": 33}, {"loop": 2}],
     ),
     "program stops name the program kind": (
         {

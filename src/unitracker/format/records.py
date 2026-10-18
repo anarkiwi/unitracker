@@ -20,6 +20,7 @@ META_KEYS = {
     "unwritten",
     "writes_as",
     "uniform",
+    "adds",
 }
 EXPR = "x"
 PHRASE = "p"
@@ -82,6 +83,7 @@ class RecordType:
         self.expr = spec.get("expr")
         self.unwritten = frozenset(str(f) for f in spec.get("unwritten") or ())
         self.uniform = tuple(str(f) for f in spec.get("uniform") or ())
+        self.adds = {str(k): int(v) for k, v in (spec.get("adds") or {}).items()}
         for key in ("unwritten", "uniform"):
             if not set(getattr(self, key)) <= self.fields.keys():
                 raise RecordTypeError(

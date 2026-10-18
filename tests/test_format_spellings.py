@@ -4,7 +4,7 @@ writer writes each meaning one way."""
 import numpy as np
 import pytest
 
-from unitracker.format import songio, timeline
+from unitracker.format import idle, songio, timeline
 from unitracker.format.codec import CodecError, row_place
 from unitracker.player.vm import SongPlayer
 
@@ -62,7 +62,7 @@ def test_an_expression_a_row_starts_goes_on_any_row():
 
 GT_FILTER = """      ins:
         i1: {{ctrl: [{{ctrl: 65, note: +0}}, end], filter: [{{cut: 1024, res: 12, route: 1, mode: 16}}, {row},
-          end]}}
+          {{cut: 512}}, end]}}
 """
 
 
@@ -71,7 +71,7 @@ def test_the_reader_refuses_and_the_writer_drops_an_expression_no_start_reads():
     refused(held.replace("{hold: 5}", "{hold: 5, cut: v + 3}"), "can't express")
     ir = songio.loads(held)
     rows = ir["records"]["filttab"]
-    later = max(rows)
+    later = max(rows) - 1
     ir["exprs"][len(ir["exprs"]) + 1] = "v + 3"
     rows[later] = {**rows[later], "x": len(ir["exprs"])}
     assert songio.dumps(ir) == canonical(held)
@@ -218,3 +218,97 @@ def test_the_writer_writes_a_held_freq_as_none_and_none_only_where_a_freq_runs()
     events[1]["command"] = [16, len(ir["exprs"])]
     events[2]["command"] = [16, 0]
     assert songio.dumps(ir) == text
+
+
+# -- 5: rows that change nothing --
+
+IDLE = [
+    ("goattracker2", "ins", "i1: {ctrl: [{ctrl: 65, note: +0}, end], filter: [{cut: 1024, res: 12,"
+     " route: 1, mode: 16}, ROW, end]}", "{hold: 5}"),
+    ("goattracker2", "ins", "i1: {ctrl: [{ctrl: 65, note: +0}, ROW, end]}", "{}"),
+    ("goattracker2", "ins", "i1: {ctrl: [{ctrl: 65, note: +0}, ROW, end]}", "{wait: 3}"),
+    ("defmon", "ins", "i1: {ctrl: [{hold: 4, ctrl: 65, gate: 1}, ROW, end]}", "{}"),
+]  # fmt: skip
+
+
+def unchecked(monkeypatch, text: str) -> dict:
+    """What the reader reads ``text`` as, without refusing rows that change nothing."""
+    monkeypatch.setattr(idle, "check", lambda *_: None)
+    ir = songio.loads(text)
+    monkeypatch.undo()
+    return ir
+
+
+def same_play(text: str, ir: dict, ticks: int = 400) -> bool:
+    return np.array_equal(
+        SongPlayer(songio.loads(text)).render_grid(ticks), SongPlayer(ir).render_grid(ticks)
+    )
+
+
+@pytest.mark.parametrize("pr,tname,ins,row", IDLE)
+def test_a_last_row_that_only_lasts_is_refused_and_left_out(monkeypatch, pr, tname, ins, row):
+    text = doc(pr, f"      {tname}:\n        {ins.replace('ROW', row)}\n", {"p1": "C4.i1*16"})
+    refused(text, "a last row that only lasts changes nothing")
+    ir = unchecked(monkeypatch, text)
+    out = canonical(songio.dumps(ir))
+    assert f"{row}, end]" not in out
+    assert same_play(out, ir)
+
+
+HELD = {
+    "goattracker2": "i1: {ctrl: [{ctrl: 65, note: +0}, end], filter: [{cut: 1024, res: 12,"
+    " route: 1, mode: 16}, ROW, {cut: 512}, end]}",
+    "defmon": "i1: {ctrl: [{ctrl: 65, gate: 1}, ROW, {ctrl: 33}, end]}",
+    "sidwizard": "i1: {ctrl: [{ctrl: 65}, ROW, {ctrl: 33}, end]}",
+    "goattracker2c": "i1: {ctrl: [{ctrl: 65, note: +0}, ROW, {ctrl: 33, note: +12}, end]}",
+}
+
+
+@pytest.mark.parametrize(
+    "pr,rows,merged",
+    [
+        ("goattracker2", "{hold: 2}, {hold: 3}", "{hold: 5}"),
+        ("goattracker2", "{hold: 100}, {hold: 100}", "{hold: 127}, {hold: 73}"),
+        ("goattracker2", "{}, {}", "{hold: 2}"),
+        ("defmon", "{hold: 2}, {hold: 3}", "{hold: 5}"),
+        ("goattracker2c", "{wait: 2}, {wait: 3}", "{wait: 6}"),
+        ("goattracker2c", "{wait: 2}, {}", "{wait: 3}"),
+        ("goattracker2c", "{wait: 9}, {wait: 9}", "{wait: 15}, {wait: 3}"),
+    ],
+)
+def test_rows_that_only_last_are_one_row(monkeypatch, pr, rows, merged):
+    defs = f"      ins:\n        {HELD[pr].replace('ROW', rows)}\n"
+    text = doc(pr.removesuffix("c"), defs, {"p1": "C4.i1*16"})
+    refused(text, "rows that only last are one row")
+    ir = unchecked(monkeypatch, text)
+    out = canonical(songio.dumps(ir))
+    assert merged in " ".join(out.split())
+    assert np.array_equal(
+        SongPlayer(songio.loads(out)).render_grid(400), SongPlayer(ir).render_grid(400)
+    )
+
+
+def test_rows_that_only_hold_stay_where_the_player_plays_them_otherwise():
+    defs = f"      ins:\n        {HELD['sidwizard'].replace('ROW', '{hold: 2}, {hold: 3}')}\n"
+    assert "{hold: 2}, {hold: 3}" in canonical(doc("sidwizard", defs, {"p1": "C4.i1*16"}))
+    last = "      ins:\n        i1: {ctrl: [{ctrl: 65}, {ctrl: 33}, {hold: 3}, end]}\n"
+    assert "{hold: 3}, end]" in canonical(doc("sidwizard", last, {"p1": "C4.i1*16"}))
+
+
+GT_HOLD = (
+    "      ins:\n        i1: {ctrl: [{ctrl: 65, note: +0}, end], filter: [{hold: 5, cut: v}, ROW,"
+    " end]}\n"
+)
+
+
+def test_an_expression_that_holds_what_its_program_holds_is_refused_and_left_out(monkeypatch):
+    text = doc(
+        "goattracker2", GT_HOLD.replace("ROW", "{res: 12, route: 1, mode: 16}"), {"p1": "C4.i1*16"}
+    )
+    refused(text, "cut: v on a program that sets no cut")
+    ir = unchecked(monkeypatch, text)
+    out = canonical(songio.dumps(ir))
+    assert "filter: [{hold: 5}, {res: 12, route: 1, mode: 16}, end]" in out
+    assert same_play(out, ir)
+    kept = doc("goattracker2", GT_HOLD.replace("ROW", "{cut: 512}"), {"p1": "C4.i1*16"})
+    assert "{hold: 5, cut: v}" in canonical(kept)

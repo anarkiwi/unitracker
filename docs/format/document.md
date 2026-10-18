@@ -83,7 +83,11 @@ the type each native table is written as, `writes_as`):
   `{loop: k}` (k is a row of the same program). A program is cut from the player's chained
   tables at every entry point. A tail two programs share is written in both, which is exact
   because rows are deterministic. A program that is one expression is written as that
-  expression: `pw: 16*abs((φ - 32) % 128 - 64) + 512`.
+  expression: `pw: 16*abs((φ - 32) % 128 - 64) + 512`. A row of a type whose rows that only time
+  the program add up (`adds`, see [Record types](../playroutines/schema.md#record-types)) is
+  written once for each run of them, as long as one row lasts, and none ends a program: a
+  GoatTracker 2 filter program writes `{hold: 5}`, not `{hold: 2}, {hold: 3}`, and no `{hold: 5}`
+  before its `end`.
 - **References.** A field that references another record holds a name. A program that only one
   instrument uses is written inline in that instrument instead
   (`ctrl: [{ctrl: 9, note: +0}, {ctrl: 65, note: +0}, end]`).

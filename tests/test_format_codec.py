@@ -502,7 +502,10 @@ def test_defmon_programs_end_on_a_freeze():
         "unitracker": songio.VERSION,
         "playroutine": {"ref": "defmon"},
         "song": [
-            {"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3},
+            {
+                "def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3, "gate": 0}, "end"]}},
+                "play": ["~"] * 3,
+            },
             "end",
         ],
     }

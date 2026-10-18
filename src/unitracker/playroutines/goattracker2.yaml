@@ -62,6 +62,8 @@ record_types:
   ctrltab:
     writes_as: ctrl
     fields: [w, n, next, x]
+    # A delay row without a note sets nothing and lasts its wait and one tick.
+    adds: {wait: 1}
     refs:
       n:
         - {type: speedtab, when: "w >= 0xF1 and w <= 0xF4"}
@@ -137,6 +139,8 @@ record_types:
     expr: x
     fields: [l, r, next, x]
     optional: [cut]
+    # A zero sweep row sets nothing and lasts its hold.
+    adds: {hold: 0}
     codec:
       - when: "l >= 0x80 and (x == 0 or cut < 0)"
         keys:

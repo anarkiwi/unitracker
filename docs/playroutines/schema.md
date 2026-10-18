@@ -48,6 +48,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see [Codecs](#codecs)) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field holding a row's modulator expression, a reference to `x` with no `refs` entry; a program of one row that sets only it is written as the expression |
+| `adds` | `{key: k}`: a row whose only key is `key`, or none, sets nothing and lasts `key + k` ticks: rows of it one after another are written as one row as long as one row lasts (then the rest), a program's last row before `end` is none of them, and an expression `v` on a first row of only `key` and the expression's key, in a program whose other rows set none of that key, is left out; the reader refuses each of these. Default: none |
 | `uniform` | `[field, ...]`: fields every row of the song that sets them sets to one value, as a player that keeps one copy plays them; the reader and the writer refuse rows that set one to two |
 | `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default |
 | any other key | a template: an action list run for a row |

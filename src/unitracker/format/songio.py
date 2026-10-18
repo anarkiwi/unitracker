@@ -10,7 +10,7 @@ import tempfile
 
 import yaml
 
-from unitracker.format import eventcmds, header, refkeys, tempo, timeline, xexpr
+from unitracker.format import eventcmds, header, idle, refkeys, tempo, timeline, xexpr
 from unitracker.format.atoms import format_atom, parse_atom, runs
 from unitracker.format.codec import (
     COMMAND_NAMES,
@@ -205,14 +205,25 @@ class _Writer:
             self.programs[key] = program_path(rtype, lambda i: self._row(rtype, i), entry, _RowEval)
         return self.programs[key]
 
-    def program_rows(self, rtype, path: list) -> list:
-        """The rows of a program's ``path``, without the expressions no start reads (those of
-        :func:`first_only` past its first row)."""
+    def program_rows(self, rtype, path: list, loop: int | None) -> tuple[list, int | None]:
+        """``(rows, loop)`` of a program's ``path`` looping to ``loop``, without the expressions
+        no start reads (those of :func:`first_only` past its first row) and the rows that change
+        nothing (see ``idle``)."""
         unread = self.first_only.get(rtype.name, ())
-        return [
+        rows = [
             {f: v for f, v in self._row(rtype, i).items() if not (k and f in unread)}
             for k, i in enumerate(path)
         ]
+        codec = self.codecs.get(rtype.name)
+        if codec is None:
+            return rows, loop
+        places = [row_place(k, len(rows), loop is None) for k in range(len(rows))]
+        forms = [(r, codec.encode(r, p)) for r, p in zip(rows, places)]
+        return idle.settled(rtype, codec, forms, loop, self._holds)
+
+    def _holds(self, index: int) -> bool:
+        """Whether expression ``index`` holds the value it drives."""
+        return idle.holds(self.exprs.get(index, ""))
 
     def _refs(self, rtype, row):
         """``(field, (type, index))`` for each reference ``row`` makes."""
@@ -237,8 +248,8 @@ class _Writer:
     def _children(self, key):
         rtype = self.rtypes[key[0]]
         if rtype.chain is not None:
-            path, _ = self.program(rtype, key[1])
-            return [ref for row in self.program_rows(rtype, path) for ref in self._refs(rtype, row)]
+            rows, _ = self.program_rows(rtype, *self.program(rtype, key[1]))
+            return [ref for row in rows for ref in self._refs(rtype, row)]
         return self._refs(rtype, self._row(rtype, key[1]))
 
     def visit(self, key, referrer):
@@ -363,9 +374,10 @@ class _Writer:
                 v != rtype.default(f) for f, v in row.items() if f not in (rtype.expr, rtype.chain)
             ):
                 return self.ref_value(self.key(EXPR, int(row[rtype.expr])))
+        raws, loop = self.program_rows(rtype, path, loop)
         rows = [
-            self.row_value(rtype, row, row_place(k, len(path), loop is None))
-            for k, row in enumerate(self.program_rows(rtype, path))
+            self.row_value(rtype, row, row_place(k, len(raws), loop is None))
+            for k, row in enumerate(raws)
         ]
         if (
             loop is None
@@ -713,6 +725,11 @@ class _Reader:
             loop = int(term["loop"])
         else:
             raise SongFormatError(f"{rtype.written}: bad program end {term!r}")
+        if all(isinstance(r, dict) for r in rows):
+            try:
+                idle.check(rtype, self.codecs.get(rtype.name), rows, loop)
+            except idle.IdleError as exc:
+                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         for row, linked in zip(out, chained(rtype, out, start, loop).values()):
             row[rtype.chain] = linked[rtype.chain]
         if loop is None:
