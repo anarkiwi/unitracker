@@ -129,13 +129,17 @@ class _Writer:
         )
         self.ir = _player(self.pr, settled.write, self.ir)
         written = lifetime.Lifetime(self.pr, self.rtypes).written
-        self.kept, rows = _player(
-            self.pr, written, self.ir["tracks"], self.ir["phrases"], self.records.get(native, {})
-        )
+        flagged = self.records.get(native, {})
+        self.kept, rows = _player(self.pr, written, self.ir["tracks"], self.ir["phrases"], flagged)
         self.records.update({native: rows} if native in self.records else {})
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
         plain_constants(self.codecs, self.rtypes, self.records, self.exprs)
         _uniform(self.pr, self.rtypes, self.records)
+        if native in self.rtypes:
+            phrases = names.same_written(
+                self.ir["phrases"], flagged, lambda index: self.key(native, index)
+            )
+            self.ir = {**self.ir, "phrases": phrases}
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 

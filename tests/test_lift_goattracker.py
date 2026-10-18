@@ -503,6 +503,15 @@ def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
     assert gt.snapped(out) is out
 
 
+def test_an_arpeggio_under_a_toneporta_of_speed_0_keeps_one_freq():
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(31, 0, 3, 0)] + [REST] * 11
+    arpeggio = [(0x41, 0), (0x04, 0x00), (0x04, 0x03), (0xFF, 2)]
+    text, _, _ = lifted(*gt_tune(arpeggio, rows=rows))
+    first = song_def(text)
+    assert first["phrase"]["p1"] == ["C2.i1*4", "G2!freq:x1!legato", "-!freq:none*11"]
+    assert first["x"] == {"x1": 0}
+
+
 ZERO_SWEEPS = {
     "a native zero sweep": ([(0x90, 0xF1), (0x00, 0x40), (0x05, 0x00), (0xA0, 0xF2)], {"hold": 5}),
     "a sweep the expression replaces": (
@@ -518,6 +527,16 @@ def test_a_zero_sweep_holds_its_ticks(filt, held):
     text, _, theirs = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], instruments, filt=filt + [(0xFF, 0)]))
     assert held in song_def(text)["ins"]["i1"]["filter"]
     assert 0xF2 in theirs[:, 0x17]
+
+
+def test_a_set_cutoff_row_before_a_mode_row_holds_its_expression():
+    instruments = [{"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    filt = [(0x00, 0x60), (0x90, 0xF1), (0x04, 0x02), (0xFF, 0)]
+    text, _, theirs = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], instruments, filt=filt))
+    first, mode, end = song_def(text)["ins"]["i1"]["filter"]
+    assert list(first) == ["cut"] and "φ" in first["cut"]
+    assert mode == {"res": 15, "route": 1, "mode": 16} and end == "end"
+    assert 0x68 in theirs[:, 0x16]
 
 
 JUMPS_TO_JUMPS = {

@@ -473,7 +473,7 @@ modulators:
     - name: command
       key: freq
       cell: freq
-      chip: {width: 16, offset: "ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}
+      chip: {width: 16, offset: "ftab[note & 0x7F]"}
       fire: [{run: {record: tickn, index: command, field: do}}]
       label: [command, cmddata]
       # A step without a command runs the instrument's freq, as the native instrument vibrato.
@@ -506,4 +506,4 @@ modulators:
         record: filttab
         index: fptr
         field: x
-        clear: {r: "r if l >= 0x80 else 0", cut: -1}
+        clear: {l: "l if l else 1", r: "r if l >= 0x80 else 0", cut: -1}
