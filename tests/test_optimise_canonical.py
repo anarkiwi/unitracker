@@ -5,6 +5,8 @@ import copy
 
 import pytest
 from conftest import gt_tune
+from test_optimise import doc as optimise_doc
+from test_optimise import ins_line
 
 from unitracker import optimise
 from unitracker.format import songio
@@ -13,29 +15,14 @@ from unitracker.modfit import grammar as G
 from unitracker.optimise import driver, shattered
 from unitracker.player import reach
 
-INS = "ad: 9, ctrl: [{ctrl: 65, note: +0}, end]"
-
 
 def doc(phrase: str, *xs: str) -> str:
     """A three-voice GoatTracker 2 document of eight steps: voice 1 plays ``phrase``, with
     expressions ``x1``, ``x2``, ... ``xs``."""
     x = "".join(f"        x{k}: {t}\n" for k, t in enumerate(xs, 1))
-    x = f"      x:\n{x}" if xs else ""
-    return f"""unitracker: 1.20
-playroutine: {{ref: goattracker2}}
-meta: {{title: t, author: a, released: r}}
-song:
-  - def:
-      restart:
-        r1: [{{hold: 4, gate: 0, ad: 15, sr: 0}}, {{ctrl: 9}}, end]
-      ins:
-        i1: {{{INS}, restart: r1}}
-{x}      phrase:
-        p1: {phrase}
-        p2: [-*8]
-    play: [p1, p2, p2]
-  - {{loop: 0}}
-"""
+    return optimise_doc(
+        ins_line("i1", "ad: 9, ctrl: [{ctrl: 65, note: +0}, end]"), phrase, x and f"      x:\n{x}"
+    )
 
 
 def canonical(text: str):
