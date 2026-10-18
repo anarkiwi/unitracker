@@ -1,8 +1,8 @@
 # Shared vocabulary
 
-Program rows and commands use one vocabulary in every song, in chip units. No key, command or
-record type is one player's own, but defMON's state after init (`vinit`, `ginit`), whose
-`ginit.sub` has no shared form yet (#148).
+Program rows and commands use one vocabulary in every song, in chip units. No key or command is
+one player's own, and a record type is a player's own only as the fixed record of its state after
+init (defMON's `vinit` and `ginit`), which is written in the shared keys.
 
 | row key | meaning |
 |---|---|

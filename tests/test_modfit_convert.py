@@ -742,7 +742,7 @@ def test_an_offset_outside_the_acid_program_fails_naming_its_row():
         songio.dumps(convert.convert(ir, cache=None, workers=1))
 
 
-SUB = "(v % 32768 + 65535)*(v % 32768 >= 1) + ((v - 1) % 256 + 512)*(v % 32768 < 1)"
+SUB = "((v - 1) % 256 + 512)*(v % 32768 < 1) + (v % 32768 + 65535)*(v % 32768 >= 1)"
 
 
 @pytest.mark.parametrize("sub", [1, 0])
