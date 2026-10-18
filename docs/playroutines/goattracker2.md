@@ -11,7 +11,7 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 |---|---|
 | tune | a packed GoatTracker 2 `.sid`, decompiled by pygoattracker |
 | lifted from | the decompiled song, and the build's hard-restart preset `adparam` as the restart programs' `ad` and `sr` |
-| tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo |
+| tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo. A document's `tempo` takes 2-129, as `!tempo` does: 3-127 starts the tempo cell, and 2, 128 and 129 the funk pair, both that tempo |
 | clock | NTSC when the header's clock flags say so, else PAL |
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
 | notes | `note_offset` 0 |

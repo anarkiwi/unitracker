@@ -24,6 +24,8 @@ def tempo_song(player: str, value=None, ins="{sr: 240, ctrl: [{ctrl: 65, note: +
         ("goattracker2", None, {"tempo": 5, "funk0": 5, "funk1": 5}),
         ("goattracker2", 12, {"tempo": 11, "funk0": 11, "funk1": 11}),
         ("goattracker2", "[6, 9]", {"tempo": 0, "funk0": 5, "funk1": 8}),
+        ("goattracker2", 2, {"tempo": 0, "funk0": 1, "funk1": 1}),
+        ("goattracker2", 129, {"tempo": 0, "funk0": 128, "funk1": 128}),
         ("sidwizard", None, {"tl": 6, "tr": 6}),
         ("sidwizard", "[4, 7]", {"tl": 4, "tr": 7}),
     ],
@@ -39,7 +41,7 @@ def test_the_tempo_starts_the_cells_the_playroutine_declares(player, value, cell
     assert {**voice, **glob} == cells
 
 
-@pytest.mark.parametrize("value,ticks", [("[6, 9]", 15), ("[4, 9]", 13), (7, 14)])
+@pytest.mark.parametrize("value,ticks", [("[6, 9]", 15), ("[4, 9]", 13), (7, 14), (2, 4), (3, 6)])
 def test_a_swing_alternates_its_two_step_lengths(value, ticks):
     grid = SongPlayer(songio.loads(tempo_song("goattracker2", value))).render_grid(120)
     steps = np.diff([t for t in range(1, 120) if grid[t, 0] != grid[t - 1, 0]])
@@ -49,7 +51,7 @@ def test_a_swing_alternates_its_two_step_lengths(value, ticks):
 @pytest.mark.parametrize(
     "player,value,match",
     [
-        ("goattracker2", 2, "goattracker2: the player can't express tempo 2"),
+        ("goattracker2", 130, "goattracker2: the player can't express tempo 130"),
         ("goattracker2", "[1, 6]", r"can't express tempo \[1, 6\]"),
         ("goattracker2", "[6, 6]", "two different tempos"),
         ("goattracker2", "[6, 7, 8]", "two different tempos"),
