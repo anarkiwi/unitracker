@@ -32,7 +32,7 @@ from unitracker.format import songio
 from unitracker.lift import backends
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
-os.environ.setdefault("UNITRACKER_WORKERS", "4")
+os.environ.setdefault("UNITRACKER_WORKERS", str(max(2, min(8, len(os.sched_getaffinity(0)) // 8))))
 os.environ.setdefault("UNITRACKER_CACHE", str(CACHE / "modfit"))
 
 

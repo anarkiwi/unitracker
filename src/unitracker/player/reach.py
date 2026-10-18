@@ -5,6 +5,7 @@ from tqdm import tqdm
 from unitracker.player.vm import SongPlayer
 
 MAX_TICKS = 1_000_000
+STRIDE, REMEMBERED = 8, 1 << 14
 
 
 class ReachabilityError(ValueError):
@@ -12,27 +13,34 @@ class ReachabilityError(ValueError):
 
 
 def recurrence(player, max_ticks: int = MAX_TICKS, progress: bool = False, each=None):
-    """``(tick, period)``: the first tick whose complete state equals the one ``period`` before.
+    """``(tick, period)``: a tick whose complete state equals the one ``period`` before.
 
-    Playback is deterministic, so the state from ``tick - period`` on repeats with that period;
-    Brent's algorithm compares each tick's state with one saved state. ``each(player)`` runs
-    after every tick, and a true result stops the run, returning None.
+    Playback is deterministic, so the state from ``tick - period`` on repeats with that period.
+    Every ``STRIDE``th state of the first ``STRIDE * REMEMBERED`` ticks is kept, so a recurrence
+    among them is found within ``STRIDE`` ticks of the earliest; past them Brent's algorithm
+    compares each tick's state with one saved state. ``each(player)`` runs after every tick, and
+    a true result stops the run, returning None.
     """
-    player.play_frame()
-    if each is not None and each(player):
-        return None
-    saved = player.state()
-    power = period = 1
-    for tick in tqdm(range(1, max_ticks + 1), desc="reach", unit="tick", disable=not progress):
+    kept, saved, power, period = {}, None, 1, 0
+    for tick in tqdm(range(max_ticks + 1), desc="reach", unit="tick", disable=not progress):
         player.play_frame()
         if each is not None and each(player):
             return None
         state = player.state()
+        if saved is None:
+            before = kept.get(state)
+            if before is not None:
+                return tick, tick - before
+            if tick % STRIDE == 0:
+                kept[state] = tick
+            if len(kept) == REMEMBERED:
+                kept, saved = {}, state
+            continue
+        period += 1
         if state == saved:
             return tick, period
         if period == power:
             saved, power, period = state, power * 2, 0
-        period += 1
     raise ReachabilityError(f"playback state did not recur within {max_ticks} ticks")
 
 
