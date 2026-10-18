@@ -68,6 +68,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | why did a modulator not become an expression? | `python tools/occurrences.py TUNE.sid [--unit freq\|pw\|cut]`, `unitracker-modfit exprs` |
 | does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modulation/modfit.md](docs/modulation/modfit.md)) |
 | tokens per section of a document | `python tools/token_report.py song.yaml` |
+| what the canonical passes find, prove and refuse over many songs or tunes | `python tools/canonical_tally.py SONG.yaml\|TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
 | dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report report.md` ([docs/optimise.md](docs/optimise.md)) |
 | does a lifter change alter any tune's lift? | `python tools/lift_snapshot.py OUTDIR SID ... [--plain]` before and after, then `diff -r` |
 | do the docs' relative links resolve? | `python tools/doc_links.py` |

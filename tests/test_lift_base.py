@@ -27,7 +27,7 @@ def every_pass_tune():
 
 
 def test_the_passes_are_named_in_the_order_they_run():
-    assert GoatTrackerLift.passes() == ("structure", *NORMALISATIONS, "convert")
+    assert GoatTrackerLift.passes() == ("structure", *NORMALISATIONS, "convert", "canonical")
     names = [name for name, _ in GoatTrackerLift(every_pass_tune()[0]).stages()]
     assert tuple(names) == GoatTrackerLift.passes()
 
@@ -65,7 +65,7 @@ def test_a_normalisation_receives_the_lift_and_the_song_before_it():
     )
     lift = recorded(every_pass_tune()[0], expressions=False)
     stages = dict(lift.stages())
-    assert recorded.passes()[-2:] == ("record", "convert")
+    assert recorded.passes()[-3:] == ("record", "convert", "canonical")
     assert seen == [(lift, stages["unmark"])] and stages["record"]["voices"] == 3
 
 
@@ -103,10 +103,12 @@ SW_NORMALISATIONS = ("first_note_selects", "chord_runs", "fold_octaves")
 
 def test_the_sidwizard_passes_run_in_order_and_convert_last(csillag, monkeypatch):
     monkeypatch.setattr(SidWizardLift, "convert", lambda _lift, song: {**song, "exprs": {}})
-    assert SidWizardLift.passes() == ("structure", *SW_NORMALISATIONS, "convert")
+    monkeypatch.setattr(SidWizardLift, "canonical", lambda _lift, song: {**song, "voices": 3})
+    assert SidWizardLift.passes() == ("structure", *SW_NORMALISATIONS, "convert", "canonical")
     stages = list(SidWizardLift.from_sid(csillag.read_bytes()).stages())
     assert tuple(name for name, _ in stages) == SidWizardLift.passes()
-    assert stages[-1][1] == {**stages[-2][1], "exprs": {}}
+    assert stages[-2][1] == {**stages[-3][1], "exprs": {}}
+    assert stages[-1][1] == {**stages[-2][1], "voices": 3}
 
 
 def test_each_sidwizard_normalisation_receives_the_song_before_it(csillag):

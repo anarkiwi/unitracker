@@ -1,17 +1,22 @@
 """The driver: screens each pass's candidates in parallel and keeps proved, smaller runs."""
 
+import functools
 import multiprocessing
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from tqdm import tqdm
 
 from unitracker.format import songio
-from unitracker.modfit.exprs import default_workers
+from unitracker.modfit.convert import CACHE, _load, _save, ir_key
+from unitracker.modfit.exprs import _cached, content_key, default_workers
 from unitracker.optimise.describe import describe
 from unitracker.optimise.edits import EDITS
 from unitracker.optimise.model import ERRORS
-from unitracker.optimise.passes import LARGER_UNPROVED, PASSES
+from unitracker.optimise.passes import CANONICAL, LARGER_UNPROVED, PASSES
 from unitracker.optimise.proof import Trace, mismatch, tokens
+from unitracker.player import reach
 from unitracker.player.checkpoint import Baseline
 from unitracker.player.vm import SongPlayer
 
@@ -37,6 +42,7 @@ class Result:
     before: int
     after: int
     findings: list = field(default_factory=list)
+    tally: dict = field(default_factory=dict)
 
 
 def _apply(ir: dict, edit: tuple) -> dict | None:
@@ -77,6 +83,16 @@ def _screen(job):
     return k, delta, mismatch(_STATE["ref"], written[2]) is None
 
 
+def _count(job):
+    """``(index, token delta)`` of one candidate edit unproved: ``"refused"`` where the edit or
+    the written text's reading refuses it, ``"same"`` where the text is unchanged."""
+    k, edit, (base, text, size) = job
+    written = _written(_apply(base, edit), _STATE["embed"])
+    if written is None:
+        return k, "refused"
+    return k, "same" if written[0] == text else written[1] - size
+
+
 class _Screener:
     """Screens candidates in-process or over one pool of ``workers`` processes, started on first
     use and holding the reference for the optimiser's lifetime."""
@@ -84,20 +100,22 @@ class _Screener:
     def __init__(self, workers: int, state: dict):
         self.workers, self.state, self.pool = workers, state, None
 
-    def __call__(self, jobs: list, desc: str) -> list:
-        """Every job's :func:`_screen` result, in job order."""
+    def __call__(self, jobs: list, desc: str, fn=_screen) -> list:
+        """Every job's ``fn`` result (:func:`_screen` by default), in job order."""
         progress = tqdm(total=len(jobs), desc=desc, unit="edit", leave=False)
         out = []
         if self.workers <= 1 or len(jobs) < 2:
             _init(self.state)
             for job in jobs:
-                out.append(_screen(job))
+                out.append(fn(job))
                 progress.update()
         else:
             if self.pool is None:
+                for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+                    os.environ[var] = "2"
                 ctx = multiprocessing.get_context("spawn")
                 self.pool = ctx.Pool(self.workers, initializer=_init, initargs=(self.state,))
-            for got in self.pool.imap_unordered(_screen, jobs, chunksize=1):
+            for got in self.pool.imap_unordered(fn, jobs, chunksize=1):
                 out.append(got)
                 progress.update()
         progress.close()
@@ -128,7 +146,7 @@ class Optimiser:
         self.base, self.tokens = songio.loads(self.text), tokens(self.text)
         if mismatch(self.ref, self.base) is None:
             self.ref.baseline = Baseline(SongPlayer(self.base))
-        self.findings = {}
+        self.findings, self.tally = {}, {}
         self.settled = set()
         self.screener = _Screener(self.workers, {"ref": self.ref, "embed": self.embed})
 
@@ -152,6 +170,8 @@ class Optimiser:
         and the text: a pass that kept nothing from a text keeps nothing from it again."""
         if (name, self.text) in self.settled:
             return False
+        if name in CANONICAL:
+            return self.settle(name)
         steps, base, size = [], self.base, self.tokens
         for edit, key in self.screen(name):
             cand = _apply(base, edit)
@@ -172,6 +192,48 @@ class Optimiser:
         if not good:
             self.settled.add((name, self.text))
         return good > 0
+
+    def settle(self, name: str) -> bool:
+        """Apply a canonical pass's candidates that read back no larger all at once and keep
+        them where the composite proves, else each half in turn (``k`` refused of ``n`` cost
+        ``O(k log n)`` proofs), a part of at most ``workers`` screened at once; whether any was
+        kept."""
+        edits = PASSES[name](self.base)
+        base = (self.base, self.text, self.tokens)
+        counted = dict(self.screener([(k, e, base) for k, e in enumerate(edits)], name, _count))
+        tally = self.tally.setdefault(name, dict.fromkeys(("found", "refused", "proved"), 0))
+        tally["found"] += len(edits)
+        tally["refused"] += sum(d == "refused" for d in counted.values())
+        chosen = [k for k, d in counted.items() if isinstance(d, int) and d <= 0]
+        song, kept = self.base, []
+
+        def solve(subset: list, screened: bool = False) -> None:
+            nonlocal song
+            if not subset:
+                return
+            cand = functools.reduce(lambda s, k: _apply(s, edits[k]) or s, subset, song)
+            written = _written(cand, self.embed)
+            if written is not None and mismatch(self.ref, written[2]) is None:
+                song = cand
+                kept.extend(subset)
+            elif not screened and 1 < len(subset) <= self.workers:
+                jobs = [(k, edits[k], base) for k in subset]
+                solve([k for k, _, ok in self.screener(jobs, name) if ok], True)
+            elif len(subset) > 1:
+                solve(subset[: len(subset) // 2], screened)
+                solve(subset[len(subset) // 2 :], screened)
+
+        solve(chosen)
+        tally["proved"] += len(kept)
+        if not kept:
+            self.settled.add((name, self.text))
+            return False
+        for k in kept:
+            forms = describe(self.base, edits[k])
+            self.findings[(name, forms)] = Finding(name, edits[k], counted[k], True, forms)
+        self.text, self.tokens, self.base = _written(song, self.embed)
+        self.settled.add((name, self.text))
+        return True
 
     def run(self, progress: bool = True) -> Result:
         """Apply every pass until none keeps an edit; the text is written from its own reading,
@@ -198,9 +260,29 @@ class Optimiser:
                     )
                 self.base, self.text, self.tokens, changed = back, text, tokens(text), True
         findings = list(self.findings.values())
-        return Result(self.source, self.base, self.text, before, self.tokens, findings)
+        return Result(self.source, self.base, self.text, before, self.tokens, findings, self.tally)
 
 
 def optimise(ir: dict, passes=None, workers: int | None = None, progress: bool = True) -> Result:
     """The song rewritten by the passes, with the same register grid and fewer tokens."""
     return Optimiser(ir, passes, workers).run(progress)
+
+
+@functools.cache
+def _code() -> str:
+    return content_key(*(p.read_bytes() for p in sorted(Path(__file__).parent.glob("*.py"))))
+
+
+def canonical(ir: dict, workers: int | None = None, cache: Path | None = CACHE) -> dict:
+    """``ir`` with the canonical passes kept, proved as every pass is, cached by content beside
+    the conversion's; ``ir`` itself where none keeps an edit or its state does not recur."""
+
+    def compute() -> dict:
+        try:
+            result = optimise(ir, list(CANONICAL), workers, progress=False)
+        except reach.ReachabilityError:
+            return ir
+        return result.ir if any(f.kept for f in result.findings) else ir
+
+    where = cache / f"canonical-{content_key(ir_key(ir), _code())}.pkl" if cache else None
+    return _cached(where, compute, _load, _save)

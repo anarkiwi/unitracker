@@ -28,6 +28,11 @@ function of a song and its arguments, `None` where it does not apply.
 
 | pass | edit | rewrites |
 |---|---|---|
+| `staircases` | `staircase` | a run of steps each carrying a value command for one key (`!cut`, `!ad`, `!sr`, `!vol`), whose values are one function of the step, becomes one expression command at its first step |
+| `slides` | `stitch` | a run of `!freq` steps of constant offsets `v + c`, `c` a function of the firing, becomes one expression in `φ` from its first step |
+| `holds` | `hold` | a `!freq` of an expression equal to `0`, or to `v` on an instrument without `freq`, on an event that does not start its note, becomes `!freq:none` |
+| `anchors` | `stitch` | a `!freq` whose expression is another of the song's, `a`, translated, `a(φ + d)`, with the groups `d` firings before it playing `a`'s first values, becomes `a` from those groups |
+| `restitch` | `stitch` | a run of `!freq` groups that continue the first group's expression with its phase becomes that expression from the first |
 | `hoist` | `hoist` | a command on notes of an instrument becomes a field of a copy of that instrument, which those notes name; refused where the command is on a non-note or the instrument is unknown |
 | `instruments` | `merge` | every reference to one instrument names another |
 | | `unhoist` | an instrument one field away from another plays as the other, with the command that sets that field in a free slot of each of its notes (referenced programs compared by their rows) |
@@ -44,6 +49,35 @@ function of a song and its arguments, `None` where it does not apply.
 | `fields` | `clear` | one record field (other than a program's chain) goes to its default |
 
 Pinned records are never dropped by `merge` nor rewritten by `truncate` or `reloop`.
+
+### Canonical passes
+
+The first five passes (`optimise.CANONICAL`) write modulation the lift wrote shattered in its
+canonical form. They read only the internal song: phrases of events and their shared commands,
+and expressions in `v` and `φ`; the codec decides on reading the written text whether a rewrite
+is writable for the player.
+
+A run is a phrase's consecutive events each carrying the pass's command, with no note after its
+first. A `!freq` run is cut into groups, consecutive events that name one expression, each one
+occurrence of the unit that plays `!freq`; a group lasts the firings the song's own playback gives
+it, alike wherever the phrase plays (a group whose occurrence differs between plays, or that
+another occurrence interrupts, ends the run). One expression `E` plays a run's groups when
+`E(φ + S_k) = e_k(φ)` over each group's firings, `S_k` the firings before group `k`; the equality is
+decided by z3 for every `v`, `N`, frequency word and table. `stitch` names `E` on each step of the
+run where `!freq` lasts a step (`lasts: step`), else on its first step alone.
+
+`slides` and `staircases` fit the run's values as a function of the firing (of the step for
+`staircases`) with the grammar's exact step and ramp forms (`modfit.phase`), the shortest by the
+grammar's rank. No playroutine has an expression form of `!cut`, `!ad`, `!sr` or `!vol` yet, so
+`staircase` rewrites nothing until one does.
+
+A canonical pass is not screened candidate by candidate: each candidate whose written text reads
+back and is no larger is applied together with the others, the composite is proved once, and a
+refused composite is split in halves, each kept where it proves, so `k` refused candidates of `n`
+cost `O(k log n)` proofs; a refused part of at most `--workers` candidates is screened in one
+parallel batch, and the composite of those that prove alone is proved in turn. A pass that keeps
+its candidates is not run again on its own text. `Result.tally` counts each pass's candidates `found`, `refused` (no
+written form, or refused on reading the written text) and `proved`.
 
 ## The guarantee
 
@@ -88,6 +122,7 @@ else plays from tick 0. The verdict is the full replay's.
 |---|---|
 | screen | each candidate is applied, written, counted, read back and checked in a process pool; a candidate whose text is unchanged is skipped; `factor` and `share` are checked only when they shrink the text; a pass is not screened again on a text it kept nothing from |
 | keep | the proved candidates are applied in candidate order, each kept in the run only if it shrinks the running text; the longest prefix of that run whose text proves is kept, found by bisection |
+| settle | a canonical pass instead keeps its candidates together, bisecting a refused composite (see [Canonical passes](#canonical-passes)) |
 | repeat | a pass repeats while it keeps an edit; the passes repeat until none does |
 | canonical | after each round the text is read and rewritten; a rewrite that differs is checked again (failure is an error) and starts another round |
 
@@ -108,7 +143,7 @@ finding (`player · place: the two forms; resolution`), alike findings joined.
 | Non-orthogonal key | proved `drop_command`, `drop_keep`, `drop_instrument` and `clear` edits |
 | VM dead state | the input playroutine's cells, procs, fields and constants that nothing reads or names, and tests that every value their cells take decides alike, found statically |
 | Unreachable vocabulary | shared row keys no player's codec writes, shared commands no player names, and the input's codec shapes and commands no lifted row or event uses |
-| Song redundancy | proved `merge`, `truncate`, `reloop`, `alias` and `factor` edits |
+| Song redundancy | proved `merge`, `truncate`, `reloop`, `alias`, `factor`, `stitch`, `hold` and `staircase` edits |
 
 Every proved edit is listed, kept or not; one proved but not kept is marked `(not kept)`. Places
 and names are those of the document the edit was proved on.

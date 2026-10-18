@@ -1,4 +1,5 @@
-"""The lift framework: a tune through its build check, structure, normalisations and expressions."""
+"""The lift framework: a tune through its build check, structure, normalisations, expressions
+and their canonical form."""
 
 import abc
 from collections import deque
@@ -7,6 +8,7 @@ from collections.abc import Callable, Iterator
 from pysidtracker import SidImage
 
 from unitracker.modfit.convert import convert
+from unitracker.optimise import canonical
 
 Pass = Callable[["Lift", dict], dict]
 
@@ -59,14 +61,19 @@ class Lift(abc.ABC):
         """``song`` with its native modulations written as the format's expressions."""
         return convert(song)
 
+    def canonical(self, song: dict) -> dict:
+        """``song`` with modulation written shattered in the format's canonical form: the
+        optimiser's canonical passes, proved on the written text."""
+        return canonical(song)
+
     @classmethod
     def passes(cls) -> tuple[str, ...]:
         """The names of the passes, in the order :meth:`stages` runs them."""
-        return ("structure", *(p.__name__ for p in cls.normalisations), "convert")
+        return ("structure", *(p.__name__ for p in cls.normalisations), "convert", "canonical")
 
     def stages(self) -> Iterator[tuple[str, dict]]:
-        """Each pass's name and the song after it, after the build check; ``convert`` only with
-        ``expressions``."""
+        """Each pass's name and the song after it, after the build check; ``convert`` and
+        ``canonical`` only with ``expressions``."""
         self.check_build()
         song = self.structure()
         yield "structure", song
@@ -74,7 +81,9 @@ class Lift(abc.ABC):
             song = normalise(self, song)
             yield normalise.__name__, song
         if self.expressions:
-            yield "convert", self.convert(song)
+            song = self.convert(song)
+            yield "convert", song
+            yield "canonical", self.canonical(song)
 
     def run(self) -> dict:
         """The lifted song: the last stage's."""
