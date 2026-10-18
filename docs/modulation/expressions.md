@@ -55,7 +55,7 @@ units ([goattracker2](../playroutines/goattracker2.md#modulators),
 | a program row's `pw`, `cut` or `freq` | the row key's expression |
 | an instrument's `pw` or `filter` program | the program's one expression |
 | an instrument's `freq` | the pitch expression a note starting the instrument runs |
-| an event's `!freq:@x1` | a name of an `x` definition |
+| an event's `!freq:x1` | a name of an `x` definition |
 
 A key that also takes a plain value reads an integer as that value and a string as an
 expression (`cut: '1024'` is the constant expression, written back quoted); elsewhere an integer
@@ -64,6 +64,6 @@ is a constant expression. An expression that contains a comma is quoted inside a
 
 ## Legato
 
-`!legato:0` makes the event's note sound without retriggering it: no gate-off, hard restart or
+`!legato` makes the event's note sound without retriggering it: no gate-off, hard restart or
 instrument start. The playroutine's `commands` entry named `legato` gives its code, and
 `modulators.legato` the cell it sets.

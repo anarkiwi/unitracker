@@ -1,4 +1,4 @@
-"""Event atoms: ``note[.instrument][!cmd:arg[!cmd:arg]][*steps]``."""
+"""Event atoms: ``note[.instrument][!cmd[:arg]...][*steps]``."""
 
 import re
 
@@ -6,13 +6,14 @@ import numpy as np
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 _NOTE_INDEX = {name: i for i, name in enumerate(NOTE_NAMES)}
+_ARG = r"[A-Za-z_]\w*|\d+(?:/\d+)*"
 _ATOM = re.compile(
-    r"^(?P<note>-|off|on|(?P<pc>[A-G]#?)(?P<oct>\d+))"
+    r"^(?P<note>-|off|on|(?P<pc>[A-G]#?)(?P<oct>-?\d+))"
     r"(?:\.(?P<ins>[A-Za-z_]\w*))?"
-    r"(?P<cmds>(?:![a-z][a-z0-9]*:(?:@[A-Za-z_]\w*|none|\d+(?:/\d+)*))*)"
-    r"(?:\*(?P<steps>\d+))?$"
+    rf"(?P<cmds>(?:![a-z][a-z0-9]*(?::(?:{_ARG}))?)*)"
+    r"(?:\*(?P<steps>[2-9]|[1-9]\d+))?$"
 )
-_COMMAND = re.compile(r"!(?P<cmd>[a-z][a-z0-9]*):(?P<arg>@[A-Za-z_]\w*|none|\d+(?:/\d+)*)")
+_COMMAND = re.compile(rf"!(?P<cmd>[a-z][a-z0-9]*)(?::(?P<arg>{_ARG}))?")
 KINDS = {0: "-", 2: "off", 3: "on"}
 
 
@@ -21,9 +22,7 @@ class AtomError(ValueError):
 
 
 def note_name(note: int) -> str:
-    """Scientific-style name of semitone index ``note`` (24 is C2)."""
-    if note < 0:
-        raise AtomError(f"note {note} is below C0")
+    """Scientific-style name of semitone index ``note`` (24 is C2, -1 is B-1)."""
     return f"{NOTE_NAMES[note % 12]}{note // 12}"
 
 
@@ -38,7 +37,7 @@ def note_index(name: str) -> int:
 def format_atom(kind: int, note: int, steps: int, ins: str | None, commands=()) -> str:
     """The atom for an event lasting ``steps``; ``note`` is in the format's numbering.
 
-    ``ins`` names the instrument and each of ``commands`` is ``name:arg`` as written.
+    ``ins`` names the instrument and each of ``commands`` is ``name[:arg]`` as written.
     """
     text = note_name(note) if kind == 1 else KINDS[kind]
     if ins is not None:
@@ -53,7 +52,8 @@ def format_atom(kind: int, note: int, steps: int, ins: str | None, commands=()) 
 def parse_atom(atom) -> dict:
     """``{kind, note, ins, commands, steps}`` for an atom; ``commands`` is ``[(cmd, arg)]``.
 
-    Names, ``@`` args and ``none`` stay text; an argument ``a/b`` is the tuple ``(a, b)``.
+    A name or ``none`` stays text, an argument ``a/b`` is the tuple ``(a, b)``, and a command
+    without an argument has ``None``. ``*1`` is refused: one step is the default.
     """
     if isinstance(atom, bool):
         atom = "on" if atom else "off"
@@ -61,7 +61,8 @@ def parse_atom(atom) -> dict:
         raise AtomError(f"not an atom: {atom!r}")
     match = _ATOM.match(atom)
     if match is None:
-        raise AtomError(f"bad atom {atom!r}")
+        one = " (one step is written without *1)" if re.search(r"\*0*1$", atom) else ""
+        raise AtomError(f"bad atom {atom!r}{one}")
     note = match["note"]
     if match["pc"] is not None:
         kind, pitch = 1, note_index(note)
@@ -77,8 +78,8 @@ def parse_atom(atom) -> dict:
     }
 
 
-def _arg(text: str):
-    if text[0] in "@n":
+def _arg(text):
+    if text is None or not text[0].isdigit():
         return text
     values = tuple(int(v) for v in text.split("/"))
     return values if len(values) > 1 else values[0]

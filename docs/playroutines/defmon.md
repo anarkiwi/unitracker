@@ -45,14 +45,14 @@ The playroutine declares [Instrument columns](../format/vocabulary.md#instrument
   programs the events arm (`{ctrl: c1, filter: c2}`, `{filter: c2}` on an event that arms only
   layer B), so `C2.i4` and `-.i5` are a note and an empty step arming them. An instrument holds
   no other key and arms at least one program.
-- `!restart:@r1` arms layer B on the steps before the note (see Hard restart).
+- `!restart:r1` arms layer B on the steps before the note (see Hard restart).
 - An event reads one command, so the slots are only an order.
 
 ## Commands
 
 | command | argument |
 |---|---|
-| `!restart` | `@restart` |
+| `!restart` | `restart` name |
 
 Every other command is refused by name (`defmon: the player can't express !tempo:6`): timing is
 the timeline's, and the volume is fixed at 15.
@@ -104,7 +104,7 @@ layer-B row's `cut` is the ACID unit's.
 
 defMON has no instrument restart: composers run a short sidTAB program on layer B on the empty
 steps before a note. The playroutine declares this with `restart: {command: 1}` (see *Hard
-restart*): a note's `!restart:@r` reads as a layer-B start (the event command an instrument's
+restart*): a note's `!restart:r` reads as a layer-B start (the event command an instrument's
 `filter` is) of a sidTAB program of the lookahead rows, the last one frozen, holding until the
 note, started as many steps before the note as they hold, all of them empty. The writer folds such a
 start back before it names the events' instruments when it is alone on its step, followed only by

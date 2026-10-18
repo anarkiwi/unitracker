@@ -203,7 +203,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `freq` | the word `F(k)` reads at index `k + note_offset`: `{word: table}`, or `{hi: table, lo: table}` joined as `hi << 8 \| lo`; or the name of a one-argument function that reads one of these at its argument (`freq: nfreq`) |
 | `notes` | the voice cells that hold the note; `N` is the first, less `note_offset` |
 | `transpose` | a voice cell added to the note for `N` |
-| `legato` | `{cell}`: the cell set while a note does not retrigger, which the `legato` command (`!legato:0`) sets |
+| `legato` | `{cell}`: the cell set while a note does not retrigger, which the `legato` command (`!legato`) sets |
 | `tables` | `{name: {entry: expr, size: n}}`: the tables `name[k]` expressions read; `entry` reads `i` and the playroutine's tables. `{name: {function: f, size: n}}` takes `entry` from the one-argument function `f` and adds `f`'s rewrite over the table to `functions` |
 | `functions` | `{name: expr}`: playroutine functions rewritten over the named tables, for analysis |
 | `units` | the units, below |

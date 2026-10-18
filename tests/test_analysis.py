@@ -2,7 +2,7 @@
 
 import pytest
 from conftest import OPTIMISED
-from test_optimise import C1, I1, PULSE, RUN, doc, ins_line, run
+from test_optimise import C1, I1, PULSE, RUN, RUN_TWICE, doc, ins_line, run
 
 from unitracker.analysis import orthogonality, spelling, tokenstudy
 from unitracker.format import songio
@@ -75,10 +75,10 @@ def test_report_lists_a_known_redundancy_once_per_form():
 
 
 def test_report_lists_vocabulary_and_song_redundancy():
-    result = run(doc(I1, RUN, C1), ["hoist", "instruments"])
+    result = run(doc(I1, RUN_TWICE, C1, steps=16), ["hoist", "instruments"])
     report = orthogonality.report([("toy", result)])
     vocab = report.split("## Vocabulary redundancy")[1].split("##")[0]
-    assert "goattracker2 · toy i1: `X.i1!run:@c1` ≡ `X.i1 with i1 + {ctrl: c1}`" in vocab
+    assert "goattracker2 · toy i1: `X.i1!run:c1` ≡ `X.i1 with i1 + {ctrl: c1}`" in vocab
     assert "## Song redundancy\n\n- none" in report
 
 
@@ -86,7 +86,7 @@ def test_reference_tunes_report_is_independent_of_order(optimised_tunes):
     songs = [(name, optimised_tunes[name][1]) for name in sorted(OPTIMISED)]
     first = orthogonality.report(songs)
     assert orthogonality.report(songs[::-1]) == first
-    assert "X.i3!run:@c1" in first and "## VM dead state" in first
+    assert "X.i3!run:c1" in first and "## VM dead state" in first
     assert "defmon · field `restart.ad`" in first and "sidwizard · csillag codec shape" in first
 
 
@@ -96,7 +96,7 @@ X = (
     "        x2: (v + 64*[(φ - 3) % 12 >= 6] - 32) % 65536\n"
 )
 PHRASE = (
-    "[C4.i1*2, D#4, G4!freq:@x1, C5, C4.i2*2, D#4, G4!freq:@x2, C5, F4.i1, G#4, C5, F5,"
+    "[C4.i1*2, D#4, G4!freq:x1, C5, C4.i2*2, D#4, G4!freq:x2, C5, F4.i1, G#4, C5, F5,"
     " C4*2, D#4, G4, C5, C4*2, D#4, G4, C5]"
 )
 SECOND = (
@@ -176,8 +176,8 @@ def test_every_spelling_has_an_exact_inverse(written):
 
 def test_spellings_read_as_intended(written):
     atoms = list(written["song"][0]["def"]["phrase"]["p1"])
-    assert spelling.relative(atoms)[:4] == ["=C4", "+0.i1*2", "+3", "+7!freq:@x1"]
-    assert spelling.delta(atoms)[:4] == ["C4.i1*2", "+3", "+4!freq:@x1", "+5"]
+    assert spelling.relative(atoms)[:4] == ["=C4", "+0.i1*2", "+3", "+7!freq:x1"]
+    assert spelling.delta(atoms)[:4] == ["C4.i1*2", "+3", "+4!freq:x1", "+5"]
     assert spelling.best_key(written) == (0, "minor")
     assert spelling.degree_text(27, (0, "minor")) == "3o2"
     assert spelling.degree_text(28, (0, "minor")) == "3#o2"

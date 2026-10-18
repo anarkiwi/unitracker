@@ -4,7 +4,7 @@ Top-level keys, in this order:
 
 | key | content |
 |---|---|
-| `unitracker` | `1.19`; readers reject any other version |
+| `unitracker` | `1.20`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see [Embedding](#embedding)) |
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
@@ -67,7 +67,7 @@ the type each native table is written as, `writes_as`):
 | `x` | `x` | a modulator expression (see [Modulators](../modulation/expressions.md)) |
 
 - **Rows** use the shared row keys (see [Shared vocabulary](vocabulary.md)) wherever the
-  playroutine's codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
+  playroutine's codec can express them: `{ctrl: 129, note: G#5}`. A row no codec shape covers is
   written in the type's `form`: a `list` row holds the fields in declaration order, with trailing
   defaults left out (`[4, 32]`); a `map` row holds the fields that differ from their defaults.
 - **Programs** are the rows of a chained type, in the order they run, followed by `end` or
@@ -78,10 +78,10 @@ the type each native table is written as, `writes_as`):
 - **References.** A field that references another record holds a name. A program that only one
   instrument uses is written inline in that instrument instead
   (`ctrl: [{ctrl: 9, note: +0}, {ctrl: 65, note: +0}, end]`).
-- **Expressions** (`x`) are the modulator expressions an event command names (`!freq:@x1`):
+- **Expressions** (`x`) are the modulator expressions an event command names (`!freq:x1`):
   `x: {x1: (v + 32) % 65536}`. An expression no command names is written where it is used.
 - **Fixed** record types (`fixed`, such as an initial voice state) keep their indices and are
-  defined in the first row: `vinit: {0: {note: =36, pw: 256, freq: 2227}, ...}`. They use the
+  defined in the first row: `vinit: {0: {note: C3, pw: 256, freq: 2227}, ...}`. They use the
   shared keys with their row meaning wherever one fits, and an omitted field is 0.
 
 ## Events
@@ -89,23 +89,25 @@ the type each native table is written as, `writes_as`):
 A phrase is a list of event atoms:
 
 ```
-note[.instrument][!command:arg[!command:arg]][*steps]
+note[.instrument][!command[:arg]...][*steps]
 ```
 
-- `note` is a note name such as `C2`, `A#3` or `C10`, `-` for no note, `off` (gate off) or `on`
-  (gate on). Names are real pitch: `C2` is 65.4 Hz in every song, whatever index the player's
-  frequency table gives it (`note_offset`).
+- `note` is a note name such as `C2`, `A#3`, `C10` or `B-1`, `-` for no note, `off` (gate off) or
+  `on` (gate on). Names are real pitch: `C2` is 65.4 Hz in every song, whatever index the
+  player's frequency table gives it (`note_offset`).
 - `.i3` names the instrument.
-- `!run:@c1` is a named command with an argument: a number, `@name` for a command that references a
-  record or an expression, `none`, or values joined by `/` for a command of several values
-  (`!funk:6/7`). A command's argument is a byte: `!freq:@x` names one of the first 255 expressions.
-  An event carries at most two commands, its two slots, then `!pulse:0` and `!filter:0` (see
-  [Lifetime](vocabulary.md#lifetime)), which take no slot. The first slot is the instrument column
-  and the second the FX column; an event that names an instrument fills the instrument column with
-  it, so its commands are the FX column's. A playroutine declares the column each command is read
-  into (`column`); a column holds one command, and an event with two in one is refused, naming
-  both.
-- `*3` makes the event last 3 steps; the steps after the first are empty.
+- `!run:c1` is a command with an argument: a number, the name of the record or expression a
+  command references (names are a prefix and digits, so they read as names), `none`, or values
+  joined by `/` for a command of several values (`!funk:6/7`). A command that takes no argument is
+  written without one (`!legato`). A command's argument is a byte: `!freq:x7` names one of the
+  first 255 expressions. An event carries at most two commands, its two slots, then `!pulse:0`
+  and `!filter:0` (see [Lifetime](vocabulary.md#lifetime)), which take no slot. The first slot is
+  the instrument column and the second the FX column; an event that names an instrument fills the
+  instrument column with it, so its commands are the FX column's. A playroutine declares the
+  column each command is read into (`column`); a column holds one command, and an event with two
+  in one is refused, naming both.
+- `*3` makes the event last 3 steps; the steps after the first are empty. One step is written
+  without `*`: `*1` is refused.
 
 ## Canonical form
 

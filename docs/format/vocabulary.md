@@ -7,7 +7,7 @@ record type is one player's own.
 |---|---|
 | `ctrl` | control register value; `^n` sets an exclusive-or mask the voice's control output keeps until a row sets another, `v^n` both |
 | `gate` | the gate the control register is written with until a row, note or `off`/`on` sets it: 0 off, 1 on |
-| `note` | `+n` / `-n` relative to the event note, `=n` absolute (format numbering, C2 = 24); omitted: no change |
+| `note` | `+n` / `-n` relative to the event note, or a note name (`G#5`) for an absolute note; omitted: no change |
 | `wait` | ticks before the row applies |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
 | `ad`, `sr` | envelope registers |
@@ -23,17 +23,17 @@ record type is one player's own.
 
 | command | meaning |
 |---|---|
-| `!run:@x` | start program `x` in the slot its kind implies; `!run:none` stops it |
+| `!run:x` | start program `x` in the slot its kind implies; `!run:none` stops it |
 | `!ad:`, `!sr:`, `!ctrl:` | set the register to the byte |
 | `!resfilt:n` | set `$D417` whole, `n = 16*res + route` |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
 | `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice, from the step that carries the command |
 | `!funk:a/b`, `!funk:none` | swing tempo, for all voices: the steps alternate `a` and `b` ticks; `none` swings on the pair already set |
-| `!freq:@x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
-| `!legato:0` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
+| `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
+| `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
 | `!mark:n` | a timing mark that changes no sound |
-| `!restart:@r` | the note's hard restart, for a player whose instruments have none (see [Hard restart](#hard-restart)) |
+| `!restart:r` | the note's hard restart, for a player whose instruments have none (see [Hard restart](#hard-restart)) |
 | `!pulse:0`, `!filter:0` | the note does not restart the instrument's pulse / filter program (see [Lifetime](#lifetime)) |
 
 A playroutine takes the commands its `commands`, `restart` and `lifetime` declare, over the
@@ -72,7 +72,7 @@ A `restart` is a program (record type `restart`, prefix `r`) anchored to a note:
 applies on the note's first tick, and each earlier row its `hold` ticks before the row after it.
 A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. An instrument names its restart
 (`restart: r1`); in a playroutine whose instruments have none, a note names its own
-(`C3.i2!restart:@r1`):
+(`C3.i2!restart:r1`):
 
 ```yaml
 restart:
@@ -80,11 +80,11 @@ restart:
 ```
 
 Four ticks before the note the gate goes off with envelope $0F00; on its first tick the control
-register takes $09 with the gate on. A note with `!legato:0` runs no restart, and an instrument
+register takes $09 with the gate on. A note with `!legato` runs no restart, and an instrument
 without `restart` has none. A playroutine plays the shapes its codec accepts; a row's place in
 its program is part of its shape (see [Codecs](../playroutines/schema.md#codecs)).
 
-A playroutine declares event restarts with `restart: {command: c}`: a note's `!restart:@r` is
+A playroutine declares event restarts with `restart: {command: c}`: a note's `!restart:r` is
 read as command `c` on the step its lookahead rows' holds put before the note, running those rows
 as a program of the command's record type, and that step must be empty. The writer folds such a
 command back onto its note when it is alone on its step, followed only by empty steps up to a
@@ -93,7 +93,7 @@ note with a free command slot, and its program ends and fits in the steps.
 ## Lifetime
 
 Whether a note restarts its instrument's pulse or filter program is a property of the note:
-`!pulse:0` and `!filter:0` mean it does not, as `!legato:0` means it does not retrigger. They
+`!pulse:0` and `!filter:0` mean it does not, as `!legato` means it does not retrigger. They
 need a note and refuse one that itself starts the program. A note that names no instrument plays
 the voice's last one; the reader finds it by walking each voice's plays twice through its loop.
 The playroutine declares the commands it plays as

@@ -99,7 +99,7 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
    - integer texts in a program whose rows have other data the format writes stay native rows.
 
    Otherwise the event's `commands` codes are replaced by the `!freq` command naming the text,
-   preceded by `!legato:0` when the start's `legato` cell is set on a note; with an `x` that
+   preceded by `!legato` when the start's `legato` cell is set on a note; with an `x` that
    reads the site's field, commandless steps the occurrence spans get it too. Changed events
    go into phrase variants (`p3~1`); a track's loop is unrolled where its passes differ.
    `retire` fields are cleared in every row of their record.

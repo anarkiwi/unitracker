@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.19 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.20 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -22,7 +22,7 @@ from unitracker.format.codec import (
     CommandCodec,
     Evaluator,
     RowCodec,
-    arg_text,
+    command_text,
     inline_row,
     inline_text,
     is_expr,
@@ -39,7 +39,7 @@ from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 from unitracker.player.modulation import declared
 from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
 
-VERSION = "1.19"
+VERSION = "1.20"
 WIDTH = 100
 PHRASE = "phrase"
 DOC_KEYS = ("unitracker", "playroutine", "meta", "hints", "clock", "voices", "song", "loop")
@@ -49,7 +49,7 @@ _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.19 format."""
+    """A document does not follow the unitracker v1.20 format."""
 
 
 @functools.cache
@@ -128,7 +128,7 @@ def _player(pr, call, *args):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.19 document."""
+    """Turns the internal representation into a canonical v1.20 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -375,11 +375,11 @@ class _Writer:
         return Flow(out)
 
     def command(self, cmd: int, raw: int) -> str | None:
-        """A command as ``name:arg``, or None for no command."""
+        """A command as ``name[:arg]``, or None for no command."""
         if not (cmd or raw):
             return None
         if cmd == restart.CODE:
-            return f"{restart.NAME}:@{self.names[(restart.NAME, raw)]}"
+            return f"{restart.NAME}:{self.names[(restart.NAME, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
@@ -388,8 +388,8 @@ class _Writer:
             rtype = self.rtypes[value[0]]
             return f"{name}:{inline_text(rtype, self._row(rtype, value[1]))}"
         if isinstance(value, tuple) and not self.commands.values(name):
-            return f"{name}:@{self.names[self.key(*value)]}"
-        return f"{name}:{arg_text(value)}"
+            return f"{name}:{self.names[self.key(*value)]}"
+        return command_text(name, value)[1:]
 
     # -- document --
 
@@ -540,7 +540,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False, respell=None) -> str:
-    """A canonical v1.19 document for internal-representation song ``ir``.
+    """A canonical v1.20 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference;
     ``respell(doc)`` rewrites the written structure before it is dumped (spelling studies).
@@ -566,7 +566,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
 
 
 class _Reader:
-    """Expands a v1.19 document to the internal representation."""
+    """Expands a v1.20 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -836,13 +836,13 @@ class _Reader:
         if cmd not in COMMAND_NAMES:
             raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
         if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
-            return [restart.CODE, self.lookup(arg[1:], restart.NAME)]
-        if self.commands.inline(cmd) and arg != NONE:
+            return [restart.CODE, self.lookup(arg, restart.NAME)]
+        if self.commands.inline(cmd) and arg not in (NONE, None):
             arg = self._inline(cmd, arg, atom)
         elif isinstance(arg, str) and arg != NONE:
-            if arg[1:] not in self.names:
-                raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
-            arg = self.names[arg[1:]]
+            if arg not in self.names:
+                raise SongFormatError(f"unknown name {arg!r} in {atom!r}")
+            arg = self.names[arg]
         try:
             return list(self.commands.decode(cmd, arg))
         except CodecError as exc:
@@ -925,7 +925,7 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.19 document."""
+    """The internal representation of a v1.20 document."""
     doc = parse(text)
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
@@ -937,13 +937,13 @@ def loads(text: str) -> dict:
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.19 document at ``path``."""
+    """The internal representation of the v1.20 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.19 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.20 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

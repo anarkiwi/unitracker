@@ -30,14 +30,14 @@ expressions, and `!funk` writes its rows inline.
 
 ## Events
 
-`.i3` names the instrument. `!legato:0` is read from either slot and the other command from the
+`.i3` names the instrument. `!legato` is read from either slot and the other command from the
 other; otherwise the slots are only an order.
 
 ## Commands
 
 | command | argument |
 |---|---|
-| `!run` | `@ctrl`, `@pw`, `@filter` |
+| `!run` | `ctrl` name, `pw` name, `filter` name |
 | `!ad` | 0-255 |
 | `!sr` | 0-255 |
 | `!ctrl` | 0-255 |
@@ -47,9 +47,9 @@ other; otherwise the slots are only an order.
 | `!tempo` | 3-127 |
 | `!vtempo` | 3-127 |
 | `!funk` | 0-255/0-255, `none` |
-| `!freq` | `@x`, `none` |
+| `!freq` | `x` name, `none` |
 | `!mark` | 16-255 |
-| `!legato` | 0 |
+| `!legato` | no argument |
 | `!pulse` | 0 |
 | `!filter` | 0 |
 
@@ -60,7 +60,7 @@ Every other command is refused by name.
 - `!funk:a/b` is command $E, its argument the speed-table row's two bytes; `!funk:none` swings on
   the pair already set.
 - `!vol` is command $D below $10; from $10 it is `!mark`.
-- `!legato:0` is command 17: the lifter writes a native toneporta on a note as `!legato:0` plus
+- `!legato` is command 17: the lifter writes a native toneporta on a note as `!legato` plus
   the toneporta, so the note does not retrigger.
 - `!freq` is command 16, which plays every expression.
 
@@ -137,10 +137,10 @@ or its programs' rows, and whose event runs none (`!run`); the writer leaves the
 
 | unit | key | cell | value `v` | fires | starts | written |
 |---|---|---|---|---|---|---|
-| `command` | `freq` | `freq` | the offset from the frequency of the note (with the wavetable's arpeggio) | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:@x` (command 16); without a command, the instrument's `freq` |
+| `command` | `freq` | `freq` | the offset from the frequency of the note (with the wavetable's arpeggio) | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, the instrument's `freq` |
 | `wave` | `freq` | `freq` | as `command` | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
-| `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:@pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
-| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:@f`, `!resfilt:0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
+| `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
+| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!resfilt:0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
 - A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence (`φ`
   keeps counting); a different one, or a step with another or no command, starts the next. A step

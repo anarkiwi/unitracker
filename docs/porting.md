@@ -286,7 +286,7 @@ the existing ports do.
 | filter | `res`, `route` (a mask, or the edit `+ m`, `-`), `mode`, `cut`, and `!vol` ([Filter](format/vocabulary.md#filter)) | filter program shapes; `rel` on `route` for an edit | each playroutine file's *Filter* or *Records* |
 | lifetime | `!pulse:0`, `!filter:0` on the note ([Lifetime](format/vocabulary.md#lifetime)) | `lifetime: {pulse: {field, flag}, filter: {field, flag}}` | each playroutine file's *Lifetime* |
 | relative control | `ctrl: ^n`, the exclusive-or mask the voice's control output keeps ([Shared vocabulary](format/vocabulary.md)) | `eor` on the `ctrl` key | `defmon` only; the others refuse it |
-| legato | `!legato:0` ([Legato](modulation/expressions.md#legato)) | `modulators.legato: {cell, command}` | each playroutine file's command table |
+| legato | `!legato` ([Legato](modulation/expressions.md#legato)) | `modulators.legato: {cell, command}` | each playroutine file's command table |
 | tempo | the tempo commands and constants ([Shared vocabulary](format/vocabulary.md)) | `commands` entries with `when`, `arg`, `raw` | each playroutine file's command table; a tempo command no entry declares is refused by name |
 
 The writer and reader resolve the context these forms need by walking each voice's plays:

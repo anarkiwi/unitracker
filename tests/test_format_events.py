@@ -187,10 +187,10 @@ def test_unfold_refuses_a_restart_without_room(events, match):
 
 
 def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
-    text = songio.dumps(songio.loads(rs_song("-*4, C3.i1!restart:@r1*8")))
+    text = songio.dumps(songio.loads(rs_song("-*4, C3.i1!restart:r1*8")))
     ir = songio.loads(text)
     assert songio.dumps(ir) == text
-    assert "!restart:@r1" in text and "filter" not in text and "restart" not in ir["records"]
+    assert "!restart:r1" in text and "filter" not in text and "restart" not in ir["records"]
     steps = compile_phrase(ir["phrases"]["p1"])
     assert steps[1, 3] == LAYER_B and steps[4, 0] == 1 and not steps[2:4].any()
     assert ir["records"]["sidtab"][steps[1, 4]] == {
@@ -209,17 +209,17 @@ def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
             )
         )
     )
-    assert "i2" not in folded and "[-*4, C3.i1!restart:@r1*8]" in folded
+    assert "i2" not in folded and "[-*4, C3.i1!restart:r1*8]" in folded
     assert f"r1: {RS_PROGRAM}" in folded
 
 
-RS_P1 = "-*4, C3.i1!restart:@r1*8"
+RS_P1 = "-*4, C3.i1!restart:r1*8"
 
 
 @pytest.mark.parametrize(
     "p1,program,pr,ins,match",
     [
-        ("-*2, C3.i1!restart:@r1*8", RS_PROGRAM, "defmon", RS_INS, "3 empty steps"),
+        ("-*2, C3.i1!restart:r1*8", RS_PROGRAM, "defmon", RS_INS, "3 empty steps"),
         (RS_P1, "[{}, end]", "defmon", RS_INS, "a row before its note"),
         (RS_P1, "[{hold: 3}, {ctrl: 9}, end]", "defmon", RS_INS, "can't express row"),
         (RS_P1, "[{hold: 3, ctrl: ^8}, {}, {loop: 0}]", "defmon", RS_INS, "can't loop"),
@@ -250,7 +250,7 @@ def env_song(phrases, rows=ONCE, loop="~", defs=SW_ENV):
 def test_a_byte_reads_as_the_nibble_and_column_the_player_writes_it_with():
     atoms = (
         "C4.i1!sr:192*4, D4!sr:208*4, -!ad:66*4, -!ad:21*4, -!sr:247*4, -!ad:18*4, C4*4,"
-        " E4!legato:0!sr:241*4"
+        " E4!legato!sr:241*4"
     )
     ir = songio.loads(env_song({"p1": atoms}))
     assert commands(ir) == [
@@ -346,7 +346,7 @@ COL_DEFS = SW_ENV + "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
 
 
 def test_commands_in_different_columns_share_an_event():
-    atoms = "C4.i1*4, D4!sr:192!tempo:4*4, E4!run:@c1!tempo:4*4, F4!legato:0!tempo:4*4"
+    atoms = "C4.i1*4, D4!sr:192!tempo:4*4, E4!run:c1!tempo:4*4, F4!legato!tempo:4*4"
     text = songio.dumps(songio.loads(env_song({"p1": atoms}, defs=COL_DEFS)))
     ir = songio.loads(text)
     assert commands(ir)[1:] == [[[336, 12], [18, 4]], [[112, 2], [18, 4]], [[63, 0], [18, 4]]]
@@ -357,8 +357,8 @@ def test_commands_in_different_columns_share_an_event():
     "atoms,shown",
     [
         ("C4.i1!sr:192!tempo:4*4", "!sr and !tempo"),
-        ("C4.i1!run:@c1!funk:4/5*4", "!run and !funk"),
-        ("C4.i1*4, D4!sr:192!run:@c1*4", "!sr and !run"),
+        ("C4.i1!run:c1!funk:4/5*4", "!run and !funk"),
+        ("C4.i1*4, D4!sr:192!run:c1*4", "!sr and !run"),
     ],
 )
 def test_two_commands_in_one_column_are_refused_naming_both(atoms, shown):
@@ -418,14 +418,12 @@ def test_sidwizard_writes_the_flag_bits_on_the_notes_they_keep():
 def test_lifetime_commands_take_no_command_slot_and_legato_notes_start_nothing():
     defs = SW_INS + "      x:\n        x1: (v - 7) % 65536\n"
     ir = songio.loads(
-        song(
-            "sidwizard", defs, {"p1": "C4.i1*4, D4!ad:16!freq:@x1!pulse:0*4, E4!legato:0!pulse:0*4"}
-        )
+        song("sidwizard", defs, {"p1": "C4.i1*4, D4!ad:16!freq:x1!pulse:0*4, E4!legato!pulse:0*4"})
     )
     assert ir["records"]["ins"][1]["flags"] == 0x50
     assert [code for code, _ in ir["phrases"]["p1"][1]["commands"]] == [288, 16]
     out = songio.dumps(ir)
-    assert "D4!ad:16!freq:@x1!pulse:0*4, E4!legato:0*4" in out
+    assert "D4!ad:16!freq:x1!pulse:0*4, E4!legato*4" in out
     assert songio.dumps(songio.loads(out)) == out
 
 
@@ -465,7 +463,7 @@ def test_goattracker_accepts_the_command_where_no_program_starts_and_writes_it_i
         ("sidwizard", SW_INS, "C4.i1*4, D4!pulse:1*4", "the player can't express !pulse:1"),
         ("goattracker2", GT_INS, "C4.i1!pulse:0*2", "whose instrument i1 starts the pulse"),
         ("goattracker2", GT_INS, "F4.i3!pulse:0*2", "whose instrument i3 starts the pulse"),
-        ("goattracker2", GT_INS, "D4.i2!run:@pw1!pulse:0*2", "on a note that starts the program"),
+        ("goattracker2", GT_INS, "D4.i2!run:pw1!pulse:0*2", "on a note that starts the program"),
         (
             "defmon",
             "      ins:\n        i1: {ctrl: [{ctrl: 65}, end]}\n",

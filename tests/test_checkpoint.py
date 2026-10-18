@@ -14,7 +14,7 @@ I3 = ins_line("i3", f"ad: 9, {LATE}, ctrl: [{A}, end]")
 EXPRS = "      x:\n        x1: (v + 32) % 65536\n        x2: (v + 16 + 16) % 65536\n"
 LATE_DOC = doc(
     f"{I1}\n{I2_HEARD}\n{I3}",
-    "[C4.i1!freq:@x1*16, D4.i2*2, E4.i3!freq:@x2*2, F4.i1!freq:@x3*2]",
+    "[C4.i1!freq:x1*16, D4.i2*2, E4.i3!freq:x2*2, F4.i1!freq:x3*2]",
     EXPRS + "        x3: (v + 33) % 65536\n",
     steps=22,
     extra=row("p3", "[C4.i2*2, D4*2]"),

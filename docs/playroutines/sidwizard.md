@@ -28,25 +28,25 @@ A note is read as the player's note with no octave shift, which plays the same p
 ## Events
 
 `.i3` names the instrument. The first slot is the instrument column and the second the FX
-column. `!ad` and `!sr` play in the column of their slot (see Commands); `!freq`, `!legato:0`,
+column. `!ad` and `!sr` play in the column of their slot (see Commands); `!freq`, `!legato`,
 `!run` and the timing commands play in their own. The FX column holds one command, so an event
 whose two commands both play there is refused, naming both (`sidwizard: the player can't play
 !tempo and !freq on one event of phrase p1`); a pair is played when one of them is an
 instrument-column form (`!ad` or `!sr` in the first slot of an event that names no instrument,
-`!run` on such an event) or `!legato:0`.
+`!run` on such an event) or `!legato`.
 
 ## Commands
 
 | command | argument |
 |---|---|
-| `!run` | `@ctrl`, `none` |
+| `!run` | `ctrl` name, `none` |
 | `!ad` | 0-255, at most one nibble from the instrument's |
 | `!sr` | 0-255, at most one nibble from the instrument's |
 | `!tempo` | 3-127 |
 | `!vtempo` | 3-127 |
 | `!funk` | 3-15/3-15 |
-| `!freq` | `@x`, `none` |
-| `!legato` | 0 |
+| `!freq` | `x` name, `none` |
+| `!legato` | no argument |
 | `!pulse` | 0 |
 | `!filter` | 0 |
 
@@ -68,7 +68,7 @@ Every other command is refused by name.
   and $11 (`!funk:a/b`) every voice's to its nibbles. Each rewinds the swing to its first tempo,
   and each voice counts its current row against the new pair from its next tick. A tempo of 0
   plays as 6.
-- `!legato:0` is instrument column $3F.
+- `!legato` is instrument column $3F.
 - `!freq` is playroutine code $10, which no native FX has: it runs the expression it names.
 
 ## Control programs
@@ -122,7 +122,7 @@ bytes from index `i - 11`, size 256).
 
 | unit | key | cell | value `v` | fires | starts | written |
 |---|---|---|---|---|---|---|
-| `pitch` | `freq` | `voff` | the offset added to the note's frequency | every tick but the one a note starts on | a row writes `voff` or changes the vibrato or slide state, at the row or at its deferred FX | the instrument's `freq` for an instrument vibrato; else `!freq:@x` |
+| `pitch` | `freq` | `voff` | the offset added to the note's frequency | every tick but the one a note starts on | a row writes `voff` or changes the vibrato or slide state, at the row or at its deferred FX | the instrument's `freq` for an instrument vibrato; else `!freq:x` |
 | `pulse` | `pw` | `pwhi:pwlo` | the 12-bit register: the cell plus the row's keyboard-track term | every tick but the one a note starts on | a note starts the pulse program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `vfhi:vflo:3`, mirrored to the global cutoff | the 11-bit cutoff: the cell plus the row's keyboard-track term | every tick the voice controls the filter but the one a note starts on | a note starts the filter program | the program's first row (instrument `filter`) |
 

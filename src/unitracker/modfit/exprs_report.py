@@ -89,7 +89,7 @@ def locations(doc: dict) -> dict:
         for kind, defs in (item.get("def") or {}).items():
             for name, value in (defs or {}).items():
                 if kind == "x":
-                    out.setdefault(str(value), []).append(f"!freq:@{name}")
+                    out.setdefault(str(value), []).append(f"!freq:{name}")
                 elif kind != "phrase" and isinstance(name, str):
                     rows(name, value)
     return out

@@ -15,6 +15,7 @@ import yaml
 
 from unitracker.format import songio
 from unitracker.format.codec import (
+    ARGLESS,
     COMMAND_NAMES,
     NONE,
     ROW_KEYS,
@@ -58,7 +59,7 @@ EDGES += tuple(range(0xF0, 0xFE))
 ROWS = {
     ("goattracker2", "ctrltab"): [
         ({"w": 0xE9, "n": 0}, {"ctrl": 9, "note": "+0"}),
-        ({"w": 129, "n": 196}, {"ctrl": 129, "note": "=68"}),
+        ({"w": 129, "n": 196}, {"ctrl": 129, "note": "G#5"}),
         ({"w": 1, "n": 5}, {"wait": 1, "note": "+5"}),
         ({"w": 65, "n": 0x80}, {"ctrl": 65}),
         ({"w": 0, "n": 12}, {"note": "+12"}),
@@ -104,7 +105,7 @@ ROWS = {
         ({"w": 0x21, "a": 0xF4, "d": 0xF0}, {"ctrl": 0x21, "note": "-12", "freq": -16}),
         ({"w": 0, "a": 5}, {"note": "+5"}),
         ({"w": 3, "a": 0x80, "d": 0x80, "h": 3}, {"hold": 4, "freq": -128}),
-        ({"w": 0x0F, "a": 0x99, "h": 0x0F}, {"hold": 16, "note": "=24"}),
+        ({"w": 0x0F, "a": 0x99, "h": 0x0F}, {"hold": 16, "note": "C2"}),
         ({"w": 0x50, "a": 0x7F}, None),
         ({"w": 0x50, "a": 0, "h": 0x40}, None),
         ({"w": 5, "a": 3, "h": 2}, None),
@@ -129,7 +130,7 @@ ROWS = {
             {"dl": 1, "wgh": 64, "wgl": 1, "af": 0x80, "xf": 2, "xc": 5},
             {"hold": 2, "ctrl": "64^1", "freq": ("x", 2), "cut": ("x", 5)},
         ),
-        ({"dl": 242, "tr": 180}, {"note": "=28"}, {"tr": 180}),
+        ({"dl": 242, "tr": 180}, {"note": "E2"}, {"tr": 180}),
         ({"wgl": 8}, {"ctrl": "^8"}),
         ({"wgh": 16}, {"ctrl": 16}),
         ({"re": 0}, {"route": "-"}),
@@ -191,7 +192,7 @@ REFUSALS = {
     ("goattracker2", "ctrltab"): [
         ({"ctrl": 0xE5}, r"values of \['ctrl'\]"),
         ({"ctrl": 9, "wait": 1}, "values of"),
-        ({"note": "=0"}, r"values of \['note'\]"),
+        ({"note": "C0"}, r"values of \['note'\]"),
         ({"vol": 16}, "no shape"),
         ({"res": 0, "route": 0}, "no shape"),
         ({"res": 1, "route": 0, "filter": NONE}, "values of"),
@@ -235,7 +236,7 @@ COMMAND_ROWS = {
         (10, 2, ("run", ("filttab", 2))),
         (16, 3, ("freq", ("x", 3))),
         (16, 0, ("freq", NONE)),
-        (17, 0, ("legato", 0)),
+        (17, 0, ("legato", None)),
         (14, 0, ("funk", NONE)),
         (14, 6, ("funk", ("speedtab", 6))),
         (15, 0, None),
@@ -245,7 +246,7 @@ COMMAND_ROWS = {
     "sidwizard": [
         (16, 3, ("freq", ("x", 3))),
         (16, 0, ("freq", NONE)),
-        (63, 0, ("legato", 0)),
+        (63, 0, ("legato", None)),
         (112, 5, ("run", ("wftab", 5))),
         (112, 0, ("run", NONE)),
         (17, 0x57, ("funk", (5, 7))),
@@ -267,11 +268,13 @@ COMMAND_REFUSALS = {
         ("funk", ("ctrltab", 1)),
         *(("funk", v) for v in [(6, 256), (6,), (6, 6, 6), 6]),
         ("legato", 1),
+        ("legato", 0),
         ("freq", 5),
     ],
     "sidwizard": [
         ("freq", 5),
         ("legato", 1),
+        ("legato", 0),
         ("tempo", 2),
         *(("funk", v) for v in [(2, 6), (6, 16), (16, 6), (6,), (6, 6, 6), 6, NONE, ("x", 1)]),
     ],
@@ -459,13 +462,13 @@ def test_expression_and_reference_keys():
 def test_defmon_programs_end_on_a_freeze():
     c = CODECS["defmon"]["sidtab"]
     end = {"dl": 0x80, "tr": 180, "af": 0x80, "xf": 1}
-    c.check_end({"dl": 0x80, "tr": 180}, {"note": "=28"})
-    c.check_end(end, {"note": "=28", "freq": "v + 1"})
+    c.check_end({"dl": 0x80, "tr": 180}, {"note": "E2"})
+    c.check_end(end, {"note": "E2", "freq": "v + 1"})
     bad = [
         ({"dl": 0x80}, {"hold": 3}),
-        (end, {"note": "=28"}),
-        (end, {"note": "=29", "freq": "v"}),
-        ({"dl": 0x80, "tr": 180}, {"note": "=28", "freq": "v"}),
+        (end, {"note": "E2"}),
+        (end, {"note": "F2", "freq": "v"}),
+        ({"dl": 0x80, "tr": 180}, {"note": "E2", "freq": "v"}),
     ]
     for raw, row in bad:
         with pytest.raises(CodecError, match="can't end"):
@@ -599,8 +602,8 @@ def test_codec_expressions_read_only_declared_tables():
         (
             note_value,
             lambda v: note_text(*v),
-            [("=68", (True, 68)), ("-3", (False, -3)), ("=-24", (True, -24)), ("+5", (False, 5))],
-            [True, "=+3", "x", 1.5],
+            [("G#5", (True, 68)), ("-3", (False, -3)), ("C0", (True, 0)), ("+5", (False, 5))],
+            [True, "=68", "x", 1.5, "H2"],
         ),
         (
             route_value,
@@ -660,14 +663,14 @@ def nfreq(note):
 
 @pytest.mark.parametrize("freq", [3, -5, 0])
 def test_defmon_init_keys_mean_what_they_mean_in_rows(freq):
-    ir = defmon_doc({"pw": 0x0567, "note": "=36", **({"freq": freq} if freq else {})}, {"sub": 1})
+    ir = defmon_doc({"pw": 0x0567, "note": "C3", **({"freq": freq} if freq else {})}, {"sub": 1})
     voice, word = ir["records"]["vinit"][0], nfreq(60) + freq
     assert (voice["pw"], voice["tbase"], voice["flo"] | voice["fhi"] << 8) == (0x0567, 60, word)
     assert ir["records"]["ginit"][0] == {"sub": 1}
     grid = SongPlayer(ir).render_grid(2)
     assert list(grid[0][0:4]) == [word & 0xFF, word >> 8, 0x67, 0x05]
     text = songio.dumps(ir)
-    assert f"0: {{note: =36, pw: 1383{f', freq: {freq}' if freq else ''}}}" in text
+    assert f"0: {{note: C3, pw: 1383{f', freq: {freq}' if freq else ''}}}" in text
     assert songio.dumps(songio.loads(text)) == text
 
 
@@ -697,7 +700,7 @@ def test_defmon_init_cells_without_a_written_form_are_refused():
 
 
 DM_ROUTES = """
-unitracker: 1.19
+unitracker: 1.20
 playroutine: {ref: defmon}
 song:
   - def:
@@ -723,7 +726,7 @@ def test_defmon_routes_relative_to_the_programs_voice():
 
 
 SW_CHORD = """
-unitracker: 1.19
+unitracker: 1.20
 playroutine: {ref: sidwizard}
 song:
   - def:
@@ -733,7 +736,7 @@ song:
       ctrl:
         c1: [{hold: 3, ctrl: 17, note: +4}, {hold: 3, ctrl: 17, note: +7}, {loop: 0}]
       phrase:
-        p1: [C4.i1*4, C4!run:@c1*4]
+        p1: [C4.i1*4, C4!run:c1*4]
     play: [p1, p1, p1]
 loop: 0
 """
@@ -837,10 +840,10 @@ def accepted(player: str) -> dict:
             refs.setdefault(name, []).append("/".join(["0-255"] * len(rtypes[ref].own)))
             continue
         if ref is not None:
-            refs.setdefault(name, []).append(f"`@{rtypes[ref].written}`")
+            refs.setdefault(name, []).append(f"`{rtypes[ref].written}` name")
             continue
         values.setdefault(name, set()).update(readable(cmds, code, name, var))
-    cells = {n: cell(v) for n, v in values.items()}
+    cells = {n: "no argument" if n in ARGLESS else cell(v) for n, v in values.items()}
     for name in envelope_names(pr.get("commands")):
         cells[name] += ", at most one nibble from the instrument's"
     for name, names in refs.items():
@@ -850,7 +853,7 @@ def accepted(player: str) -> dict:
             pass
         cells[name] = ", ".join(names)
     if pr.get(restart.NAME):
-        cells[restart.NAME] = f"`@{restart.NAME}`"
+        cells[restart.NAME] = f"`{restart.NAME}` name"
     cells.update({n: "0" for n in pr.get(lifetime.NAME) or {}})
     return cells
 

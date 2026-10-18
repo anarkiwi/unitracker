@@ -9,6 +9,7 @@ a reference ``("x", index)`` to the format's expression records, or a reference
 import keyword
 import re
 
+from unitracker.format.atoms import AtomError, note_index, note_name
 from unitracker.format.expr import ExprError, Resolver
 from unitracker.format.records import ABSENT
 
@@ -48,10 +49,11 @@ COMMAND_NAMES = (
     "restart",
     "legato",
 )
+ARGLESS = ("legato",)
 BYTE_SHIFT = {"cut": 3}
 KEY_DEFAULTS = {"hold": 1}
 NONE = "none"
-_NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
+_RELATIVE = re.compile(r"^[+-]\d+$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
 _CTRL = re.compile(r"^(?P<lit>\d+)?\^(?P<mask>\d+)$")
 
@@ -120,20 +122,23 @@ def env_name(key: str) -> str:
 
 
 def note_value(value) -> tuple[bool, int]:
-    """``(absolute, number)`` for a written ``note``: an int is relative, ``"=n"`` absolute."""
+    """``(absolute, number)`` for a written ``note``: an int or ``+n``/``-n`` is relative, a note
+    name absolute."""
     if isinstance(value, bool):
         raise CodecError(f"bad note {value!r}")
     if isinstance(value, int):
         return False, value
-    match = _NOTE.match(str(value))
-    if match is None or (match["abs"] and match["n"][0] == "+"):
-        raise CodecError(f"bad note {value!r}")
-    return bool(match["abs"]), int(match["n"])
+    if _RELATIVE.match(str(value)):
+        return False, int(value)
+    try:
+        return True, note_index(str(value))
+    except AtomError as exc:
+        raise CodecError(f"bad note {value!r}") from exc
 
 
 def note_text(absolute: bool, number: int) -> str:
-    """The written form of a note value."""
-    return f"={number}" if absolute else f"{number:+d}"
+    """The written form of a note value: a note name, or ``+n``/``-n``."""
+    return note_name(number) if absolute else f"{number:+d}"
 
 
 def route_value(value) -> tuple[int, int]:
@@ -292,6 +297,11 @@ def is_values(value) -> bool:
 def arg_text(value) -> str:
     """A command argument as written: several values joined by ``/``."""
     return "/".join(map(str, value)) if is_values(value) else str(value)
+
+
+def command_text(name: str, value) -> str:
+    """A command as written: ``!name``, or ``!name:arg``."""
+    return f"!{name}" if value is None else f"!{name}:{arg_text(value)}"
 
 
 def is_expr(value) -> bool:
@@ -579,10 +589,12 @@ class CommandCodec:
 
     def encode(self, code: int, arg: int) -> tuple[str, object]:
         """``(name, value)``: value is an int, a tuple of ints for an entry with ``args``,
-        ``(type, index)`` for a reference, or ``none``."""
+        ``(type, index)`` for a reference, ``none``, or None for a command of :data:`ARGLESS`."""
         for ecode, name, ref, var in self.entries:
             if ecode != code or ("when" in var and not evaluate(var["when"], {"arg": arg})):
                 continue
+            if name in ARGLESS:
+                return name, None
             if "args" in var:
                 return name, tuple(evaluate(e, {"arg": arg}) for e in var["args"].values())
             if ref is None:
@@ -596,6 +608,10 @@ class CommandCodec:
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
     def _arg(self, name, ref, var, value):
+        if (name in ARGLESS) != (value is None):
+            return None
+        if value is None:
+            return evaluate(var.get("raw", 0), {})
         if value == NONE:
             return None if ref is None else self.rtypes[ref].none
         if "args" in var:
@@ -625,4 +641,4 @@ class CommandCodec:
                     return code, arg
             except CodecError:
                 continue
-        raise CodecError(f"the player can't express !{name}:{arg_text(value)}")
+        raise CodecError(f"the player can't express {command_text(name, value)}")

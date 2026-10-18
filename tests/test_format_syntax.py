@@ -11,26 +11,32 @@ ATOMS = [
     (0, 0, 1, None, [], "-"),
     (2, 0, 4, None, [], "off*4"),
     (3, 0, 1, None, [], "on"),
-    (1, 46, 1, "i4", ["slideup:@s1"], "A#3.i4!slideup:@s1"),
+    (1, 46, 1, "i4", ["slideup:s1"], "A#3.i4!slideup:s1"),
+    (1, 48, 1, None, ["legato", "freq:x2"], "C4!legato!freq:x2"),
     (0, 0, 48, None, ["tempo:16"], "-!tempo:16*48"),
     (0, 0, 1, None, ["run:none"], "-!run:none"),
-    (1, 60, 2, "i2", ["run:@w2", "sr:136"], "C5.i2!run:@w2!sr:136*2"),
+    (1, 60, 2, "i2", ["run:w2", "sr:136"], "C5.i2!run:w2!sr:136*2"),
 ]
 BAD_ATOMS = [
-    "", "X4", "C4.1x", "C4!1:1", "C4!A:1", "C4*", 7, "C4 .i1", "C4!run:@1x", "C4!run:-1",
-    "C4!run:1!",
+    "", "X4", "C4.1x", "C4!1:1", "C4!A:1", "C4*", 7, "C4 .i1", "C4!run:@w1", "C4!run:-1",
+    "C4!run:1!", "C4*1", "C4*0", "C4*01", "C4!legato:",
 ]  # fmt: skip
 
 
 def test_note_names():
-    for note, name in [(0, "C0"), (24, "C2"), (46, "A#3"), (121, "C#10")]:
+    for note, name in [
+        (0, "C0"),
+        (24, "C2"),
+        (46, "A#3"),
+        (121, "C#10"),
+        (-1, "B-1"),
+        (-24, "C-2"),
+    ]:
         assert (note_name(note), note_index(name)) == (name, note)
-    assert all(note_index(note_name(n)) == n for n in range(128))
+    assert all(note_index(note_name(n)) == n for n in range(-36, 128))
     for bad in ["H2", "C", "C#", "-", "C2x"]:
         with pytest.raises(AtomError):
             note_index(bad)
-    with pytest.raises(AtomError):
-        note_name(-1)
 
 
 def test_atoms_format_and_parse():
@@ -39,12 +45,16 @@ def test_atoms_format_and_parse():
         parsed = parse_atom(atom)
         assert (parsed["kind"], parsed["steps"], parsed["ins"]) == (kind, steps, ins)
         assert kind != 1 or parsed["note"] == note
-        args = [c.split(":") for c in commands]
-        assert parsed["commands"] == [(n, a if a[0] in "@n" else int(a)) for n, a in args]
+        args = [(c.split(":") + [None])[:2] for c in commands]
+        assert parsed["commands"] == [
+            (n, a if a is None or a[0].isalpha() else int(a)) for n, a in args
+        ]
     assert (parse_atom(False)["kind"], parse_atom(True)["kind"]) == (2, 3)
     for bad in BAD_ATOMS:
         with pytest.raises(AtomError):
             parse_atom(bad)
+    with pytest.raises(AtomError, match="without \\*1"):
+        parse_atom("C4.i1*1")
 
 
 def test_runs_fold_empty_rows():

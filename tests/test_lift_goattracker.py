@@ -201,7 +201,7 @@ def test_the_reference_lift_holds_the_tunes_constants(references):
 
 
 COMMANDS_SONG = """
-unitracker: 1.19
+unitracker: 1.20
 playroutine: {ref: goattracker2, constants: {deftempo: 6}}
 song:
   - def:
@@ -386,8 +386,8 @@ VIBRATO = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "vibrato_
 NOTES = [(24, 1, 0, 0)] + [REST] * 7 + [(31, 1, 0, 0), REST, (36, 1, 0, 0)] + [REST] * 5
 RESUMED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 0, 1, 1)] + [REST] * 3 + [(31, 1, 0, 0)]
 CHANGED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 2, 0, 0)] + [REST] * 3 + [(36, 2, 0, 0)]
-RESUMED_ATOMS = ["C2.i1*4", "-!freq:@x1", "-!freq:@x2", "-!freq:@x2", "-!freq:@x2", "G2.i1*8"]
-CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:@x1", "-!freq:@x1", "-!freq:@x1", "-!freq:@x1", "C3.i2*8"]
+RESUMED_ATOMS = ["C2.i1*4", "-!freq:x1", "-!freq:x2", "-!freq:x2", "-!freq:x2", "G2.i1*8"]
+CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1", "-!freq:x1", "-!freq:x1", "-!freq:x1", "C3.i2*8"]
 
 
 # Each case: instrument 1's vibrato delay, the rows, a second instrument, a fragment of each

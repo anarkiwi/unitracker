@@ -434,11 +434,11 @@ def test_cli_writes_the_report(gt_song, tmp_path, monkeypatch):
         main(["--out", str(out), "exprs", "synthetic.sid", "--before", str(tmp_path),
               "--after", str(tmp_path / "none"), "--workers", workers])  # fmt: skip
         texts.append(out.read_text())
-    assert all("read back from its v1.19 text, 7680 ticks are equal to" in t for t in texts)
+    assert all("read back from its v1.20 text, 7680 ticks are equal to" in t for t in texts)
     text = texts[0]
     assert "## synthetic (goattracker2)" in text and "## Tokens" in text
     assert "closed form (start value any): v = 16*abs((φ - 32) % 128 - 64) + 512" in text
-    assert re.search(r"written \(\d+ occurrences\): \(v \+ 32\) % 65536  at !freq:@x\d", text)
+    assert re.search(r"written \(\d+ occurrences\): \(v \+ 32\) % 65536  at !freq:x\d", text)
     assert re.search(r"written \(\d+ occurrences\): 2048  at i2 pw", text)
     assert re.search(r"synthetic: \d+ / - / \d+", text)
 
