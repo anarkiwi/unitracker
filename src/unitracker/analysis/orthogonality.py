@@ -314,8 +314,8 @@ def _product(sets) -> int:
 
 def _procs(unit: dict):
     for item in unit.get("fire") or []:
-        if isinstance(item, str):
-            yield item
+        if isinstance(item, str) or "proc" in item:
+            yield item if isinstance(item, str) else item["proc"]
 
 
 def _modulator_reads(pr: dict):

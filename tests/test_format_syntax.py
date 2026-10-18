@@ -108,10 +108,14 @@ def test_expressions():
         (Names(), ["g(1)"], "unknown function"),
         (Names({"f": {"args": ["a"], "expr": "a"}}), ["f(1, 2)"], "takes 1"),
         (Names({"f": {"args": ["a"], "expr": "f(a)"}}), ["f(1)"], "recurses"),
-        (Names, [{"s8": {"args": ["a"], "expr": "a"}}], "builtins"),
     ],
 )
 def test_expression_errors(resolver, texts, match):
     for text in texts:
         with pytest.raises(ExprError, match=match):
-            resolver(text) if isinstance(resolver, type) else resolver.compile(text)
+            resolver.compile(text)
+
+
+def test_a_function_cannot_shadow_a_builtin():
+    with pytest.raises(ExprError, match="builtins"):
+        Names({"s8": {"args": ["a"], "expr": "a"}})

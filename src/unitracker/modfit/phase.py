@@ -18,10 +18,10 @@ import z3
 from unitracker.format.codec import Evaluator
 from unitracker.modfit import chipinv
 from unitracker.modfit import grammar as G
-from unitracker.modfit.flow import Writes, walk
+from unitracker.modfit.flow import Writes, action_lists, walk
 from unitracker.modfit.form import INF, Form, Programs, atoms, lin, mk, record_data, show
 from unitracker.modfit.invariant import Slicer
-from unitracker.player.modulation import VALUE
+from unitracker.player.modulation import VALUE, function, run_of
 
 PHI_BOUND = 1 << 20
 FIRE = "_fire"
@@ -57,15 +57,10 @@ class Player(Programs):
 
 
 def dispatch(pr: dict, actions: list) -> list:
-    """``actions`` with each ``run`` of a playroutine record's lists as an ``if`` chain; a call of
-    a proc that runs one and has no ``return`` is inlined."""
-    records, procs = pr.get("records") or {}, pr.get("procs") or {}
+    """``actions`` with each ``run`` of a playroutine record's lists as an ``if`` chain."""
+    records = pr.get("records") or {}
     out = []
     for a in actions:
-        body = procs.get(a.get("call"))
-        if body and not a.get("with") and inlined(body, records):
-            out += dispatch(pr, body)
-            continue
         run = a.get("run") or {}
         rows = records.get(run.get("record"))
         if rows is None:
@@ -374,10 +369,23 @@ class Graph:
     error: str = ""
 
 
-def inlined(body: list, records: dict) -> bool:
-    """True when a proc's ``body`` runs a playroutine record's lists and has no ``return``."""
-    runs = any((a.get("run") or {}).get("record") in records for a in body)
-    return runs and not any("return" in d for d in walk(body))
+def fire_actions(pr: dict, item) -> list:
+    """The actions of a ``fire`` entry: a proc's call, a ``run``, or a template or record function
+    run at the index its one calling ``run`` gives."""
+    ref = function(item)
+    if "proc" in ref:
+        return [{"call": ref["proc"]}]
+    if "run" in item:
+        return [item]
+    run = run_of(ref)
+    calls = {
+        str(d["run"]["index"])
+        for d in walk(list(action_lists(pr).values()))
+        if "run" in d and run_of(function(d)) == run
+    }
+    if len(calls) != 1:
+        raise ValueError(f"{run} is run at {len(calls)} indices, not one")
+    return [{"run": {**run, "index": calls.pop()}}]
 
 
 class Machine:  # pylint: disable=too-many-instance-attributes
@@ -388,9 +396,7 @@ class Machine:  # pylint: disable=too-many-instance-attributes
         self.unit = unit
         self.chip = unit.get("chip")
         self.paired = bool(self.chip) and unit["cell"] in form.pair
-        actions = dispatch(
-            form.pr, [a if isinstance(a, dict) else {"call": a} for a in unit["fire"]]
-        )
+        actions = dispatch(form.pr, [a for f in unit["fire"] for a in fire_actions(form.pr, f)])
         if self.chip and not self.paired:
             self.cell = VALUE
             form.width[VALUE] = int(self.chip["width"])

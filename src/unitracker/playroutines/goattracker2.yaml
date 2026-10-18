@@ -125,9 +125,7 @@ record_types:
       - if: "row.w >= 0xF0"
         then:
           - set: {arg: row.n, wc: "row.w & 0x0F"}
-          - if: "wc >= 1 and wc <= 4"
-            then: [{call: wstart}, {call: wstep}]
-            else: [{run: {record: wavecmd, index: wc, field: do}}]
+          - run: {record: wavecmd, index: wc, field: do}
           - set: {skip: 1}
           - return: true
       - if: "row.w >= 0xE0"
@@ -326,11 +324,6 @@ records:
     14: {do: [{set: {state: 1}}]}
 
 procs:
-  # A wavetable step ($F1-$F4): wstart starts the wave unit, wstep is its one firing.
-  wstart:
-    - set: {wc: wc}
-  wstep:
-    - run: {record: wavecmd, index: wc, field: do}
   # The voice's registers hold its first note once a wavetable row sets its frequency.
   wnote:
     - set: {freq: "ftab[n]", vibtime: 0, lastnote: n, skip: 1, onset: 1}
@@ -509,13 +502,13 @@ modulators:
       key: freq
       cell: freq
       chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
-      fire: [wstep]
+      fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]
       label: [wcur]
       x: "ctrltab[wcur].x"
       relative: [lastnote]
       site: {record: ctrltab, index: wcur, field: x, row: true, clear: {w: 0xF1, n: 0}}
       hooks:
-        - {at: {proc: wstart}, written: [wc]}
+        - {at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}
     - name: pulse
       key: pw
       cell: pulse

@@ -197,9 +197,9 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `cell` | the driven cell; a pair `hi:lo[:k]` is the value `hi << k \| lo & (2**k - 1)` (k 8 when omitted) |
 | `chip` | `{width, value, store}`: the unit's value is `value` over the cells, masked to `width` bits; `store` (reading `value`) writes a value back, run only when the cells do not already give it; each cell state the firings reach gives its own value, and `store` inverts `value` on those states |
 | `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it |
-| `fire` | one firing: proc names and `run` actions; `v` is read before the first entry's function runs and the expression's value is stored after the last's |
+| `fire` | one firing: proc names, `run` actions and functions; `v` is read before the first entry's function runs and the expression's value is stored after the last's |
 | `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing |
-| `hooks` | the starts: `{at: function, written: [cells], key: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `key` cells, or writes a `pointer` to a program that sets one of `program.fields` |
+| `hooks` | the starts: `{at: function, written: [cells], key: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `key` cells, or writes a `pointer` to a program that sets one of `program.fields`; a hook with none of the three restarts it on every call, before the call runs |
 | `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start |
 | `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
 | `label` | the cells that group a unit's occurrences for the lifter |
@@ -208,10 +208,13 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the document does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
 | `commands` | the native command codes the lifter replaces by the command named `key` that references `x` (`!freq`) |
 
-A function is `{proc: p}`, `{record: r, field: f}` (every row's action list in field `f`, or
-with `index: i` row `i`'s) or `{type: t, template: f}`. A `fire` entry names the function it
-runs: a proc name `{proc}`, a `run` with `field` `{record, field}`, a `run` with `template`
-`{type, template}`.
+A function is `{proc: p}`, `{record: r, field: f}` (every row's action list in field `f`, with
+`index: i` row `i`'s, or with `index: [i, ...]` those rows') or `{type: t, template: f}`. A `fire`
+entry names the function it runs: a proc name `{proc}`, a `run` with `field` `{record, field}`, a
+`run` with `template` `{type, template}`, or the function itself, which the lifter runs at the index
+of the one `run` that calls it. A firing whose every call is a start fires and starts at the same
+function (GoatTracker's wavetable steps: `fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]`,
+`hooks: [{at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}]`).
 
 ## The cursor
 

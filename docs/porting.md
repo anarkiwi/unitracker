@@ -208,8 +208,8 @@ unit keys are in [Modulator declarations](playroutines/schema.md#modulator-decla
 | key | what it transcribes |
 |---|---|
 | `cell`, `scope` | the cell the replay modulates (`hi:lo[:k]` for a pair); `global` for one cell the voices share |
-| `fire` | one firing, as proc names and `run` actions: `v` is read before the first entry runs and the value stored after the last |
-| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` or `{type: t, template: f}`) writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields` |
+| `fire` | one firing, as proc names, `run` actions and functions: `v` is read before the first entry runs and the value stored after the last |
+| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` with `i` a row or a list of rows, or `{type: t, template: f}`) writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields`; with none of these, every call of the function is a start. Never add a proc only to label a firing or a start: name the function the player already runs |
 | `x` | the expression a start selects; 0 leaves the playroutine's own firing |
 | `label` | the cells grouping occurrences, usually the program pointer |
 | `site`, `retire`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` (the `commands` entry named `key` with `ref: x`) replaces |
