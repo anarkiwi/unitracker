@@ -165,7 +165,7 @@ RESTARTS = {
         (LAST, {"gate": 0}, True),
         (LAST, {}, True),
         (FIRST, {"hold": 64, "gate": 0}, False),
-        (FIRST, {**HR, "ad": 0x1F}, False),
+        (FIRST, {**HR, "ad": 0x1F}, True),
         (FIRST, {"ad": 0x0F, "sr": 0}, False),
         (FIRST, {"ctrl": 9}, False),
         (MIDDLE, {"hold": 2}, False),

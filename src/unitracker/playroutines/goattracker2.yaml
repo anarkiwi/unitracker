@@ -1,6 +1,4 @@
 # GoatTracker 2 playroutine (player.s, buffered writes) as a unitracker playroutine.
-# The lifter fills in the build constants.
-constants: {adparam: 0x0F00}
 defaults: {tempo: 6}
 # A tempo n is each voice's tempo cell n - 1; a swing pair is each voice's funk pair less 1 with
 # its tempo 0, which alternates it. Command $F plays 3-127 ticks; a funk tempo 2-129.
@@ -42,14 +40,15 @@ record_types:
     unwritten: [speed, vd]
     refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, freq: x, restart: restart}
   # Hard restart: a lookahead row, read hold ticks before the note (the gate timer), that
-  # may turn the gate off and then preset the envelope to adparam; then the note's first-tick
-  # row, which writes the first waveform with the gate on, or only the gate.
+  # may turn the gate off and then preset the envelope to the build's one preset; then the
+  # note's first-tick row, which writes the first waveform with the gate on, or only the gate.
   restart:
     form: map
     fields: [hold, next]
     optional: [ctrl, gate, ad, sr]
+    uniform: [ad, sr]
     codec:
-      - when: "first and not last and hold >= 1 and hold <= 0x3F and ctrl < 0 and gate <= 0 and ((ad < 0 and sr < 0) or (gate == 0 and ad == adparam >> 8 and sr == (adparam & 0xFF)))"
+      - when: "first and not last and hold >= 1 and hold <= 0x3F and ctrl < 0 and gate <= 0 and ((ad < 0 and sr < 0) or (gate == 0 and ad >= 0 and sr >= 0))"
         keys: {hold: hold}
         raw: {hold: hold}
       - when: "last and not first and hold == 0 and ad < 0 and sr < 0 and ((ctrl < 0 and gate <= 1) or (ctrl >= 1 and ctrl < 0xFE and gate == 1))"

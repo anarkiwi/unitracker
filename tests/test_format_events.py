@@ -533,3 +533,24 @@ def test_an_envelope_command_keeps_the_slot_that_decides_its_column():
     ir = songio.loads(env_song({"p1": "C4.i1*4, D4!legato!sr:192*4"}, defs=COL_DEFS))
     assert commands(ir)[1] == [[63, 0], [80, 12]]
     assert "D4!legato!sr:192*4" in songio.dumps(ir)
+
+
+# -- the hard-restart preset: one per goattracker2 song --
+
+
+def test_the_restart_preset_is_one_per_song():
+    ins = (
+        "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65}, end], restart: r1}\n"
+        "        i2: {sr: 240, ctrl: [{ctrl: 33}, end], restart: r2}\n      restart:\n"
+        "        r1: [{hold: 2, gate: 0, ad: 14, sr: 0}, {ctrl: 9}, end]\n"
+        "        r2: [{hold: 3, gate: 0, ad: 14, sr: 0}, {}, end]\n"
+    )
+    text = song("goattracker2", ins, {"p1": "C4.i1*4, D4.i2*4"})
+    ir = songio.loads(text)
+    assert songio.dumps(ir) == songio.dumps(songio.loads(songio.dumps(ir)))
+    assert "constants" not in songio.dumps(ir)
+    with pytest.raises(songio.SongFormatError, match="restart rows set ad to different values"):
+        songio.loads(text.replace("hold: 3, gate: 0, ad: 14", "hold: 3, gate: 0, ad: 15"))
+    ir["records"]["restart"][3]["sr"] = 1
+    with pytest.raises(songio.SongFormatError, match="restart rows set sr to different values"):
+        songio.dumps(ir)

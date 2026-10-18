@@ -331,7 +331,7 @@ imply, so the lifter resolves what the native data leaves implicit:
 
 | what | example |
 |---|---|
-| the build | constants (`adparam`, `defmon`'s `floor` and `dbl`) and the initial tempo; `check_build` refuses builds and features the playroutine does not cover |
+| the build | constants (`defmon`'s `floor` and `dbl`) and the initial tempo; `check_build` refuses builds and features the playroutine does not cover |
 | carried modulator values | a slide's start frequency, a delay counter, an ACID direction: `convert` writes each as a constant of its start's expression |
 | instrument context | the voice's instrument at each note: SID-Wizard's octave shift into the notes, its envelope bytes, a first note that selects no instrument |
 | module state through init | `defmon`'s `vinit` and `ginit`; a cell the replay's init sets is refused, naming it |

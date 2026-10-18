@@ -442,7 +442,6 @@ def lift(dec, expressions: bool = True) -> dict:
     if build.adparam is not None:
         adparam = build.adparam << 8 | build.srparam
     deftempo = build.deftempo if build.deftempo is not None else _default_tempo(song)
-    playroutine["constants"] = {"adparam": adparam}
     freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
     instruments, restarts = instrument_records(song.instruments, adparam)
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]

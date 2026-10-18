@@ -123,6 +123,17 @@ def _refuse(problem) -> None:
         raise SongFormatError(problem)
 
 
+def _uniform(pr: dict, rtypes: dict, records: dict) -> None:
+    """Refuse rows of a type that set one of its ``uniform`` fields to different values."""
+    for name, rtype in rtypes.items():
+        field = rtype.disagree(records.get(name) or {})
+        if field is not None:
+            raise SongFormatError(
+                f"{pr['name']}: the {rtype.written} rows set {field} to different values;"
+                " the player has one"
+            )
+
+
 def _player(pr, call, *args):
     """``call(*args)``, its lifetime, envelope and column errors the player's."""
     try:
@@ -175,6 +186,7 @@ class _Writer:
         self.records.update({native: rows} if native in self.records else {})
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
         plain_constants(self.codecs, self.rtypes, self.records, self.exprs)
+        _uniform(self.pr, self.rtypes, self.records)
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -932,6 +944,7 @@ class _Reader:
                         self._define(tname, name, value)
             rows.append([self._entry(e) for e in item["play"]])
         self._resolve()
+        _uniform(self.pr, self.rtypes, self.records)
         return phrases, rows, loop
 
     def read(self) -> dict:

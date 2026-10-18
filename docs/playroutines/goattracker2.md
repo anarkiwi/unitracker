@@ -10,7 +10,7 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 | | |
 |---|---|
 | tune | a packed GoatTracker 2 `.sid`, decompiled by pygoattracker |
-| lifted from | the decompiled song and the build's constant `adparam` |
+| lifted from | the decompiled song, and the build's hard-restart preset `adparam` as the restart programs' `ad` and `sr` |
 | tempo | the build's default tempo byte `d` plus 1 (when the build carries none, `d` is instrument 63's `ad` minus 1 if that `ad` is 2 or more and the instrument has no wavetable, else 5); `d` 0 is the swing `[9, 6]`, on the player's initial funk pair, and `d` 1 is not covered |
 | clock | NTSC when the header's clock flags say so, else PAL |
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
@@ -127,11 +127,12 @@ or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step wri
 
 | lookahead row | first-tick row |
 |---|---|
-| exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n}` (n $01-$FD, the first wave, which sets the gate on), `{gate: g}`, or `{}` |
+| exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad` and `sr` or neither | `{ctrl: n}` (n $01-$FD, the first wave, which sets the gate on), `{gate: g}`, or `{}` |
 
 The player reads the voice's next step its instrument's gate timer ahead of each note; an
 instrument without a restart reads it on the note's first tick. A note keeps the gate as the
-restart left it, so its first-tick row sets it.
+restart left it, so its first-tick row sets it. The build has one envelope preset (`adparam`),
+so every lookahead row that sets `ad` and `sr` sets the same values (`uniform`).
 
 ## Lifetime
 

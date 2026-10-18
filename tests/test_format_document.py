@@ -371,6 +371,7 @@ def test_record_type_defaults_refs_and_names():
         ({"r": {"do": {"set": {}}}}, "action list"),
         ({"r": {"fields": ["a"], "chain": "next"}}, "chain field"),
         ({"r": {"fields": ["a"], "unwritten": ["b"]}}, r"unwritten fields \['b'\] are not fields"),
+        ({"r": {"fields": ["a"], "uniform": ["b"]}}, r"uniform fields \['b'\] are not fields"),
         ({"a": {"writes_as": "ctrl"}, "b": {"writes_as": "ctrl"}}, "share one written name"),
         ({"a": {"writes_as": "x"}}, "share one written name"),
         ({"pw": {}, "pulse": {"writes_as": "pw", "prefix": "q"}}, "share one written name"),

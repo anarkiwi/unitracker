@@ -215,7 +215,8 @@ def test_the_reference_lift_holds_the_tunes_constants(references):
     song = references["metal_warrior"].ir()
     assert song["meta"]["title"] == "Metal Warrior Title Remix"
     assert song["clock"] == gt.PAL_CLOCK
-    assert song["playroutine"]["constants"] == {"adparam": 0x0F00} and song["tempo"] == 12
+    assert not song["playroutine"].get("constants") and song["tempo"] == 12
+    assert (song["records"]["restart"][1]["ad"], song["records"]["restart"][1]["sr"]) == (15, 0)
     assert [len(t["plays"]) for t in song["tracks"]] == [5, 5, 5]
     assert len(song["tables"]["ftab"]) == 128
     assert song["records"]["ins"][1]["sr"] == 0x88
