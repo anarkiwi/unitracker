@@ -549,6 +549,7 @@ def test_command_names_the_player_cannot_say_are_refused(player):
         ({"raw": {"w": {"range": [0, 3]}}}, "a raw field is an expression"),
         ({1: {"name": "mod"}}, "not a shared command name"),
         ({1: {"name": "run", "ref": "nope"}}, "unknown type 'nope'"),
+        ({"keys": {"ad": {"byte": "n"}}}, "ad has no byte form"),
     ],
 )
 def test_codec_declarations_are_checked(spec, match):

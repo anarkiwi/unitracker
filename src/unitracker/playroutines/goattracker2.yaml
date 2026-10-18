@@ -18,7 +18,7 @@ commands:
   9: {name: run, ref: pulsetab}
   10: {name: run, ref: filttab}
   11: {name: resfilt}
-  12: {name: cut, arg: "arg << 3", raw: "arg >> 3"}
+  12: {name: cut, byte: arg}
   13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
   # E: the swing tempos; the lifter gives a speed-table row l/r as $10000 | l << 8 | r (!funk:6/7).
   14:
@@ -116,8 +116,8 @@ record_types:
         keys: {res: 0, route: 0, filter: {none: true}}
         raw: {w: 0xFB, n: 0}
       - when: "w == 0xFC and n >= 0 and n <= 0xFF"
-        keys: {cut: "n << 3"}
-        raw: {w: 0xFC, n: "cut >> 3"}
+        keys: {cut: {byte: n}}
+        raw: {w: 0xFC, n: cut}
       - when: "w == 0xFD and n >= 0 and n < 0x10"
         keys: {vol: n}
         raw: {w: 0xFD, n: vol}
@@ -167,14 +167,14 @@ record_types:
           mode: "l & 0x70"
           res: "r >> 4"
           route: "r & 0x0F"
-          cut: {value: "cut << 3", omit: "cut < 0", expr: x}
+          cut: {byte: cut, omit: "cut < 0", expr: x}
         raw:
           l: "0x80 | mode"
           r: "((res & 0x0F) << 4) | (route & 0x0F)"
-          cut: "(cut >> 3) if has_cut else -1"
+          cut: "cut if has_cut else -1"
       - when: "l == 0 and x == 0"
-        keys: {cut: "r << 3"}
-        raw: {l: 0, r: "cut >> 3"}
+        keys: {cut: {byte: r}}
+        raw: {l: 0, r: cut}
     do:
       - if: "row.l >= 0x80"
         then:

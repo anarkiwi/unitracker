@@ -477,7 +477,7 @@ def codec_keys(rt) -> dict:
         for key, spec in (shape.get("keys") or {}).items():
             spec = spec if isinstance(spec, dict) else {"value": spec}
             for part in (spec, spec.get("eor") or {}):
-                for f in names(part.get("value")) & set(rt.fields):
+                for f in (names(part.get("value")) | names(part.get("byte"))) & set(rt.fields):
                     out.setdefault(f, set()).add(key)
     return out
 

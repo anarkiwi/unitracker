@@ -165,9 +165,11 @@ a shared key needs no `keys` or `raw` entry of its own. Read a signed byte or wo
 for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back;
 `keep` for raw fields written under their own names ([Codecs](playroutines/schema.md#codecs)). Write
 every row kind onto the shared keys ([Shared vocabulary](format/vocabulary.md)), each in its one
-meaning in chip units. The reader accepts a written row only when encoding its raw inverse gives the
+meaning in chip units; a player that stores the 11-bit cutoff as its top byte writes the `cut` key
+as `{byte: f}` and the `cut` command as `{name: cut, byte: arg}`, and its `raw` reads `cut` as that
+byte. The reader accepts a written row only when encoding its raw inverse gives the
 row again, so a shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
-`commands`: code to `{name, ref, when, arg, raw}`, `{name, when, args, raw}` for several values,
+`commands`: code to `{name, ref, when, arg, raw}` (or `byte` for `arg`), `{name, when, args, raw}` for several values,
 `{name, none}` for the argument written `none`, or `{name, nibble, slot}` for an envelope command.
 
 **A document names no player.** No key, command or record type is one player's own. What the
