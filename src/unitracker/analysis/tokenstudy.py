@@ -1,5 +1,5 @@
 """Token studies of unitracker documents: per-section counts and context-efficiency mock-ups,
-each measured with several real tokenizers (see docs/optimise.md).
+each counted with several real tokenizers.
 
 A mock-up rewrites the written structure of a document (``songio.dumps(..., respell=)``); none
 of them is a format the reader accepts.
