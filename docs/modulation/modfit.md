@@ -51,7 +51,7 @@ value term (`exprs.Analysis.key`).
    change. Frequency-table reads fold to `F`; named tables replace the functions they rewrite.
 5. **Closed form.** When every class adds or sets and the start value is known (or set before
    any add), candidate `g(φ)` (the value after the firing at `φ`) are window ramps over the
-   cycle plus its drift, gated `[φ >= d]` after a constant prefix, also rewritten through `abs`;
+   cycle plus its drift, gated `(φ >= d)` after a constant prefix, also rewritten through `abs`;
    wrapped only when the range leaves the cell. The shortest proved candidate is kept.
 
 ### What is proved
@@ -86,7 +86,7 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
 3. **Group.** Occurrences group by unit and `label`. Over a group's starts that modulate: a
    shared closed form when every start has the same one, else a shared recurrence when every
    start has the same one, else each start's own (closed form if any, else recurrence). A start
-   whose first value differs from the player's by a carried constant `c` is written `f - c·[φ < 1]`
+   whose first value differs from the player's by a carried constant `c` is written `f - c·(φ < 1)`
    (a shared closed form gives way to the recurrence first). A start that does not modulate
    writes nothing (`v` at a row site or where a native command is replaced).
 4. **Write.** At the unit's `site` when it exists and its `when` holds over the start cells:
@@ -130,7 +130,7 @@ Within a group whose texts differ only in values carried from earlier playback, 
 proves one form for every value: the differing start cells are made symbolic and derived
 again; a cell the firing never counts becomes an input, proved for every value of its width
 and equal to each start's expression. Otherwise one carried counter that each firing lowers by
-one, keeping `v`, is a delay gate `[φ >= d]` before the run of the start whose counter ran out.
+one, keeping `v`, is a delay gate `(φ >= d)` before the run of the start whose counter ran out.
 Otherwise the reason is reported. This is reported by `exprs`; the conversion writes each
 start's constants.
 

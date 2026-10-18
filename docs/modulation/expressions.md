@@ -12,7 +12,7 @@ cutoff) by an integer expression evaluated at each of the unit's firings.
 | `a // b` | floored division: rounds toward minus infinity |
 | `a % b` | floored modulo: the result has the sign of `b` |
 | `abs(a)`, `min(a, b)`, `max(a, b)` | |
-| `[a op b]` | Iverson bracket of one comparison: 1 when it holds, else 0; `op` is `==`, `!=`, `<`, `<=`, `>` or `>=` |
+| `(a op b)` | one comparison as an integer: 1 when it holds, else 0; `op` is `==`, `!=`, `<`, `<=`, `>` or `>=` |
 | `v` | the cell's value before the firing |
 | `φ` | the firings since the modulator started, from 0 |
 | `N` | the voice's sounding note, format numbering (C2 = 24) |
@@ -20,7 +20,11 @@ cutoff) by an integer expression evaluated at each of the unit's firings.
 | `T[k]` | entry `k` of a table `T` the playroutine declares (`modulators: tables:`); 0 outside its size |
 
 Anything else is rejected on reading, naming the text (`... is outside the grammar`,
-`... calls no grammar function`, `[...] is not one comparison`, `unknown table 'T'`).
+`... calls no grammar function`, `(...) is not one comparison`, `unknown table 'T'`).
+
+The lifter writes each expression in one form: a comparison in parentheses, and no `% m` over its
+sums and products that the cell's wrap to its width repeats (`v + 32`, not `(v + 32) % 65536`,
+for a 16-bit cell), its constant term then the nearest to 0.
 
 ## Evaluation
 
@@ -58,9 +62,11 @@ units ([goattracker2](../playroutines/goattracker2.md#modulators),
 | an event's `!freq:x1` | a name of an `x` definition |
 
 A key that also takes a plain value reads an integer as that value and a string as an
-expression (`cut: '1024'` is the constant expression, written back quoted); elsewhere an integer
-is a constant expression. An expression that contains a comma is quoted inside a YAML flow map:
-`pw: '2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048'`.
+expression; elsewhere an integer is a constant expression. A constant is written in its plain
+form: a constant expression in a key that takes the value as the value (`cut: 1024`, quoted only
+where the value can't be played), and a program of one row that sets only its unit's key as that
+constant (`pw: 2048`, not `[{pw: 2048}, end]`). An expression that contains a comma is quoted
+inside a YAML flow map: `pw: '2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048'`.
 
 ## Legato
 

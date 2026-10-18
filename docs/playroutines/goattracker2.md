@@ -155,7 +155,7 @@ or its programs' rows, and whose event runs none (`!run`); the writer leaves the
   command continue.
 - Commands 1-4 and the instrument vibrato are the `command` unit's own firings: the lifter writes
   the commands' modulations as `!freq`, and the instrument vibrato as the instrument's `freq`,
-  its delay a term in `φ` (`[φ >= 38]` for a delay of 40), when it starts with the note; a
+  its delay a term in `φ` (`(φ >= 38)` for a delay of 40), when it starts with the note; a
   vibrato that resumes after a command, or after a row that selects another instrument without a
   note, is `!freq` on each of its steps. An instrument with a vibrato delay of 0 has no vibrato.
 - A wavetable row's `freq` is one firing: the step ($F1-$F4) the row runs, with its speed and the

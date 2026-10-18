@@ -1,6 +1,6 @@
 """The modulator expression grammar: canonical sympy terms, their text, z3 and Python forms.
 
-Integers, ``+ - * // % & | ^ << >>``, ``abs``, ``min``, ``max``, Iverson brackets ``[a < b]``,
+Integers, ``+ - * // % & | ^ << >>``, ``abs``, ``min``, ``max``, comparisons ``(a < b)`` as 0 or 1,
 ``v``, ``φ``, ``N``, ``F(k)`` (frequency of format note k), player tables ``name[k]`` and other
 modulators by name. Shifts and all-ones masks fold into ``*``, ``//`` and ``%``.
 """
@@ -410,7 +410,7 @@ def _sum(e) -> str:
 
 
 def _compare(e, op: str) -> str:
-    """``[e op 0]`` as ``[P op Q + k]`` with positive terms left; ``> Q`` for ``>= Q + 1``."""
+    """``(e op 0)`` as ``(P op Q + k)`` with positive terms left; ``> Q`` for ``>= Q + 1``."""
     const, rest = e.as_coeff_Add()
     terms = sympy.Add.make_args(rest)
     pos = sympy.Add(*(t for t in terms if not t.could_extract_minus_sign()))
@@ -424,7 +424,38 @@ def _compare(e, op: str) -> str:
         const = 0
         op = {">=": ">", "<=": "<"}[op]
     right = sympy.expand(neg - const)
-    return f"[{text(pos)} {op} {text(right)}]"
+    return f"({text(pos)} {op} {text(right)})"
+
+
+def _nearest(e, size: int):
+    """``e`` with its constant term the nearest to 0 that is alike modulo ``size``."""
+    const, rest = e.as_coeff_Add()
+    if not const.is_Integer or rest == 0:
+        return e
+    near = int(const) % size
+    return rest + (near - size if 2 * near >= size else near)
+
+
+def _ring(e, size: int):
+    """``e`` without each ``% m`` (``size`` dividing ``m``) reached through sums and products
+    alone, which leave ``e`` modulo ``size`` alike; each sum it opens with its constant nearest
+    to 0."""
+    if isinstance(e, sympy.Mod) and e.args[1].is_Integer and int(e.args[1]) % size == 0:
+        return _nearest(_ring(e.args[0], size), size)
+    if e.is_Add or e.is_Mul:
+        return e.func(*(_ring(a, size) for a in e.args))
+    if e.is_Pow and e.exp.is_Integer and e.exp > 0:
+        return sympy.Pow(_ring(e.base, size), e.exp)
+    return e
+
+
+def unwrapped(e, width: int | None):
+    """``e`` without the ``% m`` its unit's wrap to ``width`` bits repeats (``2**width``
+    divides ``m``) through its sums and products (see :func:`_ring`)."""
+    if width is None:
+        return e
+    out = _ring(e, 1 << width)
+    return e if out == e else _nearest(out, 1 << width)
 
 
 @functools.lru_cache(maxsize=None)

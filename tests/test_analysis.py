@@ -92,8 +92,8 @@ def test_reference_tunes_report_is_independent_of_order(optimised_tunes):
 
 I2 = ins_line("i2", "ad: 4, ctrl: [{ctrl: 33, note: +0}, end]")
 X = (
-    "      x:\n        x1: (v + 32*[(φ - 3) % 12 >= 6] - 16) % 65536\n"
-    "        x2: (v + 64*[(φ - 3) % 12 >= 6] - 32) % 65536\n"
+    "      x:\n        x1: (v + 32*((φ - 3) % 12 >= 6) - 16) % 65536\n"
+    "        x2: (v + 64*((φ - 3) % 12 >= 6) - 32) % 65536\n"
 )
 PHRASE = (
     "[C4.i1*2, D#4, G4!freq:x1, C5, C4.i2*2, D#4, G4!freq:x2, C5, F4.i1, G#4, C5, F5,"
@@ -135,7 +135,7 @@ def test_sections_rests_and_primitives_split_a_document(written):
 
 def test_mockups_rewrite_what_they_name():
     texts = tokenstudy.mockups(song())
-    assert "forms: {f1: '(a, b) (v + a*[(φ - 3) % 12 >= 6] - b) % 65536'}" in texts["forms"]
+    assert "forms: {f1: '(a, b) (v + a*((φ - 3) % 12 >= 6) - b) % 65536'}" in texts["forms"]
     assert "f1(32, 16)" in texts["forms"] and "f1(64, 32)" in texts["forms"]
     assert "tri(φ - 32, 128)" in texts["primitives"]
     assert "&s1" in texts["sub-phrases"] and "sub:" in texts["sub-phrases"]

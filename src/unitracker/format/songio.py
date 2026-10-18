@@ -27,6 +27,7 @@ from unitracker.format.codec import (
     inline_text,
     is_expr,
     note_text,
+    plain_constants,
     row_place,
     written_value,
 )
@@ -157,6 +158,11 @@ class _Writer:
         self.names = {}
         self.row = 0
         self.phrase_names = {}
+        self.driven = {
+            u["site"]["record"]: u["key"]
+            for u in declared(self.pr).get("units") or []
+            if u.get("site") and self.rtypes[u["site"]["record"]].expr is not None
+        }
         _player(self.pr, column.check, self.pr, ir["phrases"])
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         native = (self.pr.get("instrument") or {}).get("type")
@@ -166,6 +172,7 @@ class _Writer:
         )
         self.records.update({native: rows} if native in self.records else {})
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
+        plain_constants(self.codecs, self.rtypes, self.records, self.exprs)
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -342,6 +349,13 @@ class _Writer:
             self.row_value(rtype, self._row(rtype, i), row_place(k, len(path), loop is None))
             for k, i in enumerate(path)
         ]
+        if (
+            loop is None
+            and len(rows) == 1
+            and list(rows[0]) == [self.driven.get(rtype.name)]
+            and isinstance(rows[0][self.driven[rtype.name]], int)
+        ):
+            return rows[0][self.driven[rtype.name]]
         rows.append(Atom("end") if loop is None else FlowMap(loop=loop))
         return Flow(rows)
 

@@ -79,7 +79,7 @@ the type each native table is written as, `writes_as`):
   instrument uses is written inline in that instrument instead
   (`ctrl: [{ctrl: 9, note: +0}, {ctrl: 65, note: +0}, end]`).
 - **Expressions** (`x`) are the modulator expressions an event command names (`!freq:x1`):
-  `x: {x1: (v + 32) % 65536}`. An expression no command names is written where it is used.
+  `x: {x1: v + 32}`. An expression no command names is written where it is used.
 - **Fixed** record types (`fixed`, such as an initial voice state) keep their indices and are
   defined in the first row: `vinit: {0: {note: C3, pw: 256, freq: 2227}, ...}`. They use the
   shared keys with their row meaning wherever one fits, and an omitted field is 0.
@@ -117,7 +117,8 @@ The writer produces one text per song:
 - records and rows the song never reaches are dropped;
 - identical phrases, and phrases that are equal up to a transpose, are merged, and the transpose
   moves into the play entry;
-- equal expression texts share one definition;
+- equal expression texts share one definition, and a constant is written in its plain form
+  (`pw: 2048`; see [Where expressions go](../modulation/expressions.md#where-expressions-go));
 - runs of empty steps become `*steps`;
 - a restart its notes arm on the steps before them is written as their instrument's `restart`
   (see [Hard restart](vocabulary.md#hard-restart));

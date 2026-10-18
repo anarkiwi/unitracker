@@ -524,6 +524,30 @@ class RowCodec:
             raise CodecError(f"{self.rtype.written}: row {written!r} can't end a program")
 
 
+def plain_constants(codecs: dict, rtypes: dict, records: dict, exprs: dict) -> None:
+    """Rewrite in ``records`` each row whose key holds a constant expression (of ``exprs``) where
+    the key also takes a plain value, as the row of that value when it reads back."""
+    for name, codec in codecs.items():
+        number = {k for k, plain in codec.expr_keys().items() if plain}
+        chain = rtypes[name].chain
+        for index, row in list(records.get(name, {}).items()):
+            shared = codec.encode(row) or {}
+            consts = {
+                k: int(exprs[v[1]])
+                for k, v in shared.items()
+                if k in number and is_expr(v) and str(exprs.get(v[1], "")).lstrip("-").isdigit()
+            }
+            if not consts:
+                continue
+            try:
+                raw = codec.decode(
+                    {k: written_value(k, v) for k, v in {**shared, **consts}.items()}
+                )
+            except CodecError:
+                continue
+            records[name][index] = {**raw, **({chain: row[chain]} if chain in row else {})}
+
+
 def command_variants(spec: dict):
     """``(code, variant)`` of each variant of a playroutine's ``commands`` map."""
     for code, vs in (spec or {}).items():

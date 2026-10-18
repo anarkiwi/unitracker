@@ -295,9 +295,9 @@ WAVETABLE_TUNES = {
             "speed": SPEEDS,
         },
         ("ins", "i1", "ctrl"),
-        [FIRST, {"freq": "(v + 16) % 65536"}, {"freq": "(v + 16) % 65536"}, ...]
-        + [{"freq": "(v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2) % 65536"}]
-        + [{"freq": "(v + 32) % 65536"}, {"ctrl": 65}, {"loop": 6}],
+        [FIRST, {"freq": "v + 16"}, {"freq": "v + 16"}, ...]
+        + [{"freq": "v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2"}]
+        + [{"freq": "v + 32"}, {"ctrl": 65}, {"loop": 6}],
     ),
     "an unheard waveform pause is a waveform row": (
         {
@@ -417,16 +417,16 @@ CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1", "-!freq:x1", "-!freq:x1", "-!freq:x1
 @pytest.mark.parametrize(
     "delay,rows,second,freqs,atoms",
     [
-        (1, NOTES, None, {"i1": "[(φ - 2) % 8 >= 4]"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
-        (3, NOTES, None, {"i1": "[φ >= 2]"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
-        (40, NOTES, None, {"i1": "[φ >= 38]"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
+        (1, NOTES, None, {"i1": "((φ - 2) % 8 >= 4)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
+        (3, NOTES, None, {"i1": "(φ >= 2)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
+        (40, NOTES, None, {"i1": "(φ >= 38)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
         (0, TWO_NOTES, None, {"i1": None}, ["C2.i1*8", "G2.i1*8"]),
         (3, RESUMED + [REST] * 7, None, {}, RESUMED_ATOMS),
         (
             3,
             CHANGED + [REST] * 7,
             {**VIBRATO, "vibrato_param": 2, "vibrato_delay": 1},
-            {"i1": "[φ >= 2]", "i2": "F((N + 1) % 128)"},
+            {"i1": "(φ >= 2)", "i2": "F((N + 1) % 128)"},
             CHANGED_ATOMS,
         ),
     ],

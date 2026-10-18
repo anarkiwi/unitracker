@@ -24,7 +24,7 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
 from unitracker.player import reach
-from unitracker.player.modulation import declared, unit_command
+from unitracker.player.modulation import declared, unit_command, unit_width
 from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
 
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
@@ -169,11 +169,12 @@ def derive_task(ir: dict, key: str, start: tuple, cache: Path | None):
     return _cached(where, lambda: _analysis(ir, key).derived(start), _load, _save)
 
 
-def checked(derived, a, f) -> str:
-    """The grammar text of value update ``f`` with phase update ``a``: one per firing."""
+def checked(derived, a, f, width=None) -> str:
+    """The grammar text of value update ``f`` with phase update ``a``: one per firing; its outer
+    ``% m`` dropped when its unit's wrap to ``width`` bits repeats it."""
     if derived.order.kind != "time" or int(a) != int(G.PHI in f.free_symbols):
         raise ConversionError(f"phase {G.text(a)} is not one per firing: {G.text(f)}")
-    return G.text(f)
+    return G.text(G.unwrapped(f, width))
 
 
 def groups(occs: list) -> dict:
@@ -194,8 +195,8 @@ def carried(an: Analysis, occ, a, f) -> int:
 
 
 def with_carried(an: Analysis, occ, d, pair: tuple) -> tuple:
-    """``(a, f)`` of an occurrence: ``pair`` with the constant its start carries in, ``f - c·[φ <
-    1]``; a closed form that misses its first value gives way to the recurrence."""
+    """``(a, f)`` of an occurrence: ``pair`` with the constant its start carries in, ``f - c·(φ <
+    1)``; a closed form that misses its first value gives way to the recurrence."""
     c = carried(an, occ, *pair)
     if c and d.closed is not None and pair[1] is not d.value:
         pair = (d.phase, d.value)
@@ -265,12 +266,17 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
             shared = first.update
         elif len(recur) == 1 and live:
             shared = (first.phase, first.value)
-        once = bool((an.unit(occs[members[0]].unit).get("site") or {}).get("row"))
+        unit = an.unit(occs[members[0]].unit)
+        once = bool((unit.get("site") or {}).get("row"))
+        width = unit_width(an.ir["playroutine"], unit)
         for i in members:
             d = found[occs[i].key][0]
             if not d.identity:
                 a, f = with_carried(an, occs[i], d, shared or d.update)
-                out[i] = G.text(f.subs(G.PHI, 0)) if once else checked(d, a, f)
+                if once:
+                    out[i] = G.text(G.unwrapped(f.subs(G.PHI, 0), width))
+                else:
+                    out[i] = checked(d, a, f, width)
     tables = set((declared(an.ir["playroutine"]).get("tables") or {}))
     for text in {t for t in out if t is not None}:
         try:

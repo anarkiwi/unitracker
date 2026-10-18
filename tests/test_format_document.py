@@ -335,7 +335,7 @@ def test_the_writer_refuses_what_has_no_written_form(pr):
 def test_a_pulse_program_name_is_not_a_phrase_name():
     text = list_song(tname="pw", name="pw", row="{pw: 2048}").replace("[off]", "[off!run:pw1]")
     out = songio.dumps(songio.loads(text))
-    assert "pw1: [{pw: 2048}, end]" in out and "p1: [off!run:pw1]" in out
+    assert "pw1: 2048" in out and "p1: [off!run:pw1]" in out
     assert songio.dumps(songio.loads(out)) == out
     with pytest.raises(SongFormatError, match="name 'p1' defined twice"):
         songio.loads(text.replace("pw1", "p1"))

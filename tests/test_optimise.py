@@ -55,7 +55,7 @@ SCALE = "[C4.i1*2, D4*2, E4*2, F4*2]"
 C1 = "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
 RUN = "[C4.i1!run:c1*2, D4!run:c1*2, E4!run:c1*2, F4!run:c1*2]"
 RUN_TWICE = RUN[:-1] + ", " + RUN[1:].replace("4", "5").replace(".i1", "")
-LATE = "freq: '[φ >= 38]*(F(N + 1) - F(N))'"
+LATE = "freq: '(φ >= 38)*(F(N + 1) - F(N))'"
 I2_UNHEARD = ins_line("i2", f"ad: 9, {LATE}, ctrl: [{A}, end]")
 I2_HEARD = ins_line("i2", f"ad: 10, ctrl: [{A}, end]")
 TWO = "[C4.i1*2, D4.i2*2, E4.i1*2, F4.i2*2]"

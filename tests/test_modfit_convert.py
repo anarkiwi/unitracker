@@ -84,7 +84,7 @@ GT_SONG = doc(
         x2: 0""",
     "[C4.i1, -!freq:x1, -!freq:x1, D4!legato!freq:x2, -]",
 ).replace(*TEMPO)
-SW_INS = "freq: '[φ >= 2]*W[N + 25]'"
+SW_INS = "freq: '(φ >= 2)*W[N + 25]'"
 SW_SONG = doc(
     "sidwizard",
     """      ins:
@@ -179,20 +179,26 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
             GT_SONG,
             INS + ",",
             INS + ", filter: [{cut: '1024', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
-            ["cut: '1024'", "cut: 512"],
+            ["cut: 1024", "cut: 512"],
         ),
         (
             GT_SONG,
             INS + ",",
             INS + ", filter: [{cut: '0', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
-            ["cut: '0'"],
+            ["cut: 0"],
+        ),
+        (
+            GT_SONG,
+            INS + ",",
+            INS + ", filter: [{cut: '1027', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
+            ["cut: '1027'"],
         ),
         (
             SW_SONG,
             SW_INS,
             SW_INS
             + ", filter: [{cut: '1024', res: 0, mode: 16}, {cut: 512, res: 3, mode: 32}, end]",
-            ["cut: '1024'", "cut: 512"],
+            ["cut: 1024", "cut: 512"],
         ),
     ],
 )
@@ -216,7 +222,8 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
         ),
         ([("x1: (v + 300) % 65536", "x1: v / 2")], "outside the grammar"),
         ([("x1: (v + 300) % 65536", "x1: W[N]")], "unknown table 'W'"),
-        ([("x1: (v + 300) % 65536", "x1: '[0 < v < 9]'")], "not one comparison"),
+        ([("x1: (v + 300) % 65536", "x1: '(0 < v < 9)'")], "not one comparison"),
+        ([("x1: (v + 300) % 65536", "x1: '[v > 9]*v'")], r"a comparison is written \(a op b\)"),
         ([("x1: (v + 300) % 65536", "x1: sqrt(v)")], "calls no grammar function"),
         ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
         ([("-!freq:x1, -!freq:x1,", "-!freq:x9, -!freq:x1,")], "unknown name 'x9'"),
@@ -252,7 +259,7 @@ def test_the_reader_refuses_old_forms_bad_arguments_and_text_outside_the_grammar
 
 def test_expressions_compile_to_the_grammar_semantics():
     ns = {"_F": lambda k: 1000 + k, "_T": {"W": lambda i: 2 * i}}
-    f = xexpr.compile_expr("[v >= 3]*(F(N) % 7) - abs(-φ) + max(W[2], 1) + min(v, -3)", ns)
+    f = xexpr.compile_expr("(v >= 3)*(F(N) % 7) - abs(-φ) + max(W[2], 1) + min(v, -3)", ns)
     assert f(3, 2, 4) == (1004 % 7) - 2 + 4 - 3 and f(2, 0, 4) == 4 - 3 + 1 - 1
     floor = xexpr.compile_expr("φ // 30 - v // 4", {"_T": {}})
     assert [floor(-5, phi, 0) for phi in (0, 29, 30, 61)] == [2, 2, 3, 4]
@@ -273,16 +280,16 @@ def test_a_selected_expression_must_exist():
         SongPlayer(song)
 
 
-CSILLAG_GATE = "'[φ >= 15]*((-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33]) % 65536)'"
-ACID_STEP = "v % 65536 + 2560)*[v % 65536 < 62976]"
+CSILLAG_GATE = "(-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33])*(φ >= 15)"
+ACID_STEP = "v % 65536 + 2560)*(v % 65536 < 62976)"
 
 
 @pytest.mark.parametrize(
     "name,ticks,old,new",
     [
-        ("metal_warrior", 3840, "x1: (v + 32) % 65536", "x1: (v + 33) % 65536"),
+        ("metal_warrior", 3840, "x1: v + 32", "x1: v + 33"),
         ("metal_warrior", 3840, "C4!legato!freq:x2", "C4!freq:x2"),
-        ("csillag", 3 * 2304, CSILLAG_GATE, CSILLAG_GATE.replace("[φ >= 15]", "[φ >= 14]")),
+        ("csillag", 3 * 2304, CSILLAG_GATE, CSILLAG_GATE.replace("(φ >= 15)", "(φ >= 14)")),
         ("crosseyed", None, ACID_STEP, ACID_STEP.replace("2560", "2304", 1)),
     ],
 )
@@ -602,7 +609,7 @@ def test_the_offset_is_folded_into_the_cut_expressions(acid):
     assert not np.array_equal(want[:, 22], regs(acid_ir(0), 400)[:, 22])
     assert len(np.unique(want[:, 22])) > 20
     text = songio.dumps(acid.out)
-    assert "cp:" not in text and "acid:" not in text and "cut: '" in text
+    assert "cp:" not in text and "acid:" not in text and "{cut: (" in text
     song = songio.loads(text)
     assert songio.dumps(song) == text and np.array_equal(regs(song, 400), want)
 

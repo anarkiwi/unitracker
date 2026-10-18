@@ -86,8 +86,8 @@ def test_brackets_have_one_canonical_form():
     assert G.ge(2 * PHI, 5) == G.ge(PHI, 3)
     assert G.eq(2 * PHI, 5) == 0
     assert G.Iv(sympy.Ne(PHI, 3)) == 1 - G.eq(PHI, 3)
-    assert G.text(G.ge(V, G.freq(N) + 1)) == "[v > F(N)]"
-    assert G.text(G.polar(G.lt(PHI, 64) * 5 + 2)) == "5*[φ < 64] + 2"
+    assert G.text(G.ge(V, G.freq(N) + 1)) == "(v > F(N))"
+    assert G.text(G.polar(G.lt(PHI, 64) * 5 + 2)) == "5*(φ < 64) + 2"
     assert not G.valid(sympy.Rational(1, 2) * PHI)
     assert G.shortest([sympy.Rational(1, 2) * PHI, PHI + PHI]) == 2 * PHI
 
@@ -128,12 +128,12 @@ _SIGNED = V - 65536 * G.ge(V, 32768)
             * (G.ge(_U, 32768) * (512 + sympy.Mod(V - 1, 256)) + (1 - G.ge(_U, 32768)) * _U),
             None,
             lambda shown, e: G.rank(shown) < G.rank(e)
-            and G.text(shown).startswith("16384*[φ == 0]"),
+            and G.text(shown).startswith("16384*(φ == 0)"),
         ),
         (
             G.eq(_SIGNED, 0) * 7 + G.ge(_SIGNED, 1) * V,
             (("v", 0, 65535),),
-            lambda shown, e: "[v >= 32768]]" not in G.text(shown),
+            lambda shown, e: "(v >= 32768))" not in G.text(shown),
         ),
     ],
 )
@@ -438,7 +438,7 @@ def test_cli_writes_the_report(gt_song, tmp_path, monkeypatch):
     text = texts[0]
     assert "## synthetic (goattracker2)" in text and "## Tokens" in text
     assert "closed form (start value any): v = 16*abs((φ - 32) % 128 - 64) + 512" in text
-    assert re.search(r"written \(\d+ occurrences\): \(v \+ 32\) % 65536  at !freq:x\d", text)
+    assert re.search(r"written \(\d+ occurrences\): v \+ 32  at !freq:x\d", text)
     assert re.search(r"written \(\d+ occurrences\): 2048  at i2 pw", text)
     assert re.search(r"synthetic: \d+ / - / \d+", text)
 
@@ -451,3 +451,18 @@ def test_a_fired_record_function_runs_at_the_index_of_its_call():
     run = {"run": {"record": "wavecmd", "index": "wc", "field": "do"}}
     wave, ran = Machine(song, unit, spec), Machine(song, {**unit, "fire": [run]}, spec)
     assert (wave.actions, wave.control, wave.real) == (ran.actions, ran.control, ran.real)
+
+
+@pytest.mark.parametrize(
+    "e,width,written",
+    [
+        (sympy.Mod(G.V + 32, 65536), 16, "v + 32"),
+        (sympy.Mod(G.V + 65504, 65536), 16, "v - 32"),
+        (sympy.Mod(G.V + 32, 65536), 17, "(v + 32) % 65536"),
+        (sympy.Mod(G.V + 32, 65536), None, "(v + 32) % 65536"),
+        (G.ge(G.PHI, 2) * sympy.Mod(G.V + 65000, 65536), 12, "(v - 536)*(φ >= 2)"),
+        (sympy.Min(sympy.Mod(G.V - 3, 4096), 7) + 1, 12, "min(7, (v - 3) % 4096) + 1"),
+    ],
+)
+def test_a_wrap_the_unit_repeats_is_not_written(e, width, written):
+    assert G.text(G.unwrapped(e, width)) == written
