@@ -116,6 +116,43 @@ def test_text_parses_back_to_the_same_values():
             assert parsed(v, phi, 0) == compiled(v, phi, 0)
 
 
+# A filter program: set 117, set 102, 30 steps of -3, then +3 and -1 in turn.
+GT_TURN = {
+    1: {"l": 0x90, "r": 0xA1, "cut": 117, "next": 2},
+    2: {"l": 0, "r": 102, "next": 3},
+    3: {"l": 30, "r": 0xFD, "next": 4},
+    4: {"l": 1, "r": 3, "next": 5},
+    5: {"l": 1, "r": 0xFF, "next": 4},
+}
+TURN_CYCLE = "((-(φ % 2) + 2*(φ // 2) - 17) % 256)"
+TURN_MISREAD = "((-φ % 2 - 2*(φ // 2) - 17) % 256)"
+
+
+def test_a_text_that_does_not_read_back_is_refused(monkeypatch):
+    e = G.parse(f"8*(φ >= 32)*{TURN_CYCLE}")
+    assert G.parse(G.text(e)) == e
+    G.text.cache_clear()
+    monkeypatch.setattr(G, "_text", lambda _: f"8*(φ >= 32)*{TURN_MISREAD}")
+    with pytest.raises(ValueError, match="does not read back"):
+        G.text(e)
+    assert not G.valid(e)
+    with pytest.raises(ValueError, match="not in the grammar"):
+        G.parse("v << 2")
+
+
+def test_a_closed_form_is_proved_as_its_text_reads():
+    m = machine("goattracker2", "filter", filttab=GT_TURN)
+    start = m.start({"fptr": 1, "ftime": 0})
+    d = derive(m, start, None, GT_FREQ)
+    text = G.text(d.closed)
+    assert d.exact and text.endswith(TURN_CYCLE)
+    domain = tuple(dict(start)[c] for c in P.DOMAIN)
+    prover = P.Prover(m, GT_FREQ, None, domain, m.atom(dict(start)))
+    assert prover.closed(G.parse(text), d.value, None) is None
+    misread = G.parse(text.replace(TURN_CYCLE, TURN_MISREAD))
+    assert prover.closed(misread, d.value, None) is not None
+
+
 def test_z3_division_and_modulo_are_floored():
     env = {"v": z3.BitVecVal(-5, G.BITS)}
     for e, want in ((sympy.Mod(V, 3), 1), (sympy.floor(V / 2), -3), (sympy.Abs(V), 5)):

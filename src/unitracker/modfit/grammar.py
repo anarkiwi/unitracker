@@ -5,7 +5,9 @@ Integers, ``+ - * // % & | ^ << >>``, ``abs``, ``min``, ``max``, comparisons ``(
 modulators by name. Shifts and all-ones masks fold into ``*``, ``//`` and ``%``.
 """
 
+import ast
 import functools
+import operator
 
 import sympy
 import z3
@@ -381,7 +383,7 @@ def _prec(e) -> int:
 
 
 def _wrap(e, prec: int) -> str:
-    s = text(e)
+    s = _text(e)
     return f"({s})" if _prec(e) < prec else s
 
 
@@ -394,16 +396,21 @@ def _product(e) -> str:
             parts if len(parts) > 1 or _prec(factors[0]) > MUL else [f"({parts[0]})"]
         )
     if coeff != 1:
-        parts.insert(0, text(coeff))
+        parts.insert(0, _text(coeff))
     return "*".join(parts)
 
 
+def _addends(e) -> list:
+    """The terms of a sum, unevaluated nested sums opened."""
+    return [t for a in sympy.Add.make_args(e) for t in (_addends(a) if a.is_Add else [a])]
+
+
 def _sum(e) -> str:
-    terms = sorted(sympy.Add.make_args(e), key=lambda t: (t.is_Number, sympy.default_sort_key(t)))
+    terms = sorted(_addends(e), key=lambda t: (t.is_Number, sympy.default_sort_key(t)))
     out = []
     for i, t in enumerate(terms):
         neg = t.could_extract_minus_sign()
-        body = text(-t if neg else t)
+        body = _text(-t if neg else t)
         if i == 0 and neg and (isinstance(-t, sympy.Mod) or _floordiv(-t)):
             body = f"({body})"
         out.append(("-" if neg else "") + body if i == 0 else (" - " if neg else " + ") + body)
@@ -425,7 +432,7 @@ def _compare(e, op: str) -> str:
         const = 0
         op = {">=": ">", "<=": "<"}[op]
     right = sympy.expand(neg - const)
-    return f"({text(pos)} {op} {text(right)})"
+    return f"({_text(pos)} {op} {_text(right)})"
 
 
 def _nearest(e, size: int):
@@ -461,7 +468,22 @@ def unwrapped(e, width: int | None):
 
 @functools.lru_cache(maxsize=None)
 def text(e) -> str:
-    """The grammar text of an expression."""
+    """The grammar text of an expression; ValueError unless :func:`parse` reads it back as
+    ``e``, so a proof of ``e`` is a proof of its text."""
+    e = sympy.sympify(e)
+    s = _text(e)
+    if canon(_plain(parse(s, e.free_symbols)) - _plain(e)) != 0:
+        raise ValueError(f"grammar text {s!r} does not read back as {e!r}")
+    return s
+
+
+def _plain(e):
+    """``e`` with each display bracket ``[x < 0]``, ``[x != 0]`` as ``1 -`` its complement."""
+    e = e.replace(lambda x: isinstance(x, IvLt), lambda x: 1 - ge(x.args[0], 0))
+    return e.replace(lambda x: isinstance(x, IvNe), lambda x: 1 - eq(x.args[0], 0))
+
+
+def _text(e) -> str:
     # pylint: disable=too-many-return-statements,too-many-branches
     e = sympy.sympify(e)
     if e.is_Integer:
@@ -484,10 +506,10 @@ def text(e) -> str:
     if fd:
         return f"{_wrap(fd[0], ATOM)} // {_wrap(fd[1], ATOM)}"
     if isinstance(e, sympy.Abs):
-        return f"abs({text(e.args[0])})"
+        return f"abs({_text(e.args[0])})"
     if isinstance(e, (sympy.Min, sympy.Max)):
         args = sorted(e.args, key=sympy.default_sort_key)
-        return f"{'min' if isinstance(e, sympy.Min) else 'max'}({', '.join(map(text, args))})"
+        return f"{'min' if isinstance(e, sympy.Min) else 'max'}({', '.join(map(_text, args))})"
     if isinstance(e, Iv):
         rel = e.args[0]
         return _compare(rel.lhs, "==" if isinstance(rel, sympy.Eq) else ">=")
@@ -501,9 +523,57 @@ def text(e) -> str:
     if isinstance(e, sympy.core.function.AppliedUndef):
         name = type(e).__name__
         if name == "F":
-            return f"F({', '.join(map(text, e.args))})"
-        return f"{name}[{text(e.args[0])}]"
+            return f"F({', '.join(map(_text, e.args))})"
+        return f"{name}[{_text(e.args[0])}]"
     raise ValueError(f"no grammar text for {e!r}")
+
+
+_BINARY = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.FloorDiv: lambda a, b: sympy.floor(a / b),
+    ast.Mod: sympy.Mod,
+    ast.BitAnd: BitAnd,
+    ast.BitOr: BitOr,
+    ast.BitXor: BitXor,
+}
+_RELATION = {
+    ast.GtE: sympy.Ge,
+    ast.Gt: sympy.Gt,
+    ast.LtE: sympy.Le,
+    ast.Lt: sympy.Lt,
+    ast.Eq: sympy.Eq,
+    ast.NotEq: sympy.Ne,
+}
+_CALLS = {"abs": sympy.Abs, "min": sympy.Min, "max": sympy.Max, "F": FREQ}
+
+
+def parse(s: str, symbols=()) -> sympy.Expr:
+    """The sympy term of grammar text ``s``; names are ``v``, ``φ``, ``N``, then ``symbols``,
+    else integer symbols."""
+    names = {x.name: x for x in (V, PHI, N, *symbols)}
+
+    def walk(n):
+        # pylint: disable=too-many-return-statements
+        if isinstance(n, ast.Constant) and type(n.value) is int:
+            return sympy.Integer(n.value)
+        if isinstance(n, ast.Name):
+            return names.get(n.id) or sympy.Symbol(n.id, integer=True)
+        if isinstance(n, ast.BinOp) and type(n.op) in _BINARY:
+            return _BINARY[type(n.op)](walk(n.left), walk(n.right))
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub):
+            return -walk(n.operand)
+        if isinstance(n, ast.Compare) and len(n.ops) == 1 and type(n.ops[0]) in _RELATION:
+            rel = _RELATION[type(n.ops[0])]
+            return Iv(rel(walk(n.left), walk(n.comparators[0]), evaluate=False))
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) in _CALLS and not n.keywords:
+            return _CALLS[n.func.id](*map(walk, n.args))
+        if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name):
+            return table(n.value.id)(walk(n.slice))  # pylint: disable=not-callable
+        raise ValueError(f"not in the grammar: {ast.unparse(n)}")
+
+    return walk(ast.parse(s, mode="eval").body)
 
 
 @functools.lru_cache(maxsize=1)

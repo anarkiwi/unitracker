@@ -371,6 +371,30 @@ def test_a_filter_sweep_is_written_in_cutoff_units(ramp, fall, text, wrong):
     assert not np.array_equal(regs(songio.loads(written.replace(*wrong)), 200), want)
 
 
+def test_a_sweep_that_turns_at_a_row_boundary_plays_as_written():
+    ir = gt_ir("[C4.i1*16, D4*16]", FILTER)
+    ft = ir["records"]["filttab"]
+    ft[1]["next"], ft[2] = 2, {"l": 0, "r": 102, "next": 3}
+    ft[3], ft[4], ft[5] = (
+        {"l": 30, "r": 253, "next": 4},
+        {"l": 1, "r": 3, "next": 5},
+        {
+            "l": 1,
+            "r": 255,
+            "next": 4,
+        },
+    )
+    want = regs(ir, 200)
+    out = convert.convert(ir, cache=None, workers=1)
+    [text] = out["exprs"].values()
+    assert text.endswith("8*(φ >= 32)*((-(φ % 2) + 2*(φ // 2) - 17) % 256)")
+    written = songio.dumps(out)
+    assert np.array_equal(regs(songio.loads(written), 200), want)
+    misread = written.replace("+ 2*(φ // 2)", "- 2*(φ // 2)")
+    assert misread != written
+    assert not np.array_equal(regs(songio.loads(misread), 200), want)
+
+
 def test_the_player_floors_a_scaled_expression_to_the_cell():
     ins = INS + ", filter: [{cut: '1024 + 12*min(φ, 6)', res: 12, route: 1, mode: 16}, end]}"
     cut = regs(gt_ir("[C4.i1*8]", ins), 40)[:, 22]
