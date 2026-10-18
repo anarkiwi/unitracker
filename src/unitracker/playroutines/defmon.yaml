@@ -12,7 +12,7 @@ tables:
   rate_hi: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52]
 # A pattern event's instrument column arms sidcall layer A with a sidTAB program and its command
 # arms layer B; a document writes the pair as one ins record (see format/events/instrument.py).
-instrument: {type: sidtab, base: 1, writes_as: {type: ins, column: ctrl, commands: {1: filter}}}
+instrument: {type: sidtab, base: 1, event: {type: ins, column: ctrl, commands: {1: filter}}}
 note_offset: 24
 # The pattern event's command arms layer B: the instrument's filter, or a note's restart.
 commands:
@@ -24,16 +24,12 @@ record_types:
   # The instrument an event names: the sidTAB programs it arms, ctrl on layer A and filter on
   # layer B, whose ACID step drives the cutoff; -1 leaves the layer running.
   ins:
-    none: 0
     max: 0xFFFF
     form: map
     optional: [ctrl, filter]
     refs: {ctrl: sidtab, filter: sidtab}
   # The restart a note names: lookahead rows of sidTAB columns, then the note's empty row.
   restart:
-    prefix: r
-    none: 0
-    chain: next
     form: map
     fields: [dl, next]
     optional: [wgh, wgl, ad, sr]
@@ -51,7 +47,8 @@ record_types:
   # absent, applies in the replay's bitmap-walk order ($16B0).
   sidtab:
     writes_as: ctrl
-    chain: next
+    # Every index is a row: an event's instrument 1 arms row 0.
+    none: null
     stop: "dl >= 0x80"
     form: map
     # freq, pw and cut are the row's pitch, pulse and ACID modulator expressions (xf, xp, xc):
@@ -295,8 +292,7 @@ tick:
 ghost:
   global: {0x16: "(floor if cf >= 0x80 or cf < floor else cf) << dbl", 0x17: o17, 0x18: o18}
   voice:
-    0: o_flo
-    1: o_fhi
+    0: "o_fhi:o_flo"
     2: "o_pw & 0xFF"
     3: "(o_pw >> 8) & 0x0F"
     4: o_ctrl

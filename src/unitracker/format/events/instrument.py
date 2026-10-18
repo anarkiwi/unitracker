@@ -1,13 +1,13 @@
 """Event instruments: one record naming the programs an event's native columns arm.
 
-With ``instrument: {type: t, base: b, writes_as: {type: ins, column: k, commands: {c: f}}}`` an
+With ``instrument: {type: t, base: b, event: {type: ins, column: k, commands: {c: f}}}`` an
 event's instrument column (record ``t`` at index value - ``b``) is field ``k`` of an ``ins`` record
 and the argument of its command ``c`` field ``f``; the event names that record instead.
 """
 
 import numpy as np
 
-NAME = "writes_as"
+NAME = "event"
 SLOTS = (3, 5)
 
 

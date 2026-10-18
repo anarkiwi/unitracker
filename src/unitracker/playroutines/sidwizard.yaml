@@ -8,7 +8,6 @@ tables:
   freqlo: [7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
   freqhi: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255, 7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
   exptab: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255]
-instrument: {type: ins, base: 0}
 # !pulse:0 and !filter:0: the header's control bits 6 and 7, which keep the program running on
 # a note that selects no instrument.
 lifetime:
@@ -44,8 +43,6 @@ commands:
 record_types:
   # An instrument's 16-byte header as fields, its WF/arp, pulse and filter tables as programs.
   ins:
-    prefix: i
-    none: 0
     form: map
     # flags: bits 4-5 the vibrato type, bit 6 keeps the pulse and bit 7 the filter program
     # running across notes (see lifetime); the field has no written form.
@@ -57,9 +54,6 @@ record_types:
   # paused) or the gated-off waveform; then the note's first-tick row, the first waveform the
   # control register takes before the WF table.
   restart:
-    prefix: r
-    none: 0
-    chain: next
     form: map
     fields: [hold, next]
     optional: [ctrl, gate, ad, sr]
@@ -76,8 +70,6 @@ record_types:
   # program only once it ends; the lifter makes h equal w. A chord is the program's own rows.
   wftab:
     writes_as: ctrl
-    none: 0
-    chain: next
     fields: {w: 0, a: 128, d: 0, h: 0, next: 0}
     codec:
       - when: "w >= 0x10 and a != 0x7F and d != 0xFF and 0 <= h <= 0x3F"
@@ -106,11 +98,8 @@ record_types:
   pwtab:
     writes_as: pw
     prefix: pw
-    none: 0
-    chain: next
     expr: x
     fields: {a: 0, b: 0, k: 0, next: 0, x: 0}
-    refs: {x: x}
     codec:
       - when: "a >= 0x80 and (a & 0x70) == 0 and k == 0"
         keys: {pw: "((a & 0x0F) << 8) | b"}
@@ -120,11 +109,8 @@ record_types:
   # expression driving the cutoff from this row.
   flttab:
     writes_as: filter
-    none: 0
-    chain: next
     expr: x
     fields: {a: 0, b: 0, res: 0, k: 0, next: 0, x: 0}
-    refs: {x: x}
     codec:
       - when: "a >= 0x80 and k == 0 and (x == 0 or b == 0)"
         keys: {mode: "a & 0x70", res: "res & 0x0F", cut: {byte: b, expr: x}}
@@ -601,7 +587,7 @@ tick:
   - call: frame
 ghost:
   global: {0x15: fcutlo, 0x16: "fcuthi + fkd(fkt, fdp) + fshift + ((fcuthi + fkd(fkt, fdp)) >> 8)", 0x17: "(fres & 0xF0) | (fswitch & 0x0F)", 0x18: fmv}
-  voice: {0: r0, 1: r1, 2: r2, 3: "r3 & 0x0F", 4: r4, 5: r5, 6: r6}
+  voice: {0: "r1:r0", 2: r2, 3: "r3 & 0x0F", 4: r4, 5: r5, 6: r6}
 # The modulators (see goattracker2.yaml). W is the speed table the vibrato and slide speeds
 # index: exptab below 107, then the frequency words.
 modulators:
@@ -634,8 +620,8 @@ modulators:
         record: ins
         clear: {vibrato: 0, vibdelay: 0, flags: "(flags & 0xCF) | 0x10"}
       hooks:
-        - {at: {proc: apply_row}, written: [voff], key: [svib, fml, fmh, vper, fx]}
-        - {at: {proc: run_deferred}, key: [svib, fml, fmh, vper, fx]}
+        - {at: {proc: apply_row}, written: [voff], changed: [svib, fml, fmh, vper, fx]}
+        - {at: {proc: run_deferred}, changed: [svib, fml, fmh, vper, fx]}
     - name: pulse
       key: pw
       cell: "pwhi:pwlo"

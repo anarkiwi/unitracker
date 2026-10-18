@@ -47,6 +47,7 @@ PLAYROUTINE = {
         "stopped": {
             "prefix": "t",
             "chain": "next",
+            "none": None,
             "stop": "v >= 128",
             "fields": ["v", "next"],
         },

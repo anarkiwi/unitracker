@@ -50,7 +50,8 @@ first occurred.
 `def` maps a record type, `x`, or `phrase` to `{name: value}`. Names are the record type's
 prefix and a number, given in first-use order (`i1`, `i2`, ..., `c1`, ...; expressions `x1`,
 ...; phrases `p1`, ...). The prefixes are distinct, so a name says what it is. The reader
-allocates each type's indices in definition order from the type's `first` index, so a name
+allocates each type's indices in definition order from the type's `none + 1` (0 for a type with
+no `none`), so a name
 stands for whatever index the playroutine needs.
 
 Every playroutine writes its records under these record types (its `record_types` entry names

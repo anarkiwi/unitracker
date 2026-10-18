@@ -244,21 +244,21 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         return (0, cell)
 
     def wrap_hook(self, unit: dict, hook: dict) -> None:
-        """A start hook: a restart when the hook writes ``written`` or changes ``key``.
+        """A start hook: a restart when the hook writes ``written`` or changes ``changed``.
 
         A written ``pointer`` restarts only when the program it selects sets the unit's fields; a
         hook with none of the three restarts on every call, before it runs.
         """
         state = {}
         watch = list(hook.get("written") or []) + list(hook.get("pointer") or [])
-        always = not (watch or hook.get("key"))
+        always = not (watch or hook.get("changed"))
 
         def before(args):
             voice = self.voice(args)
             state["pre"] = self.cells.snapshot(voice)
             if always:
                 self.restart(unit, voice, (hook["at"], None, state["pre"]))
-            state["key"] = tuple(self.cells.get(c, voice) for c in hook.get("key") or [])
+            state["key"] = tuple(self.cells.get(c, voice) for c in hook.get("changed") or [])
             state["counts"] = [self.writes.get(self.token(voice, c), 0) for c in watch]
 
         def after(args):
@@ -268,7 +268,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
                 for c, n in zip(watch, state["counts"])
                 if self.writes.get(self.token(voice, c), 0) != n
             }
-            key = tuple(self.cells.get(c, voice) for c in hook.get("key") or [])
+            key = tuple(self.cells.get(c, voice) for c in hook.get("changed") or [])
             moved = written & set(hook.get("pointer") or [])
             self.applied(unit, voice)
             if always:

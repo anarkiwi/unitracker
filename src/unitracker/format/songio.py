@@ -4,7 +4,6 @@ The player runs the expanded internal representation (``"unitracker": "ir"``): e
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
 """
 
-import copy
 import functools
 import os
 import re
@@ -30,6 +29,7 @@ from unitracker.format.codec import (
     written_value,
 )
 from unitracker.format.events import column, envelope, fold, instrument, lifetime, restart
+from unitracker.format.schema import expand
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.xexpr import ExpressionError, text_of
@@ -60,7 +60,7 @@ def _library_text(name: str) -> str:
 
 def library(name: str) -> dict:
     """The library definition of playroutine ``name``, named by its file."""
-    return {"name": name, **yaml.safe_load(_library_text(name))}
+    return expand({"name": name, **yaml.safe_load(_library_text(name))})
 
 
 def defaults(pr: dict) -> dict:
@@ -494,10 +494,10 @@ class _Writer:
         name = self.pr["name"]
         tables = {k: [int(x) for x in v] for k, v in (self.ir.get("tables") or {}).items()}
         if embed:
-            rest = {k: v for k, v in self.pr.items() if k not in ("name", "constants", "tables")}
+            full = expand(self.pr)
             pr = {"name": name, "constants": FlowMap(self.pr.get("constants") or {})}
             pr["tables"] = {k: Flow(v) for k, v in tables.items()}
-            pr.update(copy.deepcopy(rest))
+            pr.update((k, v) for k, v in full.items() if k not in ("name", "constants", "tables"))
             return pr
         lib = library(name)
         own = ("constants", "tables")
@@ -585,7 +585,7 @@ class _Reader:
         if not isinstance(spec, dict):
             raise SongFormatError("playroutine must be a mapping")
         if "ref" not in spec:
-            pr = copy.deepcopy(spec)
+            pr = expand(spec)
             self.tables = {
                 k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()
             }

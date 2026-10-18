@@ -53,7 +53,7 @@ Start from the existing port closest to the target player:
 |---|---|---|
 | [`goattracker2`](playroutines/goattracker2.md) | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `tickn`, `wavecmd`), one codec shape per command row, the gate-timer lookahead |
 | [`sidwizard`](playroutines/sidwizard.md) | an instrument header plus WF/arp, pulse and filter programs; a pattern row with an instrument column and an FX column | header bytes as instrument keys, two event slots, envelope nibble commands, `lifetime` flags |
-| [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: writes_as`, event restarts (`restart: {command}`), `fixed` init records, a `global` unit |
+| [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: event`, event restarts (`restart: {command}`), `fixed` init records, a `global` unit |
 
 **Files:** none yet. **Verify** the toolchain and the existing ports:
 `PYTHONPATH=src .venv/bin/python tools/reference_check.py out/porting` prints
@@ -147,16 +147,19 @@ Declare each native table as a record type ([Record types](playroutines/schema.m
 
 | native table | keys |
 |---|---|
-| instruments | `form: map`, `fields` with their defaults, `refs` to the programs they start, `none`, and `pin` for an index the replay reads directly (GoatTracker's instrument 1) |
-| a table of programs with a next pointer or jump | `chain` (the next-row field), `none`, `stop` (a row after which the program ends, `defmon`'s frozen row), `end` (raw fields set on a program's last row) |
+| instruments | `form: map`, `fields` with their defaults, `refs` to the programs they start, and `pin` for an index the replay reads directly (GoatTracker's instrument 1) |
+| a table of programs with a next pointer or jump | a `next` field (or `chain`, the next-row field), `stop` (a row after which the program ends, `defmon`'s frozen row), `end` (raw fields set on a program's last row) |
 | rows whose effect depends on their kind | templates (any other key, such as `do` and `each`), reading `row.<field>` |
 | module state carried through init | `fixed: true` (`defmon`'s `vinit`, `ginit`) |
-| a modulated program | `expr: x`, the field holding a row's expression |
+| a modulated program | `expr: x`, the field holding a row's expression (its `refs` entry is implied) |
 | raw fields with no written form | `unwritten: [field, ...]` |
 
 `writes_as` names the record type the table is written as (`ins`, `ctrl`, `pw`, `filter`, `restart`;
 the table in [Definitions](format/document.md#definitions)), and `prefix` its name prefix when that
-is not the written name's first letter. A field for which 0 is meaningful goes in `optional`, read as
+is not the written name's first letter. `none`, the index meaning "no row", is 0 unless given
+(`none: null` when every index is a row, as `defmon`'s sidTAB). The type written as `ins` is the
+instrument an event names unless `instrument` says otherwise, and `note_offset` is 0 unless given.
+A field for which 0 is meaningful goes in `optional`, read as
 -1, "absent", when missing (the `restart` rows, `defmon`'s sidTAB columns); an optional field that is
 a shared key needs no `keys` or `raw` entry of its own. Read a signed byte or word with the builtins
 `s8` and `s16`.
@@ -211,7 +214,7 @@ unit keys are in [Modulator declarations](playroutines/schema.md#modulator-decla
 |---|---|
 | `cell`, `scope` | the cell the replay modulates (`hi:lo[:k]` for a pair); `global` for one cell the voices share |
 | `fire` | one firing, as proc names, `run` actions and functions: `v` is read before the first entry runs and the value stored after the last |
-| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` with `i` a row or a list of rows, or `{type: t, template: f}`) writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields`; with none of these, every call of the function is a start. Never add a proc only to label a firing or a start: name the function the player already runs |
+| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` with `i` a row or a list of rows, or `{type: t, template: f}`) writing a `written` cell, changing the `changed` cells, or writing a `pointer` to a program that sets one of `program.fields`; with none of these, every call of the function is a start. Never add a proc only to label a firing or a start: name the function the player already runs |
 | `x` | the expression a start selects; 0 leaves the playroutine's own firing |
 | `label` | the cells grouping occurrences, usually the program pointer |
 | `site`, `retire`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` (the `commands` entry named `key` with `ref: x`) replaces |
@@ -278,7 +281,7 @@ The writer and reader resolve the context these forms need by walking each voice
 envelope nibble command as the byte it writes), and the event folds `fold.py`, `instrument.py` (the
 record an event's columns arm) and `restart.py` (a restart run on the steps before its note), and
 `column.py` refuses two commands on one event for a column that holds one. They read the
-playroutine's `lifetime`, `commands` with `nibble`, `instrument: writes_as`, `restart` and
+playroutine's `lifetime`, `commands` with `nibble`, `instrument: event`, `restart` and
 `exclusive` declarations, so a port declares them rather than codes them; each raises its own error
 naming what has no written form.
 
