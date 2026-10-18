@@ -70,7 +70,8 @@ order:
 
 | replay | playroutine |
 |---|---|
-| build constants, default tempo | `constants`, which the lifter sets per tune; `defaults` (clock, voices) where they are not PAL and 3 |
+| build constants | `constants`, which the lifter sets per tune; `defaults` (clock, voices, tempo) where they are not PAL, 3 and none |
+| the initial tempo | the document's `tempo`, which the lifter sets per tune |
 | frequency and other lookup tables | `tables` (a song patches them, see [Document](format/document.md)); `note_offset` |
 | zero-page and self-modified operands, per voice or shared | `voice` and `global` cells, each with the `width` of its 6502 location; a scratch value has no width |
 | jump tables (command dispatch) | playroutine-owned `records`, run with `run: {record, index, field}` |
@@ -287,7 +288,7 @@ the existing ports do.
 | lifetime | `!pw`, `!filter` on the note ([Lifetime](format/vocabulary.md#lifetime)) | `lifetime: {pw: {field, flag}, filter: {field, flag}}` | each playroutine file's *Lifetime* |
 | relative control | `ctrl: ^n`, the exclusive-or mask the voice's control output keeps ([Shared vocabulary](format/vocabulary.md)) | `eor` on the `ctrl` key | `defmon` only; the others refuse it |
 | legato | `!legato` ([Legato](modulation/expressions.md#legato)) | `modulators.legato: {cell, command}` | each playroutine file's command table |
-| tempo | the tempo commands and constants ([Shared vocabulary](format/vocabulary.md)) | `commands` entries with `when`, `arg`, `raw` | each playroutine file's command table; a tempo command no entry declares is refused by name |
+| tempo | the tempo commands and the initial `tempo` ([Shared vocabulary](format/vocabulary.md)) | `commands` entries with `when`, `arg`, `raw` | each playroutine file's command table; a tempo command no entry declares is refused by name |
 
 The writer and reader resolve the context these forms need by walking each voice's plays:
 `src/unitracker/format/events/`: `lifetime.py` (the instrument a note plays), `envelope.py` (an

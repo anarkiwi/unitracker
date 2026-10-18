@@ -124,11 +124,12 @@ A legato note restarts nothing, so the command adds nothing there.
 
 ## Envelope commands
 
-A command entry `{name: ad, nibble: s, column: c}` sets one nibble of an envelope register over
-the instrument's byte. The document writes each as the byte it writes, `!ad:n` or `!sr:n` in the
-slot of its column, from the voice's instrument (see [Walking the plays](#walking-the-plays));
-the reader plays each byte as the nibble command that changes one nibble of the instrument's byte.
-A phrase whose bytes differ between the places it plays becomes one phrase per place.
+`!ad:n` and `!sr:n` are the byte the envelope register takes. A player whose envelope commands set
+one nibble over the instrument's byte (an envelope command entry, see
+[Codecs](../playroutines/schema.md#codecs)) has them written as the byte they write, in the slot of
+their column, from the voice's instrument (see [Walking the plays](#walking-the-plays)); the reader
+plays each byte as the nibble command that changes one nibble of the instrument's byte. A phrase
+whose bytes differ between the places it plays becomes one phrase per place.
 
 ## Walking the plays
 

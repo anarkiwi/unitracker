@@ -26,7 +26,7 @@ a nibble, as the reference grid does.
 | `ins` | none: the pair of sidTAB programs an event arms | see Events |
 | `ctrl` | sidTAB | a sidTAB row writes any register, so it is defMON's one program table; see Control programs |
 | `restart` | sidTAB programs on layer B before a note | see Hard restart |
-| `vinit` | each voice's state after init (fixed) | `pw`, the pulse cell, at most $0FFF; `freq`, the frequency registers as the signed offset from `note`'s frequency (omitted: the note's frequency); `sacc`, the slide accumulator; `note` (`=n`), the note its relative rows add to |
+| `vinit` | each voice's state after init (fixed) | `pw`, the pulse cell, at most $0FFF; `freq`, the frequency registers as the signed offset from `note`'s frequency (omitted: the note's frequency); `sacc`, the slide accumulator; `note`, a note name, the note its relative rows add to |
 | `ginit` | the global state after init (fixed) | `sub`: 1 when the ACID step subtracts (its SBC), 0 when it adds (its ADC), which the replay's own ACID firing reads until a layer-B row sets the step (setting the cutoff keeps it) |
 
 The frequency registers in `vinit` are the voice's on the first tick only: init's call latches them,
@@ -109,12 +109,10 @@ defMON has no instrument restart: composers run a short sidTAB program on layer 
 steps before a note. The playroutine declares this with `event: {..., restart: 1}` (see
 [Hard restart](../format/vocabulary.md#hard-restart)): the `restart` of a note's instrument reads
 as a layer-B start (the event command an instrument's `filter` is) of a sidTAB program of the
-lookahead rows, the last one frozen, holding until the
-note, started as many steps before the note as they hold, all of them empty. The writer folds such a
-start back before it names the events' instruments when it is alone on its step, followed only by
-empty steps up to a note with a free command slot, and its program ends, sets no column but `dl`,
-`wgh`, `wgl`, `ad` and `sr`, and fits in the steps. The note's own sidTAB program
-starts on its first tick, so the restart's last row is empty.
+lookahead rows, the last one frozen, holding until the note. The writer folds such a start back
+before it names the events' instruments, as vocabulary.md says, when its program also sets no
+column but `dl`, `wgh`, `wgl`, `ad` and `sr`. The note's own sidTAB program starts on its first
+tick, so the restart's last row is empty.
 
 ## Lifetime
 

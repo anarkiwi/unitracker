@@ -133,7 +133,6 @@ The writer produces one text per song:
 - a restart its notes arm on the steps before them is written as their instrument's `restart`
   (see [Hard restart](vocabulary.md#hard-restart));
 - a phrase whose envelope bytes differ between the places it plays is split into one phrase per
-  place (see [Envelope commands](vocabulary.md#envelope-commands)), the inverse of the merge;
-- no-op commands are dropped.
+  place (see [Envelope commands](vocabulary.md#envelope-commands)), the inverse of the merge.
 
 Writing what the reader returns gives the same bytes.
