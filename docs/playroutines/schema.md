@@ -64,9 +64,7 @@ A control-program table, for example, decodes its bytes in a template:
 ```yaml
 ctrltab:
   writes_as: ctrl
-  none: 0
-  chain: next
-  fields: [w, n, next]
+  fields: [w, n, next]             # chained by next; none 0
   do:
     - if: "row.w >= 0xF0"
       then: [{set: {arg: row.n}}, {run: {record: wavecmd, index: "row.w & 0x0F", field: do}}, ...]
@@ -186,11 +184,11 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 
 | key | meaning |
 |---|---|
-| `freq` | the word `F(k)` reads at index `k + note_offset`: `{word: table}`, or `{hi: table, lo: table}` joined as `hi << 8 \| lo` |
+| `freq` | the word `F(k)` reads at index `k + note_offset`: `{word: table}`, or `{hi: table, lo: table}` joined as `hi << 8 \| lo`; or the name of a one-argument function that reads one of these at its argument (`freq: nfreq`) |
 | `notes` | the voice cells that hold the note; `N` is the first, less `note_offset` |
 | `transpose` | a voice cell added to the note for `N` |
 | `legato` | `{cell}`: the cell set while a note does not retrigger, which the `legato` command (`!legato:0`) sets |
-| `tables` | `{name: {entry: expr, size: n}}`: the tables `name[k]` expressions read; `entry` reads `i` and the playroutine's tables |
+| `tables` | `{name: {entry: expr, size: n}}`: the tables `name[k]` expressions read; `entry` reads `i` and the playroutine's tables. `{name: {function: f, size: n}}` takes `entry` from the one-argument function `f` and adds `f`'s rewrite over the table to `functions` |
 | `functions` | `{name: expr}`: playroutine functions rewritten over the named tables, for analysis |
 | `units` | the units, below |
 
@@ -203,7 +201,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it (default: `global` for a global cell) |
 | `fire` | one firing: proc names, `run` actions and functions; `v` is read before the first entry's function runs and the expression's value is stored after the last's |
 | `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing (default: the site's field, `record[index].field`) |
-| `hooks` | the starts: `{at: function, written: [cells], changed: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `changed` cells, or writes a `pointer` to a program that sets one of `program.fields`; a hook with none of the three restarts it on every call, before the call runs |
+| `hooks` | the starts: `{at: function, written: [cells], changed: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `changed` cells, or writes a `pointer` to a program that sets one of `program.fields`; a hook with none of the three restarts it on every call, before the call runs. Default: each function outside the firing (its functions and what they call) that writes the unit's pointer, `program.pointer` or else the site's `index`, as a `pointer` hook with a `program` and a `written` one without; with a `row` site, each function of the firing |
 | `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start (`pointer` and `record` default to the site's `index` and `record`) |
 | `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
 | `label` | the cells that group a unit's occurrences for the lifter (default: the site's `index`) |
@@ -217,8 +215,8 @@ A function is `{proc: p}`, `{record: r, field: f}` (every row's action list in f
 entry names the function it runs: a proc name `{proc}`, a `run` with `field` `{record, field}`, a
 `run` with `template` `{type, template}`, or the function itself, which the lifter runs at the index
 of the one `run` that calls it. A firing whose every call is a start fires and starts at the same
-function (GoatTracker's wavetable steps: `fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]`,
-`hooks: [{at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}]`).
+function (GoatTracker's wavetable steps: `fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]`
+with a `row` site, whose hooks default to `[{at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}]`).
 
 ## The cursor
 

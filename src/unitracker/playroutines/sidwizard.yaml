@@ -591,17 +591,16 @@ ghost:
 # The modulators (see goattracker2.yaml). W is the speed table the vibrato and slide speeds
 # index: exptab below 107, then the frequency words.
 modulators:
-  freq: {hi: freqhi, lo: freqlo}
+  freq: dfreq
   notes: [note, pn]
   transpose: oct
   legato: {cell: pleg}
   tables:
     W: {size: 204, entry: "exptab[i] if i < 107 else (freqhi[i - 107] << 8) | freqlo[i - 107]"}
-    E: {size: 256, entry: "freqhi[i - 11] if i >= 11 else 0"}
+    E: {function: ex, size: 256}
   functions:
     fmlo: "W[fyc(a, d)] & 0xFF"
     fmhi: "W[fyc(a, d)] >> 8"
-    ex: "E[i]"
   units:
     - name: pitch
       key: freq
@@ -629,7 +628,6 @@ modulators:
       chip: {width: 12, offset: "-(pwtrack(pwkt, note + oct) << 8)"}
       fire: [tick_pw]
       site: {record: pwtab, index: ppos, field: x, clear: {a: 0, b: 0, k: 0}}
-      hooks: [{at: {proc: start_note}, written: [ppos]}]
     - name: filter
       key: cut
       cell: "vfhi:vflo:3"
@@ -639,4 +637,3 @@ modulators:
       mirror: "fcuthi:fcutlo:3"
       fire: [filt_row]
       site: {record: flttab, index: fpos, field: x, clear: {a: "a if a >= 0x80 else 0", b: 0, k: 0}}
-      hooks: [{at: {proc: start_note}, written: [fpos]}]

@@ -302,13 +302,11 @@ ghost:
 # The modulators (see goattracker2.yaml); a start counts only when the new program sets one of
 # the unit's program fields.
 modulators:
-  freq: {hi: note_hi, lo: note_lo}
+  freq: nfreq
   notes: [note, tbase]
   # S[k]: the offset af below $80 adds to note k - af.
   tables:
-    S: {size: 256, entry: "((por_lo[i + 1] | (por_hi[i + 1] << 8)) - (por_lo[i] | (por_hi[i] << 8))) & 0xFFFF"}
-  functions:
-    por: "S[y]"
+    S: {function: por, size: 256}
   units:
     # The offset the pitch adds to the note: the slide accumulator, or af below $80's offset.
     - name: pitch A
@@ -331,11 +329,9 @@ modulators:
       fire: [layer_a, pulse]
       program: {fields: [pw, ps, xp]}
       site: {record: sidtab, index: rowA, field: xp, clear: {pw: -1, ps: -1}}
-      hooks: [{at: {proc: pattern}, pointer: [rowA]}]
     - name: acid B
       key: cut
       cell: acc
       fire: [layer_b, acid_step]
       program: {fields: [cp, acid, xc]}
       site: {record: sidtab, index: rowB, field: xc, clear: {cp: -1, acid: -1}}
-      hooks: [{at: {proc: pattern}, pointer: [rowB]}]

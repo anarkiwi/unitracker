@@ -486,17 +486,11 @@ modulators:
       fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]
       relative: [lastnote]
       site: {record: ctrltab, index: wcur, field: x, row: true, clear: {w: 0xF1, n: 0}}
-      hooks:
-        - {at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}
     - name: pulse
       key: pw
       cell: pulse
       fire: [pulse_exec]
       site: {record: pulsetab, index: pptr, field: x, clear: {l: 0, r: 0}}
-      hooks:
-        - {at: {proc: new_note_init}, written: [pptr]}
-        - {at: {record: tick0, field: do, index: 9}, written: [pptr]}
-        - {at: {record: wavecmd, field: do, index: 9}, written: [pptr]}
     - name: filter
       key: cut
       cell: filtercutoff
@@ -507,9 +501,3 @@ modulators:
         index: fptr
         field: x
         clear: {l: "l if l >= 0x80 else 0", r: "r if l >= 0x80 else 0", cut: -1}
-      hooks:
-        - {at: {proc: new_note_init}, written: [fptr]}
-        - {at: {record: tick0, field: do, index: 10}, written: [fptr]}
-        - {at: {record: tick0, field: do, index: 11}, written: [fptr]}
-        - {at: {record: wavecmd, field: do, index: 10}, written: [fptr]}
-        - {at: {record: wavecmd, field: do, index: 11}, written: [fptr]}

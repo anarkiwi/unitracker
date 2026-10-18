@@ -3,7 +3,7 @@
 import pytest
 
 from unitracker.format import songio
-from unitracker.format.schema import expand
+from unitracker.format.schema import SchemaError, expand
 
 LIBRARY = ("goattracker2", "defmon", "sidwizard")
 
@@ -134,6 +134,104 @@ def test_explicit_unit_keys_and_chip_maps_stay():
         "site": {"record": "r", "index": "i", "field": "f"},
         "program": {"record": "q", "pointer": "p", "fields": []},
         "chip": {"width": 8, "value": "g", "store": {"g": "value"}},
+        "hooks": [],
     }
     out = expand({"global": {"g": {"width": 8}}, "modulators": {"units": [unit]}})
     assert out["modulators"]["units"][0] == unit
+
+
+def _row(record, index, cell, kind="written"):
+    return {"at": {"record": record, "field": "do", "index": index}, kind: [cell]}
+
+
+DECLARED_HOOKS = {
+    ("goattracker2", "wave"): [{"at": {"record": "wavecmd", "field": "do", "index": [1, 2, 3, 4]}}],
+    ("goattracker2", "pulse"): [
+        {"at": {"proc": "new_note_init"}, "written": ["pptr"]},
+        _row("tick0", 9, "pptr"),
+        _row("wavecmd", 9, "pptr"),
+    ],
+    ("goattracker2", "filter"): [
+        {"at": {"proc": "new_note_init"}, "written": ["fptr"]},
+        _row("tick0", 10, "fptr"),
+        _row("tick0", 11, "fptr"),
+        _row("wavecmd", 10, "fptr"),
+        _row("wavecmd", 11, "fptr"),
+    ],
+    ("defmon", "pulse A"): [{"at": {"proc": "pattern"}, "pointer": ["rowA"]}],
+    ("defmon", "acid B"): [{"at": {"proc": "pattern"}, "pointer": ["rowB"]}],
+    ("sidwizard", "pulse"): [{"at": {"proc": "start_note"}, "written": ["ppos"]}],
+    ("sidwizard", "filter"): [{"at": {"proc": "start_note"}, "written": ["fpos"]}],
+}
+
+
+def test_inferred_hooks_are_the_ones_the_playroutines_declared():
+    found = {}
+    for name in LIBRARY:
+        for unit in songio.library(name)["modulators"]["units"]:
+            found[(name, unit["name"])] = unit["hooks"]
+    assert {k: found[k] for k in DECLARED_HOOKS} == DECLARED_HOOKS
+    assert sum(map(len, DECLARED_HOOKS.values())) == 13
+    assert found[("goattracker2", "command")][0]["changed"] == ["command", "cmddata"]
+    assert found[("defmon", "pitch A")] == [
+        {"at": {"proc": "pattern"}, "written": ["sacc"], "pointer": ["rowA"]}
+    ]
+
+
+def test_named_tables_and_freq_come_from_functions():
+    dm, sw = songio.library("defmon")["modulators"], songio.library("sidwizard")["modulators"]
+    assert dm["freq"] == {"hi": "note_hi", "lo": "note_lo"}
+    assert sw["freq"] == {"hi": "freqhi", "lo": "freqlo"}
+    assert dm["tables"]["S"]["entry"] == (
+        "((por_lo[i + 1] | (por_hi[i + 1] << 8)) - (por_lo[i] | (por_hi[i] << 8))) & 0xFFFF"
+    )
+    assert dm["functions"] == {"por": "S[y]"}
+    assert list(sw["functions"]) == ["fmlo", "fmhi", "ex"] and sw["functions"]["ex"] == "E[i]"
+
+
+def test_a_freq_function_reads_a_word_table_or_a_pair():
+    functions = {
+        "w": {"args": ["k"], "expr": "ft[k]"},
+        "p": {"args": ["k"], "expr": "lo[k & 0xFF] + (hi[k & 0xFF] << 8)"},
+        "bad": {"args": ["k"], "expr": "ft[k + 1]"},
+        "t": {"args": ["y"], "expr": "a[y] + y"},
+    }
+
+    def mods(freq, tables=None):
+        pr = {"functions": functions, "modulators": {"freq": freq, "tables": tables or {}}}
+        return expand(pr)["modulators"]
+
+    assert mods("w")["freq"] == {"word": "ft"}
+    assert mods("p")["freq"] == {"hi": "hi", "lo": "lo"}
+    with pytest.raises(SchemaError, match="bad reads no word table"):
+        mods("bad")
+    got = mods("w", {"T": {"function": "t", "size": 4}, "U": {"function": "t", "entry": "0"}})
+    assert got["tables"]["T"]["entry"] == "a[i] + i" and got["tables"]["U"]["entry"] == "0"
+    assert got["functions"] == {"t": "T[y]"}
+
+
+def test_a_unit_with_no_pointer_has_no_inferred_hooks():
+    out = expand({"modulators": {"units": [{"cell": "g", "fire": ["p"]}]}, "procs": {"p": []}})
+    assert "hooks" not in out["modulators"]["units"][0]
+
+
+def test_a_pointer_write_inside_the_firing_is_no_hook():
+    def write(cell):
+        return [{"if": "1", "then": [{"set": {cell: 1}}]}]
+
+    pr = {
+        "procs": {
+            "step": [{"run": {"record": "cmd", "index": "c", "field": "do"}}],
+            "go": write("p"),
+        },
+        "records": {"cmd": {1: {"do": write("p")}}, "arm": {2: {"do": write("p")}, 3: {"do": []}}},
+        "modulators": {
+            "units": [
+                {"cell": "a", "fire": ["step"], "site": {"record": "t", "index": "p", "field": "x"}}
+            ]
+        },
+    }
+    assert expand(pr)["modulators"]["units"][0]["hooks"] == [
+        {"at": {"proc": "go"}, "written": ["p"]},
+        {"at": {"record": "arm", "field": "do", "index": 2}, "written": ["p"]},
+    ]

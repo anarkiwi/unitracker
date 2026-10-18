@@ -214,7 +214,7 @@ unit keys are in [Modulator declarations](playroutines/schema.md#modulator-decla
 |---|---|
 | `cell`, `scope` | the cell the replay modulates (`hi:lo[:k]` for a pair); `scope` is `global` for a global cell, which the voices share |
 | `fire` | one firing, as proc names, `run` actions and functions: `v` is read before the first entry runs and the value stored after the last |
-| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` with `i` a row or a list of rows, or `{type: t, template: f}`) writing a `written` cell, changing the `changed` cells, or writing a `pointer` to a program that sets one of `program.fields`; with none of these, every call of the function is a start. Never add a proc only to label a firing or a start: name the function the player already runs |
+| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` with `i` a row or a list of rows, or `{type: t, template: f}`) writing a `written` cell, changing the `changed` cells, or writing a `pointer` to a program that sets one of `program.fields`; with none of these, every call of the function is a start. Left out, they are the functions outside the firing that write the site's `index` (`program.pointer`); declare them only for a start that is not a pointer write. Never add a proc only to label a firing or a start: name the function the player already runs |
 | `x` | the expression a start selects; 0 leaves the playroutine's own firing; by default the site's field |
 | `label` | the cells grouping occurrences; by default the site's index, the program pointer |
 | `site`, `retire`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` (the `commands` entry named `key` with `ref: x`) replaces |
@@ -226,7 +226,8 @@ without a command), each step the start spans without a command gets the `!freq`
 (SID-Wizard's pitch unit, whose cell a commandless row leaves alone) only the step that starts
 it does (`convert.falls_back`).
 
-The top level of `modulators` gives what expressions read: `freq` (the word `F(k)` reads),
+The top level of `modulators` gives what expressions read: `freq` (the word `F(k)` reads, or the
+function that reads it),
 `notes`, `transpose`, `legato` (the cell the `legato` command sets), and the named `tables` and
 `functions`.
 
