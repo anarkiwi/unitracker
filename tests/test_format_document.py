@@ -217,7 +217,10 @@ def test_writer_errors(change, match):
         (edit(("loop",), 0), "unknown key loop in document"),
         (edit(("playroutine",), "mini"), "mapping"),
         (edit(("playroutine",), {"ref": "nope"}), "no playroutine"),
-        (edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}), "unknown table"),
+        (
+            edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}),
+            "unknown table",
+        ),
         (edit(("playroutine", "record_types", "prog", "max"), 3), "more than 3"),
         (edit(DEF + ("prog", "w1"), [[10]]), "rows then end"),
         (edit(DEF + ("prog", "w1"), [[10], {"loop": 7}]), "bad program end"),
@@ -228,8 +231,9 @@ def test_writer_errors(change, match):
         (edit(DEF + ("ins", "i1"), {"a": [[1], "end"]}), "cannot hold a program"),
         (edit(DEF + ("ins", "i1"), {"p": "i2"}), "not a prog"),
         (edit(DEF + ("ins", "i1"), {"p": "nothing"}), "unknown name 'nothing'"),
-        (edit(DEF + ("ins", "1x"), {}), "bad name"),
-        (edit(DEF + ("ins", "w1"), {}), "defined twice"),
+        (edit(DEF + ("ins", "1x"), {}), "name '1x' is not i and a number"),
+        (edit(DEF + ("ins", "w1"), {}), "name 'w1' is not i and a number"),
+        (edit(DEF + ("ins", "i01"), {}), "name 'i01' is not i and a number"),
         (edit(DEF + ("phrase", "p2"), ["-!ad:w1"]), "can't express"),
         (edit(DEF + ("phrase", "p2"), ["-!run:zz"]), "unknown name 'zz' in"),
         (edit(DEF + ("phrase", "p2"), ["-!run:w1!run:w1!run:w1"]), "more than 2 commands"),
@@ -336,7 +340,7 @@ def test_a_pulse_program_name_is_not_a_phrase_name():
     out = songio.dumps(songio.loads(text))
     assert "pw1: 2048" in out and "p1: [off!run:pw1]" in out
     assert songio.dumps(songio.loads(out)) == out
-    with pytest.raises(SongFormatError, match="name 'p1' defined twice"):
+    with pytest.raises(SongFormatError, match="name 'p1' is not pw and a number"):
         songio.loads(text.replace("pw1", "p1"))
 
 

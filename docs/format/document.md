@@ -62,8 +62,8 @@ than it repeats.
 ## Definitions
 
 `def` maps a record type, `x`, or `phrase` to `{name: value}`. Names are the record type's
-prefix and a number, given in first-use order (`i1`, `i2`, ..., `c1`, ...; expressions `x1`,
-...; phrases `p1`, ...). The prefixes are distinct, so a name says what it is. The reader
+prefix and a number from 1, given in first-use order (`i1`, `i2`, ..., `c1`, ...; expressions
+`x1`, ...; phrases `p1`, ...); the reader refuses any other name (`zz`, `c01`). The prefixes are distinct, so a name says what it is. The reader
 allocates each type's indices in definition order from the type's `none + 1` (0 for a type with
 no `none`), so a name
 stands for whatever index the playroutine needs.

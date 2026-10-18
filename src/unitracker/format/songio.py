@@ -45,7 +45,14 @@ from unitracker.format.shared import (
     refuse_quoted as _refuse_quoted,
     player as _player,
 )
-from unitracker.format.records import EXPR, chained, program_path, record_types, ref_type
+from unitracker.format.records import (
+    EXPR,
+    PHRASE as PHRASE_PREFIX,
+    chained,
+    program_path,
+    record_types,
+    ref_type,
+)
 from unitracker.format.xexpr import ExpressionError, text_of
 from unitracker.format.yamlstyle import Atom, Decimal, Dumper, Flow, FlowMap, Quoted, parse
 from unitracker.player.modulation import declared
@@ -56,7 +63,6 @@ WIDTH = 100
 PHRASE = "phrase"
 DOC_KEYS = ("unitracker", "playroutine", "meta", "clock", "voices", "tempo", "song")
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-][1-9]\d*)?$")
-_ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _INTEGER = re.compile(r"-?(?:0|[1-9][0-9]*)")
 
 
@@ -534,6 +540,12 @@ class _Writer:
         return Atom(name if trans == 0 else f"{name}{trans:+d}")
 
 
+def _named(written: str, prefix: str, name) -> None:
+    """Raise unless ``name`` is a name of a ``written`` type: its ``prefix`` and a number."""
+    if not (isinstance(name, str) and re.fullmatch(rf"{re.escape(prefix)}[1-9][0-9]*", name)):
+        raise SongFormatError(f"{written}: name {name!r} is not {prefix} and a number")
+
+
 def _transpose_key(arr):
     """A phrase's rows with notes relative to its first note, and that first note."""
     notes = arr[:, 0] == 1
@@ -752,8 +764,7 @@ class _Reader:
                 raise SongFormatError(f"{written}: a fixed row is named by its index, not {name!r}")
             self.pending.append((rtype, name, self._proto(rtype, value)))
             return
-        if not isinstance(name, str) or not _ONE.match(name):
-            raise SongFormatError(f"{written}: bad name {name!r}")
+        _named(written, rtype.prefix, name)
         if name in self.names:
             raise SongFormatError(f"name {name!r} defined twice")
         if tname == EXPR:
@@ -856,6 +867,7 @@ class _Reader:
                 if tname != PHRASE:
                     self._define(tname, name, value)
                     continue
+                _named(PHRASE, PHRASE_PREFIX, name)
                 if name in phrases or name in self.names:
                     raise SongFormatError(f"name {name!r} defined twice")
                 if not isinstance(value, list):

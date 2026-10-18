@@ -193,7 +193,7 @@ def test_constant_and_text_expressions_read_back_as_written(song, old, new, kept
     assert all(k in text for k in kept) and songio.dumps(songio.loads(text)) == text
 
 
-MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
+MANY = "".join(f"        x{k}: {k}\n" for k in range(3, 303))
 
 
 @pytest.mark.parametrize(
@@ -227,7 +227,7 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
         (
             [
                 ("      x:\n", "      x:\n" + MANY),
-                ("-!freq:x1, -", "-!freq:y1, -!freq:y299"),
+                ("-!freq:x1, -", "-!freq:x3, -!freq:x301"),
             ],
             "argument is a byte",
         ),

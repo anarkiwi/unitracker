@@ -182,7 +182,7 @@ GT_FREQ = """      x:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}
         i2: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], freq: v + 3}
 """
-THEN = "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n"
+THEN = TWO_ROWS = "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n"
 
 
 @pytest.mark.parametrize(
@@ -625,3 +625,46 @@ def test_a_table_entry_outside_the_table_and_an_expression_where_none_goes_are_r
 def test_the_reader_raises_only_its_own_error(pr, defs):
     text = canonical(doc(pr, defs, {"p1": "C4.i1!tempo:7*4" if pr != "defmon" else "C4.i1*4"}))
     assert not perturb.fuzz(text)
+
+
+# -- 15: a name is its type's prefix and a number --
+
+
+@pytest.mark.parametrize(
+    "old,new,match",
+    [
+        ("c1: [", "zz: [", "name 'zz' is not c and a number"),
+        ("c1: [", "c01: [", "name 'c01' is not c and a number"),
+        ("p1: [", "phrase1: [", "name 'phrase1' is not p and a number"),
+        ("x1: v", "y1: v", "name 'y1' is not x and a number"),
+    ],
+)
+def test_a_name_carries_its_types_prefix(old, new, match):
+    defs = GT_ONE + "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
+    text = canonical(doc("goattracker2", defs, {"p1": "C4.i1!run:c1*4, D4!freq:x1*4"}))
+    assert old in text
+    refused(text.replace(old, new), match)
+
+
+def test_a_name_is_defined_once():
+    text = canonical(doc("goattracker2", GT_DEFS, {"p1": "C4.i1*4", "p2": "D4*4"}, TWO_ROWS))
+    refused(text.replace("p2: [D4*4]", "p1: [D4*4]").replace("p2,", "p1,"), "'p1' defined twice")
+
+
+SW_PW = "      ins:\n        i1: {ad: 18, sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: 2048}\n"
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("{ad: 18, sr: 240,", "{sr: 240, ad: 18,"),
+        ("{ad: 18, sr: 240,", "{ad: 18, sr: 240, restart: 0,"),
+        ("pw: 2048}", "pw: [{pw: 2048}, end]}"),
+        ("C4.i1*4", "C4.i1, -*3"),
+        ("        p2: [-*4]\n", "        p2: [-*4]\n        p3: [C5*4]\n"),
+    ],
+)
+def test_the_writer_writes_one_form_of_what_the_reader_reads_several_ways(old, new):
+    base = doc("sidwizard", SW_PW, {"p1": "C4.i1*4", "p2": "-*4"}, ALONE)
+    assert old in base
+    assert canonical(base.replace(old, new)) == canonical(base)
