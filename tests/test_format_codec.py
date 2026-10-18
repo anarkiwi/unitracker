@@ -418,7 +418,7 @@ def test_keys_outside_every_shape_or_that_no_shape_combines_are_refused(player, 
     key = next(k for k in ROW_KEYS if k not in c.keys)
     with pytest.raises(CodecError, match=f"^unknown key {key} in {c.rtype.written}$"):
         c.decode({key: 0})
-    shapes = [{*s.keys, *s.keep} for s in c.shapes]
+    shapes = [set(s.keys) for s in c.shapes]
     values = {k: v for _, _, _, shared in sample(player, name) for k, v in shared.items()}
     for pair in itertools.combinations(sorted(values), 2):
         if not any(set(pair) <= s for s in shapes):
@@ -576,7 +576,7 @@ def test_command_names_the_player_cannot_say_are_refused(player):
     "spec,match",
     [
         ({"keys": {"wave": 1}}, "not a shared row key"),
-        ({"keep": ["ctrl"]}, "collide with shared keys"),
+        ({"keep": ["ctrl"]}, "unknown key keep in a codec shape"),
         ({"keys": {"run": {"ref": "pulsetab"}}}, "both ref and field"),
         ({"raw": {"w": {"range": [0, 3]}}}, "a raw field is an expression"),
         ({1: {"name": "mod"}}, "not a shared command name"),

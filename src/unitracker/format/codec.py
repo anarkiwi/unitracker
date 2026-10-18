@@ -250,7 +250,7 @@ def optional_codec(optional) -> tuple[dict, dict]:
 
 
 class _Shape:
-    """One way to write a row: forward keys, inverse raw fields, fields kept as they are.
+    """One way to write a row: forward keys and inverse raw fields.
 
     A ``route`` key's ``rel`` gives its relation to the program's voice (see
     :func:`route_value`). A key's ``expr`` names the raw field of its expression, a key with
@@ -265,6 +265,8 @@ class _Shape:
     # pylint: disable=too-few-public-methods
 
     def __init__(self, spec: dict, optional=()):
+        for key in sorted(set(spec) - {"when", "keys", "raw"}):
+            raise CodecError(f"unknown key {key} in a codec shape")
         self.when = spec.get("when")
         own = spec.get("keys") or {}
         gen_keys, gen_raw = optional_codec(f for f in optional if f not in own)
@@ -284,10 +286,6 @@ class _Shape:
         bad = sorted(f for f, expr in self.raw.items() if isinstance(expr, dict))
         if bad:
             raise CodecError(f"raw {bad}: a raw field is an expression")
-        self.keep = list(spec.get("keep") or [])
-        clash = set(self.keep) & set(ROW_KEYS)
-        if clash:
-            raise CodecError(f"kept fields {sorted(clash)} collide with shared keys")
 
 
 def is_values(value) -> bool:
@@ -328,7 +326,7 @@ class RowCodec:
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
         self.rtype = rtype
         self.shapes = [_Shape(s, rtype.optional) for s in spec]
-        self.keys = frozenset(k for s in self.shapes for k in (*s.keys, *s.keep))
+        self.keys = frozenset(k for s in self.shapes for k in s.keys)
         self.offset = offset
         self.ev = evaluator or _PLAIN
 
@@ -390,9 +388,6 @@ class RowCodec:
                 out[key] = (int(self.ev(kspec["rel"], row)) if "rel" in kspec else 0, value)
             else:
                 out[key] = value
-        for field in shape.keep:
-            if row[field] != self.rtype.default(field):
-                out[field] = row[field]
         return out
 
     def encode(self, row: dict, place: dict | None = None) -> dict | None:
@@ -439,7 +434,7 @@ class RowCodec:
     @staticmethod
     def _unfit(shape, norm) -> str | None:
         """Why a written row's keys can't take ``shape``, or None."""
-        extra = set(norm) - set(shape.keys) - set(shape.keep)
+        extra = set(norm) - set(shape.keys)
         if extra:
             return f"keys {sorted(extra)}"
         for key, value in norm.items():
@@ -465,8 +460,7 @@ class RowCodec:
             return None, unfit
         exprs = {shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)}
         env = {**exprs, **self._env(shape, {k: v for k, v in norm.items() if k not in shape.refs})}
-        raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
-        raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
+        raw = {f: self.ev(expr, env) for f, expr in shape.raw.items()}
         raw.update(exprs)
         raw.update({shape.keys[k]["field"]: v[1] for k, v in norm.items() if k in shape.refs})
         full = self._full(raw)

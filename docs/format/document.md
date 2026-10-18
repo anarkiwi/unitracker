@@ -78,6 +78,7 @@ the type each native table is written as, `writes_as`):
 | `pw` | `pw` | a pulse program |
 | `filter` | `f` | a filter program |
 | `restart` | `r` | a hard restart (see [Hard restart](vocabulary.md#hard-restart)) |
+| `vinit`, `ginit` | (fixed) | defMON's voice and global state after init (see [defmon](../playroutines/defmon.md)) |
 | `x` | `x` | a modulator expression (see [Modulators](../modulation/expressions.md)) |
 
 - **Rows** use the shared row keys (see [Shared vocabulary](vocabulary.md)) wherever the
@@ -123,8 +124,10 @@ note[.instrument][!command[:arg]...][*steps]
   command references (names are a prefix and digits, so they read as names), `none`, or values
   joined by `/` for a command of several values (`!tempo:6/7`). A command that takes no argument is
   written without one (`!legato`). A command's argument is a byte: `!freq:x7` names one of the
-  first 255 expressions. An event carries at most two commands, its two slots, then `!pw`
-  and `!filter` (see [Lifetime](vocabulary.md#lifetime)), which take no slot. The first slot is
+  first 255 expressions. An event carries at most two slot commands, one per slot, then `!pw`
+  and `!filter` (see [Lifetime](vocabulary.md#lifetime)), which take no slot; a command written
+  beside another whose native effect it is (a command entry's `also`, as in
+  `!filter:none!resfilt:0/0`) is that command, in its slot. The first slot is
   the instrument column and the second the FX column; an event that names an instrument fills the
   instrument column with it, so its commands are the FX column's. A playroutine declares the
   column each command is read into (`column`); a column holds one command, and an event with two

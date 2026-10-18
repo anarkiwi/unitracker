@@ -81,8 +81,7 @@ to leave it out, for `note` whether it is absolute, for `route` its relation to 
 (1 adds it, -1 removes it, default 0), the raw field holding the key's expression, and for `ctrl`
 its mask as `{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
 `note_abs`, `route_rel`, for a mask `has_eor` and `eor`, and each expression key's raw field, the
-expression's reference or 0, defined) and `keep` (raw fields written under their own names; a kept
-reference is written as a name). An `optional` field `f` that is a shared key gives each shape the
+expression's reference or 0, defined); a shape has no other key. An `optional` field `f` that is a shared key gives each shape the
 key `f: {value: f, omit: "f < 0"}` and the raw field `f: "f if has_f else -1"`; a shape that gives
 key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one.
 A key with a vocabulary default (`hold`: 1) is left out at that value unless it gives its own
@@ -109,8 +108,8 @@ gives the row again. A command entry has a `name`, an optional `ref` (a record t
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
 written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `freq` entry's `lasts: step` says the
-native command ends on a step that carries no command (see [Lifetime of
+joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `freq` entry's `lasts: step` declares that the native
+`!freq` ends on a step without a command (see [Lifetime of
 `!freq`](../format/vocabulary.md#lifetime-of-freq)). An entry's `also` (`name:arg`) is
 another command whose native effect the code has too: the event writes it beside the command,
 and the reader reads the two as the one code and refuses the command without it

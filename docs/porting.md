@@ -102,7 +102,7 @@ has no command for.
 **The cursor.** `fetch` sets `ev_kind`, `ev_note`, `ev_instr`, the two command slots
 `ev_cmd`/`ev_arg` and `ev_cmd2`/`ev_arg2`, `at_phrase_start` and `ended` ([The
 cursor](playroutines/schema.md#the-cursor)). Map each pattern column onto them; the lifter writes
-events in the same form (section 6). An event carries at most two commands, its two slots
+events in the same form (section 6). An event carries at most two slot commands, one per slot
 ([Events](format/document.md#events)).
 
 **The ghost and the canonical flush.** The ghost gives each register after the tick, and the
@@ -168,8 +168,8 @@ a shared key needs no `keys` or `raw` entry of its own. A `hold` key needs no `o
 with the builtins `s8` and `s16`.
 
 **Codec shapes.** Each `codec` entry is one row kind: `when` over the raw fields, the constants and,
-for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back;
-`keep` for raw fields written under their own names ([Codecs](playroutines/schema.md#codecs)). Write
+for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back
+([Codecs](playroutines/schema.md#codecs)). Write
 every row kind onto the shared keys ([Shared vocabulary](format/vocabulary.md)), each in its one
 meaning in chip units; a player that stores the 11-bit cutoff as its top byte writes the `cut` key
 as `{byte: f}` and the `cut` command as `{name: cut, byte: arg}`, and its `raw` reads `cut` as that
