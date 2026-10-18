@@ -34,10 +34,11 @@ class Naming:
             return True
         return flagged and any(self.lifetime.keeps(row, cmd) for cmd in self.lifetime.flagged)
 
-    def redundant(self, events: list, rows: dict, flagged=None):
+    def redundant(self, events: list, rows: dict, flagged=None, same=None):
         """The index of each note of a phrase's ``events`` that names the instrument its phrase
-        last named, where naming it changes nothing; ``rows`` the instrument records, and
-        ``flagged`` the instruments whose flags are in use (default: every one)."""
+        last named, where naming it changes nothing; ``rows`` the instrument records,
+        ``flagged`` the instruments whose flags are in use (default: every one), and ``same``
+        what an instrument index is written as (default: itself)."""
         if self.off:
             return
         named = None
@@ -46,11 +47,27 @@ class Naming:
             if not ins:
                 continue
             note, index = event.get("note"), int(ins) - self.lifetime.base
-            if ins == named and isinstance(note, int) and not isinstance(note, bool):
+            ident = index if same is None else same(index)
+            if ident == named and isinstance(note, int) and not isinstance(note, bool):
                 used = flagged is None or index in flagged
                 if not self._changes(event, rows.get(index), used):
                     yield k
-            named = ins
+            named = ident
+
+    @staticmethod
+    def _dropped(events: list, drop: set) -> list:
+        return [
+            {f: v for f, v in e.items() if f != "instrument"} if k in drop else e
+            for k, e in enumerate(events)
+        ]
+
+    def same_written(self, phrases: dict, rows: dict, same) -> dict:
+        """``phrases`` without the names the reader refuses once equal instruments are one
+        written record, ``same`` giving what an instrument index is written as."""
+        return {
+            name: self._dropped(events, set(self.redundant(events, rows, same=same)))
+            for name, events in phrases.items()
+        }
 
     def write(self, tracks: list, phrases: dict, rows: dict) -> tuple[dict, dict]:
         """``(phrases, rows)`` without the instrument names that change nothing, and without the
@@ -63,11 +80,7 @@ class Naming:
         }
         out = {}
         for name, events in phrases.items():
-            drop = set(self.redundant(events, rows, flagged))
-            out[name] = [
-                {f: v for f, v in e.items() if f != "instrument"} if k in drop else e
-                for k, e in enumerate(events)
-            ]
+            out[name] = self._dropped(events, set(self.redundant(events, rows, flagged)))
         return out, (lifetime.unflagged(rows, flagged) if lifetime.flagged else rows)
 
     def check(self, phrases: dict, rows: dict) -> None:

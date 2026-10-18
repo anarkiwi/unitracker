@@ -150,6 +150,20 @@ def test_a_note_naming_the_instrument_its_phrase_plays_is_refused_and_written_wi
 
 
 @pytest.mark.parametrize(
+    "pr,defs",
+    [("goattracker2", GT_DEFS), ("sidwizard", SW_DEFS)],
+)
+def test_a_note_naming_an_instrument_equal_to_its_phrases_is_written_without(pr, defs):
+    plain = canonical(doc(pr, defs, {"p1": "C4.i1*4, D4*4"}))
+    ir = songio.loads(plain)
+    rows = ir["records"]["ins"]
+    first = ir["phrases"]["p1"][0]["instrument"]
+    rows[max(rows) + 1] = dict(rows[first])
+    ir["phrases"]["p1"][1]["instrument"] = max(rows)
+    assert songio.dumps(ir) == plain
+
+
+@pytest.mark.parametrize(
     "pr,defs,atoms",
     [
         ("sidwizard", SW_DEFS, "C4.i1*4, D4!pw*4, E4.i1*4"),
