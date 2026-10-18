@@ -15,7 +15,6 @@ lifetime:
   filter: {field: filter}
 note_offset: 0
 onset: onset
-started: started
 commands:
   5: {name: ad}
   6: {name: sr}
@@ -233,7 +232,6 @@ voice:
   instr: {width: 8, init: 1}
   ii: {width: 8}
   onset: {width: 1}
-  started: {width: 1}
   note: {width: 8}
   lastnote: {width: 8}
   # The last wavetable note row's n: the frequency base is ftab[n] of the note it gives.
