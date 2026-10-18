@@ -956,7 +956,7 @@ def schema_keys() -> dict[str, set[str]]:
 def used_keys(pr: dict):
     """(level, key) for each key a playroutine definition uses, at the levels the schema lists."""
     yield from (("top", k) for k in pr)
-    nested = [pr.get("instrument") or {}, (pr.get("instrument") or {}).get("writes_as") or {}]
+    nested = [pr.get("instrument") or {}, (pr.get("instrument") or {}).get("event") or {}]
     nested += [pr.get("restart") or {}, pr.get("defaults") or {}]
     nested += [*(pr.get("lifetime") or {}).values(), *pr["voice"].values(), *pr["global"].values()]
     yield from (("block", k) for d in nested if isinstance(d, dict) for k in d)

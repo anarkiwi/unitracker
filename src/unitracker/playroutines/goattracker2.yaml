@@ -3,13 +3,11 @@
 constants: {adparam: 0x0F00, deftempo: 5}
 tables:
   ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-instrument: {type: ins, base: 0}
 # !pulse:0 and !filter:0 hold on a note whose instrument starts no such program: new_note_init
 # sets the pointer from the instrument's field, and a wavetable $F9/$FA row sets it.
 lifetime:
   pulse: {field: pw}
   filter: {field: filter}
-note_offset: 0
 commands:
   5: {name: ad}
   6: {name: sr}
@@ -32,8 +30,6 @@ commands:
   17: {name: legato, when: "arg == 0"}
 record_types:
   ins:
-    prefix: i
-    none: 0
     pin: [1]
     form: map
     # speed and vd: the native instrument vibrato, which the instrument's freq replaces.
@@ -44,9 +40,6 @@ record_types:
   # may turn the gate off and then preset the envelope to adparam; then the note's first-tick
   # row, which writes the first waveform with the gate on, or only the gate.
   restart:
-    prefix: r
-    none: 0
-    chain: next
     form: map
     fields: [hold, next]
     optional: [ctrl, gate, ad, sr]
@@ -57,16 +50,12 @@ record_types:
       - when: "last and not first and hold == 0 and ad < 0 and sr < 0 and ((ctrl < 0 and gate <= 1) or (ctrl >= 1 and ctrl < 0xFE and gate == 1))"
   # The speed table: no written form.
   speedtab:
-    prefix: s
-    none: 0
     fields: [l, r]
     unwritten: [l, r]
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
   # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
   ctrltab:
     writes_as: ctrl
-    none: 0
-    chain: next
     fields: [w, n, next, x]
     refs:
       n:
@@ -140,11 +129,8 @@ record_types:
   pulsetab:
     writes_as: pw
     prefix: pw
-    none: 0
-    chain: next
     expr: x
     fields: [l, r, next, x]
-    refs: {x: x}
     codec:
       - when: "l >= 0x80"
         keys: {pw: "((l & 0x0F) << 8) | r"}
@@ -155,12 +141,9 @@ record_types:
   # reads from the following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
   filttab:
     writes_as: filter
-    none: 0
-    chain: next
     expr: x
     fields: [l, r, next, x]
     optional: [cut]
-    refs: {x: x}
     codec:
       - when: "l >= 0x80 and (x == 0 or cut < 0)"
         keys:
@@ -466,10 +449,8 @@ tick:
 ghost:
   global: {0x15: "0", 0x16: fcutreg, 0x17: fctrlreg, 0x18: fmodereg}
   voice:
-    0: "freq & 0xFF"
-    1: "freq >> 8"
-    2: "pulse & 0xFF"
-    3: "pulse >> 8"
+    0: freq
+    2: pulse
     4: "wave & gate"
     5: ad
     6: sr
@@ -486,7 +467,7 @@ modulators:
     - name: command
       key: freq
       cell: freq
-      chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
+      chip: {width: 16, offset: "ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}
       fire: [{run: {record: tickn, index: command, field: do}}]
       label: [command, cmddata]
       # A step without a command runs the instrument's freq, as the native instrument vibrato.
@@ -495,47 +476,28 @@ modulators:
       site: {when: "command == 0 and onset and not fired", record: ins, index: ii, field: freq}
       retire: {record: ins, clear: {speed: 0, vd: 0}}
       hooks:
-        - {at: {record: tick0, field: do}, key: [command, cmddata]}
+        - {at: {record: tick0, field: do}, changed: [command, cmddata]}
         - {at: {proc: new_note_init}, written: [vibdelay]}
         - {at: {type: ctrltab, template: do}, written: [lastnote]}
     - name: wave
       key: freq
       cell: freq
-      chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
+      chip: {width: 16, offset: "ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}
       fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]
-      label: [wcur]
-      x: "ctrltab[wcur].x"
       relative: [lastnote]
       site: {record: ctrltab, index: wcur, field: x, row: true, clear: {w: 0xF1, n: 0}}
-      hooks:
-        - {at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}
     - name: pulse
       key: pw
       cell: pulse
       fire: [pulse_exec]
-      label: [pptr]
-      x: "pulsetab[pptr].x"
       site: {record: pulsetab, index: pptr, field: x, clear: {l: 0, r: 0}}
-      hooks:
-        - {at: {proc: new_note_init}, written: [pptr]}
-        - {at: {record: tick0, field: do, index: 9}, written: [pptr]}
-        - {at: {record: wavecmd, field: do, index: 9}, written: [pptr]}
     - name: filter
-      scope: global
       key: cut
       cell: filtercutoff
-      chip: {width: 11, value: "filtercutoff << 3", store: {filtercutoff: "value >> 3"}}
+      chip: {width: 11}
       fire: [filter_exec]
-      label: [fptr]
-      x: "filttab[fptr].x"
       site:
         record: filttab
         index: fptr
         field: x
         clear: {l: "l if l >= 0x80 else 0", r: "r if l >= 0x80 else 0", cut: -1}
-      hooks:
-        - {at: {proc: new_note_init}, written: [fptr]}
-        - {at: {record: tick0, field: do, index: 10}, written: [fptr]}
-        - {at: {record: tick0, field: do, index: 11}, written: [fptr]}
-        - {at: {record: wavecmd, field: do, index: 10}, written: [fptr]}
-        - {at: {record: wavecmd, field: do, index: 11}, written: [fptr]}

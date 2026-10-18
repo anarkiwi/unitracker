@@ -8,9 +8,10 @@ name: str                                 # embedded definitions only
 constants: {name: int}
 defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3}   # optional; these are the default
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
-note_offset: 0                            # frequency-table index of format note 0
+note_offset: 0                            # frequency-table index of format note 0; default 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
-                                          # writes_as: {type, column, commands}: see Instrument columns
+                                          # default: the type written as ins, base 0
+                                          # event: {type, column, commands}: see Instrument columns
 restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
 lifetime: {pulse: {field: pw, flag: {flags: 0x40}}}   # !pulse:0 and !filter:0 (see Lifetime)
 exclusive: "code < 0x100"                 # over code and instrument: commands of a one-command column
@@ -25,7 +26,7 @@ init: [actions]                           # first tick only, global scope
 tick: [actions]                           # every later tick, global scope
 ghost:
   global: {0x15: expr, 0x16: expr, 0x17: expr, 0x18: expr}
-  voice: {0: expr, 1: expr, ..., 6: expr} # offsets within a voice
+  voice: {0: expr, 1: expr, ..., 6: expr} # offsets within a voice; a word cell or "hi:lo" fills two
 modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declarations
 ```
 
@@ -38,8 +39,8 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `form` | `list` (default) or `map` |
 | `writes_as` | the record type a document writes it as (default: its own name; see [Definitions](../format/document.md#definitions)) |
 | `prefix` | the name prefix (default: the first letter of the written name); distinct from the other types' and from the phrases' `p` |
-| `chain` | the field holding the next row: the type is a table of programs |
-| `none` | the index that means "no row"; references equal to it are plain numbers |
+| `chain` | the field holding the next row: the type is a table of programs (default: `next` when the type has a `next` field; `null` for none) |
+| `none` | the index that means "no row"; references equal to it are plain numbers (default 0, none for a `fixed` type; `null`: every index is a row) |
 | `stop` | an expression over a row's fields after which a program ends |
 | `max` | the last index the reader allocates (from `none + 1`, or 0; default 255) |
 | `pin` | indices the playroutine reads directly; they are defined first |
@@ -47,7 +48,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `refs` | `{field: type}`, or `{field: [{type: t, when: expr}, ...]}` for a reference that depends on the row |
 | `codec` | shapes writing rows as shared keys (see [Codecs](#codecs)) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
-| `expr` | the field (a reference to `x`) holding a row's modulator expression; a program of one row that sets only it is written as the expression |
+| `expr` | the field holding a row's modulator expression, a reference to `x` with no `refs` entry; a program of one row that sets only it is written as the expression |
 | `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default; a type whose fields are all unwritten has no written form, and a document naming it is refused (`unknown record type 'speedtab'`) |
 | any other key | a template: an action list run for a row |
 
@@ -63,9 +64,7 @@ A control-program table, for example, decodes its bytes in a template:
 ```yaml
 ctrltab:
   writes_as: ctrl
-  none: 0
-  chain: next
-  fields: [w, n, next]
+  fields: [w, n, next]             # chained by next; none 0
   do:
     - if: "row.w >= 0xF0"
       then: [{set: {arg: row.n}}, {run: {record: wavecmd, index: "row.w & 0x0F", field: do}}, ...]
@@ -185,11 +184,11 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 
 | key | meaning |
 |---|---|
-| `freq` | the word `F(k)` reads at index `k + note_offset`: `{word: table}`, or `{hi: table, lo: table}` joined as `hi << 8 \| lo` |
+| `freq` | the word `F(k)` reads at index `k + note_offset`: `{word: table}`, or `{hi: table, lo: table}` joined as `hi << 8 \| lo`; or the name of a one-argument function that reads one of these at its argument (`freq: nfreq`) |
 | `notes` | the voice cells that hold the note; `N` is the first, less `note_offset` |
 | `transpose` | a voice cell added to the note for `N` |
 | `legato` | `{cell}`: the cell set while a note does not retrigger, which the `legato` command (`!legato:0`) sets |
-| `tables` | `{name: {entry: expr, size: n}}`: the tables `name[k]` expressions read; `entry` reads `i` and the playroutine's tables |
+| `tables` | `{name: {entry: expr, size: n}}`: the tables `name[k]` expressions read; `entry` reads `i` and the playroutine's tables. `{name: {function: f, size: n}}` takes `entry` from the one-argument function `f` and adds `f`'s rewrite over the table to `functions` |
 | `functions` | `{name: expr}`: playroutine functions rewritten over the named tables, for analysis |
 | `units` | the units, below |
 
@@ -198,14 +197,14 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `name` | the unit's name |
 | `key` | the shared key it drives: `freq`, `pw` or `cut` |
 | `cell` | the driven cell; a pair `hi:lo[:k]` is the value `hi << k \| lo & (2**k - 1)` (k 8 when omitted) |
-| `chip` | `{width, value, store}`: the unit's value is `value` over the cells, masked to `width` bits; `store` (reading `value`) writes a value back, run only when the cells do not already give it; each cell state the firings reach gives its own value, and `store` inverts `value` on those states |
-| `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it |
+| `chip` | `{width, offset, value, store}`: the unit's value is `value` over the cells, masked to `width` bits; `store` (reading `value`) writes a value back, run only when the cells do not already give it; each cell state the firings reach gives its own value, and `store` inverts `value` on those states. `value` defaults to the cells less `offset` (an expression, default 0), a cell narrower than `width` holding the value's top bits, and `store` to its inverse |
+| `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it (default: `global` for a global cell) |
 | `fire` | one firing: proc names, `run` actions and functions; `v` is read before the first entry's function runs and the expression's value is stored after the last's |
-| `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing |
-| `hooks` | the starts: `{at: function, written: [cells], key: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `key` cells, or writes a `pointer` to a program that sets one of `program.fields`; a hook with none of the three restarts it on every call, before the call runs |
-| `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start |
+| `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing (default: the site's field, `record[index].field`) |
+| `hooks` | the starts: `{at: function, written: [cells], changed: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `changed` cells, or writes a `pointer` to a program that sets one of `program.fields`; a hook with none of the three restarts it on every call, before the call runs. Default: each function outside the firing (its functions and what they call) that writes the unit's pointer, `program.pointer` or else the site's `index`, as a `pointer` hook with a `program` and a `written` one without; with a `row` site, each function of the firing |
+| `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start (`pointer` and `record` default to the site's `index` and `record`) |
 | `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
-| `label` | the cells that group a unit's occurrences for the lifter |
+| `label` | the cells that group a unit's occurrences for the lifter (default: the site's `index`) |
 | `relative` | cells a start reads as `N` plus their offset from the note |
 | `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the document does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
@@ -216,8 +215,8 @@ A function is `{proc: p}`, `{record: r, field: f}` (every row's action list in f
 entry names the function it runs: a proc name `{proc}`, a `run` with `field` `{record, field}`, a
 `run` with `template` `{type, template}`, or the function itself, which the lifter runs at the index
 of the one `run` that calls it. A firing whose every call is a start fires and starts at the same
-function (GoatTracker's wavetable steps: `fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]`,
-`hooks: [{at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}]`).
+function (GoatTracker's wavetable steps: `fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]`
+with a `row` site, whose hooks default to `[{at: {record: wavecmd, field: do, index: [1, 2, 3, 4]}}]`).
 
 ## The cursor
 
@@ -240,7 +239,8 @@ Each tick, the player runs `init` (first tick) or `tick` (every later tick). The
 evaluates the ghost, masks each value to 8 bits, and flushes the registers that
 changed since the last flush, in GoatTracker 2's buffered order (`BUFFEREDWRITES`:
 the filter step first, then `mt_loadregs`). A register with no ghost entry keeps its
-value.
+value. An entry `r` naming a cell wider than 8 bits (`0: freq`) or a pair (`0: "fhi:flo"`) gives
+register `r` the low byte and `r + 1` the high byte, unless `r + 1` has an entry of its own.
 
 ```
 $15 $16 $17 $18,  then for each voice v (base 7v): +2 +3 +6 +5 +0 +1 +4

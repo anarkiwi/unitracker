@@ -120,7 +120,7 @@ per place.
 ## Instrument columns
 
 A playroutine whose events arm programs directly, with no native instrument, declares
-`instrument: {type: t, base: b, writes_as: {type: ins, column: k, commands: {c: f}}}`: an event's
+`instrument: {type: t, base: b, event: {type: ins, column: k, commands: {c: f}}}`: an event's
 instrument column (record `t` at index value - `b`) is field `k` of an `ins` record and the
 argument of its command `c` field `f`. The writer names one instrument per combination of
 programs the events arm, and the event names that instrument.

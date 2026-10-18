@@ -37,7 +37,7 @@ slide a layer-A program starts before the voice's first note, which clears it. T
 ## Events
 
 The playroutine declares [Instrument columns](../format/vocabulary.md#instrument-columns):
-`instrument: {type: sidtab, base: 1, writes_as: {type: ins, column: ctrl, commands: {1: filter}}}`.
+`instrument: {type: sidtab, base: 1, event: {type: ins, column: ctrl, commands: {1: filter}}}`.
 
 - `.i3` names the instrument: its `ctrl` is the sidTAB program sidcall layer A starts (the
   event's instrument column), its `filter` the one layer B starts (the event's command), and a

@@ -337,7 +337,7 @@ def _modulator_reads(pr: dict):
         yield from _strings(list((chip.get("store") or {}).values()))
         yield from [*(unit.get("label") or []), str(unit.get("x", ""))]
         for hook in unit.get("hooks") or []:
-            yield from [*(hook.get("written") or []), *(hook.get("key") or [])]
+            yield from [*(hook.get("written") or []), *(hook.get("changed") or [])]
             yield from hook.get("pointer") or []
         yield from [str((unit.get("program") or {}).get("pointer", ""))]
         site = unit.get("site") or {}
