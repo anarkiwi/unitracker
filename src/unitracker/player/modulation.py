@@ -194,7 +194,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             if unit.get("init"):
                 for entry in (fire[0], fire[-1]):
                     self.wrap(
-                        function(entry), lambda args, unit=unit: self.on_init(unit, args), None
+                        function(entry), lambda args, unit=unit: self._on_init(unit, args), None
                     )
 
     @property
@@ -362,7 +362,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             return 0
         return self.note(self.player.voice_cells[voice])
 
-    def on_init(self, unit: dict, args) -> None:
+    def _on_init(self, unit: dict, args) -> None:
         """At the init's first call of a unit's firing, start the unit (``INIT``), a global
         unit's start the first voice's: a firing the init enters at its last function begins
         there."""
