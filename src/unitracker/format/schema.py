@@ -47,7 +47,34 @@ def expand(pr: dict) -> dict:
         if "hooks" not in unit:
             bodies = _bodies(out) if bodies is None else bodies
             _hooks(unit, bodies, out.get("records") or {})
+    for name, fields in first_only(out).items():
+        _first_rows(types[name].get("codec") or [], fields)
     return out
+
+
+def first_only(pr: dict) -> dict:
+    """``{record type: {fields}}``: the expression fields of the units whose start reads the
+    expression on the first row of a program (a ``site`` of a chained type without ``row``)."""
+    types = pr.get("record_types") or {}
+    out = {}
+    for unit in (pr.get("modulators") or {}).get("units") or []:
+        site = unit.get("site") or {}
+        spec = types.get(site.get("record")) or {}
+        if "field" in site and not site.get("row") and spec.get("chain") is not None:
+            out.setdefault(site["record"], set()).add(str(site["field"]))
+    return out
+
+
+def _first_rows(shapes: list, fields: set) -> None:
+    """Each codec shape with a key holding the expression of one of ``fields`` fits a row that
+    sets it only on a program's first row, where a start reads it."""
+    for shape in shapes:
+        keys = (shape.get("keys") or {}).values()
+        held = sorted({k["expr"] for k in keys if isinstance(k, dict) and k.get("expr") in fields})
+        cond = "(" + " and ".join(f"{f} == 0" for f in held) + " or first)"
+        when = shape.get("when")
+        if held and not str(when).startswith(cond):
+            shape["when"] = cond + (f" and ({when})" if when else "")
 
 
 def _record_type(spec: dict) -> None:

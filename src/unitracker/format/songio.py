@@ -31,7 +31,7 @@ from unitracker.format.codec import (
     written_value,
 )
 from unitracker.format.events import column, envelope, fold, freq, instrument, lifetime
-from unitracker.format.schema import expand
+from unitracker.format.schema import expand, first_only
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.xexpr import ExpressionError, text_of
@@ -174,6 +174,7 @@ class _Writer:
         self.names = {}
         self.row = 0
         self.phrase_names = {}
+        self.first_only = first_only(self.pr)
         self.driven = {
             u["site"]["record"]: u["key"]
             for u in declared(self.pr).get("units") or []
@@ -216,6 +217,15 @@ class _Writer:
             self.programs[key] = program_path(rtype, lambda i: self._row(rtype, i), entry, _RowEval)
         return self.programs[key]
 
+    def program_rows(self, rtype, path: list) -> list:
+        """The rows of a program's ``path``, without the expressions no start reads (those of
+        :func:`first_only` past its first row)."""
+        unread = self.first_only.get(rtype.name, ())
+        return [
+            {f: v for f, v in self._row(rtype, i).items() if not (k and f in unread)}
+            for k, i in enumerate(path)
+        ]
+
     def _refs(self, rtype, row):
         """``(field, (type, index))`` for each reference ``row`` makes."""
         out = []
@@ -240,7 +250,7 @@ class _Writer:
         rtype = self.rtypes[key[0]]
         if rtype.chain is not None:
             path, _ = self.program(rtype, key[1])
-            return [ref for i in path for ref in self._refs(rtype, self._row(rtype, i))]
+            return [ref for row in self.program_rows(rtype, path) for ref in self._refs(rtype, row)]
         return self._refs(rtype, self._row(rtype, key[1]))
 
     def visit(self, key, referrer):
@@ -364,8 +374,8 @@ class _Writer:
             ):
                 return self.ref_value(self.key(EXPR, int(row[rtype.expr])))
         rows = [
-            self.row_value(rtype, self._row(rtype, i), row_place(k, len(path), loop is None))
-            for k, i in enumerate(path)
+            self.row_value(rtype, row, row_place(k, len(path), loop is None))
+            for k, row in enumerate(self.program_rows(rtype, path))
         ]
         if (
             loop is None

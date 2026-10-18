@@ -444,7 +444,8 @@ def test_expressions_none_and_references_go_only_where_a_shape_holds_them(player
                 CodecError, match=f"{key} (holds no expression|is only none) here|bad {key}"
             ):
                 c.decode({key: ("x", 1)})
-        for place, k, _, shared in (r for r in sample(player, name) if c.shapes[r[1]] in exprs):
+        firsts = (r for r in sample(player, name) if r[0]["first"] and c.shapes[r[1]] in exprs)
+        for place, k, _, shared in firsts:
             row = {**as_written(shared), key: ("x", 1)}
             assert c.decode(row, place)[c.shapes[k].keys[key]["expr"]] == 1
         if exprs and not any("value" in s.keys[key] for s in exprs):

@@ -187,6 +187,9 @@ _FORMS = {
 }
 
 
+_ANYWHERE = {"first": 1, "last": 0}
+
+
 def row_place(k: int, count: int, ends: bool) -> dict:
     """The position of row ``k`` of a program of ``count`` rows that ends or loops."""
     return {"first": int(k == 0), "last": int(ends and k == count - 1)}
@@ -396,7 +399,7 @@ class RowCodec:
         """Shared keys for a raw row, notes as ``(absolute, number)``; None if no shape fits.
 
         ``place`` gives a program row's position to the shapes' ``when``: ``first`` and
-        ``last`` (the row before ``end``) are 1 or 0.
+        ``last`` (the row before ``end``) are 1 or 0; a row of no known position is a first row.
         """
         full = self._full(row)
         for shape in self.shapes:
@@ -408,7 +411,8 @@ class RowCodec:
         return None
 
     def _fits(self, shape, full: dict, place) -> bool:
-        return shape.when is None or bool(self.ev(shape.when, {**full, **(place or {})}))
+        place = _ANYWHERE if place is None else place
+        return shape.when is None or bool(self.ev(shape.when, {**full, **place}))
 
     def _env(self, shape, norm) -> dict:
         env = {}
