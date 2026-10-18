@@ -35,7 +35,8 @@ A command means one thing in every player; it applies on the step that carries i
 | `!cut:n` | set the 11-bit cutoff |
 | `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks, two different tempos (`!tempo:6/6` is refused: it is `!tempo:6`) |
 | `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
-| `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
+| `!freq:x` | drive the voice frequency by expression `x` until a note starts the instrument or another `!freq` (see [Lifetime of `!freq`](#lifetime-of-freq) and [Modulators](../modulation/expressions.md)) |
+| `!freq:none` | return the voice frequency to its instrument's `freq` |
 | `!mark:n` | a mark that changes no sound: the player reads the byte and plays nothing |
 | `!legato` | the event's note does not retrigger; it needs a note (see [Legato](../modulation/expressions.md#legato)) |
 
@@ -121,6 +122,15 @@ carry it and others not, and the command on a note that names an instrument. A n
 no instrument plays the voice's last one (see [Walking the plays](#walking-the-plays)). A note
 played under instruments of which some keep a program and others restart it has no written form.
 A legato note restarts nothing, so the command adds nothing there.
+
+## Lifetime of `!freq`
+
+A `!freq:x` lasts until a note starts the instrument (a legato note does not) or another `!freq`
+replaces it; steps between, empty or with other commands, continue it, and a phrase writes the
+`!freq` it runs once (`!freq:x1` on a step after the same phrase's `!freq:x1` is refused).
+`!freq:none` returns the frequency to the instrument's `freq` before a note does, where the player
+can: a playroutine whose native command ends on a step that carries no command declares `lasts:
+step`, and the writer writes `!freq:none` on each such step after a `!freq`.
 
 ## Envelope commands
 

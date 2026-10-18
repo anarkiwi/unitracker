@@ -85,7 +85,7 @@ GT_SONG = doc(
       x:
         x1: (v + 300) % 65536
         x2: 0""",
-    "[C4.i1, -!freq:x1, -!freq:x1, D4!freq:x2!legato, -]",
+    "[C4.i1, -!freq:x1, -, D4!freq:x2!legato, -!freq:none]",
 ).replace(*TEMPO)
 SW_INS = "freq: '(φ >= 2)*W[N + 25]'"
 SW_SONG = doc(
@@ -218,7 +218,7 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
     "edits,match",
     [
         ([("unitracker: 1.20", "unitracker: 1.8")], "not a unitracker v1.20 document"),
-        ([("-!freq:x1, -!freq:x1,", "-!noteglide:0, -!freq:x1,")], "unknown command !noteglide"),
+        ([("-!freq:x1, -,", "-!noteglide:0, -,")], "unknown command !noteglide"),
         (
             [("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]")],
             "unknown key for in pw",
@@ -229,23 +229,23 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
         ([("x1: (v + 300) % 65536", "x1: '[v > 9]*v'")], r"a comparison is written \(a op b\)"),
         ([("x1: (v + 300) % 65536", "x1: sqrt(v)")], "calls no grammar function"),
         ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
-        ([("-!freq:x1, -!freq:x1,", "-!freq:x9, -!freq:x1,")], "unknown name 'x9'"),
+        ([("-!freq:x1, -,", "-!freq:x9, -,")], "unknown name 'x9'"),
         (
-            [("-!freq:x1, -!freq:x1,", "-!tempo:6/9/7, -!freq:x1,")],
+            [("-!freq:x1, -,", "-!tempo:6/9/7, -!freq:x1,")],
             r"!tempo: the argument is 2 values",
         ),
         (
-            [("-!freq:x1, -!freq:x1,", "-!tempo:6/256, -!freq:x1,")],
+            [("-!freq:x1, -,", "-!tempo:6/256, -!freq:x1,")],
             r"!tempo: each value is a byte",
         ),
         (
-            [("-!freq:x1, -!freq:x1,", "-!run:6/9, -!freq:x1,")],
+            [("-!freq:x1, -,", "-!run:6/9, -!freq:x1,")],
             r"can't express !run:6/9 in",
         ),
         (
             [
                 ("      x:\n", "      x:\n" + MANY),
-                ("-!freq:x1, -!freq:x1", "-!freq:y1, -!freq:y299"),
+                ("-!freq:x1, -", "-!freq:y1, -!freq:y299"),
             ],
             "argument is a byte",
         ),

@@ -47,7 +47,7 @@ instrument-column form (`!ad` or `!sr` in the first slot of an event that names 
 | `!sr` | 0-255, at most one nibble from the instrument's |
 | `!tempo` | 3-127, 3-15/3-15 (two different) |
 | `!vtempo` | 3-127, 3-15/3-15 (two different) |
-| `!freq` | `x` name, `none` |
+| `!freq` | `x` name |
 | `!legato` | no argument |
 
 Every other command is refused by name.

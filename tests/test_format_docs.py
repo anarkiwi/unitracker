@@ -20,7 +20,7 @@ from unitracker.format.codec import (
     envelope_names,
 )
 from unitracker.format import tempo
-from unitracker.format.events import lifetime, restart
+from unitracker.format.events import freq, lifetime, restart
 
 DOCS = Path(__file__).resolve().parents[1] / "docs" / "playroutines"
 HEADER = "| command | argument |"
@@ -104,7 +104,8 @@ def accepted(player: str) -> dict:
         cells[name] += ", at most one nibble from the instrument's"
     for name, names in refs.items():
         with contextlib.suppress(CodecError):
-            names += [f"`{NONE}`"] if cmds.decode(name, NONE) else []
+            stops = name != freq.NAME or freq.Freq(pr).step
+            names += [f"`{NONE}`"] if cmds.decode(name, NONE) and stops else []
         cells[name] = ", ".join(names)
     for slot in ("pw", "filter"):
         stops = []

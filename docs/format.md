@@ -53,5 +53,10 @@ song:
         ...
         p6: [off*3, A#3.i4!freq:x1, C4!freq:x2!legato, D4, D#4*2, C4, G4*2, C5, G#4!freq:x1, ...]
     play: [p4, p5, p6]
-  - {loop: 0}
+  ...
+  - def:
+      phrase:
+        p16: [off!tempo:16, -!freq:none*47]
+    play: [p1, p2, p16]
+  - {loop: 1}
 ```

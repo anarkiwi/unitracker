@@ -3,8 +3,9 @@
 A playroutine's ``commands`` entry may give the ``column`` its command is read into: a name, or a
 list of names of which it takes the first the event leaves free (an event that names an instrument
 fills :data:`INSTRUMENT`), else the last; a named command without one is read into the FX column.
-:data:`COLUMNS` are the event slots' columns in slot order. A column holds one command; an event with two in one column is refused, naming both. An
-event's commands are written in one order (:func:`ordered`).
+:data:`COLUMNS` are the event slots' columns in slot order. A column holds one command; an event
+with two in one column is refused, naming both. An event's commands are written in one order
+(:func:`ordered`).
 """
 
 from unitracker.format.codec import COMMAND_NAMES, command_variants

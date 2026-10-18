@@ -322,7 +322,6 @@ def test_a_lone_fx_column_command_off_a_note_start_is_written_in_the_first_slot(
         ({"p1": "C4.i1*4, -!sr:none*4"}, ONCE, "~", "can't express !sr:none"),
         ({"p1": "-!ad:18*4, C4.i1*4"}, ONCE, "~", "!ad on a voice that has no instrument"),
         ({"p1": "C4.i1*4, -.i2*4, -!ad:50*4"}, ONCE, "~", "!ad also writes sr 248 over 240"),
-        (SPLIT_PHRASES, SPLIT, 1, "phrase p2 plays its envelope commands differently"),
     ],
 )
 def test_the_reader_refuses_an_envelope_byte_no_small_fx_writes(phrases, plays, loop, match):
@@ -578,3 +577,80 @@ def test_a_command_that_also_stops_the_filter_program_is_written_with_the_stop()
         songio.loads(text.replace("0/0", "0/1"))
     with pytest.raises(songio.SongFormatError, match="!resfilt:0/0 also does !filter:none"):
         songio.loads(text.replace("!filter:none", ""))
+
+
+def test_a_loop_whose_passes_play_an_envelope_byte_differently_is_written_out():
+    ir = songio.loads(env_song(SPLIT_PHRASES, SPLIT, 1))
+    text = songio.dumps(ir)
+    assert text.endswith("    play: [p3, p3, p3]\n  - play: [p2, p2, p2]\n  - {loop: 2}\n")
+    assert songio.dumps(songio.loads(text)) == text
+    assert np.array_equal(grid(songio.loads(text), 400), grid(ir, 400))
+
+
+# -- !freq: lasts until a note starts the instrument --
+
+FREQ_X = "      x:\n        x1: (v + 300) % 65536\n        x2: (v - 40) % 65536\n"
+GT_FREQ = FREQ_X + "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}\n"
+
+
+@pytest.mark.parametrize(
+    "native,written",
+    [
+        ([[16, 1], [16, 1], [16, 1]], "C4.i1!freq:x1*3, D4.i1*3"),
+        ([[16, 1], [], []], "C4.i1!freq:x1, -!freq:none*2, D4.i1*3"),
+        ([[16, 1], [6, 3], [16, 1]], "C4.i1!freq:x1, -!sr:3*2, D4.i1*3"),
+        ([[16, 1], [6, 3], []], "C4.i1!freq:x1, -!sr:3, -!freq:none, D4.i1*3"),
+        ([[16, 1], [16, 2], []], "C4.i1!freq:x1, -!freq:x2, -!freq:none, D4.i1*3"),
+    ],
+)
+def test_goattracker_writes_a_freq_once_and_none_where_the_native_one_ends(native, written):
+    ir = songio.loads(song("goattracker2", GT_FREQ, {"p1": "C4.i1*3, D4.i1*3"}))
+    events = [{"note": 48, "instrument": 1}, {}, {}, {"note": 50, "instrument": 1, "steps": 3}]
+    for event, cmd in zip(events, native):
+        event.update({"command": cmd} if cmd else {})
+    ir["phrases"]["p1"] = events
+    text = songio.dumps(ir)
+    assert f"p1: [{written}]" in text and songio.dumps(songio.loads(text)) == text
+    assert np.array_equal(grid(songio.loads(text), 200), grid(ir, 200))
+
+
+@pytest.mark.parametrize(
+    "pr,defs,atoms,match",
+    [
+        (
+            "goattracker2",
+            GT_FREQ,
+            "C4.i1!freq:x1, -!freq:x1",
+            "!freq repeats the !freq its phrase runs",
+        ),
+        (
+            "goattracker2",
+            GT_FREQ,
+            "C4.i1!freq:x1, -!sr:3, -!freq:x1",
+            "!freq repeats the !freq its",
+        ),
+        ("sidwizard", SW_INS + FREQ_X, "C4.i1!freq:x1, -!freq:x1", "!freq repeats the !freq its"),
+        ("sidwizard", SW_INS, "C4.i1, -!freq:none", "the player can't express !freq:none"),
+    ],
+)
+def test_the_reader_refuses_a_running_freq_written_again(pr, defs, atoms, match):
+    with pytest.raises(songio.SongFormatError, match=f"{pr}: {match}"):
+        songio.loads(song(pr, defs, {"p1": atoms}))
+
+
+def test_a_freq_continues_over_steps_and_into_the_next_phrase_until_a_note():
+    text = song(
+        "goattracker2",
+        GT_FREQ,
+        {"p1": "C4.i1*2, D4.i1!freq:x1*2", "p2": "-*2, E4.i1*2"},
+        "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n",
+    )
+    ir = songio.loads(text)
+    assert commands(ir, "p2")[:2] == [[16, 1], [16, 1]] and commands(ir, "p2")[2] is None
+    assert songio.dumps(songio.loads(songio.dumps(ir))) == songio.dumps(ir)
+    sw = songio.loads(song("sidwizard", SW_INS + FREQ_X, {"p1": "C4.i1!freq:x1*4"}))
+    sw["phrases"]["p1"] = [
+        {"note": 49, "instrument": 1, "command": [16, 1]},
+        {"command": [16, 1], "steps": 3},
+    ]
+    assert "p1: [C4.i1!freq:x1*4]" in songio.dumps(sw)

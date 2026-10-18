@@ -5,11 +5,10 @@ writes the sounding instrument's byte with that nibble replaced, and the other r
 from its override, which must leave it unchanged; overrides last until the next note start.
 """
 
-import functools
-
 from unitracker.format.codec import ENVELOPE, command_code, command_variants, envelope_names
+from unitracker.format.events import context
 from unitracker.format.events.column import COLUMNS
-from unitracker.format.events.lifetime import order, starts
+from unitracker.format.events.lifetime import starts
 from unitracker.player.vm import event_commands
 
 NIBBLE = 0x0F
@@ -26,36 +25,6 @@ class _Voice:
 
     def __init__(self):
         self.ins, self.regs, self.over = 0, {}, {}
-
-
-def _with(event: dict, commands) -> dict:
-    """``event`` with ``commands`` as its commands."""
-    out = {k: v for k, v in event.items() if k not in ("command", "commands")}
-    if len(commands) == 1:
-        out["command"] = list(commands[0])
-    elif commands:
-        out["commands"] = [list(c) for c in commands]
-    return out
-
-
-def _played(trk: dict, phrases: dict, convert) -> dict:
-    """``{play: commands}``: each play's events' commands as ``convert(voice, event)`` gives
-    them where the voice plays it, refusing a play that they differ on between its passes."""
-    voice, seen = _Voice(), {}
-    for play, name in order(trk):
-        got = tuple(tuple(convert(voice, e)) for e in phrases[name])
-        if seen.setdefault(play, got) != got:
-            problem = f"a play of phrase {name} plays its envelope commands differently"
-            raise EnvelopeError(f"{problem} on its passes")
-    return seen
-
-
-def _alias(variants: list, name: str, got: tuple) -> str:
-    """The phrase that plays ``name`` as ``got``: ``name`` for its first variant."""
-    if got not in variants:
-        variants.append(got)
-    k = variants.index(got)
-    return name if k == 0 else f"{name}/{k}"
 
 
 class Envelope:
@@ -175,18 +144,11 @@ class Envelope:
 
     def _rewrite(self, song: dict, records: dict, convert) -> dict:
         """``song`` with each event's commands as ``convert`` gives them where the voice plays
-        it; a phrase played in contexts that give it different commands becomes one phrase per
-        context."""
+        it (see ``context.rewrite``)."""
         if not self.native:
             return song
-        phrases = song["phrases"]
-        variants, out, new = {}, dict(phrases), []
-        for trk in song["tracks"]:
-            plays = list(trk["plays"])
-            for k, got in _played(trk, phrases, functools.partial(convert, records)).items():
-                name = plays[k]["phrase"]
-                alias = _alias(variants.setdefault(name, []), name, got)
-                out[alias] = [_with(e, c) for e, c in zip(phrases[name], got)]
-                plays[k] = {**plays[k], "phrase": alias}
-            new.append({**trk, "plays": plays})
-        return {**song, "tracks": new, "phrases": out}
+
+        def events(voice, event):
+            return [context.with_commands(event, convert(records, voice, event))]
+
+        return context.rewrite(song, events, _Voice)

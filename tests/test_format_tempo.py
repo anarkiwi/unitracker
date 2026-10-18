@@ -2,11 +2,10 @@
 
 import numpy as np
 import pytest
+from test_format_codec import atom_doc
 
 from unitracker.format import songio, tempo
 from unitracker.player.vm import SongError, SongPlayer
-
-from test_format_codec import atom_doc
 
 
 def tempo_song(player: str, value=None, ins="{sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}") -> str:

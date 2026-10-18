@@ -71,7 +71,8 @@ Every other command is refused by name.
   the control, pulse and filter programs.
 - `!legato` is command 17: the lifter writes a native toneporta on a note as `!legato` plus
   the toneporta, so the note does not retrigger.
-- `!freq` is command 16, which plays every expression.
+- `!freq` is command 16, which plays every expression; `!freq:none` is 16 with 0 (see
+  Modulators).
 
 ## Control programs
 
@@ -153,10 +154,12 @@ start them where the composer put them; the playroutine declares no `lifetime`, 
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!filter:none!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
-- A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence (`φ`
-  keeps counting); a different one, or a step with another or no command, starts the next. A step
-  without a command runs the instrument's `freq` expression, which a note's steps without a
-  command continue.
+- `!freq` is command 16, `lasts: step`: the native command ends on a step without a command,
+  where the instrument's `freq` resumes, and a step with another command (`!ad`, `!vol`, ...)
+  continues it. The writer writes that step `!freq:none` (command 16 with 0, which plays as a step
+  without a command), and the reader repeats the running `!freq` on each step without one; the
+  same `!freq` on the next step continues the occurrence (`φ` keeps counting). A note's steps
+  without a command run the instrument's `freq` expression.
 - Commands 1-4 and the instrument vibrato are the `command` unit's own firings: the lifter writes
   the commands' modulations as `!freq`, and the instrument vibrato as the instrument's `freq`,
   its delay a term in `φ` (`(φ >= 38)` for a delay of 40), when it starts with the note; a
