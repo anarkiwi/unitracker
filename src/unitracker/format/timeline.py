@@ -62,7 +62,8 @@ class _Voice:
 def to_rows(tracks, lengths) -> tuple[list[list], int | None]:
     """Rows of per-voice entries (``(phrase, transpose)``, ``END`` or None), and the loop row.
 
-    Rows run until the joint state of every voice repeats; ``loop`` is that row.
+    Rows run until the joint state of every voice repeats; ``loop`` is that row. A song that ends
+    has no row that only ends voices: its end ends them.
     """
     voices = [_Voice(track, lengths) for track in tracks]
     rows, seen, t = [], {}, 0
@@ -72,15 +73,26 @@ def to_rows(tracks, lengths) -> tuple[list[list], int | None]:
         if key in seen:
             return rows, seen[key]
         if all(v.done for v in voices):
-            return rows, None
+            return _ended(rows), None
         if len(rows) >= MAX_ROWS:
             raise TimelineError(f"the voices' loops do not align within {MAX_ROWS} rows")
         seen[key] = len(rows)
         rows.append([v.start(t) if d else None for v, d in zip(voices, due)])
         live = [v.end for v in voices if not v.done]
         if not live:
-            return rows, None
+            return _ended(rows), None
         t = min(live)
+
+
+def _ended(rows: list) -> list:
+    """``rows`` without the last rows that only end voices."""
+    while rows and _only_ends(rows[-1]):
+        rows = rows[:-1]
+    return rows
+
+
+def _only_ends(row) -> bool:
+    return all(e in (END, None) for e in row)
 
 
 def _starts(rows, lengths, voices):
@@ -115,6 +127,8 @@ def from_rows(rows, loop, lengths, voices: int) -> list[dict]:
     starts, items, t_end, done = _starts(rows, lengths, voices)
     if loop is not None and not 0 <= loop < len(rows):
         raise TimelineError(f"loop row {loop} is outside the song")
+    if loop is None and _only_ends(rows[-1]):
+        raise TimelineError("the song's last row only ends voices; the song's end ends them")
     return [_track(items[v], loop, starts, t_end, done[v]) for v in range(voices)]
 
 

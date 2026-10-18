@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import yaml
 from conftest import gt_tune, table
+from pygoattracker import Player
 from pygoattracker.model import (
     Instrument,
     Orderlist,
@@ -22,7 +23,7 @@ from unitracker.format.codec import CodecError, CommandCodec, RowCodec
 from unitracker.format.records import record_types
 from unitracker.lift import goattracker as gt
 from unitracker.modfit.convert import ConversionError
-from unitracker.player.vm import SongPlayer
+from unitracker.player.vm import SongPlayer, event_commands
 
 
 # Each table's rows and the records it lifts to, as ``keys`` values (None: absent).
@@ -98,16 +99,25 @@ def test_instruments_and_default_tempo():
         with pytest.raises(gt.LiftError, match="gate timer 0"):
             gt.instrument_records([bad], 0x0F00)
     song = Song(instruments=[Instrument() for _ in range(63)])
-    assert gt._default_tempo(song) == 5  # pylint: disable=protected-access
+    assert gt.native_start(Player(song)) == {"tempo": 5, "funk0": 8, "funk1": 5}
     song.instruments[62] = Instrument(attack_decay=7)
-    assert gt._default_tempo(song) == 6  # pylint: disable=protected-access
+    assert gt.native_start(Player(song))["tempo"] == 6
 
 
-def test_the_initial_tempo_is_the_default_tempo_byte_plus_one():
-    pr = songio.library("goattracker2")
-    assert gt.initial_tempo(5, pr) == 6 and gt.initial_tempo(0, pr) == [9, 6]
-    with pytest.raises(gt.LiftError, match="default tempo of 1"):
-        gt.initial_tempo(1, pr)
+@pytest.mark.parametrize(
+    "start,tempo",
+    [((5, 8, 5), 6), ((0, 8, 5), [9, 6]), ((1, 8, 5), [6, 9]), ((0, 6, 6), 7)],
+)
+def test_the_initial_tempo_is_the_native_tempo_cells(start, tempo):
+    assert gt.initial_tempo(dict(zip(("tempo", "funk0", "funk1"), start))) == tempo
+
+
+def test_a_song_starting_on_its_swings_second_tempo_plays_the_player():
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)])
+    dec.info.build.deftempo = 1
+    native.default_tempo = 1
+    text, _, _ = lifted(dec, native)
+    assert "tempo: [6, 9]" in text
 
 
 def tempo_rows(*commands):
@@ -137,14 +147,13 @@ def test_a_swing_names_its_pair_and_plays_the_player(commands, written):
     assert all(w in text for w in written) and "speedtab" not in text
 
 
-def test_a_swing_on_the_stored_pair_meeting_two_pairs_is_not_covered():
-    dec, _ = gt_tune(
+def test_a_swing_meeting_another_pair_on_each_pass_is_written_out_until_the_passes_repeat():
+    dec, native = gt_tune(
         [(0x41, 0), (0xFF, 0)], rows=tempo_rows((4, 15, 0), (8, 14, 1)), speed=[(6, 9)]
     )
-    with pytest.raises(
-        gt.LiftError, match=r"meets the pairs \[\(6, 9\), \(9, 6\)\]; named, it plays differently"
-    ):
-        gt.lift(dec, expressions=False)
+    text, _, _ = lifted(dec, native, 2000)
+    played = [e for e in yaml.safe_load(text)["song"] if isinstance(e, dict) and "play" in e]
+    assert "!tempo:9/6" in text and "!tempo:6/9" in text and len(played) >= 2
 
 
 def test_phrase_folds_empty_rows():
@@ -215,8 +224,9 @@ def test_the_reference_lift_holds_the_tunes_constants(references):
     song = references["metal_warrior"].ir()
     assert song["meta"]["title"] == "Metal Warrior Title Remix"
     assert song["clock"] == gt.PAL_CLOCK
-    assert song["playroutine"]["constants"] == {"adparam": 0x0F00} and song["tempo"] == 12
-    assert [len(t["plays"]) for t in song["tracks"]] == [5, 5, 5]
+    assert not song["playroutine"].get("constants") and song["tempo"] == 12
+    assert (song["records"]["restart"][1]["ad"], song["records"]["restart"][1]["sr"]) == (15, 0)
+    assert [len(t["plays"]) for t in song["tracks"]] == [6, 6, 6]
     assert len(song["tables"]["ftab"]) == 128
     assert song["records"]["ins"][1]["sr"] == 0x88
 
@@ -408,8 +418,8 @@ VIBRATO = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "vibrato_
 NOTES = [(24, 1, 0, 0)] + [REST] * 7 + [(31, 1, 0, 0), REST, (36, 1, 0, 0)] + [REST] * 5
 RESUMED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 0, 1, 1)] + [REST] * 3 + [(31, 1, 0, 0)]
 CHANGED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 2, 0, 0)] + [REST] * 3 + [(36, 2, 0, 0)]
-RESUMED_ATOMS = ["C2.i1*4", "-!freq:x1", "-!freq:x2", "-!freq:x2", "-!freq:x2", "G2.i1*8"]
-CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1", "-!freq:x1", "-!freq:x1", "-!freq:x1", "C3.i2*8"]
+RESUMED_ATOMS = ["C2.i1*4", "-!freq:x1", "-!freq:x2*3", "G2.i1*8"]
+CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1*4", "C3.i2*8"]
 
 
 # Each case: instrument 1's vibrato delay, the rows, a second instrument, a fragment of each
@@ -463,3 +473,31 @@ def test_a_cutoff_byte_writes_its_top_eight_bits():
         rows["ctrltab"].decode({"cut": 0x109})
     with pytest.raises(CodecError, match="a byte form has no value"):
         RowCodec(record_types(pr)["ctrltab"], [{"keys": {"cut": {"byte": "n", "value": "n"}}}], 0)
+
+
+@pytest.mark.parametrize(
+    "commands",
+    [[(4, 13, 0x20)], [(4, 4, 1), (8, 13, 0x20), (9, 13, 0xFF)], [(4, 1, 1), (6, 13, 0x10)]],
+    ids=["after no command", "during a vibrato", "during a portamento"],
+)
+def test_a_d10_to_dff_is_the_command_it_keeps_running(commands):
+    rows = [(24, 1, 0, 0)] + [REST] * 15
+    for k, code, arg in commands:
+        rows[k] = (None, 0, code, arg)
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, speed=[(2, 0x20)])
+    text, _, _ = lifted(dec, native)
+    assert "mark" not in text and "!vol" not in text
+
+
+def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(31, 0, 3, 0)] + [REST] * 3
+    rows += [(36, 1, 0, 0)] + [REST] * 7
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], rows=rows)
+    out = gt.snapped(gt.lift(dec, expressions=False))
+    cmds = [list(c) for e in out["phrases"]["p00"] for c in event_commands(e)]
+    assert [3, 0] not in cmds and [gt.LEGATO, 0] in cmds
+    (index,) = [a for c, a in cmds if c == gt.FREQ]
+    assert out["exprs"][index] == gt.AT_NOTE
+    theirs = np.asarray(native.render_grid(400), dtype=np.uint8)
+    assert SongPlayer(out).mismatch(theirs) is None
+    assert gt.snapped(out) is out

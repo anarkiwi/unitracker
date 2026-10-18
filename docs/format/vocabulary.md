@@ -5,7 +5,7 @@ record type is one player's own.
 
 | row key | meaning |
 |---|---|
-| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, `v^n` both (see [The gate](#the-gate)) |
+| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, which holds until a row of the player that plays it changes it, `v^n` both (see [The gate](#the-gate)) |
 | `gate` | the gate, 0 off or 1 on (see [The gate](#the-gate)) |
 | `note` | `+n` / `-n` relative to the event note, or a note name (`G#5`) for an absolute note; omitted: no change |
 | `wait` | ticks before the row applies (see [Timing](#timing)) |
@@ -21,7 +21,7 @@ record type is one player's own.
 | `filter` | `none`: the row stops the filter program, as `pw: none` the pulse program |
 | `vol` | the volume, the low nibble of `$D418` |
 
-A command means one thing in every player; it applies on the step that carries it.
+A command means one thing in every player; it applies from the step that carries it.
 
 | command | meaning |
 |---|---|
@@ -33,11 +33,11 @@ A command means one thing in every player; it applies on the step that carries i
 | `!resfilt:r/m` | set `res` and `route` (a mask), as a row's keys of those names |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
-| `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks |
+| `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks, two different tempos (`!tempo:6/6` is refused: it is `!tempo:6`) |
 | `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
-| `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
-| `!mark:n` | a mark that changes no sound: the player reads the byte and plays nothing |
-| `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
+| `!freq:x` | drive the voice frequency by expression `x` until a note starts the instrument or another `!freq` (see [Lifetime of `!freq`](#lifetime-of-freq) and [Modulators](../modulation/expressions.md)) |
+| `!freq:none` | return the voice frequency to its instrument's `freq` |
+| `!legato` | the event's note does not retrigger; it needs a note (see [Legato](../modulation/expressions.md#legato)) |
 
 A playroutine takes the commands its `commands` and `lifetime` declare, over the
 arguments its codec accepts; each playroutine's file
@@ -62,9 +62,8 @@ returns to, which two rows precede; so both keys stay.
 
 `ctrl` and `gate` each hold until a row sets them; a note, `off` and `on` set the gate as the
 player does. A row's `ctrl` leaves the gate as it is, but on a restart's first-tick row, where a
-`ctrl` sets the gate on: the row is written without `gate: 1`, and `gate: 0` there is refused.
-The mask `^n` holds until a row sets `gate` or another mask; a row that sets `gate` without a mask
-sets it to 0.
+`ctrl` sets the gate on: the row has no `gate`, and the reader refuses one beside the `ctrl`.
+A playroutine whose rows take a mask says which rows change it.
 
 ## Chords
 
@@ -87,7 +86,9 @@ voice and the bits of `m`, `route: - m` removes them, and `m` is left out when i
 
 A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last row
 applies on the note's first tick, and each earlier row its `hold` ticks before the row after it.
-A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. A note's restart is its instrument's
+A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`; a player may give a lookahead row's `ctrl` a
+further effect, which its file states where it defines the row (SID-Wizard's `ctrl: 24` also pauses
+the voice's tables). A note's restart is its instrument's
 (`restart: r1`) in every player:
 
 ```yaml
@@ -110,29 +111,40 @@ to a note with a free command slot, and its program ends and fits in the steps.
 ## Lifetime
 
 Whether a note restarts its instrument's pulse or filter program is a property of the note:
-`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. They
-need a note and refuse one that itself starts the program. A note that names no instrument plays
-the voice's last one; the reader finds it by walking each voice's plays twice through its loop.
-The playroutine declares the commands it plays as
-`lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`, or `lifetime: [pw, filter]` when no entry
-has a key; an entry's `field` is the instrument key of the program (default: the slot's name):
+`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. They need a note
+that names no instrument. A playroutine that plays them keeps the program by an instrument bit,
+and declares `lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`: `flag` is the instrument
+field and bit mask, and `field` the instrument key of the program (default: the slot's name). The
+writer puts the command on every note that names no instrument and plays one with the bit set,
+and the reader sets the bit from those notes; it refuses an instrument some of whose such notes
+carry it and others not, and the command on a note that names an instrument. A note that names
+no instrument plays the voice's last one (see [Walking the plays](#walking-the-plays)). A note
+played under instruments of which some keep a program and others restart it has no written form.
+A legato note restarts nothing, so the command adds nothing there.
 
-| declaration | the command |
-|---|---|
-| with `flag` (an instrument field and bit mask) | the bit, which keeps the program on a note that names no instrument: the writer puts the command on every such note of an instrument with the bit set, and the reader sets the bit from those notes; it refuses an instrument some of whose such notes carry it and others not, and the command on a note that names an instrument |
-| without `flag` | holds on a note whose instrument starts no such program; the reader refuses it on a note whose instrument starts one |
+## Lifetime of `!freq`
 
-A note played under instruments of which some keep a program and others restart it has no
-written form. A legato note restarts nothing, so the command adds nothing there.
+A `!freq:x` lasts until a note starts the instrument (a legato note does not) or another `!freq`
+replaces it; steps between, empty or with other commands, continue it, and a phrase writes the
+`!freq` it runs once (`!freq:x1` on a step after the same phrase's `!freq:x1` is refused).
+`!freq:none` returns the frequency to the instrument's `freq` before a note does, where the player
+can: a playroutine whose native command ends on a step that carries no command declares `lasts:
+step`, and the writer writes `!freq:none` on each such step after a `!freq`.
 
 ## Envelope commands
 
-A command entry `{name: ad, nibble: s, column: c}` sets one nibble of an envelope register over
-the instrument's byte. The document writes each as the byte it writes, `!ad:n` or `!sr:n` in the
-slot of its column, from the voice's instrument (found by walking each voice's plays twice
-through its loop); the reader plays each byte as the nibble command that changes one nibble of
-the instrument's byte. A phrase whose bytes differ between the places it plays becomes one phrase
-per place.
+`!ad:n` and `!sr:n` are the byte the envelope register takes. A player whose envelope commands set
+one nibble over the instrument's byte (an envelope command entry, see
+[Codecs](../playroutines/schema.md#codecs)) has them written as the byte they write, in the slot of
+their column, from the voice's instrument (see [Walking the plays](#walking-the-plays)); the reader
+plays each byte as the nibble command that changes one nibble of the instrument's byte. A phrase
+whose bytes differ between the places it plays becomes one phrase per place.
+
+## Walking the plays
+
+What a command means can depend on what the voice played before it: the instrument a note that
+names none plays, and the byte an envelope command writes. The writer and the reader find it by
+walking each voice's plays, repeats written out, twice through its loop.
 
 ## Instrument columns
 

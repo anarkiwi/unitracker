@@ -19,6 +19,7 @@ META_KEYS = {
     "expr",
     "unwritten",
     "writes_as",
+    "uniform",
 }
 EXPR = "x"
 PHRASE = "p"
@@ -80,10 +81,12 @@ class RecordType:
         self.end = dict(spec.get("end") or {})
         self.expr = spec.get("expr")
         self.unwritten = frozenset(str(f) for f in spec.get("unwritten") or ())
-        if not self.unwritten <= self.fields.keys():
-            raise RecordTypeError(
-                f"{name}: unwritten fields {sorted(self.unwritten)} are not fields"
-            )
+        self.uniform = tuple(str(f) for f in spec.get("uniform") or ())
+        for key in ("unwritten", "uniform"):
+            if not set(getattr(self, key)) <= self.fields.keys():
+                raise RecordTypeError(
+                    f"{name}: {key} fields {sorted(getattr(self, key))} are not fields"
+                )
         self.templates = {k: v for k, v in spec.items() if k not in META_KEYS}
         for key, actions in self.templates.items():
             if not isinstance(actions, list):
@@ -101,6 +104,18 @@ class RecordType:
     def body(self, row: dict) -> dict:
         """``row`` without its chain field."""
         return {f: v for f, v in row.items() if f != self.chain}
+
+    def disagree(self, rows: dict) -> str | None:
+        """The first :attr:`uniform` field ``rows`` set to more than one value, or None."""
+        for field in self.uniform:
+            values = {
+                int(r[field])
+                for r in rows.values()
+                if r.get(field, self.default(field)) != self.default(field)
+            }
+            if len(values) > 1:
+                return field
+        return None
 
     def free(self, rows) -> int:
         """The type's first index after every used index of ``rows``."""

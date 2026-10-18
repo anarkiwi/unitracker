@@ -85,7 +85,7 @@ GT_SONG = doc(
       x:
         x1: (v + 300) % 65536
         x2: 0""",
-    "[C4.i1, -!freq:x1, -!freq:x1, D4!legato!freq:x2, -]",
+    "[C4.i1, -!freq:x1, -, D4!freq:x2!legato, -!freq:none]",
 ).replace(*TEMPO)
 SW_INS = "freq: '(φ >= 2)*W[N + 25]'"
 SW_SONG = doc(
@@ -140,7 +140,7 @@ def test_goattracker_freq_command_pulse_expression_and_legato():
         "0",
         "1024 + 16*min(3, φ)",
     ]
-    dropped = GT_SONG.replace("D4!legato!freq:x2", "D4!freq:x2")
+    dropped = GT_SONG.replace("D4!freq:x2!legato", "D4!freq:x2")
     assert {64, 9} <= set(voice0(dropped, 34)[2][9:34])
 
 
@@ -176,7 +176,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "song,old,new,kept",
     [
-        (GT_SONG, "", "", ["pw: '1024 + 16*min(3, φ)'", "!legato!freq:x2"]),
+        (GT_SONG, "", "", ["pw: '1024 + 16*min(3, φ)'", "!freq:x2!legato"]),
         (GT_SONG, "pw: '1024 + 16*min(3, φ)'", "pw: 2048", ["pw: 2048"]),
         (
             GT_SONG,
@@ -218,7 +218,7 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
     "edits,match",
     [
         ([("unitracker: 1.20", "unitracker: 1.8")], "not a unitracker v1.20 document"),
-        ([("-!freq:x1, -!freq:x1,", "-!noteglide:0, -!freq:x1,")], "unknown command !noteglide"),
+        ([("-!freq:x1, -,", "-!noteglide:0, -,")], "unknown command !noteglide"),
         (
             [("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]")],
             "unknown key for in pw",
@@ -229,23 +229,23 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
         ([("x1: (v + 300) % 65536", "x1: '[v > 9]*v'")], r"a comparison is written \(a op b\)"),
         ([("x1: (v + 300) % 65536", "x1: sqrt(v)")], "calls no grammar function"),
         ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
-        ([("-!freq:x1, -!freq:x1,", "-!freq:x9, -!freq:x1,")], "unknown name 'x9'"),
+        ([("-!freq:x1, -,", "-!freq:x9, -,")], "unknown name 'x9'"),
         (
-            [("-!freq:x1, -!freq:x1,", "-!tempo:6/9/7, -!freq:x1,")],
+            [("-!freq:x1, -,", "-!tempo:6/9/7, -!freq:x1,")],
             r"!tempo: the argument is 2 values",
         ),
         (
-            [("-!freq:x1, -!freq:x1,", "-!tempo:6/256, -!freq:x1,")],
+            [("-!freq:x1, -,", "-!tempo:6/256, -!freq:x1,")],
             r"!tempo: each value is a byte",
         ),
         (
-            [("-!freq:x1, -!freq:x1,", "-!run:6/9, -!freq:x1,")],
+            [("-!freq:x1, -,", "-!run:6/9, -!freq:x1,")],
             r"can't express !run:6/9 in",
         ),
         (
             [
                 ("      x:\n", "      x:\n" + MANY),
-                ("-!freq:x1, -!freq:x1", "-!freq:y1, -!freq:y299"),
+                ("-!freq:x1, -", "-!freq:y1, -!freq:y299"),
             ],
             "argument is a byte",
         ),
@@ -291,7 +291,7 @@ ACID_STEP = "v % 65536 + 2560)*(v % 65536 < 62976)"
     "name,ticks,old,new",
     [
         ("metal_warrior", 3840, "x1: v + 32", "x1: v + 33"),
-        ("metal_warrior", 3840, "C4!legato!freq:x2", "C4!freq:x2"),
+        ("metal_warrior", 3840, "C4!freq:x2!legato", "C4!freq:x2"),
         ("csillag", 3 * 2304, CSILLAG_GATE, CSILLAG_GATE.replace("(φ >= 15)", "(φ >= 14)")),
         ("crosseyed", None, ACID_STEP, ACID_STEP.replace("2560", "2304", 1)),
     ],

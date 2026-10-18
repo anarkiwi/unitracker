@@ -1,13 +1,22 @@
 """A song's initial tempo: ``n`` ticks per step, or a swing pair ``[a, b]`` whose steps alternate.
 
-A playroutine declares ``tempo: {cells: {cell: expr}, swing: {cell: expr}, when: expr}`` over
-``a`` and ``b`` (``b`` is ``a`` for one tempo): ``cells`` set for every tempo, ``swing`` also for
-a pair, ``when`` the tempos it plays (docs/playroutines/schema.md, *Tempo*).
+A playroutine declares ``tempo: {cells: {cell: expr}, when: expr}`` over ``a`` and ``b`` (``b``
+is ``a`` for one tempo): ``cells`` the cells it starts, ``when`` the tempos it plays
+(docs/playroutines/schema.md, *Tempo*).
 """
 
 from unitracker.format.codec import CodecError, evaluate
 
 NAME = "tempo"
+COMMANDS = ("tempo", "vtempo")
+
+
+def one(name: str, value):
+    """``a`` for a tempo command's pair argument ``(a, a)``, else None: a swing is two
+    different tempos, and ``!tempo:a/a`` is written ``!tempo:a``."""
+    if name in COMMANDS and isinstance(value, tuple) and len(value) == 2 and value[0] == value[1]:
+        return value[0]
+    return None
 
 
 def pair(tempo) -> tuple[int, int] | None:
@@ -58,5 +67,6 @@ def cells(pr: dict, tempo) -> dict:
     if not spec or tempo is None:
         return {}
     a, b = pair(tempo)
-    exprs = {**(spec.get("cells") or {}), **((spec.get("swing") or {}) if a != b else {})}
-    return {cell: evaluate(expr, {"a": a, "b": b}) for cell, expr in exprs.items()}
+    return {
+        cell: evaluate(expr, {"a": a, "b": b}) for cell, expr in (spec.get("cells") or {}).items()
+    }

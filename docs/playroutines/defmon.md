@@ -11,7 +11,7 @@ The defMON `$1000` replay of [`defmon.yaml`](../../src/unitracker/playroutines/d
 | lifted from | the replay's memory after init |
 | step | one tick: the lifter simulates the arranger and pattern counters, so each song step becomes one phrase per voice, all of the same length in ticks, with each event on the tick the replay applies it; the playroutine fetches every tick |
 | notes | `note_offset` 24: defMON index 48 is `C2`; a note is a GATE_N note |
-| constants | `floor` and `dbl`, the result of the replay's `$D41B` probe at init, which tells the SID models apart |
+| constants | `floor` and `dbl`, the result of the replay's `$D41B` probe at init, which tells the SID models apart: they are the SID model of the environment the tune is lifted in, not data of the tune |
 
 The replay's init ($1522) clears `$D417`, `$D418`'s filter bits, the ACID accumulator, step and
 offset `cp`, and each voice's envelope, control register and mask, pitch mode, pulse step,
@@ -26,12 +26,14 @@ a nibble, as the reference grid does.
 | `ins` | none: the pair of sidTAB programs an event arms | see Events |
 | `ctrl` | sidTAB | a sidTAB row writes any register, so it is defMON's one program table; see Control programs |
 | `restart` | sidTAB programs on layer B before a note | see Hard restart |
-| `vinit` | each voice's state after init (fixed) | `pw`, the pulse cell, at most $0FFF; `freq`, the frequency registers as the signed offset from `note`'s frequency (omitted: the note's frequency); `sacc`, the slide accumulator; `note` (`=n`), the note its relative rows add to |
+| `vinit` | each voice's state after init (fixed) | `pw`, the pulse cell, at most $0FFF; `freq`, the pitch unit's start value, the slide accumulator's offset from the note's frequency; `note`, a note name, the note its relative rows add to |
 | `ginit` | the global state after init (fixed) | `sub`: 1 when the ACID step subtracts (its SBC), 0 when it adds (its ADC), which the replay's own ACID firing reads until a layer-B row sets the step (setting the cutoff keeps it) |
 
-The frequency registers in `vinit` are the voice's on the first tick only: init's call latches them,
-then its pitch step sets the frequency from the note. The slide accumulator counts only under a
-slide a layer-A program starts before the voice's first note, which clears it. There are no `pw` or
+The module also carries each voice's frequency registers through init, which sound on the first
+tick only, before the pitch step sets them from the note; the playroutine starts them at 0 and the
+lifter refuses a tune whose replay hears them. It writes `note` only where the replay hears it. The
+slide accumulator counts only under a slide a layer-A program starts before the voice's first
+note, which clears it. There are no `pw` or
 `filter` record types.
 
 ## Events
@@ -76,7 +78,9 @@ The player takes no shared command: each is refused by name (`defmon: the player
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk order: `dl` is
 `hold` (a frozen row ends its program), `wgh` is `ctrl` (the waveform nibble, written with bit 0
 set: the replay's gate is `wgl`'s bit 0), `wgl` is `gate` and the mask of its other bits
-(`{ctrl: 81^4, gate: 1}` is `wgh` $50, `wgl` $05; a `wgl` row always writes `gate`), `tr` is `note`, `fv` is `mode` (bits 4-7), `re` is `res` and `route`, and the
+(`{ctrl: 81^4, gate: 1}` is `wgh` $50, `wgl` $05; a `wgl` row always writes `gate`, so the mask
+`^n` holds until a row sets `gate` or another mask, and a row that sets `gate` without a mask sets
+it to 0), `tr` is `note`, `fv` is `mode` (bits 4-7), `re` is `res` and `route`, and the
 row's pitch, pulse and ACID modulators are `freq`, `pw` and `cut` (see Modulators). A step is one
 tick, so `hold` counts both.
 
@@ -107,12 +111,10 @@ defMON has no instrument restart: composers run a short sidTAB program on layer 
 steps before a note. The playroutine declares this with `event: {..., restart: 1}` (see
 [Hard restart](../format/vocabulary.md#hard-restart)): the `restart` of a note's instrument reads
 as a layer-B start (the event command an instrument's `filter` is) of a sidTAB program of the
-lookahead rows, the last one frozen, holding until the
-note, started as many steps before the note as they hold, all of them empty. The writer folds such a
-start back before it names the events' instruments when it is alone on its step, followed only by
-empty steps up to a note with a free command slot, and its program ends, sets no column but `dl`,
-`wgh`, `wgl`, `ad` and `sr`, and fits in the steps. The note's own sidTAB program
-starts on its first tick, so the restart's last row is empty.
+lookahead rows, the last one frozen, holding until the note. The writer folds such a start back
+before it names the events' instruments, as vocabulary.md says, when its program also sets no
+column but `dl`, `wgh`, `wgl`, `ad` and `sr`. The note's own sidTAB program starts on its first
+tick, so the restart's last row is empty.
 
 ## Lifetime
 

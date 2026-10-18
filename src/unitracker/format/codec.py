@@ -47,7 +47,6 @@ COMMAND_NAMES = (
     "tempo",
     "vtempo",
     "freq",
-    "mark",
     "legato",
 )
 ARGLESS = ("legato",)
@@ -128,7 +127,7 @@ def note_value(value) -> tuple[bool, int]:
     if isinstance(value, bool):
         raise CodecError(f"bad note {value!r}")
     if isinstance(value, int):
-        return False, value
+        return False, int(value)
     if _RELATIVE.match(str(value)):
         return False, int(value)
     try:
@@ -319,8 +318,8 @@ def first_tick(rtype, place) -> bool:
 class RowCodec:
     """A record type's shapes, with the playroutine's note offset.
 
-    On a restart's first-tick row a ``ctrl`` implies ``gate: 1``: the row is written without it
-    and read with it (see :func:`first_tick`).
+    On a restart's first-tick row a ``ctrl`` implies ``gate: 1``: the row is written without it,
+    read with it, and refused with a ``gate`` (see :func:`first_tick`).
     """
 
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
@@ -490,10 +489,10 @@ class RowCodec:
         for key in sorted(set(written) - self.keys):
             raise CodecError(f"unknown key {key} in {self.rtype.written}")
         if first_tick(self.rtype, place) and "ctrl" in written:
-            if written.get("gate", 1) != 1:
+            if "gate" in written:
                 raise CodecError(
                     f"{self.rtype.written}: the player can't express row {written!r}"
-                    " (a ctrl on the note's first tick sets the gate on)"
+                    " (a ctrl on the note's first tick sets the gate on; the row has no gate)"
                 )
             written = {**written, "gate": 1}
         norm = self.normalize(written)
@@ -636,6 +635,14 @@ class CommandCodec:
                     text = "/".join(str(v) for v in row.values())
                     raise CodecError(f"the player can't express !{name}:{text}")
                 return
+
+    def also(self, code: int, arg: int) -> str | None:
+        """The command (``name:arg``) an event writes beside command ``code`` with ``arg``, whose
+        native effect it also has; None for none."""
+        for ecode, _, _, var in self.entries:
+            if ecode == code and "also" in var and evaluate(var.get("when", 1), {"arg": arg}):
+                return str(var["also"])
+        return None
 
     def values(self, name: str) -> bool:
         """Whether command ``name`` takes several values that are no record's row."""

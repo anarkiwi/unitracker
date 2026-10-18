@@ -12,8 +12,8 @@ note_offset: 0                            # frequency-table index of format note
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
                                           # default: the type written as ins, base 0
                                           # event: {type, column, commands, restart}: see Instrument columns
-tempo: {cells: {tl: a, tr: b}, swing: {}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
-lifetime: {pw: {flag: {flags: 0x40}}, filter: {}}     # !pw and !filter, or [pw, filter] (see Lifetime)
+tempo: {cells: {tl: a, tr: b}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
+lifetime: {pw: {flag: {flags: 0x40}}, filter: {flag: {flags: 0x80}}}   # !pw and !filter (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
@@ -48,6 +48,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see [Codecs](#codecs)) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field holding a row's modulator expression, a reference to `x` with no `refs` entry; a program of one row that sets only it is written as the expression |
+| `uniform` | `[field, ...]`: fields every row of the song that sets them sets to one value, as a player that keeps one copy plays them; the reader and the writer refuse rows that set one to two |
 | `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default |
 | any other key | a template: an action list run for a row |
 
@@ -107,7 +108,12 @@ gives the row again. A command entry has a `name`, an optional `ref` (a record t
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
 written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `ref` entry with `inline: true`
+joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `freq` entry's `lasts: step` says the
+native command ends on a step that carries no command (see [Lifetime of
+`!freq`](../format/vocabulary.md#lifetime-of-freq)). An entry's `also` (`name:arg`) is
+another command whose native effect the code has too: the event writes it beside the command,
+and the reader reads the two as the one code and refuses the command without it
+(`!filter:none!resfilt:0/0`). A `ref` entry with `inline: true`
 writes the referenced row's fields, each a byte, joined by `/` (`!tempo:6/7`), its `when` over
 the row's fields; the reader allocates one row per distinct argument, and the type has no
 definitions of its own (`unknown record type 'speedtab'`). A program `ref` entry's argument `none`
@@ -115,7 +121,8 @@ is the type's `none`, written as the stop command of its slot (`!run:none`, `!pw
 `!filter:none`). An entry's `column`
 is the event column its command is read into, `instrument` (event slot 0) or `fx` (slot 1), or a
 list of them of which it takes the first the event leaves free (an event that names an instrument
-fills `instrument`); a column holds one command, and an event with two in one is refused. An entry
+fills `instrument`); a named entry without one is read into `fx`. A column holds one command, and
+an event with two in one is refused. An entry
 `{name: ad, nibble: s, column: c}` is an envelope command: the code sets the nibble at shift `s` of
 the register `name` over the instrument's field `name`, played from the slot of column `c`, and is
 written as the byte it writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).
@@ -126,9 +133,9 @@ playroutine's functions. A list row a shape covers is rejected: it has a shared-
 ## Tempo
 
 A song's `tempo` (see [Document](../format/document.md)) is `n` ticks per step or a swing pair
-`[a, b]`. The playroutine's `tempo` gives the cells it starts: `cells` (`{cell: expr}`) for every
-tempo and `swing` too for a pair, each expression over `a` and `b` (`b` is `a` for one tempo),
-assigned over the cells' `init` before the first tick; `when` is the tempos the player plays. A
+`[a, b]`. The playroutine's `tempo` gives the cells it starts, `cells` (`{cell: expr}`), each
+expression over `a` and `b` (`b` is `a` for one tempo), assigned over the cells' `init` before the
+first tick; `when` is the tempos the player plays. A
 playroutine without `tempo` has none, and a song that names one is refused.
 
 ## Cells and expressions

@@ -42,12 +42,48 @@ def _decimal(loader, node):
     return out
 
 
+class Signed(int):
+    """An integer written with its sign (``+0``, ``-3``): a relative value where one is."""
+
+
+_INTEGER = re.compile(r"^[-+]?(?:0|[1-9][0-9]*)$")
+_BOOLS = {"true": True, "false": False}
+_ATOMS = ("off", "on")
+
+
+def _integer(_, node):
+    if not _INTEGER.match(node.value):
+        raise yaml.constructor.ConstructorError(
+            None, None, f"{node.value!r} is not a decimal integer", node.start_mark
+        )
+    return (Signed if node.value[0] in "+-" else int)(node.value)
+
+
+def _boolean(_, node):
+    """``true`` and ``false`` as booleans, ``off`` and ``on`` as the atoms of those names; YAML's
+    other spellings of a boolean are refused."""
+    if node.value in _ATOMS:
+        return node.value
+    if node.value not in _BOOLS:
+        raise yaml.constructor.ConstructorError(
+            None, None, f"{node.value!r} is not a value of the format", node.start_mark
+        )
+    return _BOOLS[node.value]
+
+
 class Loader(yaml.SafeLoader):  # pylint: disable=too-many-ancestors
-    """Safe loading with each decimal number's text kept."""
+    """Safe loading with each decimal number's text kept, integers only in decimal (a signed
+    one :class:`Signed`), ``off`` and ``on`` as atoms, and booleans spelled ``true`` and
+    ``false``."""
 
 
 Loader.add_constructor("tag:yaml.org,2002:float", _decimal)
+Loader.add_constructor("tag:yaml.org,2002:int", _integer)
+Loader.add_constructor("tag:yaml.org,2002:bool", _boolean)
 for _dumper in (yaml.SafeDumper, Dumper):
+    _dumper.add_representer(
+        Signed, lambda d, x: d.represent_scalar("tag:yaml.org,2002:int", str(int(x)))
+    )
     _dumper.add_representer(
         Decimal, lambda d, x: d.represent_scalar("tag:yaml.org,2002:float", x.text)
     )

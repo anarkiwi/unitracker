@@ -11,6 +11,11 @@ Top-level keys, in this order:
 | `tempo` | the initial tempo, only where it differs from the playroutine's `defaults`: `n` ticks per step, or `[a, b]`, a swing whose steps alternate `a` and `b` ticks (two different tempos); a playroutine without a tempo refuses it |
 | `song` | the timeline: rows, then `end` or `{loop: k}`, as a program ends |
 
+Each value has one spelling: an integer is decimal without leading zeros (`129`, not `0x81` or
+`0201`), a relative note carries its sign (`note: +0`), a note name its octave without leading
+zeros (`C2`, not `C02`), and the only booleans are `true` and `false` (`off` and `on` are atoms);
+the reader refuses YAML's other spellings (`no`, `False`, `0x81`).
+
 `playroutine.constants` lists only the constants that differ from the library's.
 `playroutine.tables` patches the library's tables: `{index: value}` for the entries that
 differ, or a full list when the length differs.
@@ -40,7 +45,9 @@ when something is first used in that row. An entry is:
 | `~` | the voice is still playing its phrase |
 
 A row starts at the earliest end of the voices' current phrases. Every voice whose phrase ends
-there must have an entry, and every other voice must be `~`; readers reject anything else.
+there must have an entry, and every other voice must be `~`; readers reject anything else. `end`
+stops every voice still playing, so a song that ends has no last row of `end` and `~` entries
+only, and readers reject one.
 Repeats are written out as rows. When the voices' loops have different lengths, the rows run
 until all of them are back in the same state together, and `{loop: k}` names the row where that
 state first occurred.
@@ -105,7 +112,10 @@ note[.instrument][!command[:arg]...][*steps]
   the instrument column and the second the FX column; an event that names an instrument fills the
   instrument column with it, so its commands are the FX column's. A playroutine declares the
   column each command is read into (`column`); a column holds one command, and an event with two
-  in one is refused, naming both.
+  in one is refused, naming both. The commands are written in the order of the command table of
+  [Shared vocabulary](vocabulary.md), but an envelope command keeps its slot, which decides its
+  column (see [Envelope commands](vocabulary.md#envelope-commands)); `!pw` and `!filter` come last,
+  in that order. The reader refuses any other order.
 - `*3` makes the event last 3 steps; the steps after the first are empty. One step is written
   without `*`: `*1` is refused.
 
@@ -123,7 +133,6 @@ The writer produces one text per song:
 - a restart its notes arm on the steps before them is written as their instrument's `restart`
   (see [Hard restart](vocabulary.md#hard-restart));
 - a phrase whose envelope bytes differ between the places it plays is split into one phrase per
-  place (see [Envelope commands](vocabulary.md#envelope-commands)), the inverse of the merge;
-- no-op commands are dropped.
+  place (see [Envelope commands](vocabulary.md#envelope-commands)), the inverse of the merge.
 
 Writing what the reader returns gives the same bytes.

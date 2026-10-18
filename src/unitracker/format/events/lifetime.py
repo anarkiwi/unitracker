@@ -1,14 +1,13 @@
 """Program lifetime: a note's ``!pw`` or ``!filter``, that it does not restart that program.
 
-A playroutine declares ``lifetime: {slot: {field: f, flag: {g: mask}}}``, or the list of slots
-whose entries are empty: ``f`` is the instrument field naming the program (default: the slot), and
-``flag`` the header bit that keeps it (docs/format/vocabulary.md).
+A playroutine declares ``lifetime: {slot: {field: f, flag: {g: mask}}}``: ``f`` is the instrument
+field naming the program (default: the slot), and ``flag`` the header bit that keeps it
+(docs/format/vocabulary.md).
 """
 
 import numpy as np
 
 from unitracker.format.codec import command_code
-from unitracker.format.records import program_path, ref_type
 from unitracker.player.vm import event_commands
 
 NAME = "lifetime"
@@ -106,19 +105,15 @@ class Lifetime:
         self.ins_type, self.base = inst.get("type"), int(inst.get("base", 0))
         self.rtypes, self.rtype = rtypes, rtypes.get(self.ins_type)
         specs = pr.get(NAME) or {}
-        specs = dict.fromkeys(specs) if isinstance(specs, list) else specs
-        self.specs = {k: {"field": k, **(v or {})} for k, v in specs.items()}
-        self.flagged = {n: _flag(s) for n, s in self.specs.items() if "flag" in s}
+        if not isinstance(specs, dict) or not all("flag" in (v or {}) for v in specs.values()):
+            raise LifetimeError(f"{NAME}: each entry is {{field, flag}}, with a flag")
+        self.specs = {k: {"field": k, **v} for k, v in specs.items()}
+        self.flagged = {n: _flag(s) for n, s in self.specs.items()}
         self.legato = command_code(pr.get("commands"), "legato")
 
-    def target(self, name: str) -> str:
-        """The record type of the program command ``name`` keeps."""
-        return self.rtype.refs[self.specs[name]["field"]][0][0]
-
-    def mask(self, commands, kind: int, refs: set) -> int:
+    def mask(self, commands, kind: int) -> int:
         """The mask of an event's lifetime commands among ``commands`` (``(name, arg)``; a
-        lifetime command has no argument), for an event of note ``kind`` whose other commands
-        reference record types ``refs``."""
+        lifetime command has no argument), for an event of note ``kind``."""
         out = 0
         for cmd, arg in commands:
             if cmd not in NAMES or arg is not None:
@@ -127,25 +122,7 @@ class Lifetime:
                 raise LifetimeError(f"the player can't express !{cmd}")
             if kind != 1:
                 raise LifetimeError(f"!{cmd} needs a note")
-            if self.target(cmd) in refs:
-                raise LifetimeError(f"!{cmd} on a note that starts the program")
             out |= bit(cmd)
-        return out
-
-    def starts(self, records: dict, index: int) -> set:
-        """The record types instrument ``index`` starts: those its fields name, and every type a
-        row of its programs references."""
-        row = records.get(self.ins_type, {}).get(index, {})
-        out = set()
-        for field in self.rtype.refs:
-            target = ref_type(self.rtype, field, row)
-            value = int(row.get(field, self.rtype.default(field)))
-            if target is None or value == self.rtypes[target].none:
-                continue
-            out.add(target)
-            ttype, rows = self.rtypes[target], records.get(target, {})
-            for i in program_path(ttype, rows.get, value)[0] if ttype.chain is not None else ():
-                out |= {ref_type(ttype, f, rows[i]) for f in ttype.refs} - {None}
         return out
 
     def _flagged(self, tracks, phrases: dict, rows: dict):
@@ -176,17 +153,15 @@ class Lifetime:
                     row[field] = int(row[field]) & ~mask | self.rtype.default(field) & mask
         return marks, out
 
-    def _check(self, mask: int, ins: int, selects: bool, records: dict, label: dict) -> None:
-        """Raise unless a note of instrument ``ins`` plays the commands of ``mask``."""
+    @staticmethod
+    def _check(mask: int, selects: bool) -> None:
+        """Raise unless a note that selects an instrument or not (``selects``) plays the commands
+        of ``mask``."""
         for cmd in names(mask):
-            if cmd in self.flagged and selects:
+            if selects:
                 raise LifetimeError(
                     f"!{cmd} on a note that selects an instrument, which restarts the {cmd}"
                     " program"
-                )
-            if cmd not in self.flagged and ins and self.target(cmd) in self.starts(records, ins):
-                raise LifetimeError(
-                    f"!{cmd} on a note whose instrument {label[ins]} starts the {cmd} program"
                 )
 
     def read(self, tracks, phrases: dict, records: dict, labels: dict) -> None:
@@ -195,8 +170,8 @@ class Lifetime:
         marks = _marks(phrases)
         rows = records.get(self.ins_type, {})
         label = {v[1]: k for k, v in labels.items() if v[0] == self.ins_type}
-        for name, k, ins, selects in notes(tracks, phrases, self.base, self.legato):
-            self._check(marks.get((name, k), 0), ins, selects, records, label)
+        for name, k, _, selects in notes(tracks, phrases, self.base, self.legato):
+            self._check(marks.get((name, k), 0), selects)
         seen = {}
         for name, k, ins, cmd in self._flagged(tracks, phrases, rows):
             seen.setdefault((cmd, label[ins], ins), set()).add(

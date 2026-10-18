@@ -109,24 +109,22 @@ record_types:
                 else: [{set: {astep: "row.acid & 0x7FFF", sub: 0}}]
             else: [{set: {acc: "(row.acid + cp * 256) & 0xFFFF", astep: 0}}]
   # Each voice's state the module carries through init ($1522 sets the other cells): its pulse
-  # cell, its frequency registers, written as the offset from its note's frequency, its slide
-  # accumulator, and the note relative rows add to.
+  # cell, the pitch unit's start value (the slide accumulator, an offset from the note's
+  # frequency), and the note relative rows add to.
   vinit:
     fixed: true
     form: map
-    fields: [pw, flo, fhi, sacc, tbase]
+    fields: [pw, sacc, tbase]
     codec:
       - keys:
           # The written width is the 12-bit cell; a cell over $0FFF has no form that reads back.
           pw: {value: "pw if pw <= 0x0FFF else pw + 0x10000", omit: "pw == 0"}
           note: {value: tbase, abs: "1", omit: "tbase == 0"}
-          freq: {value: "s16((((fhi << 8) | flo) - nfreq(tbase)) & 0xFFFF)", omit: "((fhi << 8) | flo) == nfreq(tbase)"}
-        keep: [sacc]
+          freq: {value: "s16(sacc)", omit: "sacc == 0"}
         raw:
           pw: "pw if has_pw else 0"
           tbase: "note if has_note else 0"
-          flo: "(nfreq(note if has_note else 0) + (freq if has_freq else 0)) & 0xFF"
-          fhi: "((nfreq(note if has_note else 0) + (freq if has_freq else 0)) >> 8) & 0xFF"
+          sacc: "(freq & 0xFFFF) if has_freq else 0"
   # The ACID step's direction the module carries through init ($10B8): sub 1 steps the accumulator
   # down (SBC), 0 up (ADC). Init clears the filter registers and the accumulator.
   ginit:
@@ -277,8 +275,6 @@ init:
       # layers frozen; the module carries the rest.
       - set:
           pw: "vinit[vi].pw"
-          flo: "vinit[vi].flo"
-          fhi: "vinit[vi].fhi"
           sacc: "vinit[vi].sacc"
           tbase: "vinit[vi].tbase"
           cntA: 0xFF

@@ -225,7 +225,7 @@ def test_a_pass_refuses_the_edits_the_grid_hears(case):
 
 UNHOIST_FULL = doc(
     f"{I1}\n{I2_HEARD}",
-    AS_I2.replace("E4.i2", "E4.i2!legato!freq:x1"),
+    AS_I2.replace("E4.i2", "E4.i2!freq:x1!legato"),
     "      x:\n        x1: (v + 32) % 65536\n",
 )
 

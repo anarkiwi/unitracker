@@ -10,8 +10,8 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 | | |
 |---|---|
 | tune | a packed GoatTracker 2 `.sid`, decompiled by pygoattracker |
-| lifted from | the decompiled song and the build's constant `adparam` |
-| tempo | the build's default tempo byte `d` plus 1 (when the build carries none, `d` is instrument 63's `ad` minus 1 if that `ad` is 2 or more and the instrument has no wavetable, else 5); `d` 0 is the swing `[9, 6]`, on the player's initial funk pair, and `d` 1 is not covered |
+| lifted from | the decompiled song, and the build's hard-restart preset `adparam` as the restart programs' `ad` and `sr` |
+| tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo |
 | clock | NTSC when the header's clock flags say so, else PAL |
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
 | notes | `note_offset` 0 |
@@ -32,43 +32,51 @@ expressions, and `!tempo` and `!vtempo` write a swing's row inline.
 
 ## Events
 
-`.i3` names the instrument. `!legato` is read from either slot and the other command from the
-other; otherwise the slots are only an order.
+`.i3` names the instrument. An event carries one command and `!legato`: `!legato` is in the
+instrument column, every other command in the FX column.
 
 ## Commands
 
 | command | argument |
 |---|---|
 | `!run` | `ctrl` name, `pw` name, `filter` name, `none` |
-| `!pw` | no argument, `none` |
-| `!filter` | no argument, `none` |
+| `!pw` | `none` |
+| `!filter` | `none` |
 | `!ad` | 0-255 |
 | `!sr` | 0-255 |
 | `!ctrl` | 0-255 |
 | `!resfilt` | 0-15/0-15 |
 | `!vol` | 0-15 |
 | `!cut` | 0-2040 step 8 |
-| `!tempo` | 3-127, 2-129/2-129 |
-| `!vtempo` | 3-127, 2-129/2-129 |
+| `!tempo` | 2-129, 2-129/2-129 (two different) |
+| `!vtempo` | 2-129, 2-129/2-129 (two different) |
 | `!freq` | `x` name, `none` |
-| `!mark` | 16-255 |
 | `!legato` | no argument |
 
 Every other command is refused by name.
 
-- `!tempo:n` and `!vtempo:n` are command $F; it plays a tempo of 2 as 3, so they start at 3.
-- `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each. `!vtempo:a/b` is playroutine command 18: the player keeps one swing
-  pair, and command $F's $80/$81 swing one voice on it, so 18 sets the pair, as every voice that
-  swings plays it, and swings this voice. The lifter writes $E00 and $F00/$F01/$F80/$F81, which
-  swing on the pair already set, as the commands that name the pair they meet ($x1 reversed,
-  starting on its second tempo), once a replay proves the song unchanged; a command that meets
-  pairs no one of which plays the song is not covered.
-- `!vol` is command $D below $10; from $10 it is `!mark`.
+- `!tempo:n` and `!vtempo:n` are command $F from 3 to 127; it plays a tempo of 2 as 3, so 2, 128
+  and 129 are written as `!tempo:a/b` and `!vtempo:a/b` are, with the row `n/n`.
+- `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each.
+  Each voice keeps its own swing pair: `!tempo:a/b` sets every voice's, and `!vtempo:a/b`,
+  playroutine command 18, this voice's. The native player keeps one pair, which only $E and its
+  init set, so every voice's pair is that one in a native song. The lifter writes $E00 and
+  $F00/$F01/$F80/$F81, which swing on the pair already set, as the commands that name the pair
+  each meets where it plays ($x1 reversed, starting on its second tempo): a phrase that meets
+  different pairs at different places becomes one phrase per place, and a loop whose passes meet
+  different pairs is written out from where they repeat.
+- `!vol` is command $D below $10. From $10 the command plays nothing but keeps the voice's
+  continuous command running; the lifter writes it as that command, or as an empty step when
+  there is none, once a replay proves the song unchanged.
 - `!run:none`, `!pw:none` and `!filter:none` are commands 8, 9 and 10 with argument 0, which stop
   the control, pulse and filter programs.
 - `!legato` is command 17: the lifter writes a native toneporta on a note as `!legato` plus
-  the toneporta, so the note does not retrigger.
-- `!freq` is command 16, which plays every expression.
+  the toneporta, so the note does not retrigger. A toneporta of speed 0 sets the frequency to the
+  note's on every tick, which is not `!legato` alone (that leaves the frequency where it was); one
+  the expression conversion leaves is written `!freq` of the expression `0`, the note's frequency,
+  once a replay proves the song unchanged.
+- `!freq` is command 16, which plays every expression; `!freq:none` is 16 with 0 (see
+  Modulators).
 
 ## Control programs
 
@@ -116,7 +124,8 @@ A control mask (`ctrl: ^n`) is refused.
 
 `res` and `route` are one byte, which a filter parameter row, `!resfilt:r/m` (command $B) and a
 wavetable $FB row set whole; from the command or the wavetable row, the byte 0 also stops the
-filter program (`!resfilt:0/0`, `{res: 0, route: 0, filter: none}`). A pattern command or wavetable row that sets the cutoff, `res`/`route`
+filter program, and is written so: `!filter:none!resfilt:0/0` (one command $B00; `!resfilt:0/0`
+alone is refused) and `{res: 0, route: 0, filter: none}`. A pattern command or wavetable row that sets the cutoff, `res`/`route`
 or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step writes
 `$D416`-`$D418` before the channels run, so the playroutine latches them there (`fcutreg`,
 `fctrlreg`, `fmodereg`).
@@ -125,18 +134,18 @@ or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step wri
 
 | lookahead row | first-tick row |
 |---|---|
-| exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n}` (n $01-$FD, the first wave, which sets the gate on), `{gate: g}`, or `{}` |
+| exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad` and `sr` or neither | `{ctrl: n}` (n $01-$FD, the first wave, which sets the gate on), `{gate: g}`, or `{}` |
 
 The player reads the voice's next step its instrument's gate timer ahead of each note; an
 instrument without a restart reads it on the note's first tick. A note keeps the gate as the
-restart left it, so its first-tick row sets it.
+restart left it, so its first-tick row sets it. The build has one envelope preset (`adparam`),
+so every lookahead row that sets `ad` and `sr` sets the same values (`uniform`).
 
 ## Lifetime
 
-`lifetime` declares no `flag`: a note starts the instrument's `pw` and `filter` programs, and
-wavetable `run` rows ($F9, $FA) start them where the composer put them. The reader accepts
-`!pw` and `!filter` on a note whose instrument starts no such program, through its fields
-or its programs' rows, and whose event runs none (`!run`); the writer leaves them out.
+A note starts the instrument's `pw` and `filter` programs, and wavetable `run` rows ($F9, $FA)
+start them where the composer put them; the playroutine declares no `lifetime`, so `!pw` and
+`!filter` without an argument are refused.
 
 ## Modulators
 
@@ -147,12 +156,14 @@ or its programs' rows, and whose event runs none (`!run`); the writer leaves the
 | `command` | `freq` | `freq` | the offset from the frequency of the note (with the wavetable's arpeggio) | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, the instrument's `freq` |
 | `wave` | `freq` | `freq` | as `command` | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
-| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
+| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!filter:none!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
-- A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence (`φ`
-  keeps counting); a different one, or a step with another or no command, starts the next. A step
-  without a command runs the instrument's `freq` expression, which a note's steps without a
-  command continue.
+- `!freq` is command 16, `lasts: step`: the native command ends on a step without a command,
+  where the instrument's `freq` resumes, and a step with another command (`!ad`, `!vol`, ...)
+  continues it. The writer writes that step `!freq:none` (command 16 with 0, which plays as a step
+  without a command), and the reader repeats the running `!freq` on each step without one; the
+  same `!freq` on the next step continues the occurrence (`φ` keeps counting). A note's steps
+  without a command run the instrument's `freq` expression.
 - Commands 1-4 and the instrument vibrato are the `command` unit's own firings: the lifter writes
   the commands' modulations as `!freq`, and the instrument vibrato as the instrument's `freq`,
   its delay a term in `φ` (`(φ >= 38)` for a delay of 40), when it starts with the note; a
@@ -176,7 +187,8 @@ The lifter fails, naming what it meets:
 - wavetable $F0, $F8 and $FE, on which the playroutine stops;
 - a wavetable $F7 whose pause the song hears, and a waveform value from $E0, which no waveform
   row sets;
-- a wavetable $FD $10-$FF whose pause the song hears;
+- a wavetable $FD $10-$FF whose pause the song hears, and a pattern $D10-$DFF whose rewrite the
+  song hears;
 - a wavetable step row whose runs need different expressions (a vibrato step met on different
   phases), or whose other effects (a vibrato's phase, a toneporta's arrival) the song hears;
 - a modulation start whose expression is not proved, or expressions that do not play the native

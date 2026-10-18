@@ -237,7 +237,7 @@ def test_a_pointer_write_inside_the_firing_is_no_hook():
 def test_a_command_shape_stands_for_each_command_with_a_row_key():
     commands = {
         3: {"name": "ad"},
-        4: [{"name": "vol", "when": "arg < 0x10"}, {"name": "mark", "when": "arg >= 0x10"}],
+        4: [{"name": "vol", "when": "arg < 0x10"}, {"name": "tempo", "when": "arg >= 0x10"}],
         5: {"name": "run", "ref": "t"},
         6: {"name": "cut", "byte": "arg"},
         7: {"name": "sr", "arg": "arg ^ 1", "raw": "arg ^ 1"},

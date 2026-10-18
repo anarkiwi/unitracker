@@ -151,7 +151,13 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
         note_read=GT.FREQ_TABLE,
     )
     header = SimpleNamespace(name="synthetic", author="", released="", flags=0)
-    dec = SimpleNamespace(info=info, typed=TypedSong.from_song(song), subtune=0, header=header)
+    dec = SimpleNamespace(
+        info=info,
+        typed=TypedSong.from_song(song),
+        subtune=0,
+        header=header,
+        player=lambda: Player(song, freq_table=GT.FREQ_TABLE, default_tempo=build.deftempo),
+    )
     return dec, Player(song, freq_table=GT.FREQ_TABLE)
 
 

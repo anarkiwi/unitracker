@@ -325,7 +325,7 @@ def test_slicer_keeps_a_branch_return_before_kept_actions():
 
 
 def test_keyword_verdicts():
-    labels = {"goattracker2": {"freq", "ad", "sr", "mark"}, "sidwizard": {"freq", "ad"}}
+    labels = {"goattracker2": {"freq", "ad", "sr"}, "sidwizard": {"freq", "ad"}}
     items = []
     for name, wanted in labels.items():
         s = signer(name)
@@ -337,9 +337,8 @@ def test_keyword_verdicts():
     def find(pr, label, code=None):
         return next(x for x in items if (x.pr, x.label) == (pr, label) and code in (None, x.key[0]))
 
-    for pr, label in (("sidwizard", "!freq"), ("goattracker2", "!mark")):
-        matches, v, reason = verdict(find(pr, label), items)
-        assert (matches, v, reason) == ([], "no effect", "no register, timing or table effect")
+    matches, v, reason = verdict(find("sidwizard", "!freq"), items)
+    assert (matches, v, reason) == ([], "no effect", "no register, timing or table effect")
     matches, v, reason = verdict(find("sidwizard", "!ad", 0x120), items)
     assert [(m.pr, m.key[0]) for m in matches] == [("sidwizard", 0x20), ("goattracker2", 5)]
     assert v == "partial" and reason.startswith("note row: procs.note_setup test")
