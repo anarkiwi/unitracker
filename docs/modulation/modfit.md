@@ -19,6 +19,9 @@ How a declaration feeds the analysis:
 - `fire` is the action list of one firing; its first and last entries' functions bound a firing
   in the compiled player (`unitracker.player.modulation`), and `hooks` mark a start, which opens an occurrence at the
   unit's next firing and runs to its next start. `scope: global` makes one occurrence per unit.
+  A unit with an `init` also starts at the playroutine's init: its occurrence opens at the
+  init's first call of the firing's first or last function (a global unit's is the first
+  voice's), so a firing the init enters at its last function begins there.
 - `cell` is the modulated value `v`; a pair `hi:lo[:k]` is fused into one value. With `chip`,
   `v` is the chip value `value` (`width` bits) and `store` writes it back; on a pair cell the
   chip value must be the pair plus an offset free of its parts.
@@ -108,7 +111,10 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
    - several texts for one unit: the most frequent takes the site, each other gets a copy and
      each starting event is pointed at its copy; an instrument is selected through the event the
      voice last fetched at the occurrence's first firing, which may already be the next note's;
-   - integer texts in a program whose rows have other data the format writes stay native rows.
+   - integer texts in a program whose rows have other data the format writes stay native rows;
+   - the start the init makes: at the unit's `init` (a fixed record), the text in its `field`
+     and `clear` applied to the row, unless the row already holds what `clear` sets, where the
+     playroutine's own firing plays the start.
 
    Otherwise the event's `commands` codes are replaced by the `!freq` command naming the text,
    preceded by `!legato` when the start's `legato` cell is set on a note; with an `x` that

@@ -125,12 +125,18 @@ record_types:
           pw: "pw if has_pw else 0"
           tbase: "note if has_note else 0"
           sacc: "(freq & 0xFFFF) if has_freq else 0"
-  # The ACID step's direction the module carries through init ($10B8): sub 1 steps the accumulator
-  # down (SBC), 0 up (ADC). Init clears the filter registers and the accumulator.
+  # The global state the module carries through init: the ACID step's direction ($10B8), sub 1
+  # stepping the accumulator down (SBC), 0 up (ADC), and xc, the ACID unit's expression from init.
+  # Init clears the filter registers and the accumulator.
   ginit:
     fixed: true
     form: map
-    fields: [sub]
+    fields: [sub, xc]
+    refs: {xc: x}
+    codec:
+      - when: "sub == 0"
+        keys:
+          cut: {expr: xc}
 functions:
   nfreq:
     args: [n]
@@ -332,3 +338,4 @@ modulators:
       fire: [layer_b, acid_step]
       program: {fields: [cp, acid, xc]}
       site: {record: sidtab, index: rowB, field: xc, clear: {cp: -1, acid: -1}}
+      init: {record: ginit, index: 0, field: xc, clear: {sub: 0}}

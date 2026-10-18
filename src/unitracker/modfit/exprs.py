@@ -18,7 +18,7 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.form import atoms
 from unitracker.modfit.phase import Lift, Machine, derive, dispatch
 from unitracker.modfit.replay import Stepper
-from unitracker.player.modulation import declared, run_of
+from unitracker.player.modulation import INIT, declared, run_of
 
 # ---- derivation --------------------------------------------------------------------------
 
@@ -110,7 +110,7 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         """
         machine = self.machines[unit["name"]]
         values = dict(occ.start)
-        lay = self.overlay(machine, occ.hook, occ.start) if occ.hook else {}
+        lay = self.overlay(machine, occ.hook, occ.start) if occ.hook and occ.hook != INIT else {}
         for c in self.spec["notes"]:
             values[c] = self.note_term(occ.start)
         n = occ.start.get(self.spec["notes"][0], 0) - self.shift(occ.start)

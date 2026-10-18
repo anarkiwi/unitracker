@@ -26,7 +26,7 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
 from unitracker.player import reach
-from unitracker.player.modulation import declared, unit_command, unit_width
+from unitracker.player.modulation import INIT, declared, unit_command, unit_width
 from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
 
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
@@ -211,9 +211,9 @@ def with_carried(an: Analysis, occ, d, pair: tuple) -> tuple:
 
 
 def site_of(spec: dict, occ) -> tuple | None:
-    """``(record, index)`` where unit ``spec`` writes an occurrence's expression, or None for
-    its event's command."""
-    site = spec.get("site")
+    """``(record, index)`` where unit ``spec`` writes an occurrence's expression (its ``init``
+    for the start the init makes), or None for its event's command."""
+    site = spec.get("init") if occ.hook == INIT else spec.get("site")
     if site is None or ("when" in site and not evaluate(site["when"], occ.start)):
         return None
     return site["record"], evaluate(site["index"], occ.start)
@@ -354,13 +354,18 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         """``(record, index)`` of the record an occurrence's expression is written in, or None."""
         return site_of(self.units[occ.unit], occ)
 
+    def _site_spec(self, unit: str, record: str) -> dict:
+        """The site of ``unit`` in record type ``record``: its init's, or its own."""
+        init = self.units[unit].get("init")
+        return init if init and init["record"] == record else self.units[unit]["site"]
+
     def run(self) -> dict:
         """The rewritten internal song."""
         occs = self.obs["occurrences"]
         sites = {}
         for i, occ in enumerate(occs):
             where = self.site(occ)
-            if where is not None:
+            if where is not None and not (occ.hook == INIT and self._held_native(occ.unit, where)):
                 sites.setdefault(where, {}).setdefault(occ.unit, {}).setdefault(
                     self.texts[i], []
                 ).append(occ)
@@ -374,6 +379,14 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         return self.ir
 
     # -- record sites --
+    def _held_native(self, unit: str, where: tuple) -> bool:
+        """True when the record of a unit's init already holds the state its expression clears:
+        the playroutine's own firing plays the start the init makes."""
+        name, index = where
+        rtype = self.rtypes[name]
+        row = {**rtype.fields, **self.records.get(name, {}).get(index, {})}
+        return all(row[f] == v for f, v in self.cleared(self._site_spec(unit, name), row).items())
+
     def _unshared(self, name: str, entry: int) -> tuple | None:
         """``(row position, row)`` of the first row of program ``entry`` that has no shared
         form, or None."""
@@ -428,7 +441,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         inplace = self.rtypes[where[0]].chain is None
         texts = {}
         for unit, got in by_unit.items():
-            rowed = bool(self.units[unit]["site"].get("row"))
+            rowed = bool(self._site_spec(unit, where[0]).get("row"))
             some = {t: o for t, o in got.items() if t is not None}
             if (some or rowed) and not (some and self.native(where, unit, some)):
                 if None in got and (inplace or rowed):
@@ -441,7 +454,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     def record_site(self, where: tuple, by_unit: dict) -> None:
         """Write a record's units' expressions (``_site_texts``); a unit with several gets one
         copy per text."""
-        rowed = {u for u in by_unit if self.units[u]["site"].get("row")}
+        rowed = {u for u in by_unit if self._site_spec(u, where[0]).get("row")}
         texts = self._site_texts(where, by_unit)
         if not texts:
             return
@@ -471,7 +484,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         that the format writes as they are."""
         name, index = where
         rtype, rows = self.rtypes[name], self.records.get(name, {})
-        spec = self.units[unit]["site"]
+        spec = self._site_spec(unit, name)
         if rtype.chain is None or spec.get("row") or not all(_integer(t) for t in texts):
             return False
         path, _ = _program(rows, rtype, index)
@@ -492,7 +505,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         # pylint: disable=too-many-locals
         name, index = where
         rtype, rows = self.rtypes[name], self.records.setdefault(name, {})
-        specs = [self.units[u]["site"] for u in texts]
+        specs = [self._site_spec(u, name) for u in texts]
         if rtype.chain is None or all(s.get("row") for s in specs):
             row = dict(rows.get(index, {}))
             for unit, spec in zip(texts, specs):

@@ -331,8 +331,8 @@ class _Codegen:
         return "\n".join([*shared, *self.lines[-2:], repr(self.playroutine)])
 
     def modulators(self) -> str:
-        """Source of the modulator helpers: ``_F``, ``_T``, ``_n``, each unit's selector and its
-        chip map (``_cv_i`` its value, ``_cs_i_k`` its stores)."""
+        """Source of the modulator helpers: ``_F``, ``_T``, ``_n``, each unit's selectors (``_xi_i``
+        its init's) and its chip map (``_cv_i`` its value, ``_cs_i_k`` its stores)."""
         # pylint: disable=too-many-locals
         spec = modulation.declared(self.playroutine)
         if not spec:
@@ -363,6 +363,8 @@ class _Codegen:
         for i, unit in enumerate(modulation.units(self.playroutine)):
             if "x" in unit:
                 out.append(f"def _x_{i}(v):\n    return {scope.compile(unit['x'])}")
+            if unit.get("init"):
+                out.append(f"def _xi_{i}(v):\n    return {scope.compile(unit['init']['x'])}")
             chip = unit.get("chip")
             if chip:
                 store = _Scope(self, True, (modulation.VALUE,))
@@ -739,14 +741,15 @@ class _Driven(modulation.Modulation):
             except xexpr.ExpressionError as exc:
                 raise SongError(f"{EXPR}{index}: {exc}") from exc
         pr = player.song["playroutine"]
-        self.selectors = {
-            u["name"]: ns[f"_x_{i}"] for i, u in enumerate(modulation.units(pr)) if "x" in u
-        }
+        mods = list(enumerate(modulation.units(pr)))
+        self.selectors = {u["name"]: ns[f"_x_{i}"] for i, u in mods if "x" in u}
+        self.inits = {u["name"]: ns[f"_xi_{i}"] for i, u in mods if u.get("init")}
         super().__init__(player, self.choose, keep=False)
 
-    def capture(self, unit: dict, voice) -> dict:
-        """The expression index the unit's selector names before its first firing."""
-        fn = self.selectors.get(unit["name"])
+    def capture(self, unit: dict, voice, hook) -> dict:
+        """The expression index the unit's selector names before its first firing: its init's
+        for the start the init makes."""
+        fn = (self.inits if hook == modulation.INIT else self.selectors).get(unit["name"])
         cells = self.player.voice_cells[voice] if voice is not None else None
         return {"x": fn(cells) if fn is not None else 0}
 
