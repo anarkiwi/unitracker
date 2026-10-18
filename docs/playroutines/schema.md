@@ -239,7 +239,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
 | `label` | the cells that group a unit's occurrences for the lifter (default: the site's `index`) |
 | `relative` | cells a start reads as `N` plus their offset from the note |
-| `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
+| `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: `{field: value}`, each an expression over the row's raw fields, the fields the expression replaces in every row of the program it writes; a field it does not name keeps its value, as a row's length; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the document does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
 | `commands` | the native command codes the lifter replaces by the command named `key` that references `x` (`!freq`) |
 

@@ -151,6 +151,10 @@ record_types:
       - when: "l == 0 and x == 0"
         keys: {cut: {byte: r}}
         raw: {l: 0, r: cut}
+      # A zero sweep: the cutoff, or the expression driving it, held l ticks.
+      - when: "l >= 1 and l < 0x80 and r == 0"
+        keys: {hold: l, cut: {expr: x}}
+        raw: {l: hold, r: 0}
     do:
       - if: "row.l >= 0x80"
         then:
@@ -497,4 +501,4 @@ modulators:
         record: filttab
         index: fptr
         field: x
-        clear: {l: "l if l >= 0x80 else 0", r: "r if l >= 0x80 else 0", cut: -1}
+        clear: {r: "r if l >= 0x80 else 0", cut: -1}

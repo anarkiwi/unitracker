@@ -501,3 +501,20 @@ def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
     theirs = np.asarray(native.render_grid(400), dtype=np.uint8)
     assert SongPlayer(out).mismatch(theirs) is None
     assert gt.snapped(out) is out
+
+
+ZERO_SWEEPS = {
+    "a native zero sweep": ([(0x90, 0xF1), (0x00, 0x40), (0x05, 0x00), (0xA0, 0xF2)], {"hold": 5}),
+    "a sweep the expression replaces": (
+        [(0x90, 0xF1), (0x00, 0x40), (0x06, 0x03), (0xA0, 0xF2)],
+        {"hold": 6},
+    ),
+}
+
+
+@pytest.mark.parametrize("filt,held", ZERO_SWEEPS.values(), ids=ZERO_SWEEPS)
+def test_a_zero_sweep_holds_its_ticks(filt, held):
+    instruments = [{"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    text, _, theirs = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], instruments, filt=filt + [(0xFF, 0)]))
+    assert held in song_def(text)["ins"]["i1"]["filter"]
+    assert 0xF2 in theirs[:, 0x17]

@@ -1,4 +1,5 @@
-"""Codec shape primitives the playroutines share: vocabulary key defaults and the note byte."""
+"""Codec shape primitives the playroutines share: vocabulary key defaults, the note byte and
+the held row."""
 
 import pytest
 
@@ -79,3 +80,23 @@ def test_a_ctrl_on_the_first_tick_row_is_written_without_a_gate(player, gate):
     assert raw["gate"] == 1 and restart.encode(raw, place) == {"ctrl": 9}
     with pytest.raises(CodecError, match="sets the gate on; the row has no gate"):
         restart.decode({"ctrl": 9, "gate": gate}, place)
+
+
+@pytest.mark.parametrize(
+    "written,raw",
+    [
+        ({}, {"l": 1, "r": 0}),
+        ({"hold": 5}, {"l": 5, "r": 0}),
+        ({"hold": 127, "cut": ("x", 1)}, {"l": 127, "r": 0, "x": 1}),
+    ],
+)
+def test_a_goattracker2_zero_sweep_is_a_held_filter_row(written, raw):
+    filttab = songio.codecs(songio.library("goattracker2"), None)["filttab"]
+    assert filttab.decode(written) == raw and filttab.encode(raw) == written
+
+
+@pytest.mark.parametrize("hold", [0, 128])
+def test_a_goattracker2_filter_row_holds_1_to_127_ticks(hold):
+    filttab = songio.codecs(songio.library("goattracker2"), None)["filttab"]
+    with pytest.raises(CodecError, match="can't express"):
+        filttab.decode({"hold": hold})
