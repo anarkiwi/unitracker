@@ -5,10 +5,10 @@ record type is one player's own.
 
 | row key | meaning |
 |---|---|
-| `ctrl` | control register value; `^n` sets an exclusive-or mask the voice's control output keeps until a row sets another, `v^n` both |
-| `gate` | the gate the control register is written with until a row, note or `off`/`on` sets it: 0 off, 1 on |
-| `note` | `+n` / `-n` relative to the event note, `=n` absolute (format numbering, C2 = 24); omitted: no change |
-| `wait` | ticks before the row applies |
+| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, `v^n` both (see [The gate](#the-gate)) |
+| `gate` | the gate, 0 off or 1 on (see [The gate](#the-gate)) |
+| `note` | `+n` / `-n` relative to the event note, or a note name (`G#5`) for an absolute note; omitted: no change |
+| `wait` | ticks before the row applies (see [Timing](#timing)) |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
 | `ad`, `sr` | envelope registers |
 | `pw` | the 12-bit pulse width, a value or an expression; `none` stops the voice's pulse program |
@@ -21,22 +21,25 @@ record type is one player's own.
 | `filter` | `none`: the row stops the filter program, as `pw: none` the pulse program |
 | `vol` | the volume, the low nibble of `$D418` |
 
+A command means one thing in every player; it applies on the step that carries it.
+
 | command | meaning |
 |---|---|
-| `!run:@x` | start program `x` in the slot its kind implies; `!run:none` stops it |
-| `!ad:`, `!sr:`, `!ctrl:` | set the register to the byte |
-| `!resfilt:n` | set `$D417` whole, `n = 16*res + route` |
+| `!run:x` | start program `x` in the slot its kind implies: the control, pulse or filter program; `!run:none` stops the control program |
+| `!pw:none`, `!filter:none` | stop the voice's pulse / filter program |
+| `!pw`, `!filter` (no argument) | the note does not restart its instrument's pulse / filter program (see [Lifetime](#lifetime)) |
+| `!ad:n`, `!sr:n` | set the envelope register to the byte |
+| `!ctrl:n` | set the control register's waveform and mode bits, as a row's `ctrl` |
+| `!resfilt:r/m` | set `res` and `route` (a mask), as a row's keys of those names |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
-| `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice, from the step that carries the command |
-| `!funk:a/b`, `!funk:none` | swing tempo, for all voices: the steps alternate `a` and `b` ticks; `none` swings on the pair already set |
-| `!freq:@x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
-| `!legato:0` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
-| `!mark:n` | a timing mark that changes no sound |
-| `!restart:@r` | the note's hard restart, for a player whose instruments have none (see [Hard restart](#hard-restart)) |
-| `!pulse:0`, `!filter:0` | the note does not restart the instrument's pulse / filter program (see [Lifetime](#lifetime)) |
+| `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks |
+| `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
+| `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
+| `!mark:n` | a mark that changes no sound: the player reads the byte and plays nothing |
+| `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
 
-A playroutine takes the commands its `commands`, `restart` and `lifetime` declare, over the
+A playroutine takes the commands its `commands` and `lifetime` declare, over the
 arguments its codec accepts; each playroutine's file
 ([goattracker2](../playroutines/goattracker2.md#commands),
 [sidwizard](../playroutines/sidwizard.md#commands), [defmon](../playroutines/defmon.md#commands))
@@ -48,6 +51,20 @@ is rejected on reading, naming the key or command and the player (`defmon: the p
 type outside the playroutine's codec shapes, record types and the shared command names is refused
 with one message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in
 '-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`).
+
+## Timing
+
+A row applies after its `wait` and lasts its `hold`. A `wait: n` row is `hold: +n` on the row
+before it, except on a program's entry row, which has no row before it, and on the row a loop
+returns to, which two rows precede; so both keys stay.
+
+## The gate
+
+`ctrl` and `gate` each hold until a row sets them; a note, `off` and `on` set the gate as the
+player does. A row's `ctrl` leaves the gate as it is, but on a restart's first-tick row, where a
+`ctrl` sets the gate on: the row is written without `gate: 1`, and `gate: 0` there is refused.
+The mask `^n` holds until a row sets `gate` or another mask; a row that sets `gate` without a mask
+sets it to 0.
 
 ## Chords
 
@@ -70,35 +87,35 @@ voice and the bits of `m`, `route: - m` removes them, and `m` is left out when i
 
 A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last row
 applies on the note's first tick, and each earlier row its `hold` ticks before the row after it.
-A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. An instrument names its restart
-(`restart: r1`); in a playroutine whose instruments have none, a note names its own
-(`C3.i2!restart:@r1`):
+A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. A note's restart is its instrument's
+(`restart: r1`) in every player:
 
 ```yaml
 restart:
-  r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]
+  r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]
 ```
 
 Four ticks before the note the gate goes off with envelope $0F00; on its first tick the control
-register takes $09 with the gate on. A note with `!legato:0` runs no restart, and an instrument
+register takes $09 with the gate on. A note with `!legato` runs no restart, and an instrument
 without `restart` has none. A playroutine plays the shapes its codec accepts; a row's place in
 its program is part of its shape (see [Codecs](../playroutines/schema.md#codecs)).
 
-A playroutine declares event restarts with `restart: {command: c}`: a note's `!restart:@r` is
+A player whose notes arm the restart on the steps before them declares it with its [instrument
+columns](#instrument-columns), `event: {..., restart: c}`: the restart of a note's instrument is
 read as command `c` on the step its lookahead rows' holds put before the note, running those rows
 as a program of the command's record type, and that step must be empty. The writer folds such a
-command back onto its note when it is alone on its step, followed only by empty steps up to a
-note with a free command slot, and its program ends and fits in the steps.
+command into its note's instrument when it is alone on its step, followed only by empty steps up
+to a note with a free command slot, and its program ends and fits in the steps.
 
 ## Lifetime
 
 Whether a note restarts its instrument's pulse or filter program is a property of the note:
-`!pulse:0` and `!filter:0` mean it does not, as `!legato:0` means it does not retrigger. They
+`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. They
 need a note and refuse one that itself starts the program. A note that names no instrument plays
 the voice's last one; the reader finds it by walking each voice's plays twice through its loop.
 The playroutine declares the commands it plays as
-`lifetime: {pulse: {field: pw, flag: {flags: 0x40}}, filter: {...}}`, `field` the instrument key
-of the program:
+`lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`, or `lifetime: [pw, filter]` when no entry
+has a key; an entry's `field` is the instrument key of the program (default: the slot's name):
 
 | declaration | the command |
 |---|---|

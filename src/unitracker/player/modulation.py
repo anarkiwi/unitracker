@@ -45,6 +45,16 @@ def pair_parts(cell: str) -> tuple:
     return parts[0], parts[1], int(parts[2]) if len(parts) > 2 else 8
 
 
+def unit_width(pr: dict, unit: dict) -> int | None:
+    """The bits a unit's value has: its chip map's width, else its cell's (None: unbounded)."""
+    if unit.get("chip"):
+        return int(unit["chip"]["width"])
+    hi, lo, k = pair_parts(unit["cell"])
+    cells = {**(pr.get("global") or {}), **(pr.get("voice") or {})}
+    width = (cells.get(hi) or {}).get("width")
+    return None if width is None else int(width) + (k if lo is not None else 0)
+
+
 def joined(snap: dict, cell: str) -> int:
     """A cell's value in a snapshot of cells by name, a pair joined."""
     hi, lo, k = pair_parts(cell)
@@ -165,6 +175,8 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         self.active, self.pending, self.pre = {}, {}, {}
         self.occurrences, self.keep = [], keep
         self.chips = {}
+        widths = {u["name"]: unit_width(pr, u) for u in self.units}
+        self.value_masks = {n: None if w is None else (1 << w) - 1 for n, w in widths.items()}
         for i, unit in enumerate(self.units):
             if unit.get("chip"):
                 cells = list(unit["chip"]["store"])
@@ -331,6 +343,11 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         for cell, fn in chip[1]:
             self.cells.set(cell, voice, fn(cells, value))
 
+    def bounded(self, unit: dict, value: int) -> int:
+        """``value`` wrapped to the unit's width."""
+        mask = self.value_masks[unit["name"]]
+        return value if mask is None else value & mask
+
     def note_of(self, voice) -> int:
         """The sounding format note ``N`` of a voice."""
         if voice is None or self.note is None:
@@ -380,6 +397,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         native = self.read(unit, voice)
         phi = occ.phi
         occ.v, occ.phi = occ.derived.step(before, phi, self.note_of(voice))
+        occ.v = self.bounded(unit, occ.v)
         occ.firings += 1
         if occ.v != native and occ.mismatch is None:
             occ.mismatch = (self.tick, phi, before, native, occ.v)

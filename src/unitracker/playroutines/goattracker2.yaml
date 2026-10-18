@@ -1,13 +1,18 @@
 # GoatTracker 2 playroutine (player.s, buffered writes) as a unitracker playroutine.
 # The lifter fills in the build constants.
-constants: {adparam: 0x0F00, deftempo: 5}
+constants: {adparam: 0x0F00}
+defaults: {tempo: 6}
+# A tempo n is each voice's tempo cell n - 1; a swing pair is the funk pair less 1 with the voices'
+# tempo 0, which alternates it. Command $F plays 3-127 ticks; a funk tempo 2-129.
+tempo:
+  cells: {tempo: "a - 1"}
+  swing: {tempo: 0, funk0: "a - 1", funk1: "b - 1"}
+  when: "3 <= a <= 127 if a == b else 2 <= a <= 129 and 2 <= b <= 129"
 tables:
   ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-# !pulse:0 and !filter:0 hold on a note whose instrument starts no such program: new_note_init
+# !pw and !filter hold on a note whose instrument starts no such program: new_note_init
 # sets the pointer from the instrument's field, and a wavetable $F9/$FA row sets it.
-lifetime:
-  pulse: {field: pw}
-  filter: {field: filter}
+lifetime: [pw, filter]
 commands:
   5: {name: ad}
   6: {name: sr}
@@ -15,15 +20,17 @@ commands:
   8: {name: run, ref: ctrltab}
   9: {name: run, ref: pulsetab}
   10: {name: run, ref: filttab}
-  11: {name: resfilt}
+  11: {name: resfilt, when: "arg < 0x100", args: {res: "arg >> 4", route: "arg & 0x0F"}, raw: "(res << 4) | route"}
   12: {name: cut, byte: arg}
   13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
-  # E: the swing tempos, written as the speed-table row's two bytes (!funk:6/7).
-  14: {name: funk, ref: speedtab, inline: true}
+  # E: every voice swings, the pair written as the speed-table row's two bytes (!tempo:6/7).
+  14: {name: tempo, ref: speedtab, inline: true, when: "2 <= l <= 129 and 2 <= r <= 129"}
   # F: d (bit 7 clear: all voices) gives d ticks per row for d >= 3, and d = 2 plays as 3.
   15:
     - {name: tempo, when: "arg >= 2 and arg < 0x80", arg: "arg if arg >= 3 else 3", raw: arg}
     - {name: vtempo, when: "arg >= 0x82", arg: "(arg & 0x7F) if (arg & 0x7F) >= 3 else 3", raw: "arg | 0x80"}
+  # This voice swings: the player keeps one pair, which this sets for every voice that swings.
+  18: {name: vtempo, ref: speedtab, inline: true, when: "2 <= l <= 129 and 2 <= r <= 129"}
   16: {name: freq, ref: x}
   17: {name: legato, when: "arg == 0"}
 record_types:
@@ -46,7 +53,7 @@ record_types:
         keys: {hold: hold}
         raw: {hold: hold}
       - when: "last and not first and hold == 0 and ad < 0 and sr < 0 and ((ctrl < 0 and gate <= 1) or (ctrl >= 1 and ctrl < 0xFE and gate == 1))"
-  # The speed table: no written form; !funk writes its rows inline.
+  # The speed table: no written form; !tempo and !vtempo write a pair's row inline.
   speedtab:
     fields: [l, r]
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
@@ -240,6 +247,9 @@ records:
           then: [{set: {funk0: "speedtab[newcmddata].l - 1", funk1: "speedtab[newcmddata].r - 1"}}]
         - for_voices: [{set: {tempo: 0}}]
     16: {do: [{set: {command: 16, cmddata: newcmddata}}]}
+    18:
+      do:
+        - set: {funk0: "speedtab[newcmddata].l - 1", funk1: "speedtab[newcmddata].r - 1", tempo: 0}
     15:
       do:
         - set: {nt: "newcmddata & 0x7F"}
@@ -415,7 +425,6 @@ init:
           wptr: 0
           hasnew: 0
           tick: 1
-          tempo: deftempo
           instr: 1
           gatetimer: "restart[ins[1].restart].hold"
 

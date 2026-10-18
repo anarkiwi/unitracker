@@ -17,10 +17,10 @@ class EventFolds:
 
     def __init__(self, pr: dict, rtypes: dict, codecs: dict, commands, records: dict):
         self.rtypes, self.codecs, self.records = rtypes, codecs, records
-        spec = pr.get(restart.NAME)
-        self.command = int(spec["command"]) if spec else None
-        self.target = rtypes[commands.ref(self.command)] if spec else None
         self.ins = instrument.spec(pr)
+        code = (self.ins or {}).get(restart.NAME)
+        self.command = None if code is None else int(code)
+        self.target = None if code is None else rtypes[commands.ref(self.command)]
         self.base = int((pr.get("instrument") or {}).get("base", 0))
         self.restarts, self.played, self.instruments = {}, {}, {}
 

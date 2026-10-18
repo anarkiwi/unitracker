@@ -2,7 +2,7 @@
 
 import pytest
 from conftest import OPTIMISED
-from test_optimise import C1, I1, PULSE, RUN, doc, ins_line, run
+from test_optimise import C1, I1, PULSE, RUN, RUN_TWICE, doc, ins_line, run
 
 from unitracker.analysis import orthogonality, spelling, tokenstudy
 from unitracker.format import songio
@@ -75,10 +75,10 @@ def test_report_lists_a_known_redundancy_once_per_form():
 
 
 def test_report_lists_vocabulary_and_song_redundancy():
-    result = run(doc(I1, RUN, C1), ["hoist", "instruments"])
+    result = run(doc(I1, RUN_TWICE, C1, steps=16), ["hoist", "instruments"])
     report = orthogonality.report([("toy", result)])
     vocab = report.split("## Vocabulary redundancy")[1].split("##")[0]
-    assert "goattracker2 · toy i1: `X.i1!run:@c1` ≡ `X.i1 with i1 + {ctrl: c1}`" in vocab
+    assert "goattracker2 · toy i1: `X.i1!run:c1` ≡ `X.i1 with i1 + {ctrl: c1}`" in vocab
     assert "## Song redundancy\n\n- none" in report
 
 
@@ -86,17 +86,17 @@ def test_reference_tunes_report_is_independent_of_order(optimised_tunes):
     songs = [(name, optimised_tunes[name][1]) for name in sorted(OPTIMISED)]
     first = orthogonality.report(songs)
     assert orthogonality.report(songs[::-1]) == first
-    assert "X.i3!run:@c1" in first and "## VM dead state" in first
+    assert "X.i3!run:c1" in first and "## VM dead state" in first
     assert "defmon · field `restart.ad`" in first and "sidwizard · csillag codec shape" in first
 
 
 I2 = ins_line("i2", "ad: 4, ctrl: [{ctrl: 33, note: +0}, end]")
 X = (
-    "      x:\n        x1: (v + 32*[(φ - 3) % 12 >= 6] - 16) % 65536\n"
-    "        x2: (v + 64*[(φ - 3) % 12 >= 6] - 32) % 65536\n"
+    "      x:\n        x1: (v + 32*((φ - 3) % 12 >= 6) - 16) % 65536\n"
+    "        x2: (v + 64*((φ - 3) % 12 >= 6) - 32) % 65536\n"
 )
 PHRASE = (
-    "[C4.i1*2, D#4, G4!freq:@x1, C5, C4.i2*2, D#4, G4!freq:@x2, C5, F4.i1, G#4, C5, F5,"
+    "[C4.i1*2, D#4, G4!freq:x1, C5, C4.i2*2, D#4, G4!freq:x2, C5, F4.i1, G#4, C5, F5,"
     " C4*2, D#4, G4, C5, C4*2, D#4, G4, C5]"
 )
 SECOND = (
@@ -107,7 +107,7 @@ SECOND = (
 def song():
     pulse = ins_line("i1", f"ad: 9, ctrl: [{{ctrl: 65, note: +0}}, end], pw: {PULSE}")
     text = doc(f"{pulse}\n{I2}", PHRASE, X, steps=24, extra=SECOND)
-    return songio.loads(text.replace("\nsong:", "\nhints: {ticks_per_step: 6}\nsong:"))
+    return songio.loads(text.replace("\nsong:", "\ntempo: 6\nsong:"))
 
 
 @pytest.fixture(scope="module", name="written")
@@ -135,7 +135,7 @@ def test_sections_rests_and_primitives_split_a_document(written):
 
 def test_mockups_rewrite_what_they_name():
     texts = tokenstudy.mockups(song())
-    assert "forms: {f1: '(a, b) (v + a*[(φ - 3) % 12 >= 6] - b) % 65536'}" in texts["forms"]
+    assert "forms: {f1: '(a, b) (v + a*((φ - 3) % 12 >= 6) - b) % 65536'}" in texts["forms"]
     assert "f1(32, 16)" in texts["forms"] and "f1(64, 32)" in texts["forms"]
     assert "tri(φ - 32, 128)" in texts["primitives"]
     assert "&s1" in texts["sub-phrases"] and "sub:" in texts["sub-phrases"]
@@ -149,7 +149,7 @@ def test_mockups_rewrite_what_they_name():
 
 def test_hoisted_instruments_merge_phrases_alike_but_for_instruments():
     phrases = {"p1": ["C4.i1", "D4"], "p2": ["C4.i2", "D4"]}
-    doc_ = {"song": [{"def": {"phrase": phrases}, "play": ["p1"]}, {"play": ["p2+3"]}]}
+    doc_ = {"song": [{"def": {"phrase": phrases}, "play": ["p1"]}, {"play": ["p2+3"]}, "end"]}
     out = tokenstudy.hoisted_instruments(doc_)
     assert "p2" not in out["song"][0]["def"]["phrase"] and out["song"][1]["play"] == ["p1(i1=i2)+3"]
 
@@ -176,8 +176,8 @@ def test_every_spelling_has_an_exact_inverse(written):
 
 def test_spellings_read_as_intended(written):
     atoms = list(written["song"][0]["def"]["phrase"]["p1"])
-    assert spelling.relative(atoms)[:4] == ["=C4", "+0.i1*2", "+3", "+7!freq:@x1"]
-    assert spelling.delta(atoms)[:4] == ["C4.i1*2", "+3", "+4!freq:@x1", "+5"]
+    assert spelling.relative(atoms)[:4] == ["=C4", "+0.i1*2", "+3", "+7!freq:x1"]
+    assert spelling.delta(atoms)[:4] == ["C4.i1*2", "+3", "+4!freq:x1", "+5"]
     assert spelling.best_key(written) == (0, "minor")
     assert spelling.degree_text(27, (0, "minor")) == "3o2"
     assert spelling.degree_text(28, (0, "minor")) == "3#o2"

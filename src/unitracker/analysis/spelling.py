@@ -202,7 +202,7 @@ def respelt(ir: dict) -> dict:
     return out
 
 
-SAMPLES = ("C#4", "A#1", "C10", "G#4.i7*3", "-!freq:@x12*2", "+12", "-3", "3#o4", "C4/4", "&s12")
+SAMPLES = ("C#4", "A#1", "C10", "G#4.i7*3", "-!freq:x12*2", "+12", "-3", "3#o4", "C4/4", "&s12")
 
 
 def boundaries(samples=SAMPLES) -> list:

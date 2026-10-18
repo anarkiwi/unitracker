@@ -6,7 +6,7 @@ naming its playroutine (integer cells, bounded accumulators, event handlers and 
 units, from the library in `src/unitracker/playroutines/`), then one timeline that defines
 each instrument, program, expression and phrase where it is first used. Rows and commands
 share one vocabulary across players, pitch, pulse and filter modulations are integer
-expressions in `v` and `φ` (`pw: 16*abs((φ - 32) % 128 - 64) + 512`, `!freq:@x1`), and
+expressions in `v` and `φ` (`pw: 16*abs((φ - 32) % 128 - 64) + 512`, `!freq:x1`), and
 notes are named by real pitch. The player has no player-specific knowledge,
 and its register writes are flushed in one canonical order.
 

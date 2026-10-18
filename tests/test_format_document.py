@@ -1,4 +1,4 @@
-"""The v1.19 document: canonical writing, reading back and its errors, record type declarations
+"""The v1.20 document: canonical writing, reading back and its errors, record type declarations
 and templates, and the track timeline."""
 
 import copy
@@ -79,7 +79,6 @@ def song() -> dict:
     return {
         "unitracker": "ir",
         "meta": {"title": "Mini", "author": "Test", "released": "2026", "source": "x"},
-        "hints": {"ticks_per_step": 1},
         "clock": {"cycles_per_tick": 19656, "clock_hz": 985248},
         "voices": 2,
         "tables": {"t": [1, 2, 3]},
@@ -122,7 +121,7 @@ def edit(path, value):
 
 DEF = ("song", 0, "def")
 LIST_SONG = """
-unitracker: 1.19
+unitracker: 1.20
 playroutine: {{ref: {pr}}}
 song:
   - def:
@@ -131,7 +130,7 @@ song:
       phrase:
         p1: [off]
     play: [p1, p1, p1]
-loop: ~
+  - end
 """
 LIBRARY = ("goattracker2", "sidwizard", "defmon")
 
@@ -147,9 +146,8 @@ def test_roundtrip_plays_identically_and_is_canonical():
     np.testing.assert_array_equal(SongPlayer(back).render_grid(64), SongPlayer(ir).render_grid(64))
     assert songio.dumps(back, embed=True) == text
     doc = parse(text)
-    assert list(doc) == ["unitracker", "playroutine", "meta", "hints", "song", "loop"]
+    assert list(doc) == ["unitracker", "playroutine", "meta", "song"]
     assert doc["meta"] == {"title": "Mini", "author": "Test", "released": "2026"}
-    assert doc["hints"] == {"ticks_per_step": 1, "phrase_steps": 4}
     first = doc["song"][0]["def"]
     assert first["init"] == {0: {"o": 5}}
     assert first["prog"] == {"w1": [[10], [20], [30], {"loop": 0}], "w2": [[60], "end"]}
@@ -158,31 +156,27 @@ def test_roundtrip_plays_identically_and_is_canonical():
     assert first["ins"]["i3"] == {"p": [[99, "w2"], [50], "end"]}
     assert "i4" not in first["ins"]
     assert first["phrase"]["p1"] == ["C2.i1*2", "D2.i2*2"]
-    assert first["phrase"]["p2"] == ["-!run:@w1", "F#2.i3*3"]
+    assert first["phrase"]["p2"] == ["-!run:w1", "F#2.i3*3"]
     assert doc["song"][0]["play"] == ["p1", "p2"]
     assert doc["song"][1]["play"] == ["p1+3", "p2"]
-    assert doc["loop"] == 0
+    assert doc["song"][-1] == {"loop": 0}
 
 
-def test_document_without_hints_reads_and_writes(tmp_path):
+def test_a_document_is_dumped_whole_and_loads_back(tmp_path):
     ir = song()
-    del ir["hints"]
     ir["phrases"]["c"].append({})
     path = tmp_path / "s.yaml"
     songio.dump(ir, path, embed=True)
     assert [p.name for p in tmp_path.iterdir()] == ["s.yaml"]
     text = path.read_text()
-    assert "hints" not in yaml.safe_load(text)
-    back = songio.load(path)
-    assert not back["hints"]
-    assert songio.dumps(back, embed=True) == text
+    assert songio.dumps(songio.load(path), embed=True) == text
 
 
 def test_reference_form_patches_library_tables(references):
     ref = references["metal_warrior"]
     doc = parse(ref.text)
     assert doc["playroutine"]["ref"] == "goattracker2"
-    assert doc["playroutine"]["constants"] == {"deftempo": 11}
+    assert "constants" not in doc["playroutine"] and doc["tempo"] == 12
     assert "tables" not in doc["playroutine"]
     assert "clock" not in doc
     ir = ref.ir()
@@ -193,22 +187,11 @@ def test_reference_form_patches_library_tables(references):
         songio.dumps(ir)
 
 
-def _phrase_steps(steps, extra_step):
-    def apply(ir):
-        ir["hints"]["phrase_steps"] = steps
-        if extra_step:
-            ir["phrases"]["c"].append({})
-
-    return apply
-
-
 @pytest.mark.parametrize(
     "change,match",
     [
         (lambda ir: ir["records"]["prog"].pop(2), "row 2 is referenced but not defined"),
         (lambda ir: ir["records"]["ins"][1].update(z=1), "not declared"),
-        (_phrase_steps(5, False), r"phrase_steps 5 disagrees .* lengths \[4\]"),
-        (_phrase_steps(4, True), r"phrase_steps 4 disagrees .* lengths \[4, 5\]"),
         (
             edit(("playroutine", "record_types", "prog", "refs", "x", "when"), "nope[1]"),
             "prog: unknown table 'nope'",
@@ -225,11 +208,14 @@ def test_writer_errors(change, match):
 @pytest.mark.parametrize(
     "change,match",
     [
-        (edit(("hints",), {"tempo": 6}), "hints: unknown key 'tempo'"),
-        (edit(("hints",), {"phrase_steps": True}), "hints: phrase_steps must be a positive"),
-        (edit(("hints",), [6]), "hints must be a mapping"),
+        (edit(("hints",), {"phrase_steps": 4}), "unknown key hints in document"),
+        (edit(("tempo",), 6), "mini: the player has no tempo"),
+        (edit(("tempo",), [6, 6]), "two different tempos"),
         (edit(("song",), []), "list of rows"),
         (edit(("song", 1), {"def": {}}), "play list"),
+        (edit(("song", 2), {"play": ["p1", "p2"]}), r"ends with end or \{loop: k\}"),
+        (edit(("song", 2), {"loop": 9}), "loop row 9 is outside"),
+        (edit(("loop",), 0), "unknown key loop in document"),
         (edit(("playroutine",), "mini"), "mapping"),
         (edit(("playroutine",), {"ref": "nope"}), "no playroutine"),
         (edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}), "no library"),
@@ -245,9 +231,9 @@ def test_writer_errors(change, match):
         (edit(DEF + ("ins", "i1"), {"p": "nothing"}), "unknown name 'nothing'"),
         (edit(DEF + ("ins", "1x"), {}), "bad name"),
         (edit(DEF + ("ins", "w1"), {}), "defined twice"),
-        (edit(DEF + ("phrase", "p2"), ["-!ad:@w1"]), "can't express"),
-        (edit(DEF + ("phrase", "p2"), ["-!run:@zz"]), "unknown name 'zz' in"),
-        (edit(DEF + ("phrase", "p2"), ["-!run:@w1!run:@w1!run:@w1"]), "more than 2 commands"),
+        (edit(DEF + ("phrase", "p2"), ["-!ad:w1"]), "can't express"),
+        (edit(DEF + ("phrase", "p2"), ["-!run:zz"]), "unknown name 'zz' in"),
+        (edit(DEF + ("phrase", "p2"), ["-!run:w1!run:w1!run:w1"]), "more than 2 commands"),
         (edit(("song", 0, "play"), ["p1", "p2+x"]), "bad play entry"),
     ],
 )
@@ -347,9 +333,9 @@ def test_the_writer_refuses_what_has_no_written_form(pr):
 
 
 def test_a_pulse_program_name_is_not_a_phrase_name():
-    text = list_song(tname="pw", name="pw", row="{pw: 2048}").replace("[off]", "[off!run:@pw1]")
+    text = list_song(tname="pw", name="pw", row="{pw: 2048}").replace("[off]", "[off!run:pw1]")
     out = songio.dumps(songio.loads(text))
-    assert "pw1: [{pw: 2048}, end]" in out and "p1: [off!run:@pw1]" in out
+    assert "pw1: 2048" in out and "p1: [off!run:pw1]" in out
     assert songio.dumps(songio.loads(out)) == out
     with pytest.raises(SongFormatError, match="name 'p1' defined twice"):
         songio.loads(text.replace("pw1", "p1"))
@@ -357,10 +343,10 @@ def test_a_pulse_program_name_is_not_a_phrase_name():
 
 def test_the_version_is_its_text():
     text = list_song()
-    assert songio.dumps(songio.loads(text)).startswith("unitracker: 1.19\n")
-    for version in ("1.1", "0"):
-        with pytest.raises(SongFormatError, match=r"not a unitracker v1\.19 document"):
-            songio.loads(text.replace("1.19", version, 1))
+    assert songio.dumps(songio.loads(text)).startswith("unitracker: 1.20\n")
+    for version in ("1.19", "1.2", "0"):
+        with pytest.raises(SongFormatError, match=r"not a unitracker v1\.20 document"):
+            songio.loads(text.replace("1.20", version, 1))
 
 
 def test_record_type_defaults_refs_and_names():

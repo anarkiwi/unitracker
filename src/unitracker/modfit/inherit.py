@@ -2,7 +2,7 @@
 
 The lifter writes each start with its carried values as constants; this module proves one form
 for every value of them. A carried cell the firing never counts is an input of one derivation
-over symbolic cells; a carried counter the firing counts down is a delay gate ``[φ >= d]``.
+over symbolic cells; a carried counter the firing counts down is a delay gate ``(φ >= d)``.
 """
 
 import copy
@@ -117,7 +117,7 @@ def counts_down(machine, start: dict, cell: str, low: int) -> str | None:
 
 
 def delay_gate(an, machine, live: list, cells: list, why: str) -> Inherited:
-    """One carried counter as a delay: ``[φ >= d]`` then the run of the start whose counter ran out.
+    """One carried counter as a delay: ``(φ >= d)`` then the run of the start whose counter ran out.
 
     Proved for every ``d``: each firing above the base counter keeps the value and counts down
     one (z3), the base run is derived, and the form at each start's ``d`` solves its recurrence.

@@ -20,7 +20,7 @@ def song(pr, defs, phrases, rows=ONCE, loop="~"):
     phrase = "".join(f"        {name}: [{atoms}]\n" for name, atoms in phrases.items())
     return (
         f"unitracker: {songio.VERSION}\nplayroutine: {{ref: {pr}}}\nsong:\n  - def:\n{defs}"
-        f"      phrase:\n{phrase}{rows}loop: {loop}\n"
+        f"      phrase:\n{phrase}{rows}  - {'end' if loop == '~' else f'{{loop: {loop}}}'}\n"
     )
 
 
@@ -35,7 +35,7 @@ def commands(ir, phrase="p1"):
 # -- instrument: one ins record naming the sidTAB programs of layers A and B --
 
 DM_DEFS = """      ctrl:
-        c1: [{ctrl: 65, hold: 4}, {ctrl: 64}, end]
+        c1: [{ctrl: 65, gate: 1, hold: 4}, {gate: 0}, end]
         c2: [{res: 15, route: 7, mode: 16}, end]
       ins:
         i1: {ctrl: c1, filter: c2}
@@ -60,7 +60,7 @@ def test_an_instrument_reads_as_both_layers_and_the_writer_names_native_layers()
     assert steps[4, :5].tolist() == [0, 0, 0, LAYER_B, 2]
     text = songio.dumps(ir)
     assert "p1: [C4.i1*4, -.i2*4]" in text
-    assert "i1: {ctrl: [{hold: 4, ctrl: 65}, {ctrl: 64}, end], filter: c1}" in text
+    assert "i1: {ctrl: [{hold: 4, ctrl: 65, gate: 1}, {gate: 0}, end], filter: c1}" in text
     assert songio.dumps(songio.loads(text)) == text
     out = grid(ir, 8)
     assert out[1:5, 4].tolist() == [65] * 4 and out[2, 0x17] == 0xF7
@@ -104,9 +104,9 @@ def test_the_writer_refuses_an_event_that_arms_layer_b_twice():
 
 # -- restart: a note's restart program, run on layer B on the steps before it --
 
-RS_INS = "i1: {ctrl: [{ctrl: 64^1}, end]}"
-RS_PROGRAM = "[{hold: 3, ctrl: ^8}, {}, end]"
-GT_RS_INS = "i1: {ctrl: [{ctrl: 65}, end]}"
+RS_INS = "i1: {ctrl: [{ctrl: 65, gate: 1}, end], restart: r1}"
+RS_PROGRAM = "[{hold: 3, ctrl: ^8, gate: 0}, {}, end]"
+GT_RS_INS = "i1: {ctrl: [{ctrl: 65}, end], restart: r1}"
 
 
 def rs_song(p1, program=RS_PROGRAM, ins=RS_INS, pr="defmon"):
@@ -187,10 +187,11 @@ def test_unfold_refuses_a_restart_without_room(events, match):
 
 
 def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
-    text = songio.dumps(songio.loads(rs_song("-*4, C3.i1!restart:@r1*8")))
+    text = songio.dumps(songio.loads(rs_song("-*4, C3.i1*8")))
     ir = songio.loads(text)
     assert songio.dumps(ir) == text
-    assert "!restart:@r1" in text and "filter" not in text and "restart" not in ir["records"]
+    assert f"restart: {RS_PROGRAM}}}" in text and "filter" not in text
+    assert "restart" not in ir["records"]
     steps = compile_phrase(ir["phrases"]["p1"])
     assert steps[1, 3] == LAYER_B and steps[4, 0] == 1 and not steps[2:4].any()
     assert ir["records"]["sidtab"][steps[1, 4]] == {
@@ -202,29 +203,32 @@ def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
         "next": 0,
     }
     assert grid(ir, 8)[1:, 4].tolist() == [0, 8, 8, 8, 65, 65, 65]
+
+
+def test_the_writer_folds_a_lone_layer_b_start_into_the_notes_instrument():
+    plain = RS_INS.replace(", restart: r1", "")
+    native = f"{plain}\n        i2: {{filter: [{{ctrl: ^8, gate: 0}}, end]}}"
+    native += "\n        i3: {ctrl: [{ctrl: 17, gate: 1}], end]}".replace("}]", "}")
     folded = songio.dumps(
-        songio.loads(
-            rs_song(
-                "-, -.i2*3, C3.i1*8", ins=f"{RS_INS}\n        i2: {{filter: [{{ctrl: ^8}}, end]}}"
-            )
-        )
+        songio.loads(rs_song("-, -.i2*3, C3.i1*8, -, -.i2*3, C3.i3*8, C3.i1*8", ins=native))
     )
-    assert "i2" not in folded and "[-*4, C3.i1!restart:@r1*8]" in folded
-    assert f"r1: {RS_PROGRAM}" in folded
+    assert "[-*4, C3.i1*12, C3.i2*8, C3.i3*8]" in folded
+    assert f"r1: {RS_PROGRAM}" in folded and folded.count("restart: r1}") == 2
+    assert songio.dumps(songio.loads(folded)) == folded
 
 
-RS_P1 = "-*4, C3.i1!restart:@r1*8"
+RS_P1 = "-*4, C3.i1*8"
 
 
 @pytest.mark.parametrize(
     "p1,program,pr,ins,match",
     [
-        ("-*2, C3.i1!restart:@r1*8", RS_PROGRAM, "defmon", RS_INS, "3 empty steps"),
+        ("-*2, C3.i1*8", RS_PROGRAM, "defmon", RS_INS, "3 empty steps"),
         (RS_P1, "[{}, end]", "defmon", RS_INS, "a row before its note"),
         (RS_P1, "[{hold: 3}, {ctrl: 9}, end]", "defmon", RS_INS, "can't express row"),
-        (RS_P1, "[{hold: 3, ctrl: ^8}, {}, {loop: 0}]", "defmon", RS_INS, "can't loop"),
+        (RS_P1, "[{hold: 3, ctrl: ^8, gate: 0}, {}, {loop: 0}]", "defmon", RS_INS, "can't loop"),
         (RS_P1, RS_PROGRAM, "goattracker2", GT_RS_INS, "restart: .*can't express row"),
-        ("C3.i1*8", RS_PROGRAM, "goattracker2", RS_INS, "ctrl holds no mask here"),
+        ("C3.i1*8", RS_PROGRAM, "goattracker2", GT_RS_INS, "ctrl holds no mask here"),
     ],
 )
 def test_the_reader_refuses_a_restart_it_cannot_play(p1, program, pr, ins, match):
@@ -250,7 +254,7 @@ def env_song(phrases, rows=ONCE, loop="~", defs=SW_ENV):
 def test_a_byte_reads_as_the_nibble_and_column_the_player_writes_it_with():
     atoms = (
         "C4.i1!sr:192*4, D4!sr:208*4, -!ad:66*4, -!ad:21*4, -!sr:247*4, -!ad:18*4, C4*4,"
-        " E4!legato:0!sr:241*4"
+        " E4!legato!sr:241*4"
     )
     ir = songio.loads(env_song({"p1": atoms}))
     assert commands(ir) == [
@@ -346,7 +350,7 @@ COL_DEFS = SW_ENV + "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
 
 
 def test_commands_in_different_columns_share_an_event():
-    atoms = "C4.i1*4, D4!sr:192!tempo:4*4, E4!run:@c1!tempo:4*4, F4!legato:0!tempo:4*4"
+    atoms = "C4.i1*4, D4!sr:192!tempo:4*4, E4!run:c1!tempo:4*4, F4!legato!tempo:4*4"
     text = songio.dumps(songio.loads(env_song({"p1": atoms}, defs=COL_DEFS)))
     ir = songio.loads(text)
     assert commands(ir)[1:] == [[[336, 12], [18, 4]], [[112, 2], [18, 4]], [[63, 0], [18, 4]]]
@@ -357,8 +361,8 @@ def test_commands_in_different_columns_share_an_event():
     "atoms,shown",
     [
         ("C4.i1!sr:192!tempo:4*4", "!sr and !tempo"),
-        ("C4.i1!run:@c1!funk:4/5*4", "!run and !funk"),
-        ("C4.i1*4, D4!sr:192!run:@c1*4", "!sr and !run"),
+        ("C4.i1!run:c1!tempo:4/5*4", "!run and !tempo"),
+        ("C4.i1*4, D4!sr:192!run:c1*4", "!sr and !run"),
     ],
 )
 def test_two_commands_in_one_column_are_refused_naming_both(atoms, shown):
@@ -374,7 +378,7 @@ def test_the_writer_refuses_two_fx_column_commands():
         songio.dumps(ir)
 
 
-# -- lifetime: !pulse:0 and !filter:0, a note that does not restart its instrument's program --
+# -- lifetime: !pw and !filter, a note that does not restart its instrument's program --
 
 SW_INS = """      ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '2048 + 16*min(64, φ)'}
@@ -386,7 +390,7 @@ GT_INS = """      x:
         pw1: '2048 + 16*min(3, φ)'
       ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(3, φ)',
-          restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]}
+          restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]}
         i2: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}
         i3: {sr: 240, ctrl: [{ctrl: 65, note: +0}, {run: pw1}, end]}
 """
@@ -406,7 +410,7 @@ def test_sidwizard_writes_the_flag_bits_on_the_notes_they_keep():
     plain, flagged = songio.loads(base), songio.loads(base)
     flagged["records"]["ins"][1]["flags"] = 0xD0
     text = songio.dumps(flagged)
-    written = "D4!pulse:0!filter:0*4, E4!pulse:0!filter:0*4"
+    written = "D4!pw!filter*4, E4!pw!filter*4"
     assert f"p1: [C4.i1*4, {written}, C4.i2*4, D4*4]" in text and "flags" not in text
     back = songio.loads(text)
     assert back["records"]["ins"][1]["flags"] == 0xD0 and "flags" not in back["records"]["ins"][2]
@@ -418,14 +422,12 @@ def test_sidwizard_writes_the_flag_bits_on_the_notes_they_keep():
 def test_lifetime_commands_take_no_command_slot_and_legato_notes_start_nothing():
     defs = SW_INS + "      x:\n        x1: (v - 7) % 65536\n"
     ir = songio.loads(
-        song(
-            "sidwizard", defs, {"p1": "C4.i1*4, D4!ad:16!freq:@x1!pulse:0*4, E4!legato:0!pulse:0*4"}
-        )
+        song("sidwizard", defs, {"p1": "C4.i1*4, D4!ad:16!freq:x1!pw*4, E4!legato!pw*4"})
     )
     assert ir["records"]["ins"][1]["flags"] == 0x50
     assert [code for code, _ in ir["phrases"]["p1"][1]["commands"]] == [288, 16]
     out = songio.dumps(ir)
-    assert "D4!ad:16!freq:@x1!pulse:0*4, E4!legato:0*4" in out
+    assert "D4!ad:16!freq:x1!pw*4, E4!legato*4" in out
     assert songio.dumps(songio.loads(out)) == out
 
 
@@ -441,39 +443,58 @@ def test_a_note_under_instruments_that_keep_and_restart_has_no_written_form():
         ("p2", 2, True),
         ("p3", 2, False),
     ]
-    assert "!pulse:0" not in songio.dumps(ir)
+    assert "!pw" not in songio.dumps(ir)
     ir["records"]["ins"][1]["flags"] = 0x50
-    with pytest.raises(songio.SongFormatError, match="keep and restart the pulse program"):
+    with pytest.raises(songio.SongFormatError, match="keep and restart the pw program"):
         songio.dumps(ir)
     ir["records"]["ins"][2]["flags"] = 0x50
-    assert ": [D4!pulse:0*4]" in songio.dumps(ir)
+    assert ": [D4!pw*4]" in songio.dumps(ir)
 
 
 def test_goattracker_accepts_the_command_where_no_program_starts_and_writes_it_implicitly():
     plain = songio.loads(song("goattracker2", GT_INS, {"p1": GT_PHRASE}))
-    kept = GT_PHRASE.replace("D4.i2", "D4.i2!pulse:0!filter:0").replace("E4", "E4!pulse:0")
+    kept = GT_PHRASE.replace("D4.i2", "D4.i2!pw!filter").replace("E4", "E4!pw")
     ir = songio.loads(song("goattracker2", GT_INS, {"p1": kept}))
-    assert ir == plain and "!pulse:0" not in songio.dumps(ir)
+    assert ir == plain and "!pw" not in songio.dumps(ir)
 
 
 @pytest.mark.parametrize(
     "pr,defs,atoms,match",
     [
-        ("sidwizard", SW_INS, "C4.i1*4, D4!pulse:0*4, E4*4", "is on some notes that start"),
-        ("sidwizard", SW_INS, "C4.i1!pulse:0*4, D4*4", "selects an instrument, which restarts"),
-        ("sidwizard", SW_INS, "C4.i1*4, -!filter:0*4", "!filter:0 needs a note"),
-        ("sidwizard", SW_INS, "C4.i1*4, D4!pulse:1*4", "the player can't express !pulse:1"),
-        ("goattracker2", GT_INS, "C4.i1!pulse:0*2", "whose instrument i1 starts the pulse"),
-        ("goattracker2", GT_INS, "F4.i3!pulse:0*2", "whose instrument i3 starts the pulse"),
-        ("goattracker2", GT_INS, "D4.i2!run:@pw1!pulse:0*2", "on a note that starts the program"),
+        ("sidwizard", SW_INS, "C4.i1*4, D4!pw*4, E4*4", "is on some notes that start"),
+        ("sidwizard", SW_INS, "C4.i1!pw*4, D4*4", "selects an instrument, which restarts"),
+        ("sidwizard", SW_INS, "C4.i1*4, -!filter*4", "!filter needs a note"),
+        ("sidwizard", SW_INS, "C4.i1*4, D4!pw:1*4", "the player can't express !pw:1"),
+        ("goattracker2", GT_INS, "C4.i1!pw*2", "whose instrument i1 starts the pw"),
+        ("goattracker2", GT_INS, "F4.i3!pw*2", "whose instrument i3 starts the pw"),
+        ("goattracker2", GT_INS, "D4.i2!run:pw1!pw*2", "on a note that starts the program"),
         (
             "defmon",
             "      ins:\n        i1: {ctrl: [{ctrl: 65}, end]}\n",
-            "C4.i1!filter:0",
-            "can't express !filter:0",
+            "C4.i1!filter",
+            "can't express !filter",
         ),
     ],
 )
 def test_the_reader_refuses_a_lifetime_command_the_player_cannot_play(pr, defs, atoms, match):
     with pytest.raises(songio.SongFormatError, match=f"{pr}: .*{match}"):
         songio.loads(song(pr, defs, {"p1": atoms}))
+
+
+def test_a_stop_command_names_its_slot():
+    text = song(
+        "goattracker2",
+        GT_INS,
+        {"p1": "C4.i1*2, -!pw:none*2, -!filter:none*2, -!run:none*2, D4.i3!run:pw1*2"},
+    )
+    ir = songio.loads(text)
+    assert commands(ir)[1:4] == [[9, 0], [10, 0], [8, 0]]
+    assert songio.dumps(ir) == songio.dumps(songio.loads(songio.dumps(ir)))
+    assert "-!pw:none*2, -!filter:none*2, -!run:none*2" in songio.dumps(ir)
+    for atoms, pointer in ((text, 0), (text.replace("-!pw:none", "-"), 2)):
+        player = SongPlayer(songio.loads(atoms))
+        player.render_grid(24)
+        assert player.cell("pptr", 0) == pointer
+    for wrong in ("-!run:pw", "-!pw:pw1", "-!pw:1"):
+        with pytest.raises(songio.SongFormatError):
+            songio.loads(text.replace("-!pw:none", wrong))

@@ -12,14 +12,14 @@ from unitracker.format import songio
 from unitracker.lift import backends
 from unitracker.player.vm import SongPlayer
 
-RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]"
+RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]"
 PULSE = "16*abs((φ - 32) % 128 - 64) + 512"
 
 
 def doc(ins: str, phrase: str, defs: str = "", steps: int = 8, extra: str = "") -> str:
     """A three-voice GoatTracker 2 document: voice 1 plays ``phrase``, the others rest; ``extra``
     rows follow the first."""
-    return f"""unitracker: 1.19
+    return f"""unitracker: 1.20
 playroutine: {{ref: goattracker2}}
 meta: {{title: t, author: a, released: r}}
 song:
@@ -32,7 +32,7 @@ song:
         p1: {phrase}
         p2: [-*{steps}]
     play: [p1, p2, p2]
-{extra}loop: 0
+{extra}  - {{loop: 0}}
 """
 
 
@@ -53,14 +53,15 @@ A, B, Z = "{ctrl: 65, note: +0}", "{ctrl: 33, note: +0}", "{ctrl: 17, note: +0}"
 I1 = ctrl()
 SCALE = "[C4.i1*2, D4*2, E4*2, F4*2]"
 C1 = "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
-RUN = "[C4.i1!run:@c1*2, D4!run:@c1*2, E4!run:@c1*2, F4!run:@c1*2]"
-LATE = "freq: '[φ >= 38]*(F(N + 1) - F(N))'"
+RUN = "[C4.i1!run:c1*2, D4!run:c1*2, E4!run:c1*2, F4!run:c1*2]"
+RUN_TWICE = RUN[:-1] + ", " + RUN[1:].replace("4", "5").replace(".i1", "")
+LATE = "freq: '(φ >= 38)*(F(N + 1) - F(N))'"
 I2_UNHEARD = ins_line("i2", f"ad: 9, {LATE}, ctrl: [{A}, end]")
 I2_HEARD = ins_line("i2", f"ad: 10, ctrl: [{A}, end]")
 TWO = "[C4.i1*2, D4.i2*2, E4.i1*2, F4.i2*2]"
 AS_I2 = "[C4.i1*2, D4*2, E4.i2*2, F4.i1*2]"
-TWO_RUNS = "[C4.i1!run:@c1*2, D4!run:@c2*2, E4!run:@c1*2, F4!run:@c2*2]"
-FREQS = "[C4.i1!freq:@x1*2, D4!freq:@x2*2, E4!freq:@x1*2, F4!freq:@x2*2]"
+TWO_RUNS = "[C4.i1!run:c1*2, D4!run:c2*2, E4!run:c1*2, F4!run:c2*2]"
+FREQS = "[C4.i1!freq:x1*2, D4!freq:x2*2, E4!freq:x1*2, F4!freq:x2*2]"
 PART = ", ".join(["C4.i1", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5", "F5", "G5"])
 HEARD_PART = "-*4, C4.i1*4, D4*4"
 LONG = "C5, D5, E5, F5, G5, A5, B5, C6, B5, A5, G5, F5"
@@ -84,7 +85,7 @@ def shared(ins: str) -> str:
 
 
 FIRES = {
-    "hoist": ("hoist", doc(I1, RUN, C1), ["hoist"], lambda t: "!run" not in t),
+    "hoist": ("hoist", doc(I1, RUN_TWICE, C1, steps=16), ["hoist"], lambda t: "!run" not in t),
     "merge instruments": (
         "instruments",
         doc(f"{I1}\n{I2_UNHEARD}", TWO),
@@ -149,7 +150,7 @@ FIRES = {
 }
 
 REFUSES = {
-    "hoist": ("hoist", doc(I1, RUN.replace("run:@c1", "ctrl:33")), ["hoist"]),
+    "hoist": ("hoist", doc(I1, RUN.replace("run:c1", "ctrl:33")), ["hoist"]),
     "merge instruments": ("instruments", doc(f"{I1}\n{I2_HEARD}", TWO), ["merge"]),
     "merge programs": (
         "programs",
@@ -224,7 +225,7 @@ def test_a_pass_refuses_the_edits_the_grid_hears(case):
 
 UNHOIST_FULL = doc(
     f"{I1}\n{I2_HEARD}",
-    AS_I2.replace("E4.i2", "E4.i2!legato:0!freq:@x1"),
+    AS_I2.replace("E4.i2", "E4.i2!legato!freq:x1"),
     "      x:\n        x1: (v + 32) % 65536\n",
 )
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from unitracker.format.codec import CodecError, RowCodec
+from unitracker.format.codec import CodecError, RowCodec, note_text
 from unitracker.format.records import RecordType
 
 
@@ -55,7 +55,7 @@ EIGHT = {"byte": "n", "none": 0x80, "abs": [0x81, 0xDF]}
 def test_a_note_byte_reads_absolute_relative_or_none(note, n, written):
     rows = codec({"n": 0x80}, {"keys": {"note": note}})
     assert rows.encode({"n": n}) == written
-    assert rows.decode({k: f"={v[1]}" if v[0] else v[1] for k, v in written.items()}) == {"n": n}
+    assert rows.decode({k: note_text(*v) for k, v in written.items()}) == {"n": n}
 
 
 @pytest.mark.parametrize("note", [{"byte": "n"}, {"byte": "n", "none": 0x80, "omit": "n == 0"}])

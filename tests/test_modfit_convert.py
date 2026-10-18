@@ -1,4 +1,4 @@
-"""v1.19 expressions in documents and the lift-time conversion of native modulations to them."""
+"""v1.20 expressions in documents and the lift-time conversion of native modulations to them."""
 
 import numpy as np
 import pytest
@@ -22,7 +22,7 @@ SW = library("sidwizard")["tables"]
 # A plain gated instrument whose hard restart turns the gate off two ticks ahead.
 INS = (
     "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], "
-    "restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]"
+    "restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]"
 )
 
 
@@ -41,12 +41,15 @@ def moves(words):
     return [int(d) for d in np.diff(words) if d]
 
 
+TEMPO = ("\nsong:", "\ntempo: 7\nsong:")
+
+
 def doc(playroutine, defs, phrase, extra="", silent=False):
-    """A v1.19 document playing phrase ``p1`` on every voice, or on voice 0 alone (``silent``)."""
+    """A v1.20 document playing phrase ``p1`` on every voice, or on voice 0 alone (``silent``)."""
     rest = "\n        p2: [off*8]" if silent else ""
     play = "[p1, p2, p2]" if silent else "[p1, p1, p1]"
     return f"""
-unitracker: 1.19
+unitracker: 1.20
 playroutine: {{ref: {playroutine}}}
 song:
   - def:
@@ -54,14 +57,14 @@ song:
       phrase:
         p1: {phrase}{rest}
     play: {play}
-loop: ~
+  - end
 """
 
 
 def gt_ir(phrase: str, ins: str = INS + "}"):
     """A one-voice goattracker2 song, the other voices silent."""
     defs = f"      ins:\n        i1: {ins}"
-    return songio.loads(doc("goattracker2, constants: {deftempo: 6}", defs, phrase, silent=True))
+    return songio.loads(doc("goattracker2", defs, phrase, silent=True).replace(*TEMPO))
 
 
 def sw_ir(phrase: str):
@@ -71,7 +74,7 @@ def sw_ir(phrase: str):
 
 
 GT_SONG = doc(
-    "goattracker2, constants: {deftempo: 6}",
+    "goattracker2",
     """      ins:
         i1: """
     + INS
@@ -79,15 +82,15 @@ GT_SONG = doc(
       x:
         x1: (v + 300) % 65536
         x2: 0""",
-    "[C4.i1, -!freq:@x1, -!freq:@x1, D4!legato:0!freq:@x2, -]",
-)
-SW_INS = "freq: '[φ >= 2]*W[N + 25]'"
+    "[C4.i1, -!freq:x1, -!freq:x1, D4!legato!freq:x2, -]",
+).replace(*TEMPO)
+SW_INS = "freq: '(φ >= 2)*W[N + 25]'"
 SW_SONG = doc(
     "sidwizard",
     """      ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '2048 + 2*min(4, φ)',
           """ + SW_INS + "}",
-    "[C4.i1*4, -!freq:@x1*4]",
+    "[C4.i1*4, -!freq:x1*4]",
     "      x:\n        x1: (v - 7) % 65536\n",
 )
 DM_VOICES = "      vinit: {0: {}, 1: {}, 2: {}}\n      ginit: {0: {}}\n"
@@ -100,8 +103,8 @@ DM_SONG = doc(
 DM_AF = doc(
     "defmon",
     """      ins:
-        i1: {ctrl: [{ctrl: 65, hold: 4}, {ctrl: 64}, end]}
-        i2: {ctrl: [{ctrl: 65, hold: 3}, {ctrl: 64}, end]}""",
+        i1: {ctrl: [{ctrl: 65, gate: 1, hold: 4}, {gate: 0}, end]}
+        i2: {ctrl: [{ctrl: 65, gate: 1, hold: 3}, {gate: 0}, end]}""",
     "[C4.i1*12, E4*12, G4.i2*12, A4.i1*12]",
     DM_VOICES,
 )
@@ -110,13 +113,17 @@ DM_AF = doc(
 # ---- expressions in documents ------------------------------------------------------------
 
 
-def test_funk_arguments_share_their_speed_table_rows():
-    text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
-    song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
+def test_swing_arguments_share_their_speed_table_rows():
+    text = doc(
+        "goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!tempo:6/9, -!tempo:6/9]"
+    )
+    song = songio.loads(text.replace("-!tempo:6/9]", "-!tempo:6/9, -!vtempo:3/4, -!tempo:7]"))
     assert song["records"]["speedtab"] == {1: {"l": 6, "r": 9}, 2: {"l": 3, "r": 4}}
     cmds = [e.get("command") or e["commands"][-1] for e in song["phrases"]["p1"]]
-    assert cmds == [[14, 1], [14, 1], [14, 2], [14, 0]]
-    assert "-!funk:3/4, -!funk:none]" in songio.dumps(song)
+    assert cmds == [[14, 1], [14, 1], [18, 2], [15, 7]]
+    assert "-!vtempo:3/4, -!tempo:7]" in songio.dumps(song)
+    with pytest.raises(songio.SongFormatError, match="can't express !tempo:none"):
+        songio.loads(text.replace("-!tempo:6/9]", "-!tempo:none]"))
 
 
 def test_goattracker_freq_command_pulse_expression_and_legato():
@@ -130,7 +137,7 @@ def test_goattracker_freq_command_pulse_expression_and_legato():
         "0",
         "1024 + 16*min(3, φ)",
     ]
-    dropped = GT_SONG.replace("D4!legato:0!freq:@x2", "D4!freq:@x2")
+    dropped = GT_SONG.replace("D4!legato!freq:x2", "D4!freq:x2")
     assert {64, 9} <= set(voice0(dropped, 34)[2][9:34])
 
 
@@ -166,26 +173,32 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "song,old,new,kept",
     [
-        (GT_SONG, "", "", ["pw: '1024 + 16*min(3, φ)'", "!legato:0!freq:@x2"]),
+        (GT_SONG, "", "", ["pw: '1024 + 16*min(3, φ)'", "!legato!freq:x2"]),
         (GT_SONG, "pw: '1024 + 16*min(3, φ)'", "pw: 2048", ["pw: 2048"]),
         (
             GT_SONG,
             INS + ",",
             INS + ", filter: [{cut: '1024', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
-            ["cut: '1024'", "cut: 512"],
+            ["cut: 1024", "cut: 512"],
         ),
         (
             GT_SONG,
             INS + ",",
             INS + ", filter: [{cut: '0', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
-            ["cut: '0'"],
+            ["cut: 0"],
+        ),
+        (
+            GT_SONG,
+            INS + ",",
+            INS + ", filter: [{cut: '1027', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
+            ["cut: '1027'"],
         ),
         (
             SW_SONG,
             SW_INS,
             SW_INS
             + ", filter: [{cut: '1024', res: 0, mode: 16}, {cut: 512, res: 3, mode: 32}, end]",
-            ["cut: '1024'", "cut: 512"],
+            ["cut: 1024", "cut: 512"],
         ),
     ],
 )
@@ -201,34 +214,35 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
 @pytest.mark.parametrize(
     "edits,match",
     [
-        ([("unitracker: 1.19", "unitracker: 1.8")], "not a unitracker v1.19 document"),
-        ([("-!freq:@x1, -!freq:@x1,", "-!noteglide:0, -!freq:@x1,")], "unknown command !noteglide"),
+        ([("unitracker: 1.20", "unitracker: 1.8")], "not a unitracker v1.20 document"),
+        ([("-!freq:x1, -!freq:x1,", "-!noteglide:0, -!freq:x1,")], "unknown command !noteglide"),
         (
             [("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]")],
             "unknown key for in pw",
         ),
         ([("x1: (v + 300) % 65536", "x1: v / 2")], "outside the grammar"),
         ([("x1: (v + 300) % 65536", "x1: W[N]")], "unknown table 'W'"),
-        ([("x1: (v + 300) % 65536", "x1: '[0 < v < 9]'")], "not one comparison"),
+        ([("x1: (v + 300) % 65536", "x1: '(0 < v < 9)'")], "not one comparison"),
+        ([("x1: (v + 300) % 65536", "x1: '[v > 9]*v'")], r"a comparison is written \(a op b\)"),
         ([("x1: (v + 300) % 65536", "x1: sqrt(v)")], "calls no grammar function"),
         ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
-        ([("-!freq:@x1, -!freq:@x1,", "-!freq:@x9, -!freq:@x1,")], "unknown name 'x9'"),
+        ([("-!freq:x1, -!freq:x1,", "-!freq:x9, -!freq:x1,")], "unknown name 'x9'"),
         (
-            [("-!freq:@x1, -!freq:@x1,", "-!funk:6, -!freq:@x1,")],
-            r"!funk: the argument is 2 values",
+            [("-!freq:x1, -!freq:x1,", "-!tempo:6/9/7, -!freq:x1,")],
+            r"!tempo: the argument is 2 values",
         ),
         (
-            [("-!freq:@x1, -!freq:@x1,", "-!funk:6/256, -!freq:@x1,")],
-            r"!funk: each value is a byte",
+            [("-!freq:x1, -!freq:x1,", "-!tempo:6/256, -!freq:x1,")],
+            r"!tempo: each value is a byte",
         ),
         (
-            [("-!freq:@x1, -!freq:@x1,", "-!run:6/9, -!freq:@x1,")],
+            [("-!freq:x1, -!freq:x1,", "-!run:6/9, -!freq:x1,")],
             r"can't express !run:6/9 in",
         ),
         (
             [
                 ("      x:\n", "      x:\n" + MANY),
-                ("-!freq:@x1, -!freq:@x1", "-!freq:@y1, -!freq:@y299"),
+                ("-!freq:x1, -!freq:x1", "-!freq:y1, -!freq:y299"),
             ],
             "argument is a byte",
         ),
@@ -245,7 +259,7 @@ def test_the_reader_refuses_old_forms_bad_arguments_and_text_outside_the_grammar
 
 def test_expressions_compile_to_the_grammar_semantics():
     ns = {"_F": lambda k: 1000 + k, "_T": {"W": lambda i: 2 * i}}
-    f = xexpr.compile_expr("[v >= 3]*(F(N) % 7) - abs(-φ) + max(W[2], 1) + min(v, -3)", ns)
+    f = xexpr.compile_expr("(v >= 3)*(F(N) % 7) - abs(-φ) + max(W[2], 1) + min(v, -3)", ns)
     assert f(3, 2, 4) == (1004 % 7) - 2 + 4 - 3 and f(2, 0, 4) == 4 - 3 + 1 - 1
     floor = xexpr.compile_expr("φ // 30 - v // 4", {"_T": {}})
     assert [floor(-5, phi, 0) for phi in (0, 29, 30, 61)] == [2, 2, 3, 4]
@@ -266,16 +280,16 @@ def test_a_selected_expression_must_exist():
         SongPlayer(song)
 
 
-CSILLAG_GATE = "'[φ >= 15]*((-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33]) % 65536)'"
-ACID_STEP = "v % 65536 + 2560)*[v % 65536 < 62976]"
+CSILLAG_GATE = "(-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33])*(φ >= 15)"
+ACID_STEP = "v % 65536 + 2560)*(v % 65536 < 62976)"
 
 
 @pytest.mark.parametrize(
     "name,ticks,old,new",
     [
-        ("metal_warrior", 3840, "x1: (v + 32) % 65536", "x1: (v + 33) % 65536"),
-        ("metal_warrior", 3840, "C4!legato:0!freq:@x2", "C4!freq:@x2"),
-        ("csillag", 3 * 2304, CSILLAG_GATE, CSILLAG_GATE.replace("[φ >= 15]", "[φ >= 14]")),
+        ("metal_warrior", 3840, "x1: v + 32", "x1: v + 33"),
+        ("metal_warrior", 3840, "C4!legato!freq:x2", "C4!freq:x2"),
+        ("csillag", 3 * 2304, CSILLAG_GATE, CSILLAG_GATE.replace("(φ >= 15)", "(φ >= 14)")),
         ("crosseyed", None, ACID_STEP, ACID_STEP.replace("2560", "2304", 1)),
     ],
 )
@@ -595,7 +609,7 @@ def test_the_offset_is_folded_into_the_cut_expressions(acid):
     assert not np.array_equal(want[:, 22], regs(acid_ir(0), 400)[:, 22])
     assert len(np.unique(want[:, 22])) > 20
     text = songio.dumps(acid.out)
-    assert "cp:" not in text and "acid:" not in text and "cut: '" in text
+    assert "cp:" not in text and "acid:" not in text and "{cut: (" in text
     song = songio.loads(text)
     assert songio.dumps(song) == text and np.array_equal(regs(song, 400), want)
 

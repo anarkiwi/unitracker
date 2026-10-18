@@ -19,7 +19,7 @@ TUNES = ("metal_warrior", "crosseyed", "csillag")
 BACKEND = {"metal_warrior": "goattracker2", "crosseyed": "defmon", "csillag": "sidwizard"}
 COMMANDS = {
     "metal_warrior": {"run", "freq", "legato", "tempo"},
-    "crosseyed": {"restart"},
+    "crosseyed": set(),
     "csillag": {"freq", "ad", "sr", "run", "legato"},
 }
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,7 +106,7 @@ def test_the_players_share_only_the_shared_vocabulary(references):
     for a in TUNES:
         for b in set(TUNES) - {a}:
             assert used[a][0] & used[b][0] <= set(ROW_KEYS) | {"restart"}
-    assert not used["csillag"][0] & (set(COMMAND_NAMES) - {"restart"} - set(ROW_KEYS))
+    assert not used["csillag"][0] & (set(COMMAND_NAMES) - set(ROW_KEYS))
 
 
 @pytest.mark.parametrize("name", TUNES)

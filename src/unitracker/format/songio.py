@@ -1,4 +1,4 @@
-"""Read and write unitracker v1.19 documents: a header, then one timeline of definitions and plays.
+"""Read and write unitracker v1.20 documents: a header, then one timeline of definitions and plays.
 
 The player runs the expanded internal representation (``"unitracker": "ir"``): every
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
@@ -12,7 +12,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker.format import hints, refkeys, timeline, xexpr
+from unitracker.format import refkeys, tempo, timeline, xexpr
 from unitracker.format.atoms import format_atom, parse_atom, runs
 from unitracker.format.codec import (
     COMMAND_NAMES,
@@ -22,15 +22,16 @@ from unitracker.format.codec import (
     CommandCodec,
     Evaluator,
     RowCodec,
-    arg_text,
+    command_text,
     inline_row,
     inline_text,
     is_expr,
     note_text,
+    plain_constants,
     row_place,
     written_value,
 )
-from unitracker.format.events import column, envelope, fold, instrument, lifetime, restart
+from unitracker.format.events import column, envelope, fold, instrument, lifetime
 from unitracker.format.schema import expand
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.tablepatch import table_diff, unread_dropped
@@ -39,17 +40,17 @@ from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
 from unitracker.player.modulation import declared
 from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
 
-VERSION = "1.19"
+VERSION = "1.20"
 WIDTH = 100
 PHRASE = "phrase"
-DOC_KEYS = ("unitracker", "playroutine", "meta", "hints", "clock", "voices", "song", "loop")
+DOC_KEYS = ("unitracker", "playroutine", "meta", "clock", "voices", "tempo", "song")
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 DEFAULTS = {"clock": {"cycles_per_tick": 19656, "clock_hz": 985248}, "voices": 3}
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.19 format."""
+    """A document does not follow the unitracker v1.20 format."""
 
 
 @functools.cache
@@ -63,6 +64,11 @@ def _library_text(name: str) -> str:
 def library(name: str) -> dict:
     """The library definition of playroutine ``name``, named by its file."""
     return expand({"name": name, **yaml.safe_load(_library_text(name))})
+
+
+def song_rows(doc: dict) -> list:
+    """The rows of a written document's ``song``, without its ``end`` or ``{loop: k}``."""
+    return doc["song"][:-1]
 
 
 def defaults(pr: dict) -> dict:
@@ -128,7 +134,7 @@ def _player(pr, call, *args):
 
 
 class _Writer:
-    """Turns the internal representation into a canonical v1.19 document."""
+    """Turns the internal representation into a canonical v1.20 document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -152,6 +158,11 @@ class _Writer:
         self.names = {}
         self.row = 0
         self.phrase_names = {}
+        self.driven = {
+            u["site"]["record"]: u["key"]
+            for u in declared(self.pr).get("units") or []
+            if u.get("site") and self.rtypes[u["site"]["record"]].expr is not None
+        }
         _player(self.pr, column.check, self.pr, ir["phrases"])
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         native = (self.pr.get("instrument") or {}).get("type")
@@ -161,6 +172,7 @@ class _Writer:
         )
         self.records.update({native: rows} if native in self.records else {})
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
+        plain_constants(self.codecs, self.rtypes, self.records, self.exprs)
 
     # -- objects: (type, index); chained types are programs keyed by their entry row --
 
@@ -337,6 +349,13 @@ class _Writer:
             self.row_value(rtype, self._row(rtype, i), row_place(k, len(path), loop is None))
             for k, i in enumerate(path)
         ]
+        if (
+            loop is None
+            and len(rows) == 1
+            and list(rows[0]) == [self.driven.get(rtype.name)]
+            and isinstance(rows[0][self.driven[rtype.name]], int)
+        ):
+            return rows[0][self.driven[rtype.name]]
         rows.append(Atom("end") if loop is None else FlowMap(loop=loop))
         return Flow(rows)
 
@@ -370,26 +389,29 @@ class _Writer:
                 name = self.names[(self.ins_type, ins - self.ins_base)]
             commands = [self.command(c, a) for c, a in zip(cmds[::2], cmds[1::2])]
             commands = [c for c in commands if c is not None]
-            commands += [f"{n}:0" for n in lifetime.names(keep)]
+            commands += lifetime.names(keep)
             out.append(Atom(format_atom(kind, note - self.offset, steps, name, commands)))
         return Flow(out)
 
     def command(self, cmd: int, raw: int) -> str | None:
-        """A command as ``name:arg``, or None for no command."""
+        """A command as ``name[:arg]``, or None for no command."""
         if not (cmd or raw):
             return None
-        if cmd == restart.CODE:
-            return f"{restart.NAME}:@{self.names[(restart.NAME, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         if isinstance(value, tuple) and self.commands.inline(name):
             rtype = self.rtypes[value[0]]
-            return f"{name}:{inline_text(rtype, self._row(rtype, value[1]))}"
+            row = {f: int(self._row(rtype, value[1]).get(f, rtype.default(f))) for f in rtype.own}
+            try:
+                self.commands.check_inline(name, row)
+            except CodecError as exc:
+                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+            return f"{name}:{inline_text(rtype, row)}"
         if isinstance(value, tuple) and not self.commands.values(name):
-            return f"{name}:@{self.names[self.key(*value)]}"
-        return f"{name}:{arg_text(value)}"
+            return f"{name}:{self.names[self.key(*value)]}"
+        return command_text(name, value)[1:]
 
     # -- document --
 
@@ -399,9 +421,6 @@ class _Writer:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             cmds = row[3:EVENT_COLUMNS]
             for cmd, arg in zip(cmds[::2], cmds[1::2]):
-                if cmd == restart.CODE:
-                    yield (restart.NAME, int(arg)), "command"
-                    continue
                 target = self.commands.ref(int(cmd))
                 if target is not None and not self.commands.inline(int(cmd)):
                     none = self.rtypes[target].none
@@ -463,7 +482,7 @@ class _Writer:
         return defs
 
     def song(self):
-        """``(hints, song rows, loop)`` with definitions placed at first use."""
+        """``(song rows, loop)`` with definitions placed at first use."""
         rows, loop = timeline.to_rows(
             self.ir["tracks"],
             {n: len(compile_phrase(ev)) for n, ev in (self.ir["phrases"] or {}).items()},
@@ -479,9 +498,7 @@ class _Writer:
             item = {"def": item_defs} if item_defs else {}
             item["play"] = Flow(self._entry(e, alias, pnames) for e in row)
             out.append(item)
-        reason, found = hints.written(self.ir.get("hints"), {len(compiled[b]) for b in phrase_row})
-        _refuse(reason)
-        return found, out, loop
+        return out, loop
 
     @staticmethod
     def _entry(entry, alias, pnames):
@@ -521,12 +538,18 @@ class _Writer:
         return {**pr, "tables": diff} if diff else pr
 
     def environment(self) -> dict:
-        """``clock`` and ``voices`` where they differ from the defaults."""
+        """``clock``, ``voices`` and ``tempo`` where they differ from the defaults."""
         base = defaults(self.pr)
         env = {}
         for key in ("clock", "voices"):
             if key in self.ir and self.ir[key] != base[key]:
                 env[key] = FlowMap(self.ir[key]) if isinstance(self.ir[key], dict) else self.ir[key]
+        value = self.ir.get(tempo.NAME)
+        if value is not None:
+            _refuse(tempo.problem(self.pr, value))
+            value = tempo.written(*tempo.pair(value))
+            if value != tempo.default(self.pr):
+                env[tempo.NAME] = Flow(value) if isinstance(value, list) else value
         return env
 
 
@@ -540,7 +563,7 @@ def _transpose_key(arr):
 
 
 def dumps(ir: dict, embed: bool = False, respell=None) -> str:
-    """A canonical v1.19 document for internal-representation song ``ir``.
+    """A canonical v1.20 document for internal-representation song ``ir``.
 
     With ``embed`` the playroutine and its tables are written in full instead of by reference;
     ``respell(doc)`` rewrites the written structure before it is dumped (spelling studies).
@@ -552,12 +575,9 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
         "playroutine": writer.playroutine_entry(embed),
         "meta": FlowMap({k: meta[k] for k in ("title", "author", "released") if k in meta}),
     }
-    found, rows, loop = writer.song()
-    if found:
-        doc["hints"] = FlowMap(found)
+    rows, loop = writer.song()
     doc.update(writer.environment())
-    doc["song"] = rows
-    doc["loop"] = loop
+    doc["song"] = [*rows, Atom(timeline.END) if loop is None else FlowMap(loop=loop)]
     doc = respell(doc) if respell else doc
     return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
 
@@ -566,7 +586,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
 
 
 class _Reader:
-    """Expands a v1.19 document to the internal representation."""
+    """Expands a v1.20 document to the internal representation."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -806,16 +826,13 @@ class _Reader:
             event["note"] = "off" if parsed["kind"] == 2 else "on"
         if parsed["ins"] is not None:
             event["instrument"] = self.lookup(parsed["ins"], self.ins_type) + self.ins_base
-        written = [c for c in parsed["commands"] if c[0] not in lifetime.NAMES]
+        written = [c for c in parsed["commands"] if not lifetime.is_lifetime(*c)]
         if len(written) > MAX_COMMANDS:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
         commands = [self.command(cmd, arg, atom) for cmd, arg in written]
         refs = {self.commands.ref(code) for code, _ in commands}
         keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"], refs)
         event.update({"keep": keep} if keep else {})
-        for code, index in [c for c in commands if c[0] == restart.CODE]:
-            event["restart"] = index
-            commands.remove([code, index])
         if len(commands) == 1:
             event["command"] = commands[0]
         elif commands:
@@ -835,14 +852,12 @@ class _Reader:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd not in COMMAND_NAMES:
             raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
-        if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
-            return [restart.CODE, self.lookup(arg[1:], restart.NAME)]
-        if self.commands.inline(cmd) and arg != NONE:
+        if self.commands.inline(cmd) and isinstance(arg, tuple):
             arg = self._inline(cmd, arg, atom)
         elif isinstance(arg, str) and arg != NONE:
-            if arg[1:] not in self.names:
-                raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
-            arg = self.names[arg[1:]]
+            if arg not in self.names:
+                raise SongFormatError(f"unknown name {arg!r} in {atom!r}")
+            arg = self.names[arg]
         try:
             return list(self.commands.decode(cmd, arg))
         except CodecError as exc:
@@ -856,6 +871,10 @@ class _Reader:
             row = inline_row(rtype, values)
         except CodecError as exc:
             raise SongFormatError(f"!{cmd}: {exc} in {atom!r}") from exc
+        try:
+            self.commands.check_inline(cmd, row)
+        except CodecError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
         rows = self.records[rtype.name]
         index = next((i for i, r in rows.items() if r == row), None)
         if index is None:
@@ -864,9 +883,16 @@ class _Reader:
         return rtype.name, index
 
     def _collect(self, song):
-        """Define every record and phrase; ``(phrase atoms, play rows)``."""
-        if not isinstance(song, list) or not song:
-            raise SongFormatError("song must be a list of rows")
+        """Define every record and phrase; ``(phrase atoms, play rows, loop row or None)``."""
+        if not isinstance(song, list) or len(song) < 2:
+            raise SongFormatError("song must be a list of rows then end or {loop: k}")
+        song, term = song[:-1], song[-1]
+        if term == timeline.END:
+            loop = None
+        elif isinstance(term, dict) and set(term) == {"loop"} and isinstance(term["loop"], int):
+            loop = term["loop"]
+        else:
+            raise SongFormatError(f"the song ends with end or {{loop: k}}, not {term!r}")
         phrases, rows = {}, []
         for r, item in enumerate(song):
             if not isinstance(item, dict) or "play" not in item:
@@ -881,26 +907,29 @@ class _Reader:
                         self._define(tname, name, value)
             rows.append([self._entry(e) for e in item["play"]])
         self._resolve()
-        return phrases, rows
+        return phrases, rows, loop
 
     def read(self) -> dict:
         """The internal representation."""
         doc = self.doc
-        phrases, rows = self._collect(doc.get("song"))
+        phrases, rows, loop = self._collect(doc.get("song"))
         events = {
             name: self._unfolded([self.event(a) for a in atoms], name)
             for name, atoms in phrases.items()
         }
         lengths = {name: len(compile_phrase(ev)) for name, ev in events.items()}
         voices = int(doc.get("voices", self.defaults["voices"]))
-        tracks = timeline.from_rows(rows, doc.get("loop"), lengths, voices)
+        try:
+            tracks = timeline.from_rows(rows, loop, lengths, voices)
+        except timeline.TimelineError as exc:
+            raise SongFormatError(str(exc)) from exc
         _player(self.pr, self.lifetime.read, tracks, events, self.records, self.names)
         ir = {
             "unitracker": IR_VERSION,
             "meta": dict(doc.get("meta") or {}),
-            "hints": dict(doc.get("hints") or {}),
             "clock": dict(doc.get("clock") or self.defaults["clock"]),
             "voices": voices,
+            **({tempo.NAME: self._tempo()} if self.pr.get(tempo.NAME) or tempo.NAME in doc else {}),
             "tables": self.tables,
             "playroutine": self.pr,
             "records": {k: v for k, v in self.records.items() if v and not self.folds.held(k)},
@@ -911,6 +940,12 @@ class _Reader:
         ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).read, ir, self.records)
         _player(self.pr, column.check, self.pr, ir["phrases"])
         return ir
+
+    def _tempo(self):
+        """The document's initial tempo, else the playroutine's default."""
+        value = self.doc.get(tempo.NAME, tempo.default(self.pr))
+        _refuse(None if value is None else tempo.problem(self.pr, value))
+        return value
 
     @staticmethod
     def _entry(entry):
@@ -925,25 +960,24 @@ class _Reader:
 
 
 def loads(text: str) -> dict:
-    """The internal representation of a v1.19 document."""
+    """The internal representation of a v1.20 document."""
     doc = parse(text)
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
     for key in sorted(set(doc) - set(DOC_KEYS)):
         raise SongFormatError(f"unknown key {key} in document")
-    _refuse(hints.problem(doc.get("hints")))
     return _Reader(doc).read()
 
 
 def load(path) -> dict:
-    """The internal representation of the v1.19 document at ``path``."""
+    """The internal representation of the v1.20 document at ``path``."""
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read())
 
 
 def dump(ir: dict, path, embed: bool = False) -> None:
-    """Write ``ir`` as a v1.19 document to ``path``, atomically."""
+    """Write ``ir`` as a v1.20 document to ``path``, atomically."""
     text = dumps(ir, embed)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".unitracker-", suffix=".tmp")

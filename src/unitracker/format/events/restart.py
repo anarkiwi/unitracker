@@ -1,9 +1,9 @@
 """Event restarts: a note's ``restart`` program, played by one command on the steps before it.
 
-With ``restart: {command: c}`` a note's ``!restart:@r`` is command ``c``, run as many steps
-(ticks) before the note as the program's lookahead rows hold, with those rows as a program of
-the command's record type; the program's last row, on the note's first tick, is empty.
-"""
+With ``instrument: {event: {restart: c}}`` a note's restart (its instrument's ``restart``) is
+command ``c``, run as many steps (ticks) before the note as the program's lookahead rows hold,
+with those rows as a program of the command's record type; its last row, on the note's first
+tick, is empty."""
 
 import numpy as np
 

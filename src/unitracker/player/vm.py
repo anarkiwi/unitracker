@@ -5,7 +5,7 @@ from collections.abc import Iterator
 import numpy as np
 from tqdm import tqdm
 
-from unitracker.format import xexpr
+from unitracker.format import tempo, xexpr
 from unitracker.format.expr import ExprError, Resolver
 from unitracker.format.records import EXPR, record_types
 from unitracker.player import modulation
@@ -576,6 +576,7 @@ class SongPlayer:
         self.globals = [init for _, init in gen.gcells.values()]
         self._index = (gen.gindex, gen.vindex)
         self.voice_cells = _voice_cells(song, gen)
+        self._set_tempo(gen, tempo.cells(pr, song.get(tempo.NAME)))
         self.table_reads: dict[str, set[int]] | None = None
         namespace = {
             "g": self.globals,
@@ -601,6 +602,19 @@ class SongPlayer:
         self.starts: list[int | None] = [None] * len(song["tracks"])
         self.regs = [0] * REG_COUNT
         self.ticks = 0
+
+    def _set_tempo(self, gen, cells: dict) -> None:
+        """Start each of ``cells`` at its value: a global cell, or a voice cell in every voice."""
+        for name, value in cells.items():
+            if name in gen.gindex:
+                mask = gen.gcells[name][0]
+                self.globals[gen.gindex[name]] = value if mask is None else value & mask
+                continue
+            if name not in gen.vindex:
+                raise SongError(f"the tempo sets unknown cell {name!r}")
+            mask = gen.vcells[name][0]
+            for cells_ in self.voice_cells:
+                cells_[gen.vindex[name]] = value if mask is None else value & mask
 
     def _reader(self, tables):
         """A table read that records each in-range index it reads, per table."""

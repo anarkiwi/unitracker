@@ -1,8 +1,8 @@
 """Modulator expressions: the format's grammar text, checked and compiled for the player.
 
 Integer literals, ``+ - *``, ``//`` (floor division), ``%`` (floor modulo), ``abs``, ``min``,
-``max``, Iverson brackets ``[a op b]`` (op one of ``== != < <= > >=``), ``v``, ``φ``, ``N``,
-``F(k)`` (the frequency of note k) and ``T[k]`` for a named playroutine table ``T``.
+``max``, a comparison ``(a op b)`` as 1 or 0 (op one of ``== != < <= > >=``), ``v``, ``φ``,
+``N``, ``F(k)`` (the frequency of note k) and ``T[k]`` for a named playroutine table ``T``.
 """
 
 import ast
@@ -55,8 +55,12 @@ class _Source:
             return f"(-{self(node.operand)})"
         if isinstance(node, ast.BinOp) and type(node.op) in _BINARY:
             return f"({self(node.left)} {_BINARY[type(node.op)]} {self(node.right)})"
-        if isinstance(node, ast.List) and len(node.elts) == 1:
-            return self.bracket(node.elts[0])
+        if isinstance(node, ast.Compare):
+            return self.compare(node)
+        if isinstance(node, ast.List):
+            raise ExpressionError(
+                f"{ast.unparse(node)!r} is outside the grammar: a comparison is written (a op b)"
+            )
         if isinstance(node, ast.Call):
             return self.call(node)
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
@@ -67,13 +71,13 @@ class _Source:
             return f"_T[{name!r}]({self(node.slice)})"
         raise ExpressionError(f"{ast.unparse(node)!r} is outside the grammar")
 
-    def bracket(self, node) -> str:
-        """An Iverson bracket of one comparison."""
-        if not (isinstance(node, ast.Compare) and len(node.ops) == 1):
-            raise ExpressionError(f"[{ast.unparse(node)}] is not one comparison")
+    def compare(self, node) -> str:
+        """One comparison, 1 when it holds, else 0."""
+        if len(node.ops) != 1:
+            raise ExpressionError(f"({ast.unparse(node)}) is not one comparison")
         op = _COMPARE.get(type(node.ops[0]))
         if op is None:
-            raise ExpressionError(f"[{ast.unparse(node)}] compares with no grammar operator")
+            raise ExpressionError(f"({ast.unparse(node)}) compares with no grammar operator")
         return f"(1 if {self(node.left)} {op} {self(node.comparators[0])} else 0)"
 
     def call(self, node) -> str:

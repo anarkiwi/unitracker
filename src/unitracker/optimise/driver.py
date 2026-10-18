@@ -48,12 +48,9 @@ def _apply(ir: dict, edit: tuple) -> dict | None:
 
 
 def _written(ir: dict | None, embed: bool = False):
-    """``(text, tokens, read back)`` of a candidate, or None when it can't be written. The
-    writer restates the ``phrase_steps`` hint from the candidate's phrases."""
+    """``(text, tokens, read back)`` of a candidate, or None when it can't be written."""
     if ir is None:
         return None
-    if "phrase_steps" in (ir.get("hints") or {}):
-        ir = {**ir, "hints": {k: v for k, v in ir["hints"].items() if k != "phrase_steps"}}
     try:
         text = songio.dumps(ir, embed)
         return text, tokens(text), songio.loads(text)

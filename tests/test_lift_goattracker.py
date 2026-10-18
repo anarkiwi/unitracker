@@ -103,27 +103,48 @@ def test_instruments_and_default_tempo():
     assert gt._default_tempo(song) == 6  # pylint: disable=protected-access
 
 
-def _tempo_phrases(*commands):
-    return {"a": [{"command": list(c)} for c in commands]}
+def test_the_initial_tempo_is_the_default_tempo_byte_plus_one():
+    pr = songio.library("goattracker2")
+    assert gt.initial_tempo(5, pr) == 6 and gt.initial_tempo(0, pr) == [9, 6]
+    with pytest.raises(gt.LiftError, match="default tempo of 1"):
+        gt.initial_tempo(1, pr)
+
+
+def tempo_rows(*commands):
+    """A rising scale on voice 1 with each ``(row, command, argument)`` set."""
+    rows = [(24 + k, 1 if k == 0 else 0, 0, 0) for k in range(16)]
+    for k, code, arg in commands:
+        rows[k] = (*rows[k][:2], code, arg)
+    return rows
 
 
 @pytest.mark.parametrize(
-    "commands,deftempo,expected",
+    "commands,written",
     [
-        ([], 5, 6),
-        ([], 1, None),
-        ([(0xF, 16)], 11, 16),
-        ([(0xF, 16), (0xF, 16)], 11, 16),
-        ([(0xF, 16), (0xF, 8)], 11, None),
-        ([(0xF, 0x90)], 11, None),
-        ([(0xE, 1)], 11, None),
-        ([(0x1, 1), (0xF, 16)], 11, None),
-        ([(0x1, 1), (0xF, 12)], 11, 12),
+        ([(0, 14, 1)], ["C2.i1!tempo:6/9,"]),
+        ([(0, 14, 1), (8, 15, 0)], ["C2.i1!tempo:6/9,", "G#2!tempo:6/9,"]),
+        ([(0, 15, 1)], ["C2.i1!tempo:6/9,"]),
+        ([(0, 14, 0)], ["C2.i1!tempo:9/6,"]),
+        ([(0, 15, 0x80)], ["C2.i1!vtempo:9/6,"]),
+        ([(0, 15, 0x81)], ["C2.i1!vtempo:6/9,"]),
+        ([(0, 15, 0), (4, 15, 0x81)], ["C2.i1!tempo:9/6,", "E2!vtempo:6/9,"]),
     ],
 )
-def test_ticks_per_step(commands, deftempo, expected):
-    tracks = [{"plays": [{"phrase": "a"}]}]
-    assert gt.ticks_per_step(_tempo_phrases(*commands), tracks, deftempo) == expected
+def test_a_swing_names_its_pair_and_plays_the_player(commands, written):
+    text, _, _ = lifted(
+        *gt_tune([(0x41, 0), (0xFF, 0)], rows=tempo_rows(*commands), speed=[(6, 9)])
+    )
+    assert all(w in text for w in written) and "speedtab" not in text
+
+
+def test_a_swing_on_the_stored_pair_meeting_two_pairs_is_not_covered():
+    dec, _ = gt_tune(
+        [(0x41, 0), (0xFF, 0)], rows=tempo_rows((4, 15, 0), (8, 14, 1)), speed=[(6, 9)]
+    )
+    with pytest.raises(
+        gt.LiftError, match=r"meets the pairs \[\(6, 9\), \(9, 6\)\]; named, it plays differently"
+    ):
+        gt.lift(dec, expressions=False)
 
 
 def test_phrase_folds_empty_rows():
@@ -194,15 +215,16 @@ def test_the_reference_lift_holds_the_tunes_constants(references):
     song = references["metal_warrior"].ir()
     assert song["meta"]["title"] == "Metal Warrior Title Remix"
     assert song["clock"] == gt.PAL_CLOCK
-    assert song["playroutine"]["constants"] == {"adparam": 0x0F00, "deftempo": 11}
+    assert song["playroutine"]["constants"] == {"adparam": 0x0F00} and song["tempo"] == 12
     assert [len(t["plays"]) for t in song["tracks"]] == [5, 5, 5]
     assert len(song["tables"]["ftab"]) == 128
     assert song["records"]["ins"][1]["sr"] == 0x88
 
 
 COMMANDS_SONG = """
-unitracker: 1.19
-playroutine: {ref: goattracker2, constants: {deftempo: 6}}
+unitracker: 1.20
+playroutine: {ref: goattracker2}
+tempo: 7
 song:
   - def:
       pw:
@@ -217,7 +239,7 @@ song:
         p1: [C4.i1*8]
         p2: [off*8]
     play: [p1, p2, p2]
-loop: ~
+  - end
 """
 
 
@@ -273,9 +295,9 @@ WAVETABLE_TUNES = {
             "speed": SPEEDS,
         },
         ("ins", "i1", "ctrl"),
-        [FIRST, {"freq": "(v + 16) % 65536"}, {"freq": "(v + 16) % 65536"}, ...]
-        + [{"freq": "(v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2) % 65536"}]
-        + [{"freq": "(v + 32) % 65536"}, {"ctrl": 65}, {"loop": 6}],
+        [FIRST, {"freq": "v + 16"}, {"freq": "v + 16"}, ...]
+        + [{"freq": "v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2"}]
+        + [{"freq": "v + 32"}, {"ctrl": 65}, {"loop": 6}],
     ),
     "an unheard waveform pause is a waveform row": (
         {
@@ -386,8 +408,8 @@ VIBRATO = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "vibrato_
 NOTES = [(24, 1, 0, 0)] + [REST] * 7 + [(31, 1, 0, 0), REST, (36, 1, 0, 0)] + [REST] * 5
 RESUMED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 0, 1, 1)] + [REST] * 3 + [(31, 1, 0, 0)]
 CHANGED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 2, 0, 0)] + [REST] * 3 + [(36, 2, 0, 0)]
-RESUMED_ATOMS = ["C2.i1*4", "-!freq:@x1", "-!freq:@x2", "-!freq:@x2", "-!freq:@x2", "G2.i1*8"]
-CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:@x1", "-!freq:@x1", "-!freq:@x1", "-!freq:@x1", "C3.i2*8"]
+RESUMED_ATOMS = ["C2.i1*4", "-!freq:x1", "-!freq:x2", "-!freq:x2", "-!freq:x2", "G2.i1*8"]
+CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1", "-!freq:x1", "-!freq:x1", "-!freq:x1", "C3.i2*8"]
 
 
 # Each case: instrument 1's vibrato delay, the rows, a second instrument, a fragment of each
@@ -395,16 +417,16 @@ CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:@x1", "-!freq:@x1", "-!freq:@x1", "-!freq
 @pytest.mark.parametrize(
     "delay,rows,second,freqs,atoms",
     [
-        (1, NOTES, None, {"i1": "[(φ - 2) % 8 >= 4]"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
-        (3, NOTES, None, {"i1": "[φ >= 2]"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
-        (40, NOTES, None, {"i1": "[φ >= 38]"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
+        (1, NOTES, None, {"i1": "((φ - 2) % 8 >= 4)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
+        (3, NOTES, None, {"i1": "(φ >= 2)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
+        (40, NOTES, None, {"i1": "(φ >= 38)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
         (0, TWO_NOTES, None, {"i1": None}, ["C2.i1*8", "G2.i1*8"]),
         (3, RESUMED + [REST] * 7, None, {}, RESUMED_ATOMS),
         (
             3,
             CHANGED + [REST] * 7,
             {**VIBRATO, "vibrato_param": 2, "vibrato_delay": 1},
-            {"i1": "[φ >= 2]", "i2": "F((N + 1) % 128)"},
+            {"i1": "(φ >= 2)", "i2": "F((N + 1) % 128)"},
             CHANGED_ATOMS,
         ),
     ],
@@ -422,10 +444,9 @@ def test_the_instrument_vibrato_is_the_instrument_freq(delay, rows, second, freq
     assert first["phrase"]["p1"] == atoms
 
 
-def test_funk_carries_its_tempos():
-    rows = [(24 + k, 1, 14 if k == 0 else 0, 1 if k == 0 else 0) for k in range(16)]
+def test_a_swing_alternates_its_tempos():
+    rows = tempo_rows((0, 14, 1))
     text, _, _ = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, speed=[(6, 9)]))
-    assert "C2.i1!funk:6/9," in text and "speedtab" not in text
     grid = SongPlayer(songio.loads(text)).render_grid(120).astype(int)
     steps = np.diff([t for t in range(1, 120) if grid[t, 0] != grid[t - 1, 0]])
     assert set(steps[::2]) == {6} and set(steps[1::2]) == {9}

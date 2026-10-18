@@ -85,11 +85,11 @@ def locations(doc: dict) -> dict:
                 if isinstance(row, dict):
                     rows(f"{where} row {k}", row)
 
-    for item in doc["song"]:
+    for item in songio.song_rows(doc):
         for kind, defs in (item.get("def") or {}).items():
             for name, value in (defs or {}).items():
                 if kind == "x":
-                    out.setdefault(str(value), []).append(f"!freq:@{name}")
+                    out.setdefault(str(value), []).append(f"!freq:{name}")
                 elif kind != "phrase" and isinstance(name, str):
                     rows(name, value)
     return out

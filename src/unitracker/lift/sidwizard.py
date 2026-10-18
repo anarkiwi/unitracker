@@ -10,6 +10,7 @@ from pysidwizard.player import freq_tables
 from unitracker.format.codec import CodecError, CommandCodec
 from unitracker.format.records import chained, record_types
 from unitracker.format.songio import library, song_meta
+from unitracker.format.tempo import written
 from unitracker.modfit.convert import convert
 from unitracker.player.vm import fold_empty
 
@@ -36,10 +37,8 @@ CHORD_FX = 0x70
 BIG_FX = (0x01, 0x02, 0x03)
 GLIDE = 0x03
 # The tempo FX as the playroutine's codes: every voice's tempo (the player's $10, whose code
-# !freq takes) and swing, this voice's tempo and swing, which the playroutine does not declare.
-VOICE_TEMPO, VOICE_SWING = 0x13, 0x14
-TEMPO_FX = {0x10: 0x12, 0x11: 0x11, VOICE_TEMPO: VOICE_TEMPO, VOICE_SWING: VOICE_SWING}
-TEMPO_CODES = set(TEMPO_FX.values())
+# !freq takes) and swing, this voice's tempo and swing.
+TEMPO_FX = {0x10: 0x12, 0x11: 0x11, 0x13: 0x13, 0x14: 0x14}
 INST_COLUMN = 0x100
 NOTE_COLUMN = 0x200
 HR_TIMER, HR_STACCATO, HR_FIRSTCTRL, FLAGS = 0x03, 0x04, 0x08, 0xF0
@@ -144,7 +143,8 @@ def restart_rows(control: int, hrad: int, hrsr: int, first: int) -> tuple:
     """The hard-restart program of an instrument header's control byte, as hashable rows.
 
     Bits 0 and 1 fire the restart one and two ticks before the row applies; bit 2 makes it
-    staccato (control $18); bit 3 writes the first waveform on the note's first tick.
+    staccato (control $18); bit 3 writes the first waveform on the note's first tick, which gates
+    the voice on.
     """
     timer = control & HR_TIMER
     if timer == HR_TIMER:
@@ -155,9 +155,8 @@ def restart_rows(control: int, hrad: int, hrsr: int, first: int) -> tuple:
         if control & HR_STACCATO:
             ahead["ctrl"] = STACCATO
         rows.append(ahead)
-    note = {"ctrl": first} if control & HR_FIRSTCTRL else {}
-    if rows or note:
-        rows.append(note)
+    if rows or control & HR_FIRSTCTRL:
+        rows.append({"gate": 1, **({"ctrl": first} if control & HR_FIRSTCTRL else {})})
     return tuple(tuple(sorted(row.items())) for row in rows)
 
 
@@ -287,17 +286,14 @@ def shared_commands() -> CommandCodec:
 
 
 def tempo_command(fx: int, value: int) -> tuple[int, int]:
-    """A tempo FX as ``(command, argument)``. One voice's swing of two equal tempos is that
-    voice's tempo; any other has no shared form."""
+    """A tempo FX as ``(command, argument)``."""
     code, arg = TEMPO_FX[fx], value
-    if fx == VOICE_SWING and value >> 4 == value & 0x0F:
-        code, arg = VOICE_TEMPO, value & 0x0F
     try:
         shared_commands().encode(code, arg)
     except CodecError as exc:
         raise LiftError(
-            f"tempo FX ${fx:02X} ${value:02X} is not covered: a tempo is 3-127 ticks (0: 6),"
-            " a swing for every voice"
+            f"tempo FX ${fx:02X} ${value:02X} is not covered: a tempo is 3-127 ticks, a swing"
+            " tempo 3-15 (0: 6)"
         ) from exc
     return code, arg
 
@@ -558,21 +554,16 @@ class Instruments:
         return empty
 
 
-def tempo(swm, phrases: dict) -> tuple[dict, dict]:
-    """The subtune's tempo pair as playroutine constants, and the hints it and the phrases'
-    tempo commands give."""
+def tempo(swm):
+    """The subtune's initial tempo as written: both bytes of its pair when neither has bit 7
+    clear (the player's single tempo, the first byte), each a tempo byte (0 plays 6)."""
     left, right = swm.subtune_tempos[0] if swm.subtune_tempos else (6, 6)
     if left & 0x80 and right & 0x80:
         right = left
-    ticks = {(left & 0x7F) or 6, (right & 0x7F) or 6}
-    for events in phrases.values():
-        for event in events:
-            for code, arg in _commands(event):
-                if code in TEMPO_CODES:
-                    value = shared_commands().encode(code, arg)[1]
-                    ticks.update(value if isinstance(value, tuple) else (value,))
-    hints = {"ticks_per_step": ticks.pop()} if len(ticks) == 1 else {}
-    return {"tempol": left & 0x7F, "tempor": right & 0x7F}, hints
+    try:
+        return written(*(shared_commands().encode(0x12, b & 0x7F)[1] for b in (left, right)))
+    except CodecError as exc:
+        raise LiftError(f"the subtune's tempo ${left:02X} ${right:02X} is not covered") from exc
 
 
 def freq(swm, features) -> tuple[bytes, bytes]:
@@ -606,10 +597,9 @@ def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
     chord_runs(tracks, phrases, instruments.waves)
     fold_octaves(tracks, phrases, instruments.records)
     playroutine = library("sidwizard")
-    playroutine["constants"], hints = tempo(swm, phrases)
     ir = {
         "unitracker": "ir",
-        "hints": hints,
+        "tempo": tempo(swm),
         "meta": song_meta(SidImage.from_bytes(raw).header, f"sidwizard subtune {subtune}"),
         "clock": PAL_CLOCK,
         "voices": 3,

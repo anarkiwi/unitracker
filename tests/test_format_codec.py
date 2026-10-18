@@ -1,13 +1,11 @@
 """Shared vocabulary: each library playroutine's row codecs and command codes, the written forms of
 their values, and the command and `ctrl` row key tables of docs/playroutines."""
 
-import contextlib
 import functools
 import itertools
 import math
 import re
 from importlib import resources
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,7 +22,6 @@ from unitracker.format.codec import (
     RowCodec,
     ctrl_text,
     ctrl_value,
-    envelope_names,
     evaluate,
     note_text,
     note_value,
@@ -33,7 +30,6 @@ from unitracker.format.codec import (
     row_place,
     written_value,
 )
-from unitracker.format.events import lifetime, restart
 from unitracker.format.records import RecordTypeError, record_types
 from unitracker.player.vm import SongPlayer
 
@@ -58,7 +54,7 @@ EDGES += tuple(range(0xF0, 0xFE))
 ROWS = {
     ("goattracker2", "ctrltab"): [
         ({"w": 0xE9, "n": 0}, {"ctrl": 9, "note": "+0"}),
-        ({"w": 129, "n": 196}, {"ctrl": 129, "note": "=68"}),
+        ({"w": 129, "n": 196}, {"ctrl": 129, "note": "G#5"}),
         ({"w": 1, "n": 5}, {"wait": 1, "note": "+5"}),
         ({"w": 65, "n": 0x80}, {"ctrl": 65}),
         ({"w": 0, "n": 12}, {"note": "+12"}),
@@ -104,7 +100,7 @@ ROWS = {
         ({"w": 0x21, "a": 0xF4, "d": 0xF0}, {"ctrl": 0x21, "note": "-12", "freq": -16}),
         ({"w": 0, "a": 5}, {"note": "+5"}),
         ({"w": 3, "a": 0x80, "d": 0x80, "h": 3}, {"hold": 4, "freq": -128}),
-        ({"w": 0x0F, "a": 0x99, "h": 0x0F}, {"hold": 16, "note": "=24"}),
+        ({"w": 0x0F, "a": 0x99, "h": 0x0F}, {"hold": 16, "note": "C2"}),
         ({"w": 0x50, "a": 0x7F}, None),
         ({"w": 0x50, "a": 0, "h": 0x40}, None),
         ({"w": 5, "a": 3, "h": 2}, None),
@@ -123,15 +119,25 @@ ROWS = {
     ("defmon", "sidtab"): [
         (
             {"dl": 1, "wgh": 80, "wgl": 5, "ad": 0, "sr": 68, "tr": 12, "xp": 2},
-            {"hold": 2, "ctrl": "80^5", "note": "+12", "ad": 0, "sr": 68, "pw": ("x", 2)},
+            {
+                "hold": 2,
+                "ctrl": "81^4",
+                "gate": 1,
+                "note": "+12",
+                "ad": 0,
+                "sr": 68,
+                "pw": ("x", 2),
+            },
         ),
         (
             {"dl": 1, "wgh": 64, "wgl": 1, "af": 0x80, "xf": 2, "xc": 5},
-            {"hold": 2, "ctrl": "64^1", "freq": ("x", 2), "cut": ("x", 5)},
+            {"hold": 2, "ctrl": 65, "gate": 1, "freq": ("x", 2), "cut": ("x", 5)},
         ),
-        ({"dl": 242, "tr": 180}, {"note": "=28"}, {"tr": 180}),
-        ({"wgl": 8}, {"ctrl": "^8"}),
-        ({"wgh": 16}, {"ctrl": 16}),
+        ({"dl": 242, "tr": 180}, {"note": "E2"}, {"tr": 180}),
+        ({"wgl": 8}, {"ctrl": "^8", "gate": 0}),
+        ({"wgl": 0}, {"gate": 0}),
+        ({"wgh": 16}, {"ctrl": 17}),
+        ({"wgh": 17}, None),
         ({"re": 0}, {"route": "-"}),
         ({"re": 0xF8}, {"res": 15, "route": "+ 8"}),
         ({"re": 0x9F}, {"res": 9, "route": "+ 15"}),
@@ -154,7 +160,8 @@ RESTARTS = {
         (FIRST, {"hold": 4, **HR}, True),
         (FIRST, {"hold": 63, "gate": 0}, True),
         (FIRST, {}, True),
-        (LAST, {"ctrl": 9, "gate": 1}, True),
+        (LAST, {"ctrl": 9}, True),
+        (LAST, {"gate": 1}, True),
         (LAST, {"gate": 0}, True),
         (LAST, {}, True),
         (FIRST, {"hold": 64, "gate": 0}, False),
@@ -163,16 +170,18 @@ RESTARTS = {
         (FIRST, {"ctrl": 9}, False),
         (MIDDLE, {"hold": 2}, False),
         (LAST, {"hold": 2}, False),
-        (LAST, {"ctrl": 9}, False),
-        (LAST, {"ctrl": 0xFE, "gate": 1}, False),
-        (ONLY, {"ctrl": 9, "gate": 1}, False),
-        (LAST, {"ctrl": "^8", "gate": 1}, False),
+        (LAST, {"ctrl": 9, "gate": 0}, False),
+        (LAST, {"ctrl": 0xFE}, False),
+        (ONLY, {"ctrl": 9}, False),
+        (LAST, {"ctrl": "^8"}, False),
     ],
     "sidwizard": [
         (FIRST, {"hold": 2, "ctrl": 0x18, **HR}, True),
         (FIRST, {**HR, "ad": 0x2F}, True),
         (LAST, {"ctrl": 9}, True),
-        (ONLY, {}, True),
+        (ONLY, {"gate": 1}, True),
+        (ONLY, {}, False),
+        (LAST, {"ctrl": 9, "gate": 0}, False),
         (FIRST, {"hold": 3, **HR}, False),
         (FIRST, {"hold": 2, "ctrl": 0x20, **HR}, False),
         (FIRST, {"hold": 2, "ad": 0x0F, "sr": 0}, False),
@@ -180,7 +189,10 @@ RESTARTS = {
         (LAST, {"gate": 0}, False),
     ],
     "defmon": [
-        (FIRST, {"hold": 3, "ctrl": "65^1", "ad": 9}, True),
+        (FIRST, {"hold": 3, "ctrl": 65, "gate": 1, "ad": 9}, True),
+        (FIRST, {"hold": 3, "ctrl": "65^8", "gate": 0}, True),
+        (FIRST, {"hold": 3, "ctrl": "^8"}, False),
+        (FIRST, {"hold": 3, "ctrl": 64, "gate": 1}, False),
         (LAST, {}, True),
         (LAST, {"ctrl": 65}, False),
     ],
@@ -191,7 +203,7 @@ REFUSALS = {
     ("goattracker2", "ctrltab"): [
         ({"ctrl": 0xE5}, r"values of \['ctrl'\]"),
         ({"ctrl": 9, "wait": 1}, "values of"),
-        ({"note": "=0"}, r"values of \['note'\]"),
+        ({"note": "C0"}, r"values of \['note'\]"),
         ({"vol": 16}, "no shape"),
         ({"res": 0, "route": 0}, "no shape"),
         ({"res": 1, "route": 0, "filter": NONE}, "values of"),
@@ -229,15 +241,21 @@ COMMAND_ROWS = {
         (15, 2, ("tempo", 3), (15, 3)),
         (15, 0x90, ("vtempo", 16)),
         (12, 128, ("cut", 1024)),
+        (11, 0xC1, ("resfilt", (12, 1))),
         (13, 15, ("vol", 15)),
         (13, 0x20, ("mark", 0x20)),
         (8, 3, ("run", ("ctrltab", 3))),
         (10, 2, ("run", ("filttab", 2))),
         (16, 3, ("freq", ("x", 3))),
         (16, 0, ("freq", NONE)),
-        (17, 0, ("legato", 0)),
-        (14, 0, ("funk", NONE)),
-        (14, 6, ("funk", ("speedtab", 6))),
+        (17, 0, ("legato", None)),
+        (14, 0, None),
+        (18, 7, ("vtempo", ("speedtab", 7))),
+        (18, 0, None),
+        (8, 0, ("run", NONE)),
+        (9, 0, ("pw", NONE)),
+        (10, 0, ("filter", NONE)),
+        (14, 6, ("tempo", ("speedtab", 6))),
         (15, 0, None),
         (17, 1, None),
         (4, 1, None),
@@ -245,11 +263,13 @@ COMMAND_ROWS = {
     "sidwizard": [
         (16, 3, ("freq", ("x", 3))),
         (16, 0, ("freq", NONE)),
-        (63, 0, ("legato", 0)),
+        (63, 0, ("legato", None)),
         (112, 5, ("run", ("wftab", 5))),
         (112, 0, ("run", NONE)),
-        (17, 0x57, ("funk", (5, 7))),
-        (17, 0x0F, ("funk", (6, 15)), (17, 0x6F)),
+        (17, 0x57, ("tempo", (5, 7))),
+        (17, 0x0F, ("tempo", (6, 15)), (17, 0x6F)),
+        (20, 0x3F, ("vtempo", (3, 15))),
+        (20, 0x12, None),
         (18, 0x84, ("tempo", 4), (18, 4)),
         (18, 0, ("tempo", 6), (18, 6)),
         (19, 127, ("vtempo", 127)),
@@ -264,16 +284,22 @@ COMMAND_REFUSALS = {
         ("cut", 1025),
         ("tempo", 2),
         ("run", 5),
-        ("funk", ("ctrltab", 1)),
-        *(("funk", v) for v in [(6, 256), (6,), (6, 6, 6), 6]),
+        ("tempo", ("ctrltab", 1)),
+        ("resfilt", 0xC1),
+        ("resfilt", (16, 1)),
+        ("tempo", NONE),
+        ("vtempo", NONE),
         ("legato", 1),
+        ("legato", 0),
         ("freq", 5),
     ],
     "sidwizard": [
         ("freq", 5),
         ("legato", 1),
+        ("legato", 0),
         ("tempo", 2),
-        *(("funk", v) for v in [(2, 6), (6, 16), (16, 6), (6,), (6, 6, 6), 6, NONE, ("x", 1)]),
+        *(("tempo", v) for v in [(2, 6), (6, 16), (16, 6), (6,), (6, 6, 6), NONE, ("x", 1)]),
+        *(("vtempo", v) for v in [(2, 6), (6, 16), (6, 6, 6)]),
     ],
     "defmon": [("vol", 15)],
 }
@@ -459,13 +485,13 @@ def test_expression_and_reference_keys():
 def test_defmon_programs_end_on_a_freeze():
     c = CODECS["defmon"]["sidtab"]
     end = {"dl": 0x80, "tr": 180, "af": 0x80, "xf": 1}
-    c.check_end({"dl": 0x80, "tr": 180}, {"note": "=28"})
-    c.check_end(end, {"note": "=28", "freq": "v + 1"})
+    c.check_end({"dl": 0x80, "tr": 180}, {"note": "E2"})
+    c.check_end(end, {"note": "E2", "freq": "v + 1"})
     bad = [
         ({"dl": 0x80}, {"hold": 3}),
-        (end, {"note": "=28"}),
-        (end, {"note": "=29", "freq": "v"}),
-        ({"dl": 0x80, "tr": 180}, {"note": "=28", "freq": "v"}),
+        (end, {"note": "E2"}),
+        (end, {"note": "F2", "freq": "v"}),
+        ({"dl": 0x80, "tr": 180}, {"note": "E2", "freq": "v"}),
     ]
     for raw, row in bad:
         with pytest.raises(CodecError, match="can't end"):
@@ -473,7 +499,10 @@ def test_defmon_programs_end_on_a_freeze():
     doc = {
         "unitracker": songio.VERSION,
         "playroutine": {"ref": "defmon"},
-        "song": [{"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}],
+        "song": [
+            {"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3},
+            "end",
+        ],
     }
     with pytest.raises(songio.SongFormatError, match="can't end a program"):
         songio.loads(yaml.safe_dump(doc))
@@ -529,12 +558,10 @@ def test_command_names_the_player_cannot_say_are_refused(player):
             continue
         with pytest.raises(CodecError, match="a byte"):
             cmds.decode(name, (ref, 256))
-        codes = {c for c, n, r, _ in cmds.entries if n == name and r is not None}
-        if len(codes) > 1:
-            with pytest.raises(
-                CodecError, match=re.escape(f"can't say which of commands {sorted(codes)}")
-            ):
-                cmds.encode(code, TYPES[player][ref].none)
+        if TYPES[player][ref].chain is not None:
+            slot = cmds.spelled(name, ref, NONE)
+            assert cmds.encode(code, TYPES[player][ref].none) == (slot, NONE)
+            assert cmds.decode(slot, NONE) == (code, TYPES[player][ref].none)
     assert all(cmds.ref(code) == ref for code, ref in cmds.unnamed.items())
 
 
@@ -599,8 +626,8 @@ def test_codec_expressions_read_only_declared_tables():
         (
             note_value,
             lambda v: note_text(*v),
-            [("=68", (True, 68)), ("-3", (False, -3)), ("=-24", (True, -24)), ("+5", (False, 5))],
-            [True, "=+3", "x", 1.5],
+            [("G#5", (True, 68)), ("-3", (False, -3)), ("C0", (True, 0)), ("+5", (False, 5))],
+            [True, "=68", "x", 1.5, "H2"],
         ),
         (
             route_value,
@@ -649,8 +676,12 @@ def defmon_doc(vinit, ginit=None):
         "def": {"vinit": {0: vinit}, "ginit": {0: ginit or {}}, "phrase": {"p1": ["-*4"]}},
         "play": ["p1"] * 3,
     }
-    doc = {"unitracker": songio.VERSION, "playroutine": {"ref": "defmon"}, "song": [song]}
-    return songio.loads(yaml.safe_dump({**doc, "loop": 0}))
+    doc = {
+        "unitracker": songio.VERSION,
+        "playroutine": {"ref": "defmon"},
+        "song": [song, {"loop": 0}],
+    }
+    return songio.loads(yaml.safe_dump(doc))
 
 
 def nfreq(note):
@@ -660,14 +691,14 @@ def nfreq(note):
 
 @pytest.mark.parametrize("freq", [3, -5, 0])
 def test_defmon_init_keys_mean_what_they_mean_in_rows(freq):
-    ir = defmon_doc({"pw": 0x0567, "note": "=36", **({"freq": freq} if freq else {})}, {"sub": 1})
+    ir = defmon_doc({"pw": 0x0567, "note": "C3", **({"freq": freq} if freq else {})}, {"sub": 1})
     voice, word = ir["records"]["vinit"][0], nfreq(60) + freq
     assert (voice["pw"], voice["tbase"], voice["flo"] | voice["fhi"] << 8) == (0x0567, 60, word)
     assert ir["records"]["ginit"][0] == {"sub": 1}
     grid = SongPlayer(ir).render_grid(2)
     assert list(grid[0][0:4]) == [word & 0xFF, word >> 8, 0x67, 0x05]
     text = songio.dumps(ir)
-    assert f"0: {{note: =36, pw: 1383{f', freq: {freq}' if freq else ''}}}" in text
+    assert f"0: {{note: C3, pw: 1383{f', freq: {freq}' if freq else ''}}}" in text
     assert songio.dumps(songio.loads(text)) == text
 
 
@@ -697,7 +728,7 @@ def test_defmon_init_cells_without_a_written_form_are_refused():
 
 
 DM_ROUTES = """
-unitracker: 1.19
+unitracker: 1.20
 playroutine: {ref: defmon}
 song:
   - def:
@@ -709,7 +740,7 @@ song:
         p1: [-*8]
         p2: [-.i1*2, -.i2*4, -.i3*2]
     play: [p1, p2, p1]
-loop: 0
+  - {loop: 0}
 """
 
 
@@ -723,7 +754,7 @@ def test_defmon_routes_relative_to_the_programs_voice():
 
 
 SW_CHORD = """
-unitracker: 1.19
+unitracker: 1.20
 playroutine: {ref: sidwizard}
 song:
   - def:
@@ -733,9 +764,9 @@ song:
       ctrl:
         c1: [{hold: 3, ctrl: 17, note: +4}, {hold: 3, ctrl: 17, note: +7}, {loop: 0}]
       phrase:
-        p1: [C4.i1*4, C4!run:@c1*4]
+        p1: [C4.i1*4, C4!run:c1*4]
     play: [p1, p1, p1]
-loop: 0
+  - {loop: 0}
 """
 
 
@@ -753,18 +784,22 @@ def test_sidwizard_chords_are_ctrl_programs_started_by_run():
 def atom_doc(player: str, atom: str) -> str:
     return (
         f"unitracker: {songio.VERSION}\nplayroutine: {{ref: {player}}}\nsong:\n  - def:\n"
-        f"      phrase:\n        p1: ['{atom}']\n    play: [p1, p1, p1]\nloop: 0\n"
+        f"      phrase:\n        p1: ['{atom}']\n    play: [p1, p1, p1]\n  - {{loop: 0}}\n"
     )
 
 
 @pytest.mark.parametrize(
     "player,played,refused",
     [
-        ("goattracker2", [], ["tempo:2"]),
+        (
+            "goattracker2",
+            ["tempo:3", "tempo:6/7", "vtempo:2/129", "vtempo:5", "tempo:6/6"],
+            ["tempo:2", "tempo:1/7", "vtempo:6/130", "tempo:none", "vtempo:none"],
+        ),
         (
             "sidwizard",
-            ["tempo:3", "vtempo:127", "funk:3/15", "funk:6/7"],
-            ["tempo:2", "vtempo:128", "funk:2/6", "funk:6/16", "funk:6", "funk:none"],
+            ["tempo:3", "vtempo:127", "tempo:3/15", "tempo:6/7", "vtempo:3/15"],
+            ["tempo:2", "vtempo:128", "tempo:2/6", "tempo:6/16", "vtempo:6/16", "tempo:none"],
         ),
         ("defmon", [], ["tempo:6"]),
     ],
@@ -778,220 +813,3 @@ def test_documents_take_the_timing_commands_the_player_plays(player, played, ref
             match=f"^{player}: the player can't express !{re.escape(command)} in ",
         ):
             songio.loads(atom_doc(player, f"-!{command}"))
-
-
-DOCS = Path(__file__).resolve().parents[1] / "docs" / "playroutines"
-HEADER = "| command | argument |"
-KEYS_HEADER = "| `ctrl` row key | forms |"
-
-
-def spans(values) -> str:
-    """Sorted integers as runs of one step: ``a``, ``a-b`` or ``a-b step s``."""
-    values, out, k = sorted(values), [], 0
-    while k < len(values):
-        j, step = k, values[k + 1] - values[k] if k + 1 < len(values) else 1
-        while j + 1 < len(values) and values[j + 1] - values[j] == step:
-            j += 1
-        if j - k < (1 if step == 1 else 2):
-            out.append(f"{values[k]}")
-            k += 1
-            continue
-        out.append(f"{values[k]}-{values[j]}" + ("" if step == 1 else f" step {step}"))
-        k = j + 1
-    return ", ".join(out)
-
-
-def cell(values: set) -> str:
-    """The written values a command takes: for an argument of several values, each position's
-    runs joined by ``/``, which hold only when every combination is taken."""
-    if not all(isinstance(v, tuple) for v in values):
-        return spans(values)
-    columns = [{v[k] for v in values} for k in range(len(next(iter(values))))]
-    assert len(values) == math.prod(map(len, columns)), sorted(values)
-    return "/".join(spans(c) for c in columns)
-
-
-def readable(cmds, code: int, name: str, var: dict):
-    """The written values of command ``name`` that variant ``var`` of ``code`` reads: each tuple of
-    bytes for one with ``args``, else what encoding each byte argument gives."""
-    if "args" in var:
-        tried = itertools.product(range(256), repeat=len(var["args"]))
-    else:
-        tried = []
-        for arg in range(256):
-            with contextlib.suppress(CodecError):
-                ename, value = cmds.encode(code, arg)
-                tried += [value] if ename == name else []
-    for value in tried:
-        with contextlib.suppress(CodecError):
-            cmds.decode(name, value)
-            yield value
-
-
-def accepted(player: str) -> dict:
-    """``{name: cell}``: what each shared command takes in the playroutine."""
-    pr, rtypes, cmds = LIBS[player], TYPES[player], COMMANDS[player]
-    values, refs = {}, {}
-    for code, name, ref, var in cmds.entries:
-        if ref is not None and cmds.inline(code):
-            refs.setdefault(name, []).append("/".join(["0-255"] * len(rtypes[ref].own)))
-            continue
-        if ref is not None:
-            refs.setdefault(name, []).append(f"`@{rtypes[ref].written}`")
-            continue
-        values.setdefault(name, set()).update(readable(cmds, code, name, var))
-    cells = {n: cell(v) for n, v in values.items()}
-    for name in envelope_names(pr.get("commands")):
-        cells[name] += ", at most one nibble from the instrument's"
-    for name, names in refs.items():
-        try:
-            names += [f"`{NONE}`"] if cmds.decode(name, NONE) else []
-        except CodecError:
-            pass
-        cells[name] = ", ".join(names)
-    if pr.get(restart.NAME):
-        cells[restart.NAME] = f"`@{restart.NAME}`"
-    cells.update({n: "0" for n in pr.get(lifetime.NAME) or {}})
-    return cells
-
-
-def key_forms(player: str) -> dict:
-    """``{key: text}``: the forms each row key takes in the playroutine's ``ctrl`` programs."""
-    rtypes = TYPES[player]
-    rtype = next(t for t in rtypes.values() if t.written == "ctrl")
-    forms = {}
-    for shape in RowCodec(rtype, rtype.codec, 0).shapes:
-        for key, spec in shape.keys.items():
-            found = forms.setdefault(key, {})
-            found.update(dict.fromkeys(["value"] if "value" in spec else []))
-            found.update(dict.fromkeys(["`^n`"] if "eor" in spec else []))
-            found.update(dict.fromkeys(["`+ m`, `-`"] if "rel" in spec else []))
-            found.update(dict.fromkeys(["expression"] if "expr" in spec else []))
-            found.update(dict.fromkeys([f"`{NONE}`"] if spec.get("none") else []))
-            found.update(
-                dict.fromkeys([f"`{rtypes[spec['ref']].written}` name"] if "ref" in spec else [])
-            )
-    return {k: ", ".join(v) for k, v in forms.items()}
-
-
-def documented(player: str, header: str) -> list[str]:
-    """The lines of the table under ``header`` as docs/playroutines/<player>.md has them."""
-    lines = (DOCS / f"{player}.md").read_text().splitlines()
-    start = lines.index(header) if header in lines else len(lines)
-    end = next((k for k in range(start, len(lines)) if not lines[k].startswith("|")), len(lines))
-    return lines[start:end]
-
-
-@pytest.mark.parametrize("player", PLAYERS)
-def test_the_documented_tables_are_the_playroutines(player):
-    cells, keys = accepted(player), key_forms(player)
-    names = (n for n in (*COMMAND_NAMES, *lifetime.NAMES) if n in cells)
-    commands = [HEADER, "|---|---|"] + [f"| `!{n}` | {cells[n]} |" for n in names]
-    row_keys = [KEYS_HEADER, "|---|---|"] + [
-        f"| `{k}` | {keys[k]} |" for k in ROW_KEYS if k in keys
-    ]
-    assert documented(player, HEADER) == commands, "\n".join(commands)
-    assert documented(player, KEYS_HEADER) == row_keys, "\n".join(row_keys)
-
-
-def test_spans():
-    cases = [
-        ([0], "0"),
-        (range(256), "0-255"),
-        (range(0, 2041, 8), "0-2040 step 8"),
-        ([1, 2, 3, 7], "1-3, 7"),
-        ([1, 5, 6, 7], "1, 5-7"),
-        ([2, 4, 9], "2, 4, 9"),
-        ([2, 4, 6, 9], "2-6 step 2, 9"),
-    ]
-    assert [spans(values) for values, _ in cases] == [text for _, text in cases]
-
-
-SCHEMA = (DOCS / "schema.md").read_text()
-
-
-def schema_section(heading: str) -> str:
-    """The text of docs/playroutines/schema.md under ``## heading``, up to the next one."""
-    return SCHEMA.split(f"\n## {heading}\n", 1)[1].split("\n## ", 1)[0]
-
-
-def table_rows(text: str) -> dict[str, str]:
-    """Each backticked name of a table's first column, mapped to its row's last cell."""
-    rows = (line.split("|")[1:-1] for line in text.splitlines() if line.startswith("| `"))
-    return {n: cells[-1] for cells in rows for n in re.findall(r"`(\w+)", cells[0])}
-
-
-def code_words(text: str) -> set[str]:
-    """The identifiers in the backticked spans and fenced blocks of ``text``."""
-    code = re.findall(r"```.*?```|`[^`]+`", text, flags=re.S)
-    return {w for s in code for w in re.findall(r"[A-Za-z_]\w*", s)}
-
-
-def brace_keys(text: str) -> set[str]:
-    """The names a ``{a, b: ...}`` form in ``text`` lists."""
-    return set(re.findall(r"[{,]\s*(\w+)", text))
-
-
-def schema_keys() -> dict[str, set[str]]:
-    """Per schema level, the keys docs/playroutines/schema.md documents."""
-    fence = re.search(r"```yaml\n(.*?)```", SCHEMA, flags=re.S).group(1)
-    units = table_rows(schema_section("Modulator declarations").split("| unit key |", 1)[1])
-    out = {
-        "top": set(re.findall(r"(?m)^(\w+):", fence)),
-        "block": code_words(f"`{fence}`"),
-        "record type": set(table_rows(schema_section("Record types"))),
-        "codec": code_words(schema_section("Codecs")),
-        "action": set(table_rows(schema_section("Actions"))),
-        "modulators": set(table_rows(schema_section("Modulator declarations"))),
-        "unit": set(units),
-    }
-    out.update({f"unit.{k}": brace_keys(units[k]) for k in ("site", "retire", "hooks", "program")})
-    out["unit.chip"] = brace_keys(units["chip"])
-    return out
-
-
-def used_keys(pr: dict):
-    """(level, key) for each key a playroutine definition uses, at the levels the schema lists."""
-    yield from (("top", k) for k in pr)
-    nested = [pr.get("instrument") or {}, (pr.get("instrument") or {}).get("event") or {}]
-    nested += [pr.get("restart") or {}, pr.get("defaults") or {}]
-    nested += [*(pr.get("lifetime") or {}).values(), *pr["voice"].values(), *pr["global"].values()]
-    yield from (("block", k) for d in nested if isinstance(d, dict) for k in d)
-    for spec in pr["record_types"].values():
-        for k, v in spec.items():
-            if k != "codec" and isinstance(v, list) and all(isinstance(a, dict) for a in v):
-                yield from (("action", [*a][0]) for a in v)
-            else:
-                yield "record type", k
-        yield from (("codec", k) for shape in spec.get("codec") or [] for k in shape)
-    for entry in pr["commands"].values():
-        yield from (
-            ("codec", k) for e in (entry if isinstance(entry, list) else [entry]) for k in e
-        )
-    yield from (("modulators", k) for k in pr["modulators"])
-    for unit in pr["modulators"]["units"]:
-        yield from (("unit", k) for k in unit)
-        for k in ("site", "retire", "hooks", "program", "chip"):
-            for d in unit.get(k) if isinstance(unit.get(k), list) else [unit.get(k) or {}]:
-                yield from ((f"unit.{k}", f) for f in d)
-
-
-@pytest.mark.parametrize("player", PLAYERS)
-def test_every_key_a_library_playroutine_uses_is_documented(player):
-    known = schema_keys()
-    assert {(lv, k) for lv, k in used_keys(LIBS[player]) if k not in known[lv]} == set()
-
-
-def test_an_undocumented_playroutine_key_is_found():
-    pr = {"started": 1, "voice": {}, "global": {}}
-    pr["record_types"] = {"t": {"speed": 1, "do": [{"set": {}}, {"jump": 1}]}}
-    pr.update(commands={1: {"name": "x", "scale": 2}}, modulators={"units": [{"scale": 1}]})
-    known = schema_keys()
-    found = {(lv, k) for lv, k in used_keys(pr) if k not in known[lv]}
-    assert found == {
-        ("top", "started"),
-        ("record type", "speed"),
-        ("action", "jump"),
-        ("codec", "scale"),
-        ("unit", "scale"),
-    }

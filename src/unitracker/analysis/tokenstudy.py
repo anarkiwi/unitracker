@@ -13,6 +13,8 @@ import sys
 from tqdm import tqdm
 
 from unitracker.format import songio
+from unitracker.format import tempo as ir_tempo
+from unitracker.format.songio import song_rows
 from unitracker.format.atoms import parse_atom
 from unitracker.format.yamlstyle import Atom, Flow, FlowMap
 from unitracker.optimise import one_line
@@ -93,7 +95,7 @@ def sections(text: str, split) -> dict:
 
 def phrase_defs(doc: dict):
     """``(definitions, name)`` of every phrase a written document defines, in order."""
-    for row in doc["song"]:
+    for row in song_rows(doc):
         phrases = (row.get("def") or {}).get("phrase") or {}
         for name in list(phrases):
             yield phrases, name
@@ -110,7 +112,7 @@ def _leaves(value, path=()):
 
 
 def _definitions(doc: dict):
-    for row in doc["song"]:
+    for row in song_rows(doc):
         for tname, entries in (row.get("def") or {}).items():
             if tname != "phrase":
                 yield from _leaves(entries)
@@ -196,7 +198,7 @@ def hoisted_instruments(doc: dict) -> dict:
                 del table[name]
                 continue
         seen.setdefault(key, (name, names))
-    for row in doc["song"]:
+    for row in song_rows(doc):
         row["play"] = Flow(_entry_alias(e, alias) for e in row["play"])
     return doc
 
@@ -258,7 +260,7 @@ def rests(doc: dict, split) -> tuple[int, int]:
 def grouped(doc: dict) -> dict:
     """Every definition in the first row."""
     merged = {}
-    for row in doc["song"]:
+    for row in song_rows(doc):
         for tname, entries in (row.pop("def", None) or {}).items():
             merged.setdefault(tname, {}).update(entries)
     doc["song"][0] = {"def": merged, **doc["song"][0]}
@@ -275,7 +277,7 @@ def _wave(value) -> str:
 
 def _instruments(doc: dict) -> dict:
     out = {}
-    for row in doc["song"]:
+    for row in song_rows(doc):
         for tname, entries in (row.get("def") or {}).items():
             if tname in ("ins", "sidtab"):
                 out.update(entries)
@@ -298,20 +300,19 @@ def mnemonics(doc: dict, text: str) -> str:
 
 
 def tempo(doc: dict, ir: dict) -> dict:
-    """The tempo in beats per minute of four steps, beside ``ticks_per_step``."""
-    hints = dict(doc.get("hints") or {})
+    """The initial tempo in beats per minute of four steps (a swing pair's mean), as ``bpm``."""
+    ticks = ir_tempo.pair(ir.get(ir_tempo.NAME) or ir_tempo.default(ir["playroutine"]) or 1)
     clock = ir.get("clock") or {}
-    if "ticks_per_step" in hints and clock:
+    if clock:
         rate = clock["clock_hz"] / clock["cycles_per_tick"]
-        hints["bpm"] = round(60 * rate / (4 * hints["ticks_per_step"]))
-    doc["hints"] = FlowMap(hints)
+        doc["bpm"] = round(60 * rate / (2 * sum(ticks)))
     return doc
 
 
 def contents(doc: dict) -> dict:
     """Each voice's phrases in playing order, in the header."""
     voices = [[] for _ in doc["song"][0]["play"]]
-    for row in doc["song"]:
+    for row in song_rows(doc):
         for v, entry in enumerate(row["play"]):
             if entry is not None:
                 voices[v].append(Atom(entry))
@@ -321,7 +322,7 @@ def contents(doc: dict) -> dict:
 def plays_first(doc: dict) -> dict:
     """The play rows first, then every definition under ``defs``."""
     merged = {}
-    for row in doc["song"]:
+    for row in song_rows(doc):
         for tname, entries in (row.pop("def", None) or {}).items():
             merged.setdefault(tname, {}).update(entries)
     doc["defs"] = merged

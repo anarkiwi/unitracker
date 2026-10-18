@@ -6,14 +6,14 @@ The library holds one definition per player build, named by its file
 ```yaml
 name: str                                 # embedded definitions only
 constants: {name: int}
-defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3}   # optional; these are the default
+defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3, tempo: 6}   # optional; a song's own unless it says otherwise (no tempo by default)
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
 note_offset: 0                            # frequency-table index of format note 0; default 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
                                           # default: the type written as ins, base 0
-                                          # event: {type, column, commands}: see Instrument columns
-restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
-lifetime: {pulse: {field: pw, flag: {flags: 0x40}}}   # !pulse:0 and !filter:0 (see Lifetime)
+                                          # event: {type, column, commands, restart}: see Instrument columns
+tempo: {cells: {tl: a, tr: b}, swing: {}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
+lifetime: {pw: {flag: {flags: 0x40}}, filter: {}}     # !pw and !filter, or [pw, filter] (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
@@ -107,10 +107,12 @@ gives the row again. A command entry has a `name`, an optional `ref` (a record t
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
 written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!funk:6/7`). A `ref` entry with `inline: true`
-writes the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
-one row per distinct argument, and the type has no definitions of its own (`unknown record type
-'speedtab'`). A `ref` entry's argument `none` is the type's `none` (`!funk:none`). An entry's `column`
+joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `ref` entry with `inline: true`
+writes the referenced row's fields, each a byte, joined by `/` (`!tempo:6/7`), its `when` over
+the row's fields; the reader allocates one row per distinct argument, and the type has no
+definitions of its own (`unknown record type 'speedtab'`). A program `ref` entry's argument `none`
+is the type's `none`, written as the stop command of its slot (`!run:none`, `!pw:none`,
+`!filter:none`). An entry's `column`
 is the event column its command is read into, `instrument` (event slot 0) or `fx` (slot 1), or a
 list of them of which it takes the first the event leaves free (an event that names an instrument
 fills `instrument`); a column holds one command, and an event with two in one is refused. An entry
@@ -120,6 +122,14 @@ written as the byte it writes (see [Envelope commands](../format/vocabulary.md#e
 
 Codec expressions may read the song's tables and the
 playroutine's functions. A list row a shape covers is rejected: it has a shared-key form.
+
+## Tempo
+
+A song's `tempo` (see [Document](../format/document.md)) is `n` ticks per step or a swing pair
+`[a, b]`. The playroutine's `tempo` gives the cells it starts: `cells` (`{cell: expr}`) for every
+tempo and `swing` too for a pair, each expression over `a` and `b` (`b` is `a` for one tempo),
+assigned over the cells' `init` before the first tick; `when` is the tempos the player plays. A
+playroutine without `tempo` has none, and a song that names one is refused.
 
 ## Cells and expressions
 
@@ -203,7 +213,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `freq` | the word `F(k)` reads at index `k + note_offset`: `{word: table}`, or `{hi: table, lo: table}` joined as `hi << 8 \| lo`; or the name of a one-argument function that reads one of these at its argument (`freq: nfreq`) |
 | `notes` | the voice cells that hold the note; `N` is the first, less `note_offset` |
 | `transpose` | a voice cell added to the note for `N` |
-| `legato` | `{cell}`: the cell set while a note does not retrigger, which the `legato` command (`!legato:0`) sets |
+| `legato` | `{cell}`: the cell set while a note does not retrigger, which the `legato` command (`!legato`) sets |
 | `tables` | `{name: {entry: expr, size: n}}`: the tables `name[k]` expressions read; `entry` reads `i` and the playroutine's tables. `{name: {function: f, size: n}}` takes `entry` from the one-argument function `f` and adds `f`'s rewrite over the table to `functions` |
 | `functions` | `{name: expr}`: playroutine functions rewritten over the named tables, for analysis |
 | `units` | the units, below |
@@ -253,9 +263,9 @@ The player keeps one cursor per voice and the playroutine decides when it moves.
 
 Each tick, the player runs `init` (first tick) or `tick` (every later tick). Then it
 evaluates the ghost, masks each value to 8 bits, and flushes the registers that
-changed since the last flush, in GoatTracker 2's buffered order (`BUFFEREDWRITES`:
-the filter step first, then `mt_loadregs`). A register with no ghost entry keeps its
-value. An entry `r` naming a cell wider than 8 bits (`0: freq`) or a pair (`0: "fhi:flo"`) gives
+changed since the last flush, in the canonical order below: the filter and volume registers,
+then each voice's pulse width, envelope, frequency and, last, its control register. A register
+with no ghost entry keeps its value. An entry `r` naming a cell wider than 8 bits (`0: freq`) or a pair (`0: "fhi:flo"`) gives
 register `r` the low byte and `r + 1` the high byte, unless `r + 1` has an entry of its own.
 
 ```

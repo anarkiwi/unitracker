@@ -39,7 +39,7 @@ function of a song and its arguments, `None` where it does not apply.
 | | `factor` | a phrase that is its first `n` events repeated is played as plays of that part |
 | | `share` | every phrase holding a maximal run of two or more events that recurs apart (alike up to a transpose) is played as the parts around and of the run |
 | `commands` | `drop_command` | an event loses one command |
-| | `drop_keep` | an event loses its `!pulse:0`/`!filter:0` |
+| | `drop_keep` | an event loses its `!pw`/`!filter` |
 | | `drop_instrument` | an event stops naming its instrument |
 | `fields` | `clear` | one record field (other than a program's chain) goes to its default |
 
@@ -63,8 +63,7 @@ The check (`proof.mismatch`) is exact, not sampled:
 
 What is checked is the candidate's written text read back (`songio.loads(songio.dumps(...))`), so
 the canonical writer's own rewriting ([Canonical form](format/document.md#canonical-form)) is inside
-the check. A candidate is written without its `phrase_steps` hint, which the writer derives again
-from its phrases. A song that cannot be written with its playroutine by `ref` is written embedded
+the check. A song that cannot be written with its playroutine by `ref` is written embedded
 ([Embedding](format/document.md#embedding)).
 
 ### Resuming from the input

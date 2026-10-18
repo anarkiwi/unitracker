@@ -9,6 +9,7 @@ a reference ``("x", index)`` to the format's expression records, or a reference
 import keyword
 import re
 
+from unitracker.format.atoms import AtomError, note_index, note_name
 from unitracker.format.expr import ExprError, Resolver
 from unitracker.format.records import ABSENT
 
@@ -31,9 +32,12 @@ ROW_KEYS = (
     "vol",
 )
 EXPR = "x"
+RESTART = "restart"
 ENVELOPE = -2
 COMMAND_NAMES = (
     "run",
+    "pw",
+    "filter",
     "ad",
     "sr",
     "ctrl",
@@ -42,16 +46,15 @@ COMMAND_NAMES = (
     "cut",
     "tempo",
     "vtempo",
-    "funk",
     "freq",
     "mark",
-    "restart",
     "legato",
 )
+ARGLESS = ("legato",)
 BYTE_SHIFT = {"cut": 3}
 KEY_DEFAULTS = {"hold": 1}
 NONE = "none"
-_NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
+_RELATIVE = re.compile(r"^[+-]\d+$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
 _CTRL = re.compile(r"^(?P<lit>\d+)?\^(?P<mask>\d+)$")
 
@@ -120,20 +123,23 @@ def env_name(key: str) -> str:
 
 
 def note_value(value) -> tuple[bool, int]:
-    """``(absolute, number)`` for a written ``note``: an int is relative, ``"=n"`` absolute."""
+    """``(absolute, number)`` for a written ``note``: an int or ``+n``/``-n`` is relative, a note
+    name absolute."""
     if isinstance(value, bool):
         raise CodecError(f"bad note {value!r}")
     if isinstance(value, int):
         return False, value
-    match = _NOTE.match(str(value))
-    if match is None or (match["abs"] and match["n"][0] == "+"):
-        raise CodecError(f"bad note {value!r}")
-    return bool(match["abs"]), int(match["n"])
+    if _RELATIVE.match(str(value)):
+        return False, int(value)
+    try:
+        return True, note_index(str(value))
+    except AtomError as exc:
+        raise CodecError(f"bad note {value!r}") from exc
 
 
 def note_text(absolute: bool, number: int) -> str:
-    """The written form of a note value."""
-    return f"={number}" if absolute else f"{number:+d}"
+    """The written form of a note value: a note name, or ``+n``/``-n``."""
+    return note_name(number) if absolute else f"{number:+d}"
 
 
 def route_value(value) -> tuple[int, int]:
@@ -283,7 +289,7 @@ class _Shape:
 
 
 def is_values(value) -> bool:
-    """True for a command argument of several values, ``(a, b)`` for ``!funk:a/b``."""
+    """True for a command argument of several values, ``(a, b)`` for ``!tempo:a/b``."""
     return isinstance(value, tuple) and all(
         isinstance(v, int) and not isinstance(v, bool) for v in value
     )
@@ -294,13 +300,28 @@ def arg_text(value) -> str:
     return "/".join(map(str, value)) if is_values(value) else str(value)
 
 
+def command_text(name: str, value) -> str:
+    """A command as written: ``!name``, or ``!name:arg``."""
+    return f"!{name}" if value is None else f"!{name}:{arg_text(value)}"
+
+
 def is_expr(value) -> bool:
     """True for a written key's expression reference ``("x", index)``."""
     return isinstance(value, tuple) and len(value) == 2 and value[0] == EXPR
 
 
+def first_tick(rtype, place) -> bool:
+    """Whether a row of ``rtype`` at ``place`` is a restart's first-tick row (its last), where a
+    ``ctrl`` sets the gate on."""
+    return rtype.name == RESTART and bool(place and place.get("last"))
+
+
 class RowCodec:
-    """A record type's shapes, with the playroutine's note offset."""
+    """A record type's shapes, with the playroutine's note offset.
+
+    On a restart's first-tick row a ``ctrl`` implies ``gate: 1``: the row is written without it
+    and read with it (see :func:`first_tick`).
+    """
 
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
         self.rtype = rtype
@@ -381,7 +402,10 @@ class RowCodec:
         full = self._full(row)
         for shape in self.shapes:
             if self._fits(shape, full, place):
-                return self._encode(shape, full)
+                out = self._encode(shape, full)
+                if first_tick(self.rtype, place) and "ctrl" in out and out.get("gate") == 1:
+                    del out["gate"]
+                return out
         return None
 
     def _fits(self, shape, full: dict, place) -> bool:
@@ -465,6 +489,13 @@ class RowCodec:
         naming what the player can't express."""
         for key in sorted(set(written) - self.keys):
             raise CodecError(f"unknown key {key} in {self.rtype.written}")
+        if first_tick(self.rtype, place) and "ctrl" in written:
+            if written.get("gate", 1) != 1:
+                raise CodecError(
+                    f"{self.rtype.written}: the player can't express row {written!r}"
+                    " (a ctrl on the note's first tick sets the gate on)"
+                )
+            written = {**written, "gate": 1}
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:
@@ -491,6 +522,30 @@ class RowCodec:
             != {k: v for k, v in norm.items() if k not in exprs}
         ):
             raise CodecError(f"{self.rtype.written}: row {written!r} can't end a program")
+
+
+def plain_constants(codecs: dict, rtypes: dict, records: dict, exprs: dict) -> None:
+    """Rewrite in ``records`` each row whose key holds a constant expression (of ``exprs``) where
+    the key also takes a plain value, as the row of that value when it reads back."""
+    for name, codec in codecs.items():
+        number = {k for k, plain in codec.expr_keys().items() if plain}
+        chain = rtypes[name].chain
+        for index, row in list(records.get(name, {}).items()):
+            shared = codec.encode(row) or {}
+            consts = {
+                k: int(exprs[v[1]])
+                for k, v in shared.items()
+                if k in number and is_expr(v) and str(exprs.get(v[1], "")).lstrip("-").isdigit()
+            }
+            if not consts:
+                continue
+            try:
+                raw = codec.decode(
+                    {k: written_value(k, v) for k, v in {**shared, **consts}.items()}
+                )
+            except CodecError:
+                continue
+            records[name][index] = {**raw, **({chain: row[chain]} if chain in row else {})}
 
 
 def command_variants(spec: dict):
@@ -573,47 +628,74 @@ class CommandCodec:
                 return ref
         return None
 
+    def check_inline(self, name: str, row: dict) -> None:
+        """Raise unless the inline command ``name``'s ``when`` holds for the row it writes."""
+        for _, ename, ref, var in self.entries:
+            if ename == name and ref is not None and var.get("inline"):
+                if "when" in var and not evaluate(var["when"], row):
+                    text = "/".join(str(v) for v in row.values())
+                    raise CodecError(f"the player can't express !{name}:{text}")
+                return
+
     def values(self, name: str) -> bool:
         """Whether command ``name`` takes several values that are no record's row."""
         return any(n == name and "args" in var for _, n, _, var in self.entries)
 
     def encode(self, code: int, arg: int) -> tuple[str, object]:
         """``(name, value)``: value is an int, a tuple of ints for an entry with ``args``,
-        ``(type, index)`` for a reference, or ``none``."""
+        ``(type, index)`` for a reference, ``none``, or None for a command of :data:`ARGLESS`."""
         for ecode, name, ref, var in self.entries:
-            if ecode != code or ("when" in var and not evaluate(var["when"], {"arg": arg})):
+            if ecode != code or (
+                "when" in var and not var.get("inline") and not evaluate(var["when"], {"arg": arg})
+            ):
                 continue
+            if name in ARGLESS:
+                return name, None
             if "args" in var:
                 return name, tuple(evaluate(e, {"arg": arg}) for e in var["args"].values())
             if ref is None:
                 return name, evaluate(var["arg"], {"arg": arg}) if "arg" in var else arg
             if arg != self.rtypes[ref].none:
                 return name, (ref, arg)
-            codes = {c for c, n, r, _ in self.entries if n == name and r is not None}
-            if len(codes) > 1:
-                raise CodecError(f"!{name}:{NONE} can't say which of commands {sorted(codes)}")
-            return name, NONE
+            if var.get("inline"):
+                break
+            return self.spelled(name, ref, NONE), NONE
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
+    def spelled(self, name: str, ref: str | None, value) -> str:
+        """The name command ``name`` of reference ``ref`` is written with for ``value``: ``none``
+        of a program stops its slot, ``!run:none`` the control program's and ``!pw:none`` and
+        ``!filter:none`` the others (the type's written name)."""
+        if value != NONE or ref is None or self.rtypes[ref].chain is None:
+            return name
+        written = self.rtypes[ref].written
+        return name if written == "ctrl" else written
+
     def _arg(self, name, ref, var, value):
-        if value == NONE:
-            return None if ref is None else self.rtypes[ref].none
+        """The raw argument entry ``var`` (of command ``name``, reference ``ref``) reads a written
+        value as, or None when it takes no such value."""
+        if (name in ARGLESS) != (value is None):
+            return None
+        if value is None or value == NONE:
+            none = None if ref is None else self.rtypes[ref].none
+            return evaluate(var.get("raw", 0), {}) if value is None else none
         if "args" in var:
             fits = is_values(value) and len(value) == len(var["args"])
             return evaluate(var["raw"], dict(zip(var["args"], value))) if fits else None
         if ref is not None:
             return value[1] if isinstance(value, tuple) and value[0] == ref else None
-        if isinstance(value, int) and not isinstance(value, bool):
-            arg = value >> BYTE_SHIFT[name] if "byte" in var else value
-            return evaluate(var["raw"], {"arg": arg}) if "raw" in var else arg
-        return None
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        arg = value >> BYTE_SHIFT[name] if "byte" in var else value
+        return evaluate(var["raw"], {"arg": arg}) if "raw" in var else arg
 
     def decode(self, name: str, value) -> tuple[int, int]:
         """``(code, arg)`` for a written command; ``value`` as :meth:`encode` returns it."""
         if name not in COMMAND_NAMES:
             raise CodecError(f"unknown command !{name}")
         for code, ename, ref, var in self.entries:
-            arg = self._arg(name, ref, var, value) if ename == name else None
+            spelled = self.spelled(ename, ref, value)
+            arg = self._arg(ename, ref, var, value) if spelled == name else None
             if arg is None:
                 continue
             if ref is not None and not 0 <= arg <= 0xFF:
@@ -625,4 +707,4 @@ class CommandCodec:
                     return code, arg
             except CodecError:
                 continue
-        raise CodecError(f"the player can't express !{name}:{arg_text(value)}")
+        raise CodecError(f"the player can't express {command_text(name, value)}")
