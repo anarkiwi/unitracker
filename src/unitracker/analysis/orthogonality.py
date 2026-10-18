@@ -321,7 +321,7 @@ def _modulator_reads(pr: dict):
     """The expressions and cell names the ghost and the modulator machinery read."""
     yield from (str(t) for t in (pr.get("ghost") or {}).get("global", {}).values())
     yield from (str(t) for t in (pr.get("ghost") or {}).get("voice", {}).values())
-    yield from (str(pr[k]) for k in ("onset", "started") if pr.get(k))
+    yield from [str(pr["onset"])] if pr.get("onset") else []
     mods = pr.get("modulators") or {}
     yield from mods.get("notes") or []
     yield from [mods["transpose"]] if mods.get("transpose") else []

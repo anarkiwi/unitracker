@@ -865,3 +865,93 @@ def test_spans():
         ([2, 4, 6, 9], "2-6 step 2, 9"),
     ]
     assert [spans(values) for values, _ in cases] == [text for _, text in cases]
+
+
+SCHEMA = (DOCS / "schema.md").read_text()
+
+
+def schema_section(heading: str) -> str:
+    """The text of docs/playroutines/schema.md under ``## heading``, up to the next one."""
+    return SCHEMA.split(f"\n## {heading}\n", 1)[1].split("\n## ", 1)[0]
+
+
+def table_rows(text: str) -> dict[str, str]:
+    """Each backticked name of a table's first column, mapped to its row's last cell."""
+    rows = (line.split("|")[1:-1] for line in text.splitlines() if line.startswith("| `"))
+    return {n: cells[-1] for cells in rows for n in re.findall(r"`(\w+)", cells[0])}
+
+
+def code_words(text: str) -> set[str]:
+    """The identifiers in the backticked spans and fenced blocks of ``text``."""
+    code = re.findall(r"```.*?```|`[^`]+`", text, flags=re.S)
+    return {w for s in code for w in re.findall(r"[A-Za-z_]\w*", s)}
+
+
+def brace_keys(text: str) -> set[str]:
+    """The names a ``{a, b: ...}`` form in ``text`` lists."""
+    return set(re.findall(r"[{,]\s*(\w+)", text))
+
+
+def schema_keys() -> dict[str, set[str]]:
+    """Per schema level, the keys docs/playroutines/schema.md documents."""
+    fence = re.search(r"```yaml\n(.*?)```", SCHEMA, flags=re.S).group(1)
+    units = table_rows(schema_section("Modulator declarations").split("| unit key |", 1)[1])
+    out = {
+        "top": set(re.findall(r"(?m)^(\w+):", fence)),
+        "block": code_words(f"`{fence}`"),
+        "record type": set(table_rows(schema_section("Record types"))),
+        "codec": code_words(schema_section("Codecs")),
+        "action": set(table_rows(schema_section("Actions"))),
+        "modulators": set(table_rows(schema_section("Modulator declarations"))),
+        "unit": set(units),
+    }
+    out.update({f"unit.{k}": brace_keys(units[k]) for k in ("site", "retire", "hooks", "program")})
+    out["unit.chip"] = brace_keys(units["chip"])
+    return out
+
+
+def used_keys(pr: dict):
+    """(level, key) for each key a playroutine definition uses, at the levels the schema lists."""
+    yield from (("top", k) for k in pr)
+    nested = [pr.get("instrument") or {}, (pr.get("instrument") or {}).get("writes_as") or {}]
+    nested += [pr.get("restart") or {}, pr.get("defaults") or {}]
+    nested += [*(pr.get("lifetime") or {}).values(), *pr["voice"].values(), *pr["global"].values()]
+    yield from (("block", k) for d in nested if isinstance(d, dict) for k in d)
+    for spec in pr["record_types"].values():
+        for k, v in spec.items():
+            if k != "codec" and isinstance(v, list) and all(isinstance(a, dict) for a in v):
+                yield from (("action", [*a][0]) for a in v)
+            else:
+                yield "record type", k
+        yield from (("codec", k) for shape in spec.get("codec") or [] for k in shape)
+    for entry in pr["commands"].values():
+        yield from (
+            ("codec", k) for e in (entry if isinstance(entry, list) else [entry]) for k in e
+        )
+    yield from (("modulators", k) for k in pr["modulators"])
+    for unit in pr["modulators"]["units"]:
+        yield from (("unit", k) for k in unit)
+        for k in ("site", "retire", "hooks", "program", "chip"):
+            for d in unit.get(k) if isinstance(unit.get(k), list) else [unit.get(k) or {}]:
+                yield from ((f"unit.{k}", f) for f in d)
+
+
+@pytest.mark.parametrize("player", PLAYERS)
+def test_every_key_a_library_playroutine_uses_is_documented(player):
+    known = schema_keys()
+    assert {(lv, k) for lv, k in used_keys(LIBS[player]) if k not in known[lv]} == set()
+
+
+def test_an_undocumented_playroutine_key_is_found():
+    pr = {"started": 1, "voice": {}, "global": {}}
+    pr["record_types"] = {"t": {"speed": 1, "do": [{"set": {}}, {"jump": 1}]}}
+    pr.update(commands={1: {"name": "x", "scale": 2}}, modulators={"units": [{"scale": 1}]})
+    known = schema_keys()
+    found = {(lv, k) for lv, k in used_keys(pr) if k not in known[lv]}
+    assert found == {
+        ("top", "started"),
+        ("record type", "speed"),
+        ("action", "jump"),
+        ("codec", "scale"),
+        ("unit", "scale"),
+    }
