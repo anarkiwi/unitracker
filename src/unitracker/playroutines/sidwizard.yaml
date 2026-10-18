@@ -71,7 +71,7 @@ record_types:
       - when: "first and not last and hold >= 1 and hold <= 2 and (ctrl < 0 or ctrl == 0x18) and gate == 0 and ad >= 0 and sr >= 0"
         keys: {hold: hold}
         raw: {hold: hold}
-      - when: "last and hold == 0 and gate == 1 and ad < 0 and sr < 0"
+      - when: "last and not first and hold == 0 and gate == 1 and ad < 0 and sr < 0"
   # WF/arp row: w a waveform ($10+) or a hold count below $10 (the row keeps the waveform); a
   # the arp byte (relative up $00-$7E, none $80, absolute $81-$DF, relative down $E0-$FF); d
   # the signed detune the row sets, written as its constant freq ($FF keeps it; the lifter

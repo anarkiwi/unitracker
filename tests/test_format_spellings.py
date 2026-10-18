@@ -462,3 +462,17 @@ def test_a_key_outside_the_format_is_refused(pr, old, new, match):
     text = canonical(doc(pr, defs if pr == "defmon" else GT_DEFS, {"p1": "C4.i1*4"}))
     assert old in text
     refused(text.replace(old, new, 1), match)
+
+
+# -- 9: a restart has a row before its note's --
+
+
+@pytest.mark.parametrize("pr", ["goattracker2", "sidwizard"])
+def test_a_restart_of_the_first_tick_row_alone_is_refused(pr):
+    rows = songio.codecs(songio.library(pr), None)["restart"]
+    with pytest.raises(CodecError, match="can't express"):
+        rows.decode({"ctrl": 9}, row_place(0, 1, True))
+    for row in ("{ctrl: 9}", "{gate: 1}"):
+        ins = f"i1: {{ctrl: [{{ctrl: 65, note: +0}}, end], restart: [{row}, end]}}"
+        defs = f"      ins:\n        {ins}\n"
+        refused(doc(pr, defs, {"p1": "C4.i1*4"}), "can't express")
