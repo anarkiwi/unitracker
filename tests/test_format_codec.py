@@ -793,8 +793,8 @@ def atom_doc(player: str, atom: str) -> str:
     [
         (
             "goattracker2",
-            ["tempo:3", "tempo:6/7", "vtempo:2/129", "vtempo:5", "tempo:6/6"],
-            ["tempo:2", "tempo:1/7", "vtempo:6/130", "tempo:none", "vtempo:none"],
+            ["tempo:3", "tempo:6/7", "vtempo:2/129", "vtempo:5", "tempo:2", "vtempo:129"],
+            ["tempo:130", "tempo:1/7", "vtempo:6/130", "tempo:none", "vtempo:none"],
         ),
         (
             "sidwizard",

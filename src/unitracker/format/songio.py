@@ -408,10 +408,12 @@ class _Writer:
                 self.commands.check_inline(name, row)
             except CodecError as exc:
                 raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-            return f"{name}:{inline_text(rtype, row)}"
+            single = tempo.one(name, tuple(row.values()))
+            return f"{name}:{inline_text(rtype, row) if single is None else single}"
         if isinstance(value, tuple) and not self.commands.values(name):
             return f"{name}:{self.names[self.key(*value)]}"
-        return command_text(name, value)[1:]
+        single = tempo.one(name, value)
+        return command_text(name, value if single is None else single)[1:]
 
     # -- document --
 
@@ -852,6 +854,11 @@ class _Reader:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd not in COMMAND_NAMES:
             raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
+        single = tempo.one(cmd, arg)
+        if single is not None:
+            raise SongFormatError(
+                f"!{cmd}:{single}/{single} is written !{cmd}:{single} in {atom!r}"
+            )
         if self.commands.inline(cmd) and isinstance(arg, tuple):
             arg = self._inline(cmd, arg, atom)
         elif isinstance(arg, str) and arg != NONE:
@@ -861,7 +868,13 @@ class _Reader:
         try:
             return list(self.commands.decode(cmd, arg))
         except CodecError as exc:
-            raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
+            problem = SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}")
+        if cmd in tempo.COMMANDS and self.commands.inline(cmd) and isinstance(arg, int):
+            try:
+                return list(self.commands.decode(cmd, self._inline(cmd, (arg, arg), atom)))
+            except (CodecError, SongFormatError):
+                pass
+        raise problem
 
     def _inline(self, cmd: str, values, atom) -> tuple:
         """``(type, index)`` of the row an inline argument writes: an equal row already read, else

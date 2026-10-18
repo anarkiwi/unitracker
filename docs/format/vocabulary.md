@@ -33,7 +33,7 @@ A command means one thing in every player; it applies on the step that carries i
 | `!resfilt:r/m` | set `res` and `route` (a mask), as a row's keys of those names |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
-| `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks |
+| `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks, two different tempos (`!tempo:6/6` is refused: it is `!tempo:6`) |
 | `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
 | `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
 | `!mark:n` | a mark that changes no sound: the player reads the byte and plays nothing |

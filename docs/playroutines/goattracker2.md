@@ -48,15 +48,16 @@ other; otherwise the slots are only an order.
 | `!resfilt` | 0-15/0-15 |
 | `!vol` | 0-15 |
 | `!cut` | 0-2040 step 8 |
-| `!tempo` | 3-127, 2-129/2-129 |
-| `!vtempo` | 3-127, 2-129/2-129 |
+| `!tempo` | 2-129, 2-129/2-129 (two different) |
+| `!vtempo` | 2-129, 2-129/2-129 (two different) |
 | `!freq` | `x` name, `none` |
 | `!mark` | 16-255 |
 | `!legato` | no argument |
 
 Every other command is refused by name.
 
-- `!tempo:n` and `!vtempo:n` are command $F; it plays a tempo of 2 as 3, so they start at 3.
+- `!tempo:n` and `!vtempo:n` are command $F from 3 to 127; it plays a tempo of 2 as 3, so 2, 128
+  and 129 are written as `!tempo:a/b` and `!vtempo:a/b` are, with the row `n/n`.
 - `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each. Each voice
   keeps its own swing pair: `!tempo:a/b` sets every voice's, and `!vtempo:a/b`, playroutine
   command 18, this voice's. The native player keeps one pair, which only $E and its init set, so

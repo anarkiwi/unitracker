@@ -19,6 +19,7 @@ from unitracker.format.codec import (
     RowCodec,
     envelope_names,
 )
+from unitracker.format import tempo
 from unitracker.format.events import lifetime, restart
 
 DOCS = Path(__file__).resolve().parents[1] / "docs" / "playroutines"
@@ -51,8 +52,9 @@ def cell(values: set) -> str:
     out = [spans(ints)] if ints else []
     if tuples:
         columns = [{v[k] for v in tuples} for k in range(len(next(iter(tuples))))]
-        assert len(tuples) == math.prod(map(len, columns)), sorted(tuples)
-        out.append("/".join(spans(c) for c in columns))
+        equal = len(set.intersection(*columns)) if not any(len(set(v)) == 1 for v in tuples) else 0
+        assert len(tuples) + equal == math.prod(map(len, columns)), sorted(tuples)
+        out.append("/".join(spans(c) for c in columns) + (" (two different)" if equal else ""))
     return ", ".join(out)
 
 
@@ -88,6 +90,8 @@ def taken(cmds, rtypes) -> tuple[dict, dict]:
             refs.setdefault(name, []).append(f"`{rtypes[ref].written}` name")
             continue
         values.setdefault(name, set()).update(readable(cmds, code, name, var))
+    for name, vals in values.items():
+        values[name] = {v if tempo.one(name, v) is None else tempo.one(name, v) for v in vals}
     return values, refs
 
 
