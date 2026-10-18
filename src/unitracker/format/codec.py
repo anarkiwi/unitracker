@@ -193,10 +193,9 @@ class _Shape:
     """One way to write a row: forward keys, inverse raw fields, fields kept as they are.
 
     A ``route`` key's ``rel`` gives its relation to the program's voice (see
-    :func:`route_value`). A raw field given as ``{search: [lo, hi]}`` is the first value in
-    that range whose row writes back as the written one. A key's ``expr`` names the raw field
-    of its expression, a key with ``ref`` is the reference to that record type its raw
-    ``field`` holds, and a key with ``none`` is written ``none``.
+    :func:`route_value`). A key's ``expr`` names the raw field of its expression, a key with
+    ``ref`` is the reference to that record type its raw ``field`` holds, and a key with
+    ``none`` is written ``none``.
     """
 
     # pylint: disable=too-few-public-methods
@@ -211,15 +210,10 @@ class _Shape:
             if ("ref" in self.keys[key]) != ("field" in self.keys[key]):
                 raise CodecError(f"{key}: a reference key has both ref and field")
         self.refs = {k for k, s in self.keys.items() if "ref" in s}
-        self.raw, self.search = {}, None
-        for field, expr in (spec.get("raw") or {}).items():
-            if not isinstance(expr, dict):
-                self.raw[field] = expr
-            elif self.search is not None or set(expr) != {"search"}:
-                raise CodecError(f"raw {field}: one field per shape may be {{search: [lo, hi]}}")
-            else:
-                low, high = expr["search"]
-                self.search = (field, range(int(low), int(high) + 1))
+        self.raw = dict(spec.get("raw") or {})
+        bad = sorted(f for f, expr in self.raw.items() if isinstance(expr, dict))
+        if bad:
+            raise CodecError(f"raw {bad}: a raw field is an expression")
         self.keep = list(spec.get("keep") or [])
         clash = set(self.keep) & set(ROW_KEYS)
         if clash:
@@ -382,24 +376,17 @@ class RowCodec:
         raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
         raw.update({shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)})
         raw.update({shape.keys[k]["field"]: v[1] for k, v in norm.items() if k in shape.refs})
-        field, values = shape.search or (None, [None])
-        problem = "no shape"
-        for value in values:
-            if field is not None:
-                raw[field] = value
-            full = self._full(raw)
-            if not self._fits(shape, full, place):
-                continue
-            try:
-                back = self._encode(shape, full)
-            except CodecError as exc:
-                problem = str(exc)
-                continue
-            if back == norm:
-                return dict(raw), ""
-            bad = sorted(k for k in set(back) | set(norm) if back.get(k) != norm.get(k))
-            problem = f"values of {bad}"
-        return None, problem
+        full = self._full(raw)
+        if not self._fits(shape, full, place):
+            return None, "no shape"
+        try:
+            back = self._encode(shape, full)
+        except CodecError as exc:
+            return None, str(exc)
+        if back == norm:
+            return raw, ""
+        bad = sorted(k for k in set(back) | set(norm) if back.get(k) != norm.get(k))
+        return None, f"values of {bad}"
 
     @staticmethod
     def normalize(written: dict) -> dict:

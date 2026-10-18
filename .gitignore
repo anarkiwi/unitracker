@@ -11,3 +11,6 @@ out/
 *.wav
 .cache/
 .testlogs/
+core
+core.*
+.claude/worktrees/
