@@ -216,11 +216,16 @@ def track(orderlist) -> dict:
     return {"plays": plays, "loop": loop}
 
 
-def _default_tempo(song) -> int:
-    last = song.instruments[C.MAX_INSTR - 2] if len(song.instruments) >= C.MAX_INSTR - 1 else None
-    if last is not None and last.attack_decay >= 2 and not last.wave_ptr:
-        return last.attack_decay - 1
-    return 5
+def native_start(player) -> dict:
+    """The tempo cells native ``player`` (a pygoattracker player) starts each voice on, read
+    after its init: ``tempo`` and the funk pair ``funk0``, ``funk1``."""
+    # pylint: disable=protected-access
+    player.render_grid(1)
+    tempos = {chan.tempo for chan in player._channels}
+    if len(tempos) != 1:
+        raise LiftError(f"the voices start on different tempos {sorted(tempos)}")
+    funk = player._funktable
+    return {"tempo": tempos.pop(), "funk0": funk[0], "funk1": funk[1]}
 
 
 def _phrases(song, tracks) -> dict:
@@ -234,15 +239,15 @@ def _phrases(song, tracks) -> dict:
     return out
 
 
-def initial_tempo(deftempo: int, pr: dict):
-    """The written initial tempo of default tempo byte ``deftempo``: ``deftempo + 1`` ticks, or
-    for 0 the swing on the player's initial funk pair; a swing from its second tempo (1) is not
-    covered."""
-    if deftempo >= 2:
-        return deftempo + 1
-    if deftempo == 1:
-        raise LiftError("a default tempo of 1, a swing from its second tempo, is not covered")
-    return [int(pr["voice"][f"funk{k}"]["init"]) + 1 for k in (0, 1)]
+def initial_tempo(start: dict):
+    """The written initial tempo of the native tempo cells ``start`` (see :func:`native_start`):
+    a tempo cell ``t`` from 2 is ``t + 1`` ticks; 0 and 1 swing on the funk pair from its first or
+    second tempo."""
+    t = start["tempo"]
+    if t >= 2:
+        return t + 1
+    a, b = (start[f"funk{k}"] + 1 for k in (t, t ^ 1))
+    return a if a == b else [a, b]
 
 
 # The commands that swing on the stored funk pair: E00 and $F00/$F01 every voice, $F80/$F81 this
@@ -256,11 +261,11 @@ STORED = {
 }
 
 
-def _native(ir: dict) -> SongPlayer:
-    """A player of ``ir`` starting on the native player's funk pair, which the commands of
-    :data:`STORED` read."""
+def _native(ir: dict, start: dict) -> SongPlayer:
+    """A player of ``ir`` starting on the native tempo cells ``start``, whose funk pair the
+    commands of :data:`STORED` read."""
     player = SongPlayer(ir)
-    player.set_cells({f"funk{i}": ir["playroutine"]["voice"][f"funk{i}"]["init"] for i in (0, 1)})
+    player.set_cells(start)
     return player
 
 
@@ -270,11 +275,12 @@ def _event_steps(events: list) -> dict:
     return {int(s): k for k, s in enumerate(steps)}
 
 
-def stored_pairs(ir: dict, ticks: int) -> tuple[dict, list]:
+def stored_pairs(ir: dict, ticks: int, start: dict) -> tuple[dict, list]:
     """``({(voice, occurrence, event, command index): (l, r)}, occurrences per voice)``: the funk
-    pair each command of :data:`STORED` meets where it plays over ``ticks`` ticks, the occurrence
-    being the voice's n-th phrase play (repeats and loop passes counted)."""
-    player = _native(ir)
+    pair each command of :data:`STORED` meets where it plays over ``ticks`` ticks from the native
+    tempo cells ``start``, the occurrence being the voice's n-th phrase play (repeats and loop
+    passes counted)."""
+    player = _native(ir, start)
     fetch, dispatch = player.namespace["_fetch"], player.namespace["D_v_tick0_do"]
     starts = {name: _event_steps(events) for name, events in ir["phrases"].items()}
     voice_of = {id(cells): v for v, cells in enumerate(player.voice_cells)}
@@ -368,11 +374,10 @@ class _Swings:
 
     # pylint: disable=too-few-public-methods,too-many-instance-attributes
 
-    def __init__(self, ir: dict, users: dict, ticks: int):
+    def __init__(self, ir: dict, users: dict, ticks: int, start: dict):
         self.ir, self.users = ir, users
-        self.seen, self.counts = stored_pairs(ir, ticks)
-        voice = ir["playroutine"]["voice"]
-        self.initial = tuple(int(voice[f"funk{i}"]["init"]) + 1 for i in (0, 1))
+        self.seen, self.counts = stored_pairs(ir, ticks, start)
+        self.initial = tuple(int(start[f"funk{i}"]) + 1 for i in (0, 1))
         self.speed, self.phrases, self.names = dict(ir["records"]["speedtab"]), {}, {}
 
     def _phrase(self, name: str, pairs: tuple) -> str:
@@ -403,11 +408,11 @@ class _Swings:
         return {**trk, "plays": intro + _plays(written[loop:]), "loop": len(intro)}
 
 
-def explicit_swing(ir: dict) -> dict:
-    """``ir`` with each command that swings on the stored funk pair (:data:`STORED`) naming the
-    pair it meets where it plays: a phrase that meets different pairs at different places becomes
-    one phrase per place, and a loop whose passes meet different pairs is written out until they
-    repeat."""
+def explicit_swing(ir: dict, start: dict) -> dict:
+    """``ir``, played from the native tempo cells ``start``, with each command that swings on the
+    stored funk pair (:data:`STORED`) naming the pair it meets where it plays: a phrase that meets
+    different pairs at different places becomes one phrase per place, and a loop whose passes meet
+    different pairs is written out from where they repeat."""
     users = {
         name: [
             (k, j)
@@ -420,11 +425,11 @@ def explicit_swing(ir: dict) -> dict:
     if not any(users.values()):
         return ir
     ticks = 2 * window(ir)
-    swings = _Swings(ir, users, ticks)
+    swings = _Swings(ir, users, ticks, start)
     tracks = [swings.track(v) for v in range(len(ir["tracks"]))]
     out = {**ir, "phrases": swings.phrases, "tracks": tracks}
     out["records"] = {**ir["records"], "speedtab": swings.speed}
-    diff = np.argwhere(_native(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
+    diff = np.argwhere(_native(ir, start).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
     if len(diff):
         tick, reg = (int(x) for x in diff[0])
         raise LiftError(f"the named swings play differently at tick {tick}, register {reg}")
@@ -526,7 +531,7 @@ def lift(dec, expressions: bool = True) -> dict:
     adparam = C.DEFAULT_ADPARAM
     if build.adparam is not None:
         adparam = build.adparam << 8 | build.srparam
-    deftempo = build.deftempo if build.deftempo is not None else _default_tempo(song)
+    start = native_start(dec.player())
     freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
     instruments, restarts = instrument_records(song.instruments, adparam)
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
@@ -534,7 +539,7 @@ def lift(dec, expressions: bool = True) -> dict:
     header = dec.header
     ir = {
         "unitracker": "ir",
-        "tempo": initial_tempo(deftempo, playroutine),
+        "tempo": initial_tempo(start),
         "meta": song_meta(header, f"goattracker2 subtune {dec.subtune}"),
         "clock": NTSC_CLOCK if (header.flags >> 2) & 3 == 2 else PAL_CLOCK,
         "voices": 3,
@@ -553,5 +558,5 @@ def lift(dec, expressions: bool = True) -> dict:
         "phrases": phrases,
         "playroutine": playroutine,
     }
-    ir = explicit_swing(unpause(ir))
+    ir = explicit_swing(unpause(ir), start)
     return convert(ir) if expressions else ir

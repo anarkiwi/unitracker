@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import yaml
 from conftest import gt_tune, table
+from pygoattracker import Player
 from pygoattracker.model import (
     Instrument,
     Orderlist,
@@ -98,16 +99,25 @@ def test_instruments_and_default_tempo():
         with pytest.raises(gt.LiftError, match="gate timer 0"):
             gt.instrument_records([bad], 0x0F00)
     song = Song(instruments=[Instrument() for _ in range(63)])
-    assert gt._default_tempo(song) == 5  # pylint: disable=protected-access
+    assert gt.native_start(Player(song)) == {"tempo": 5, "funk0": 8, "funk1": 5}
     song.instruments[62] = Instrument(attack_decay=7)
-    assert gt._default_tempo(song) == 6  # pylint: disable=protected-access
+    assert gt.native_start(Player(song))["tempo"] == 6
 
 
-def test_the_initial_tempo_is_the_default_tempo_byte_plus_one():
-    pr = songio.library("goattracker2")
-    assert gt.initial_tempo(5, pr) == 6 and gt.initial_tempo(0, pr) == [9, 6]
-    with pytest.raises(gt.LiftError, match="default tempo of 1"):
-        gt.initial_tempo(1, pr)
+@pytest.mark.parametrize(
+    "start,tempo",
+    [((5, 8, 5), 6), ((0, 8, 5), [9, 6]), ((1, 8, 5), [6, 9]), ((0, 6, 6), 7)],
+)
+def test_the_initial_tempo_is_the_native_tempo_cells(start, tempo):
+    assert gt.initial_tempo(dict(zip(("tempo", "funk0", "funk1"), start))) == tempo
+
+
+def test_a_song_starting_on_its_swings_second_tempo_plays_the_player():
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)])
+    dec.info.build.deftempo = 1
+    native.default_tempo = 1
+    text, _, _ = lifted(dec, native)
+    assert "tempo: [6, 9]" in text
 
 
 def tempo_rows(*commands):
