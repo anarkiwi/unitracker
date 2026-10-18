@@ -26,7 +26,7 @@ The GoatTracker 2 playroutine (`player.s`, buffered writes) of
 | `restart` | the instrument's gate timer and first wave | instruments with one gate timer and first wave share a restart program |
 
 The speed table has no written form: its vibrato and slide speeds are terms of the `freq`
-expressions, and `!funk` writes its rows inline.
+expressions, and `!funk` carries the two bytes of the row it names.
 
 ## Events
 
@@ -57,8 +57,9 @@ Every other command is refused by name.
 
 - Command $F plays a tempo of 2 as 3, so `!tempo` and `!vtempo` start at 3. The default tempo is
   `deftempo` + 1 ticks per row, the player's own count.
-- `!funk:a/b` is command $E, its argument the speed-table row's two bytes; `!funk:none` swings on
-  the pair already set.
+- `!funk:a/b` is command $E naming a speed-table row of bytes `a` and `b`, which the lifter gives
+  the command as its argument, `$10000 | a << 8 | b`; `!funk:none` (argument 0) swings on the pair
+  already set.
 - `!vol` is command $D below $10; from $10 it is `!mark`.
 - `!legato:0` is command 17: the lifter writes a native toneporta on a note as `!legato:0` plus
   the toneporta, so the note does not retrigger.

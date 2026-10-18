@@ -20,8 +20,10 @@ commands:
   11: {name: resfilt}
   12: {name: cut, arg: "arg << 3", raw: "arg >> 3"}
   13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
-  # E: the swing tempos, written as the speed-table row's two bytes (!funk:6/7).
-  14: {name: funk, ref: speedtab, inline: true}
+  # E: the swing tempos; the lifter gives a speed-table row l/r as $10000 | l << 8 | r (!funk:6/7).
+  14:
+    - {name: funk, none: 0}
+    - {name: funk, when: "arg >= 0x10000", args: {a: "(arg >> 8) & 0xFF", b: "arg & 0xFF"}, raw: "0x10000 | (a << 8) | b"}
   # F: d (bit 7 clear: all voices) gives d ticks per row for d >= 3, and d = 2 plays as 3.
   15:
     - {name: tempo, when: "arg >= 2 and arg < 0x80", arg: "arg if arg >= 3 else 3", raw: arg}
@@ -66,11 +68,12 @@ record_types:
         raw:
           ctrl: "ctrl if has_ctrl else -1"
           gate: "gate if has_gate else -1"
-  # The speed table: no written form; !funk writes its rows inline.
+  # The speed table: no written form.
   speedtab:
     prefix: s
     none: 0
     fields: [l, r]
+    unwritten: [l, r]
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
   # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
   ctrltab:
@@ -250,7 +253,7 @@ voice:
   cmddata: {width: 8}
   newcommand: {width: 8}
   legato: {width: 1}
-  newcmddata: {width: 8}
+  newcmddata: {width: 17}
   tick: {width: 8}
   tempo: {width: 8}
   gatetimer: {width: 8}
@@ -289,7 +292,7 @@ records:
     14:
       do:
         - if: newcmddata
-          then: [{set: {funk0: "speedtab[newcmddata].l - 1", funk1: "speedtab[newcmddata].r - 1"}}]
+          then: [{set: {funk0: "((newcmddata >> 8) & 0xFF) - 1", funk1: "(newcmddata & 0xFF) - 1"}}]
         - for_voices: [{set: {tempo: 0}}]
     16: {do: [{set: {command: 16, cmddata: newcmddata}}]}
     15:
@@ -497,7 +500,7 @@ ghost:
 modulators:
   freq: {word: ftab}
   notes: [note]
-  legato: {cell: legato, command: 17}
+  legato: {cell: legato}
   units:
     - name: command
       key: freq
@@ -508,7 +511,6 @@ modulators:
       label: [command, cmddata]
       # A step without a command runs the instrument's freq, as the native instrument vibrato.
       x: "cmddata if command == 16 else (ins[ii].freq if command == 0 else 0)"
-      command: 16
       commands: [1, 2, 3, 4]
       site: {when: "command == 0 and onset and not fired", record: ins, index: ii, field: freq}
       retire: {record: ins, clear: {speed: 0, vd: 0}}

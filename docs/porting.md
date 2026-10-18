@@ -165,8 +165,8 @@ for a program row, its place (`first`, `last`); `keys` from raw fields to shared
 every row kind onto the shared keys ([Shared vocabulary](format/vocabulary.md)), each in its one
 meaning in chip units. The reader accepts a written row only when encoding its raw inverse gives the
 row again, so a shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
-`commands`: code to `{name, ref, when, arg, raw, inline}`, or `{name, nibble, slot}` for an envelope
-command.
+`commands`: code to `{name, ref, when, arg, raw}`, `{name, when, args, raw}` for several values,
+`{name, none}` for the argument written `none`, or `{name, nibble, slot}` for an envelope command.
 
 **A document names no player.** No key, command or record type is one player's own. What the
 player cannot play has no shape, so the reader refuses it naming the key or command and the
@@ -210,7 +210,7 @@ unit keys are in [Modulator declarations](playroutines/schema.md#modulator-decla
 | `hooks`, `program` | the starts: a function writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields` |
 | `x` | the expression a start selects; 0 leaves the playroutine's own firing |
 | `label` | the cells grouping occurrences, usually the program pointer |
-| `site`, `retire`, `command`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` replaces |
+| `site`, `retire`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` (the `commands` entry named `key` with `ref: x`) replaces |
 | `chip` | the chip map, below |
 
 A start the `site` does not cover is written as the event's `!freq`. When `x` reads the site's
@@ -220,7 +220,8 @@ without a command), each step the start spans without a command gets the `!freq`
 it does (`convert.falls_back`).
 
 The top level of `modulators` gives what expressions read: `freq` (the word `F(k)` reads),
-`notes`, `transpose`, `legato`, and the named `tables` and `functions`.
+`notes`, `transpose`, `legato` (the cell the `legato` command sets), and the named `tables` and
+`functions`.
 
 **The chip map.** `chip: {width, value, store}` gives the unit's value `v` from its cells (`value`,
 `width` bits) and writes a value back (`store`, run only when the cells do not already give it). `v`

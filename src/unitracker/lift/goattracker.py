@@ -12,6 +12,8 @@ PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
 # The playroutine's legato command: the note does not retrigger, as a toneporta's.
 LEGATO = 17
+# The swing command's argument: the speed-table row it names, as l << 8 | r under this bit.
+FUNK_ROW = 0x10000
 
 
 class LiftError(ValueError):
@@ -83,6 +85,16 @@ def speed_records(table) -> dict:
     """Speedtable rows 1..n as ``l``/``r`` byte records."""
     tab = _Table(table)
     return {i: {"l": tab.lt(i), "r": tab.rt(i)} for i in range(1, len(tab) + 1)}
+
+
+def funk_rows(phrases: dict, speed: dict) -> None:
+    """Give each swing command the ``speed`` row it names in place of the row's index."""
+    for events in phrases.values():
+        for event in events:
+            for cmd in event.get("commands") or [event.get("command") or [0, 0]]:
+                if cmd[0] == C.CMD_FUNKTEMPO and cmd[1]:
+                    row = speed.get(cmd[1], {})
+                    cmd[1] = FUNK_ROW | row.get("l", 0) << 8 | row.get("r", 0)
 
 
 _INS_FIELDS = (
@@ -358,6 +370,8 @@ def lift(dec, expressions: bool = True) -> dict:
     instruments, restarts = instrument_records(song.instruments, adparam)
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
     phrases = _phrases(song, tracks)
+    speed = speed_records(song.speedtable)
+    funk_rows(phrases, speed)
     header = dec.header
     hints = {}
     tps = ticks_per_step(phrases, tracks, deftempo)
@@ -378,7 +392,7 @@ def lift(dec, expressions: bool = True) -> dict:
             "ctrltab": wave_records(song.wavetable),
             "pulsetab": pulse_records(song.pulsetable),
             "filttab": filter_records(song.filtertable),
-            "speedtab": speed_records(song.speedtable),
+            "speedtab": speed,
         },
         "tracks": tracks,
         "phrases": phrases,

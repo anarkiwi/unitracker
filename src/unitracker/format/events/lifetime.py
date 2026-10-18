@@ -6,6 +6,7 @@ field naming the program, and ``flag`` the header bit that keeps it (docs/format
 
 import numpy as np
 
+from unitracker.format.codec import command_code
 from unitracker.format.records import program_path, ref_type
 from unitracker.player.vm import event_commands
 
@@ -92,7 +93,7 @@ class Lifetime:
         self.rtypes, self.rtype = rtypes, rtypes.get(self.ins_type)
         self.specs = dict(pr.get(NAME) or {})
         self.flagged = {n: _flag(s) for n, s in self.specs.items() if "flag" in s}
-        self.legato = ((pr.get("modulators") or {}).get("legato") or {}).get("command")
+        self.legato = command_code(pr.get("commands"), "legato")
 
     def target(self, name: str) -> str:
         """The record type of the program command ``name`` keeps."""

@@ -25,7 +25,7 @@ How a declaration feeds the analysis:
 - `notes`, `transpose` and `note_offset` give `N`; `relative` cells start as `N` plus their
   offset; `freq` gives `F(k)`; `tables` are the named tables `T[k]` and `functions` the
   playroutine functions rewritten over them.
-- `label` groups occurrences; `site`, `command`, `commands`, `legato` and `retire` say where
+- `label` groups occurrences; `site`, `commands`, `legato` and `retire` say where
   and how the conversion writes texts (see [Conversion](#conversion)).
 
 ## Phase and value expressions
@@ -98,7 +98,7 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
      each starting event is pointed at its copy;
    - integer texts in a program whose rows have other data the format writes stay native rows.
 
-   Otherwise the event's `commands` codes are replaced by `command` naming the text (`!freq`),
+   Otherwise the event's `commands` codes are replaced by the `!freq` command naming the text,
    preceded by `!legato:0` when the start's `legato` cell is set on a note; with an `x` that
    reads the site's field, commandless steps the occurrence spans get it too. Changed events
    go into phrase variants (`p3~1`); a track's loop is unrolled where its passes differ.

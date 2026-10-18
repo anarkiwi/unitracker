@@ -1,6 +1,7 @@
 """Shared vocabulary: each library playroutine's row codecs and command codes, the written forms of
 their values, and the command and `ctrl` row key tables of docs/playroutines."""
 
+import contextlib
 import functools
 import itertools
 import math
@@ -235,6 +236,10 @@ COMMAND_ROWS = {
         (16, 3, ("freq", ("x", 3))),
         (16, 0, ("freq", NONE)),
         (17, 0, ("legato", 0)),
+        (14, 0, ("funk", NONE)),
+        (14, 0x10609, ("funk", (6, 9))),
+        (14, 0x10000, ("funk", (0, 0))),
+        (14, 6, None),
         (15, 0, None),
         (17, 1, None),
         (4, 1, None),
@@ -262,6 +267,7 @@ COMMAND_REFUSALS = {
         ("tempo", 2),
         ("run", 5),
         ("funk", ("ctrltab", 1)),
+        *(("funk", v) for v in [(6, 256), (6,), (6, 6, 6), 6]),
         ("legato", 1),
         ("freq", 5),
     ],
@@ -269,7 +275,7 @@ COMMAND_REFUSALS = {
         ("freq", 5),
         ("legato", 1),
         ("tempo", 2),
-        *(("funk", v) for v in [(2, 6), (6, 16), (6,), (6, 6, 6), 6, NONE, ("x", 1)]),
+        *(("funk", v) for v in [(2, 6), (6, 16), (16, 6), (6,), (6, 6, 6), 6, NONE, ("x", 1)]),
     ],
     "defmon": [("vol", 15)],
 }
@@ -521,7 +527,7 @@ def test_command_names_the_player_cannot_say_are_refused(player):
     with pytest.raises(CodecError, match="unknown command !noteglide"):
         cmds.decode("noteglide", 1)
     for code, name, ref, _ in cmds.entries:
-        if ref is None or cmds.inline(code):
+        if ref is None:
             continue
         with pytest.raises(CodecError, match="a byte"):
             cmds.decode(name, (ref, 256))
@@ -779,26 +785,37 @@ def cell(values: set) -> str:
     return "/".join(spans(c) for c in columns)
 
 
+def readable(cmds, code: int, name: str, var: dict):
+    """The written values of command ``name`` that variant ``var`` of ``code`` reads: each tuple of
+    bytes for one with ``args``, else what encoding each byte argument gives."""
+    if "args" in var:
+        tried = itertools.product(range(256), repeat=len(var["args"]))
+    else:
+        tried = []
+        for arg in range(256):
+            with contextlib.suppress(CodecError):
+                ename, value = cmds.encode(code, arg)
+                tried += [value] if ename == name else []
+    for value in tried:
+        with contextlib.suppress(CodecError):
+            cmds.decode(name, value)
+            yield value
+
+
 def accepted(player: str) -> dict:
     """``{name: cell}``: what each shared command takes in the playroutine."""
     pr, rtypes, cmds = LIBS[player], TYPES[player], COMMANDS[player]
     values, refs = {}, {}
-    for code, name, ref, _ in cmds.entries:
-        if ref is not None and cmds.inline(code):
-            fields = [f for f in rtypes[ref].fields if f != rtypes[ref].chain]
-            refs.setdefault(name, []).append("/".join(["0-255"] * len(fields)))
-            continue
+    for code, name, ref, var in cmds.entries:
         if ref is not None:
             refs.setdefault(name, []).append(f"`@{rtypes[ref].written}`")
             continue
-        for arg in range(256):
-            try:
-                ename, value = cmds.encode(code, arg)
-            except CodecError:
-                continue
-            if ename == name and cmds.decode(name, value):
-                values.setdefault(name, set()).add(value)
+        if "none" in var:
+            continue
+        values.setdefault(name, set()).update(readable(cmds, code, name, var))
     cells = {n: cell(v) for n, v in values.items()}
+    for name in {n for _, n, _, var in cmds.entries if "none" in var}:
+        cells[name] += f", `{NONE}`"
     for name in envelope_names(pr.get("commands")):
         cells[name] += ", at most one nibble from the instrument's"
     for name, names in refs.items():

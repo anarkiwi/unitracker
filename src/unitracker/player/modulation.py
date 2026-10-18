@@ -9,8 +9,8 @@ through ``store`` when the cells do not already give it.
 
 import dataclasses
 
-from unitracker.format.codec import evaluate
-from unitracker.format.records import record_types
+from unitracker.format.codec import command_code, evaluate
+from unitracker.format.records import EXPR, record_types
 
 VALUE = "value"
 
@@ -105,6 +105,14 @@ def declared(playroutine: dict) -> dict:
 def units(playroutine: dict) -> list:
     """A playroutine's declared modulator units."""
     return list(declared(playroutine).get("units") or [])
+
+
+def unit_command(playroutine: dict, unit: dict) -> int | None:
+    """The code of the command naming a unit's expression (``!freq``): for a unit that replaces
+    native ``commands``, the playroutine's command named its key that references ``x``."""
+    if not unit.get("commands"):
+        return None
+    return command_code(playroutine.get("commands"), unit["key"], EXPR)
 
 
 def watched(playroutine: dict) -> set:

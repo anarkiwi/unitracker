@@ -433,6 +433,19 @@ def command_variants(spec: dict):
         yield from ((int(code), v) for v in (vs if isinstance(vs, list) else [vs]))
 
 
+def command_code(spec: dict, name: str, ref: str | None = None) -> int | None:
+    """The first code of a playroutine's ``commands`` map named ``name``, and referencing ``ref``
+    when given; None if there is none."""
+    return next(
+        (
+            c
+            for c, v in command_variants(spec)
+            if v.get("name") == name and (ref is None or v.get("ref") == ref)
+        ),
+        None,
+    )
+
+
 def envelope_names(spec: dict) -> list:
     """The names of a playroutine's envelope commands: the codes with ``nibble``, whose byte
     depends on the voice (see ``envelope``); internal code ``ENVELOPE - k`` writes the k-th."""
@@ -468,13 +481,6 @@ class CommandCodec:
                 return ref
         return self.unnamed.get(code)
 
-    def inline(self, key: int | str) -> str | None:
-        """The record type whose row a command (a code or a name) writes as its argument."""
-        for code, name, ref, var in self.entries:
-            if key in (code, name) and ref is not None and var.get("inline"):
-                return ref
-        return None
-
     def values(self, name: str) -> bool:
         """Whether command ``name`` takes several values that are no record's row."""
         return any(n == name and "args" in var for _, n, _, var in self.entries)
@@ -484,6 +490,10 @@ class CommandCodec:
         ``(type, index)`` for a reference, or ``none``."""
         for ecode, name, ref, var in self.entries:
             if ecode != code or ("when" in var and not evaluate(var["when"], {"arg": arg})):
+                continue
+            if "none" in var:
+                if arg == var["none"]:
+                    return name, NONE
                 continue
             if "args" in var:
                 return name, tuple(evaluate(e, {"arg": arg}) for e in var["args"].values())
@@ -498,15 +508,14 @@ class CommandCodec:
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
     def _arg(self, ref, var, value):
+        if value == NONE or "none" in var:
+            none = var.get("none", None if ref is None else self.rtypes[ref].none)
+            return none if value == NONE else None
         if "args" in var:
             fits = is_values(value) and len(value) == len(var["args"])
             return evaluate(var["raw"], dict(zip(var["args"], value))) if fits else None
         if ref is not None:
-            if value == NONE:
-                return self.rtypes[ref].none
-            if isinstance(value, tuple) and value[0] == ref:
-                return value[1]
-            return None
+            return value[1] if isinstance(value, tuple) and value[0] == ref else None
         if isinstance(value, int) and not isinstance(value, bool):
             return evaluate(var["raw"], {"arg": value}) if "raw" in var else value
         return None
