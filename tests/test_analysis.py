@@ -65,11 +65,11 @@ def test_vocabulary_lists_shapes_and_commands_no_row_reaches():
 
 
 def test_report_lists_a_known_redundancy_once_per_form():
-    result = run(doc(I1, "[C4.i1*2, D4.i1*2, E4!ad:9*2, F4!ad:9*2]"), ["commands"])
+    result = run(doc(I1, "[C4*2, E4!ad:9*2, F4!ad:9*2, D4.i1*2]"), ["commands"])
     report = orthogonality.report([("toy", result)])
     assert report.startswith("# Orthogonality and redundancy")
     key = report.split("## Non-orthogonal key")[1].split("##")[0]
-    assert "toy p1[2], p1[3]: `E4!ad:9*2` ≡ `E4*2`" not in key
+    assert "toy p1[1], p1[2]: `E4!ad:9*2` ≡ `E4*2`" not in key
     assert "`E4!ad:9*2` ≡ `E4*2`" in key and "`F4!ad:9*2` ≡ `F4*2`" in key
     assert "`D4.i1*2` ≡ `D4*2`" in key
 

@@ -6,11 +6,15 @@ Integer literals, ``+ - *``, ``//`` (floor division), ``%`` (floor modulo), ``ab
 """
 
 import ast
+import io
+import re
+import tokenize
 
 PHI = "φ"
 NAMES = {"v": "v", PHI: "phi", "N": "N"}
 CALLS = {"abs": 1, "min": 2, "max": 2}
 _BINARY = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.FloorDiv: "//", ast.Mod: "%"}
+_DECIMAL = re.compile(r"0|[1-9][0-9]*")
 _COMPARE = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
 
 
@@ -92,6 +96,22 @@ class _Source:
             self.reads.add("F")
             return f"_F({args})"
         return f"{name}({args})"
+
+
+def literals(text: str) -> None:
+    """Raise unless each integer literal of expression ``text`` is decimal without leading
+    zeros or ``_``."""
+    try:
+        numbers = [
+            t.string
+            for t in tokenize.generate_tokens(io.StringIO(text).readline)
+            if t.type == tokenize.NUMBER
+        ]
+    except (tokenize.TokenError, SyntaxError) as exc:
+        raise ExpressionError(f"bad expression {text!r}") from exc
+    for number in numbers:
+        if not _DECIMAL.fullmatch(number):
+            raise ExpressionError(f"{number} in {text!r} is not a decimal integer")
 
 
 def source(text: str, tables=()) -> tuple[str, set]:

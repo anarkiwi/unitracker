@@ -12,9 +12,14 @@ Top-level keys, in this order:
 | `song` | the timeline: rows, then `end` or `{loop: k}`, as a program ends |
 
 Each value has one spelling: an integer is decimal without leading zeros (`129`, not `0x81` or
-`0201`), a relative note carries its sign (`note: +0`), a note name its octave without leading
-zeros (`C2`, not `C02`), and the only booleans are `true` and `false` (`off` and `on` are atoms);
-the reader refuses YAML's other spellings (`no`, `False`, `0x81`).
+`0201`), in an expression too (`v + 32`, not `v + 0x20` or `v + 3_2`), and carries a sign only
+where it is negative or a relative note (`ad: 1`, not `ad: +1`; `note: +0`, never `-0`); a note
+name has its octave without leading zeros or `-0` (`C2`, not `C02`; `C0`, not `C-0`); a play
+entry's transpose is not 0 (`p3`, not `p3+0`); the only booleans are `true` and `false` (`off` and
+`on` are atoms); a scalar is quoted only where it would read otherwise without quotes, as the
+writer quotes it (`'2*min(64, φ)'` inside a flow mapping, `title: '1984'`, not `note: 'G#5'` or
+`pw: '2048'`); and a mapping holds each key once. The reader refuses any other spelling (`no`,
+`False`, `0x81`, a key given twice).
 
 `playroutine.constants` lists only the constants that differ from the library's.
 `playroutine.tables` patches the library's tables: `{index: value}` for the entries that

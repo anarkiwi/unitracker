@@ -4,14 +4,15 @@ The player runs the expanded internal representation (``"unitracker": "ir"``): e
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
 """
 
+import contextlib
 import os
 import re
 import tempfile
 
 import yaml
 
-from unitracker.format import eventcmds, header, idle, refkeys, tempo, timeline, xexpr
-from unitracker.format.atoms import format_atom, parse_atom, runs
+from unitracker.format import eventcmds, header, idle, refkeys, spelling, tempo, timeline, xexpr
+from unitracker.format.atoms import AtomError, format_atom, parse_atom, runs
 from unitracker.format.codec import (
     COMMAND_NAMES,
     ROW_KEYS,
@@ -38,7 +39,7 @@ from unitracker.format.header import (  # pylint: disable=unused-import
 from unitracker.format.schema import first_only
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.xexpr import ExpressionError, text_of
-from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, Signed, parse
+from unitracker.format.yamlstyle import Atom, Decimal, Dumper, Flow, FlowMap, Quoted, Signed, parse
 from unitracker.player.modulation import declared
 from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, compile_phrase
 
@@ -46,8 +47,9 @@ VERSION = "1.20"
 WIDTH = 100
 PHRASE = "phrase"
 DOC_KEYS = ("unitracker", "playroutine", "meta", "clock", "voices", "tempo", "song")
-_ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
+_ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-][1-9]\d*)?$")
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_INTEGER = re.compile(r"-?(?:0|[1-9][0-9]*)")
 
 
 def song_rows(doc: dict) -> list:
@@ -110,6 +112,31 @@ def _uniform(pr: dict, rtypes: dict, records: dict) -> None:
                 f"{pr['name']}: the {rtype.written} rows set {field} to different values;"
                 " the player has one"
             )
+
+
+def _relative(codec, note) -> None:
+    """Raise for a written row's ``note`` that is a relative note without its sign, or quoted."""
+    if "note" not in codec.keys:
+        return
+    if isinstance(note, int) and not isinstance(note, (bool, Signed)):
+        raise SongFormatError(f"note {note} is written {note:+d} in {codec.rtype.written}")
+    if isinstance(note, Quoted):
+        raise SongFormatError(f"note {str(note)!r} is written unquoted in {codec.rtype.written}")
+
+
+def _plain_value(codec, written: dict, place, what: str) -> None:
+    """Raise for ``what``, a constant expression, where ``written`` with it as the value reads."""
+    with contextlib.suppress(CodecError):
+        codec.decode(written, place)
+        raise SongFormatError(f"{codec.rtype.written}: {what} is written as its value")
+
+
+def _refuse_quoted(value, what: str) -> None:
+    """Raise for ``value`` written in quotes where ``what`` is written plain."""
+    try:
+        spelling.plain(value, what)
+    except spelling.SpellingError as exc:
+        raise SongFormatError(str(exc)) from exc
 
 
 def _player(pr, call, *args):
@@ -618,10 +645,14 @@ class _Reader:
         self.next_index[rtype.name] = start + count
         return start
 
-    def expr(self, value) -> int:
-        """The index of a new expression for a written value, checked against the grammar."""
+    def expr(self, value, quoted: bool = False) -> int:
+        """The index of a new expression for a written value, checked against the grammar; an
+        integer is written unquoted, but where ``quoted`` (its value form plays otherwise)."""
+        if isinstance(value, Quoted) and _INTEGER.fullmatch(value) and not quoted:
+            raise SongFormatError(f"{str(value)!r} is written {int(value)}")
         try:
             text = text_of(value)
+            xexpr.literals(text)
             xexpr.source(text, self.named_tables)
         except ExpressionError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
@@ -676,23 +707,27 @@ class _Reader:
         """``(row, decoded fields)`` of a codec row, its named references kept as written; a
         relative note is written with its sign."""
         value = dict(value)
-        note = value.get("note")
-        if "note" in codec.keys and isinstance(note, int) and not isinstance(note, (bool, Signed)):
-            raise SongFormatError(f"note {note} is written {note:+d} in {rtype.written}")
+        _relative(codec, value.get("note"))
+        constants = {}
         for key, number in codec.expr_keys().items():
             v = value.get(key)
+            if number and isinstance(v, Quoted) and _INTEGER.fullmatch(v):
+                constants[key] = int(v)
             if isinstance(v, str) or (not number and isinstance(v, int) and key in value):
-                value[key] = (EXPR, self.expr(v))
+                value[key] = (EXPR, self.expr(v, number))
         named = {
             k: v
             for k, v in value.items()
             if k not in ROW_KEYS and isinstance(v, (str, list)) and k in rtype.refs
         }
+        written = {k: v for k, v in value.items() if k not in named}
         try:
-            names = refkeys.placeholders(self.names, self.rtypes, codec, value)
-            row = codec.decode({k: v for k, v in value.items() if k not in named}, place)
+            names = refkeys.placeholders(self.names, self.rtypes, codec, written)
+            row = codec.decode(written, place)
         except ValueError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+        for key, constant in constants.items():
+            _plain_value(codec, {**written, key: constant}, place, f"{key}: '{constant}'")
         return {**row, **named, **names}, set(row) - set(named)
 
     @staticmethod
@@ -806,7 +841,11 @@ class _Reader:
 
     def event(self, atom) -> dict:
         """An internal event for an atom."""
-        parsed = parse_atom(atom)
+        try:
+            _refuse_quoted(atom, "an atom")
+            parsed = parse_atom(atom)
+        except AtomError as exc:
+            raise SongFormatError(str(exc)) from exc
         event = {}
         if parsed["kind"] == 1:
             event["note"] = parsed["note"] + self.offset
@@ -849,6 +888,7 @@ class _Reader:
                 raise SongFormatError(f"song row {r} needs a play list")
             for tname, entries in (item.get("def") or {}).items():
                 for name, value in (entries or {}).items():
+                    _refuse_quoted(name, "a name")
                     if tname == PHRASE:
                         if name in phrases or name in self.names:
                             raise SongFormatError(f"name {name!r} defined twice")
@@ -903,6 +943,7 @@ class _Reader:
     def _entry(entry):
         if entry is None:
             return None
+        _refuse_quoted(entry, "a play entry")
         if entry == timeline.END:
             return timeline.END
         match = _ENTRY.match(str(entry))
@@ -918,8 +959,12 @@ def loads(text: str) -> dict:
     except yaml.YAMLError as exc:
         raise SongFormatError(f"not a unitracker v{VERSION} document: {exc}") from exc
     version = doc.get("unitracker") if isinstance(doc, dict) else None
-    if getattr(version, "text", version) != VERSION:
+    if not isinstance(version, Decimal) or version.text != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
+    try:
+        spelling.check(doc)
+    except spelling.SpellingError as exc:
+        raise SongFormatError(str(exc)) from exc
     for key in sorted(set(doc) - set(DOC_KEYS)):
         raise SongFormatError(f"unknown key {key} in document")
     return _Reader(doc).read()

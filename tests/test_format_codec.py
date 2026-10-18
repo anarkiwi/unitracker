@@ -9,7 +9,8 @@ from importlib import resources
 
 import numpy as np
 import pytest
-import yaml
+
+from conftest import doc_text
 
 from unitracker.format import songio
 from unitracker.format.codec import (
@@ -504,13 +505,13 @@ def test_defmon_programs_end_on_a_freeze():
         "song": [
             {
                 "def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3, "gate": 0}, "end"]}},
-                "play": ["~"] * 3,
+                "play": [None] * 3,
             },
             "end",
         ],
     }
     with pytest.raises(songio.SongFormatError, match="can't end a program"):
-        songio.loads(yaml.safe_dump(doc))
+        songio.loads(doc_text(doc))
 
 
 @pytest.mark.parametrize("player", PLAYERS)
@@ -686,7 +687,7 @@ def defmon_doc(vinit, ginit=None):
         "playroutine": {"ref": "defmon"},
         "song": [song, {"loop": 0}],
     }
-    return songio.loads(yaml.safe_dump(doc))
+    return songio.loads(doc_text(doc))
 
 
 def nfreq(note):
@@ -789,7 +790,7 @@ def test_sidwizard_chords_are_ctrl_programs_started_by_run():
 def atom_doc(player: str, atom: str) -> str:
     return (
         f"unitracker: {songio.VERSION}\nplayroutine: {{ref: {player}}}\nsong:\n  - def:\n"
-        f"      phrase:\n        p1: ['{atom}']\n    play: [p1, p1, p1]\n  - {{loop: 0}}\n"
+        f"      phrase:\n        p1: [{atom}]\n    play: [p1, p1, p1]\n  - {{loop: 0}}\n"
     )
 
 

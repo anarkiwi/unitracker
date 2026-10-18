@@ -160,7 +160,7 @@ def test_a_sidwizard_pulse_expression_reads_the_keyboard_track_table():
         "sidwizard",
         "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], "
         "pw: '2048 + 256*(E[N + 6] - E[N + 5])'}",
-        "[C2.i1*8, C6.i1*8]",
+        "[C2.i1*8, C6*8]",
     )
     _, pulse, _ = voice0(tracked, 120)
     step = [SW["freqhi"][n + 6 - 11] - SW["freqhi"][n + 5 - 11] for n in (24, 72)]
@@ -182,27 +182,8 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
         (
             GT_SONG,
             INS + ",",
-            INS + ", filter: [{cut: '1024', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
-            ["cut: 1024", "cut: 512"],
-        ),
-        (
-            GT_SONG,
-            INS + ",",
-            INS + ", filter: [{cut: '0', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
-            ["cut: 0"],
-        ),
-        (
-            GT_SONG,
-            INS + ",",
             INS + ", filter: [{cut: '1027', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
             ["cut: '1027'"],
-        ),
-        (
-            SW_SONG,
-            SW_INS,
-            SW_INS
-            + ", filter: [{cut: '1024', res: 0, mode: 16}, {cut: 512, res: 3, mode: 32}, end]",
-            ["cut: 1024", "cut: 512"],
         ),
     ],
 )
@@ -226,7 +207,7 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
         ),
         ([("x1: (v + 300) % 65536", "x1: v / 2")], "outside the grammar"),
         ([("x1: (v + 300) % 65536", "x1: W[N]")], "unknown table 'W'"),
-        ([("x1: (v + 300) % 65536", "x1: '(0 < v < 9)'")], "not one comparison"),
+        ([("x1: (v + 300) % 65536", "x1: (0 < v < 9)")], "not one comparison"),
         ([("x1: (v + 300) % 65536", "x1: '[v > 9]*v'")], r"a comparison is written \(a op b\)"),
         ([("x1: (v + 300) % 65536", "x1: sqrt(v)")], "calls no grammar function"),
         ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
@@ -446,7 +427,7 @@ def test_a_record_with_two_expressions_is_cloned_into_a_phrase_variant():
 
 
 def test_an_instrument_with_two_expressions_is_cloned_and_its_event_names_the_clone():
-    ir = sw_ir("[C4.i1*4, D4.i1*4]")
+    ir = sw_ir("[C4.i1*4, D4*4]")
     start = {"svib": 0, "pnfx": 0, "ci": 1}
     occs = [occurrence("pitch", (0, 0, 0), start, 0), occurrence("pitch", (0, 0, 4), start, 1)]
     out = convert.Rewrite(ir, obs_of(occs), ["v + 1", "v + 2"]).run()

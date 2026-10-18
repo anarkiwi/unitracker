@@ -6,8 +6,7 @@ import re
 
 import numpy as np
 import pytest
-import yaml
-from conftest import mini_song
+from conftest import doc_text, mini_song
 
 from unitracker.format import songio
 from unitracker.format import timeline as tl
@@ -241,13 +240,13 @@ def test_reader_errors(change, match):
     doc = parse(songio.dumps(song(), embed=True))
     change(doc)
     with pytest.raises(SongFormatError, match=match):
-        songio.loads(yaml.safe_dump(doc, sort_keys=False))
+        songio.loads(doc_text(doc))
 
 
 def test_reader_reads_a_program_ending_on_its_stop_row():
     doc = parse(songio.dumps(song(), embed=True))
     doc["song"][0]["def"]["stopped"] = {"t1": [[5], [200], "end"]}
-    assert songio.loads(yaml.safe_dump(doc))["records"]["stopped"] == {
+    assert songio.loads(doc_text(doc))["records"]["stopped"] == {
         0: {"v": 5, "next": 1},
         1: {"v": 200, "next": 0},
     }
@@ -287,14 +286,14 @@ def _unknown(pr: str):
 @pytest.mark.parametrize("pr", LIBRARY)
 def test_the_reader_refuses_any_key_outside_the_format(pr):
     base = parse(list_song(pr))
-    songio.loads(yaml.safe_dump(base, sort_keys=False))
+    songio.loads(doc_text(base))
     cases = _unknown(pr)
     assert len(cases) > 10
     for path, value, message in cases:
         doc = copy.deepcopy(base)
         edit(path, value)(doc)
         with pytest.raises(SongFormatError, match=re.escape(message)):
-            songio.loads(yaml.safe_dump(doc, sort_keys=False))
+            songio.loads(doc_text(doc))
 
 
 def _unwritable_program(lib: dict) -> dict:

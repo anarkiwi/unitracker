@@ -312,3 +312,79 @@ def test_an_expression_that_holds_what_its_program_holds_is_refused_and_left_out
     assert same_play(out, ir)
     kept = doc("goattracker2", GT_HOLD.replace("ROW", "{cut: 512}"), {"p1": "C4.i1*16"})
     assert "{hold: 5, cut: v}" in canonical(kept)
+
+
+# -- 6: one spelling per integer, sign and quote --
+
+GT_ONE = """      ins:
+        i1: {ad: 1, sr: 240, ctrl: [{ctrl: 65, note: +0}, {wait: 1, note: +12}, end], pw: 2048,
+          restart: r1}
+      restart:
+        r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]
+      x:
+        x1: v + 32
+"""
+GT_PHRASE = {"p1": "C4.i1!freq:x1*4, G#5*4"}
+
+
+@pytest.mark.parametrize(
+    "old,new,match",
+    [
+        ("ad: 1,", "ad: +1,", r"ad: \+1 is written 1"),
+        ("hold: 4", "hold: +4", r"hold: \+4 is written 4"),
+        ("gate: 0", "gate: -0", "gate: -0 is written 0"),
+        ("note: +0", "note: -0", r"note: -0 is written \+0"),
+        ("note: +0", "note: '+00'", "is written unquoted"),
+        ("note: +12", "note: '+12'", "is written unquoted"),
+        ("play: [p1, p1, p1]", "play: [p1+0, p1, p1]", "bad play entry"),
+        ("play: [p1, p1, p1]", "play: [p1-0, p1, p1]", "bad play entry"),
+        ("play: [p1, p1, p1]", "play: [p1+00, p1, p1]", "bad play entry"),
+        ("G#5*4", "C-0*4", "bad atom"),
+        ("note: +12", "note: C-0", "bad note"),
+        ("note: +12", "note: 'G#5'", "written without quotes"),
+        ("pw: 2048", "pw: '2048'", "'2048' is written 2048"),
+        ("pw: 2048", 'pw: "2048"', "is quoted '...'"),
+        ("x1: v + 32", "x1: '32'", "'32' is written 32"),
+        ("C4.i1!freq:x1*4", "'C4.i1!freq:x1*4'", "written without quotes"),
+        ("x1: v + 32", "x1: v + 0x20", "0x20 .* is not a decimal integer"),
+        ("x1: v + 32", "x1: v + 3_2", "3_2 .* is not a decimal integer"),
+        ("x1: v + 32", "x1: '1 + v'", "written without quotes"),
+        ("x1: v + 32", "'x1': v + 32", "written without quotes"),
+        ("unitracker: 1.20", "unitracker: '1.20'", "not a unitracker"),
+        ("      x:\n", "      x:\n        x1: v\n", "appears twice"),
+    ],
+)
+def test_each_value_has_one_spelling(old, new, match):
+    text = canonical(doc("goattracker2", GT_ONE, GT_PHRASE))
+    assert old in text
+    refused(text.replace(old, new, 1), match)
+
+
+def test_quotes_stay_where_the_plain_scalar_reads_otherwise():
+    text = canonical(doc("goattracker2", GT_ONE, GT_PHRASE))
+    meta = "meta: {title: '1984', author: '', released: 'a: b'}"
+    assert canonical(text.replace("meta: {}", meta)).count(meta) == 1
+    comma = "x1: '2*min(64, φ) + v'"
+    refused(text.replace("x1: v + 32", comma), "written without quotes")
+    flow = text.replace("pw: 2048", "pw: '2*min(64, φ) + 2048'")
+    assert "pw: '2*min(64, φ) + 2048'" in " ".join(canonical(flow).split())
+    refused(flow.replace("'2*min(64, φ) + 2048'", '"2*min(64, φ) + 2048"'), "is quoted '...'")
+
+
+@pytest.mark.parametrize(
+    "pr,ins",
+    [
+        ("goattracker2", "i1: {ctrl: [{ctrl: 65, note: +0}, end], filter: [{cut: CUT, res: 12,"
+         " route: 1, mode: 16}, {cut: 512}, end]}"),
+        ("sidwizard", "i1: {ctrl: [{ctrl: 65, note: +0}, end], filter: [{cut: CUT, res: 0,"
+         " mode: 16}, {cut: 512, res: 3, mode: 32}, end]}"),
+    ],
+)  # fmt: skip
+def test_a_constant_is_written_as_the_value_where_the_value_plays_it(pr, ins):
+    defs = f"      ins:\n        {ins}\n"
+    for cut in ("'1024'", "'0'"):
+        refused(doc(pr, defs.replace("CUT", cut), {"p1": "C4.i1*8"}), "is written as its value")
+    text = canonical(doc(pr, defs.replace("CUT", "1024"), {"p1": "C4.i1*8"}))
+    assert "cut: 1024" in text
+    if pr == "goattracker2":
+        assert "cut: '1027'" in canonical(doc(pr, defs.replace("CUT", "'1027'"), {"p1": "C4.i1*8"}))

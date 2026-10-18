@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import yaml
 from filelock import FileLock
 from pygoattracker import (
     Instrument,
@@ -29,6 +30,7 @@ from pysidwizard.player import INST_WF_TABLE_POS
 
 from unitracker import optimise
 from unitracker.format import songio
+from unitracker.format.yamlstyle import Atom, Dumper, Loader
 from unitracker.lift import backends
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
@@ -64,6 +66,26 @@ csillag = hvsc_tune(
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
     "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
 )
+
+
+def _plain(value):
+    """``value`` with each string that reads back as itself (or as the value it spells)
+    unquoted marked to be written so."""
+    if isinstance(value, dict):
+        return {_plain(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, str):
+        read = yaml.load(f"k: {value}", Loader=Loader)["k"]
+        if read == value or getattr(read, "text", None) == value:
+            return Atom(value)
+    return value
+
+
+def doc_text(doc: dict) -> str:
+    """Document ``doc`` (as :func:`unitracker.format.yamlstyle.parse` reads one) as YAML,
+    each scalar spelled as the writer spells it."""
+    return yaml.dump(_plain(doc), Dumper=Dumper, sort_keys=False, allow_unicode=True)
 
 
 def table(*rows) -> Table:

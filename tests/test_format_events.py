@@ -384,9 +384,9 @@ SW_INS = """      ins:
         i2: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(64, φ)'}
 """
 GT_INS = """      x:
-        x1: '1024 + 16*min(3, φ)'
+        x1: 1024 + 16*min(3, φ)
       pw:
-        pw1: '2048 + 16*min(3, φ)'
+        pw1: 2048 + 16*min(3, φ)
       ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(3, φ)',
           restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]}
