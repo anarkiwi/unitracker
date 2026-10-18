@@ -7,6 +7,7 @@ state has one successor, turns when a state stays until a test of ``v`` advances
 
 # pylint: disable=too-many-lines
 import ast
+import bisect
 import dataclasses
 import functools
 import itertools
@@ -362,10 +363,17 @@ def _bytes(e):
 
 @dataclasses.dataclass
 class Graph:
-    """Reachable control states: per state its guarded cases ``(conds, value, next state)``."""
+    """Reachable control states: per state its guarded cases ``(conds, value, next state)``.
+
+    A state is a row of ``lengths[i]`` firings; ``counters[i]`` is ``(cell, d)`` when the row
+    counts ``cell`` by ``d`` from the state's value, each firing taking the same cases, else
+    None for one firing. A row's cases name the state after its last firing.
+    """
 
     nodes: list
     cases: list
+    lengths: list
+    counters: list
     error: str = ""
 
 
@@ -569,31 +577,166 @@ class Machine:  # pylint: disable=too-many-instance-attributes
         return tuple(sorted(keep.items(), key=lambda x: x[0]))
 
     def explore(self, start: tuple) -> Graph:
-        """Every control state reachable from ``start``, in discovery order."""
-        index, nodes, cases, todo = {start: 0}, [start], [], [start]
+        """Every control state reachable from ``start``, in discovery order; a state other than
+        the start whose firings count one cell is the row of them (``counted``)."""
+        graph = Graph([start], [], [], [])
+        index, todo = {start: 0}, [start]
         params = {c: v for c, v in start if c not in self.control}
         while todo:
             node = todo.pop(0)
+            got = self.step(node)
+            run = self.counted(node, got) if node != start else None
+            if run is not None:
+                got = [(conds, value, _after(nxt, *run)) for conds, value, nxt in got]
             row = []
-            for conds, value, nxt in self.step(node):
+            for conds, value, nxt in got:
                 full = tuple(sorted({**params, **dict(nxt)}.items(), key=lambda x: x[0]))
                 if full not in index:
-                    index[full] = len(nodes)
-                    nodes.append(full)
+                    index[full] = len(graph.nodes)
+                    graph.nodes.append(full)
                     todo.append(full)
                 row.append((conds, value, index[full]))
-            cases.append(row)
-        return Graph(nodes, cases)
+            graph.cases.append(row)
+            graph.lengths.append(run[2] if run else 1)
+            graph.counters.append(run and run[:2])
+        return graph
+
+    def count(self, cell: str, k0: int, d: int) -> str | None:
+        """The atom ``j`` of a row that counts ``cell`` by ``d`` from ``k0``: ``cell`` is
+        ``k0 + d·j`` at its ``j``-th firing, over every ``j`` from which one more count stays in
+        the cell's width (any ``j`` for a cell without one); None when there is none."""
+        width = self.form.width.get(cell)
+        last = INF
+        if width:
+            top = (1 << width) - 1
+            last = (top - d - k0) // d if d > 0 else (k0 + d) // -d
+        if last < 0:
+            return None
+        name = f"_{cell}{k0}{d:+d}"
+        self.form.ranges[name] = (0, last)
+        return name
+
+    def counted(self, node: tuple, cases: list) -> tuple | None:
+        """``(cell, d, n)`` when the firings at ``node`` and the ``n - 1`` after it are one row:
+        each case keeps the other control and counts ``cell`` by ``d``, and with ``cell`` as
+        ``k0 + d·j`` over an atom ``j`` the cases whose tests hold are the same for each ``j``
+        below ``n``; else None.
+
+        A test of ``j`` must be linear in it alone, and no value or other control may read it,
+        so the count enters a row's claims only as its length.
+        """
+        state = dict(node)
+        found = _counting(state, cases)
+        atom = found and self.count(*found)
+        if not atom:
+            return None
+        cell, k0, d = found
+        try:
+            sym = self.step(tuple(sorted({**state, cell: mk(k0, {atom: d})}.items())))
+        except ValueError:
+            return None
+        tests = [_counts(conds, atom) for conds, _, _ in sym]
+        if None in tests or any(
+            atom in atoms(value) | atoms(tuple(v for c, v in nxt if c != cell))
+            for _, value, nxt in sym
+        ):
+            return None
+        here = _holding(tests, atom, 0)
+        stay = {c: mk(k0 + d, {atom: d}) if c == cell else state[c] for c in self.control}
+        if not here or any(dict(sym[i][2]) != stay for i in here):
+            return None
+        n = self.form.ranges[atom][1] + 1
+        for j in sorted({j for t in tests for _, points in t for j in points}):
+            if 0 < j < n and _holding(tests, atom, j) != here:
+                n = j
+                break
+        return (cell, d, n) if 1 < n < INF else None
+
+    def row(self, graph: Graph, i: int) -> tuple:
+        """``(state, conds, j)`` of node ``i``: a row's counted cell as ``k0 + d·j`` with ``j``
+        bounded to its firings; a firing's own state, ``()`` and None."""
+        state = dict(graph.nodes[i])
+        if graph.counters[i] is None:
+            return state, (), None
+        cell, d = graph.counters[i]
+        atom = self.count(cell, state[cell], d)
+        known = self.form.le(atom, graph.lengths[i] - 1)
+        return (
+            {**state, cell: mk(state[cell], {atom: d})},
+            (() if known is True else (known,)),
+            atom,
+        )
+
+
+def _after(nxt: tuple, cell: str, d: int, n: int) -> tuple:
+    """The control after a row of ``n`` firings whose first gives ``nxt``."""
+    return tuple((c, v + (n - 1) * d if c == cell else v) for c, v in nxt)
+
+
+def _counting(state: dict, cases: list) -> tuple | None:
+    """``(cell, k0, d)`` when every case moves one control cell alone, from ``k0`` to the same
+    ``k0 + d``."""
+    moved = {c for _, _, nxt in cases for c, v in nxt if v != state[c]}
+    after = {dict(nxt)[c] for c in moved for _, _, nxt in cases}
+    if len(moved) != 1 or len(after) != 1:
+        return None
+    (cell,), (k1,) = moved, after
+    k0 = state[cell]
+    return (cell, k0, k1 - k0) if isinstance(k0, int) and isinstance(k1, int) else None
+
+
+def _counts(conds, atom: str) -> list | None:
+    """``[(test, counts)]`` of the tests in ``conds`` that read ``atom``, each linear in it
+    alone, with the counts around which it can change; None when one is not linear in it alone."""
+    out = []
+    for c in conds:
+        if atom not in atoms(c):
+            continue
+        leaves = _leaves(c, atom)
+        if leaves is None:
+            return None
+        out.append((c, {(-const) // k + e for const, k in leaves for e in (-1, 0, 1, 2)}))
+    return out
+
+
+def _leaves(c, atom: str) -> list | None:
+    """``[(const, k)]`` of each comparison ``const + k·atom`` of condition ``c``, or None when a
+    comparison reads anything else."""
+    if c[0] in ("lt", "eq"):
+        const, coeffs = lin(c[1])
+        return [(const, coeffs[atom])] if set(coeffs) == {atom} else None
+    parts = [_leaves(x, atom) for x in c[1:]]
+    return None if None in parts else [leaf for p in parts for leaf in p]
+
+
+def _truth(c, atom: str, k: int) -> bool:
+    """Condition ``c`` over ``atom`` alone at ``atom = k``."""
+    head = c[0]
+    if head in ("lt", "eq"):
+        const, coeffs = lin(c[1])
+        x = const + coeffs[atom] * k
+        return x < 0 if head == "lt" else x == 0
+    if head == "not":
+        return not _truth(c[1], atom, k)
+    parts = (_truth(x, atom, k) for x in c[1:])
+    return all(parts) if head == "land" else any(parts)
+
+
+def _holding(tests: list, atom: str, k: int) -> frozenset:
+    """The cases whose tests of ``atom`` all hold at ``atom = k``."""
+    return frozenset(i for i, t in enumerate(tests) if all(_truth(c, atom, k) for c, _ in t))
 
 
 def minimal(graph: Graph, lift: Lift) -> tuple:  # pylint: disable=too-many-locals
-    """``(class per state, value per class, {class: guard} per class)``: the coarsest bisimulation.
+    """``(class per state, value per class, {class: guard} per class, firings per class)``: the
+    coarsest bisimulation.
 
-    States are equivalent when their value updates and their guarded successor classes agree.
+    States are equivalent when their value updates, their firings and their guarded successor
+    classes agree.
     """
     values = [lift.cases([(c, v) for c, v, _ in row]) for row in graph.cases]
     guards = [_guards(row, lift) for row in graph.cases]
-    label = [G.text(v) for v in values]
+    label = [f"{G.text(v)} x{n}" for v, n in zip(values, graph.lengths)]
     while True:
         keys = []
         for i, gs in enumerate(guards):
@@ -618,7 +761,7 @@ def minimal(graph: Graph, lift: Lift) -> tuple:  # pylint: disable=too-many-loca
         for j, g in guards[rep[c]].items():
             merged[cls[j]] = merged.get(cls[j], 0) + g
         edges.append({k: G.canon(g) for k, g in merged.items()})
-    return cls, [values[r] for r in rep], edges
+    return cls, [values[r] for r in rep], edges, [graph.lengths[r] for r in rep]
 
 
 def _guards(row, lift: Lift) -> dict:
@@ -631,36 +774,90 @@ def _guards(row, lift: Lift) -> dict:
 
 @dataclasses.dataclass
 class Order:
-    """The phase: ``kind`` time or turn, the state at each position, the prefix and the cycle."""
+    """The phase: ``kind`` time or turn; ``runs`` of ``(class, positions)`` over the prefix and
+    one cycle with each run's ``advance``; ``at`` each class's first position from the start."""
 
     kind: str
-    seq: list
+    runs: list
     prefix: int
     period: int
     advance: list
+    at: dict
 
 
-def order(edges: list) -> Order | None:
+def order(edges: list, lengths: list, values: list) -> Order | None:
     """The phase order of a minimal graph from class 0, or None when no single phase fits.
 
-    Time: every class has one successor. Turns: a class stays or moves to one other class.
+    Time: every class has one successor. Turns: a class stays or moves to one other class; a
+    class of several firings moves at each. A class holds its firings' positions; prefix and
+    period are the shortest that give the positions' value and guard sequence.
     """
     time = all(len(e) == 1 for e in edges)
-    seq, seen, adv = [], {}, []
+    path, at, tokens = [], {}, []
     c = 0
-    while c not in seen:
-        seen[c] = len(seq)
-        seq.append(c)
-        out = {k: g for k, g in edges[c].items() if time or k != c}
+    while c not in at:
+        at[c] = sum(n for _, n, _ in path)
+        out = {k: g for k, g in edges[c].items() if time or k != c or lengths[c] > 1}
         if len(out) > 1:
             return None
-        if not out:
-            adv.append(sympy.Integer(0))
-            return Order("turn", seq, len(seq) - 1, 1, adv)
-        ((c, g),) = out.items()
-        adv.append(sympy.Integer(1) if time else g)
-    start = seen[c]
-    return Order("time" if time else "turn", seq, start, len(seq) - start, adv)
+        g = next(iter(out.values()), None)
+        path.append((c, lengths[c], sympy.Integer(int(time)) if time or g is None else g))
+        stay = edges[c].get(c) if len(out) < len(edges[c]) else None
+        tokens.append(tuple("" if x is None else G.text(x) for x in (values[c], stay, g)))
+        if g is None:
+            break
+        c = next(iter(out))
+    loop = len(path) - 1 if g is None else [x for x, _, _ in path].index(c)
+    prefix, period = shortest_lasso(tokens, [n for _, n, _ in path], loop)
+    runs = _clipped(path, prefix + period)
+    return Order(
+        "time" if time else "turn",
+        [(c, n) for c, n, _ in runs],
+        prefix,
+        period,
+        [a for *_, a in runs],
+        at,
+    )
+
+
+def _clipped(path: list, length: int) -> list:
+    """The entries ``(class, positions, advance)`` of ``path`` over its first ``length``
+    positions."""
+    out, pos = [], 0
+    for c, n, a in path:
+        if pos < length:
+            out.append((c, min(n, length - pos), a))
+        pos += n
+    return out
+
+
+def shortest_lasso(tokens: list, sizes: list, loop: int) -> tuple:
+    """``(prefix, period)`` in positions of the sequence that repeats ``tokens[i]`` ``sizes[i]``
+    times, the entries from ``loop`` on forever: the shortest prefix and period that give it."""
+    starts = list(itertools.accumulate(sizes, initial=0))
+    cyc = []
+    for t, n in zip(tokens[loop:], sizes[loop:]):
+        cyc = cyc[:-1] + [(t, cyc[-1][1] + n)] if cyc and cyc[-1][0] == t else cyc + [(t, n)]
+    if len(cyc) > 1 and cyc[0][0] == cyc[-1][0]:
+        cyc = [(cyc[0][0], cyc[0][1] + cyc[-1][1])] + cyc[1:-1]
+    period = 1
+    if len(cyc) > 1:
+        fail = [0] * len(cyc)
+        for i in range(1, len(cyc)):
+            k = fail[i - 1]
+            while k and cyc[i] != cyc[k]:
+                k = fail[k - 1]
+            fail[i] = k + (cyc[i] == cyc[k])
+        s = len(cyc) - fail[-1]
+        period = sum(n for _, n in cyc[: s if len(cyc) % s == 0 else len(cyc)])
+    prefix = starts[loop]
+    while prefix:
+        a = bisect.bisect_right(starts, prefix - 1) - 1
+        b = bisect.bisect_right(starts, prefix - 1 + period) - 1
+        if tokens[a] != tokens[b]:
+            break
+        prefix -= min(prefix - starts[a], prefix + period - starts[b])
+    return prefix, period
 
 
 # ---- synthesis ------------------------------------------------------------------------
@@ -676,33 +873,57 @@ def absorb(e) -> sympy.Expr:
     return G.canon(sympy.Add(*out))
 
 
-def steps(items: list, x) -> sympy.Expr:
-    """``items[x]`` for ``x`` in ``[0, len)``: the first item plus a bracket per change."""
-    out = items[0]
-    for b in range(1, len(items)):
-        if items[b] != items[b - 1]:
-            out += (items[b] - items[b - 1]) * G.ge(x, b)
+def split(items: list, o: Order) -> tuple:
+    """``(prefix, cycle)`` runs of ``(item, positions)``, one item per run of ``o``."""
+    pre, cyc, pos = [], [], 0
+    for item, (_, n) in zip(items, o.runs):
+        a = min(n, max(0, o.prefix - pos))
+        pre += [(item, a)] if a else []
+        cyc += [(item, n - a)] if n > a else []
+        pos += n
+    return pre, cyc
+
+
+def steps(runs: list, x) -> sympy.Expr:
+    """The item at position ``x`` of runs ``(item, positions)``, ``x`` within them: the first
+    item plus a bracket per change."""
+    out = prev = runs[0][0]
+    b = 0
+    for item, n in runs:
+        if item != prev:
+            out += (item - prev) * G.ge(x, b)
+        prev, b = item, b + n
     return out
 
 
-def boundaries(items: list) -> list:
-    """Rotations of a cycle that start it at a change, or ``[0]`` for a constant cycle."""
-    n = len(items)
-    return [k for k in range(n) if items[k] != items[k - 1]] or [0]
+def boundaries(runs: list) -> list:
+    """Positions that start a cycle of runs at a change, or ``[0]`` for a constant cycle."""
+    out, b = [], 0
+    for i, (item, n) in enumerate(runs):
+        if item != runs[i - 1][0]:
+            out.append(b)
+        b += n
+    return out or [0]
+
+
+def rotated(runs: list, k: int) -> list:
+    """A cycle of runs started at position ``k``, a run's start."""
+    i = list(itertools.accumulate((n for _, n in runs), initial=0)).index(k)
+    return runs[i:] + runs[:i]
 
 
 def by_phase(items: list, o: Order) -> list:
-    """Candidate expressions of ``items[position(φ)]``: one per rotation of the cycle."""
-    pre, cyc = items[: o.prefix], items[o.prefix :]
+    """Candidate expressions of the item at ``φ``'s position, one item per run of ``o``: one
+    per rotation of the cycle."""
+    pre, cyc = split(items, o)
     out = []
     for k in boundaries(cyc):
-        rot = cyc[k:] + cyc[:k]
-        x = sympy.Mod(G.PHI - o.prefix - k, o.period) if o.period > 1 else 0
-        tail = steps(rot, x) if o.period > 1 else rot[0]
-        if o.prefix:
-            out.append(steps(pre + [tail], G.PHI))
+        rot = rotated(cyc, k)
+        if o.period > 1:
+            tail = steps(rot, sympy.Mod(G.PHI - o.prefix - k, o.period))
         else:
-            out.append(tail)
+            tail = rot[0][0]
+        out.append(steps(pre + [(tail, 1)], G.PHI) if o.prefix else tail)
     return [G.canon(e) for e in out]
 
 
@@ -730,7 +951,7 @@ def additive(value, mask: int):
 
 def value_forms(values: list, o: Order, mask: int) -> list:
     """Candidate value updates: by position, and when every state adds or sets, the add form."""
-    items = [values[c] for c in o.seq]
+    items = [values[c] for c, _ in o.runs]
     out = by_phase(items, o)
     ops = [additive(v, mask) for v in items]
     if all(ops):
@@ -742,49 +963,90 @@ def value_forms(values: list, o: Order, mask: int) -> list:
     return [absorb(e) for e in out]
 
 
+class Trace:
+    """Values after each firing as segments ``(first, step, positions)``: ``first`` then
+    ``first + step·j``, a set's value as it is."""
+
+    def __init__(self, segments: list):
+        self.segments = segments
+        self.starts = list(itertools.accumulate((n for _, _, n in segments), initial=0))
+
+    def __len__(self) -> int:
+        return self.starts[-1]
+
+    def segment(self, i: int) -> int:
+        """The segment holding position ``i``."""
+        return bisect.bisect_right(self.starts, i) - 1
+
+    def __getitem__(self, i: int):
+        s = self.segment(i)
+        y, d, _ = self.segments[s]
+        j = i - self.starts[s]
+        return y if j == 0 or d == 0 else sympy.expand(y + d * j)
+
+    def cut(self, a: int, b: int) -> "Trace":
+        """Positions ``[a, b)``."""
+        out = []
+        for s, (_, d, n) in enumerate(self.segments):
+            lo, hi = max(a, self.starts[s]), min(b, self.starts[s] + n)
+            if lo < hi:
+                out.append((self[lo], d, hi - lo))
+        return Trace(out)
+
+    def diffs(self) -> list:
+        """``[(d, i, j)]``: maximal runs of equal steps ``self[x] - self[x - 1]`` for ``x`` in
+        ``[i, j]``."""
+        out = []
+        for s, (_, d, n) in enumerate(self.segments):
+            b = self.starts[s]
+            parts = [(sympy.expand(self[b] - self[b - 1]), b, b)] if b else []
+            parts += [(sympy.expand(d), b + 1, b + n - 1)] if n > 1 else []
+            for step, i, j in parts:
+                if out and sympy.expand(step - out[-1][0]) == 0:
+                    out[-1] = (out[-1][0], out[-1][1], j)
+                else:
+                    out.append((step, i, j))
+        return out
+
+
 def closed_forms(values: list, o: Order, mask: int, v0) -> list:
     """Candidate ``g(φ)``, the value after the firing at ``φ``, when no value reads ``v``."""
     if o.kind != "time":
         return []
-    ops = [additive(values[c], mask) for c in o.seq]
+    ops = [additive(values[c], mask) for c, _ in o.runs]
     if not all(ops):
         return []
-    trace, y = [], v0
-    for phi in range(o.prefix + 2 * o.period):
-        k, x = ops[phi if phi < len(ops) else o.prefix + (phi - o.prefix) % o.period]
-        y = x if k == "set" else (None if y is None else sympy.expand(y + x))
-        trace.append(y)
-    if any(t is None for t in trace):
-        return []
-    cyc = ops[o.prefix :]
-    drift = sympy.expand(sum((x for k, x in cyc if k == "add"), sympy.Integer(0)))
-    if any(k == "set" for k, _ in cyc) or drift == 0:
+    pre, cyc = split(ops, o)
+    segments, y = [], v0
+    for (k, x), n in pre + cyc + cyc:
+        if k == "add" and y is None:
+            return []
+        segments.append((x, sympy.Integer(0), n) if k == "set" else (sympy.expand(y + x), x, n))
+        y = Trace(segments[-1:])[n - 1]
+    trace = Trace(segments)
+    drift = sympy.expand(sum((n * x for (k, x), n in cyc if k == "add"), sympy.Integer(0)))
+    if any(k == "set" for (k, _), _ in cyc) or drift == 0:
         drift = sympy.Integer(0)
     out = []
-    for k in boundaries([x for _, x in cyc]) if o.period > 1 else [0]:
+    for k in boundaries([(x, n) for (_, x), n in cyc]) if o.period > 1 else [0]:
         out += _windows(trace, o, k, drift)
     return [G.canon(e) for e in out]
 
 
-def _ramp(seq: list, x, window: bool = False) -> sympy.Expr:
+def _ramp(seq: Trace, x, window: bool = False) -> sympy.Expr:
     """``seq[x]`` as its first value plus clamped ramps over runs of equal steps.
 
     With ``window``, ``0 <= x < len(seq)``: the first run needs no lower clamp, the last no upper.
     """
-    out, i = seq[0], 1
-    while i < len(seq):
-        d = sympy.expand(seq[i] - seq[i - 1])
-        j = i
-        while j + 1 < len(seq) and sympy.expand(seq[j + 1] - seq[j] - d) == 0:
-            j += 1
+    out = seq[0]
+    for d, i, j in seq.diffs():
         if d != 0:
             ramp = x - i + 1 if window and i == 1 else sympy.Max(x - i + 1, 0)
             out += d * (ramp if window and j == len(seq) - 1 else sympy.Min(ramp, j - i + 1))
-        i = j + 1
     return out
 
 
-def _windows(trace: list, o: Order, k: int, drift) -> list:
+def _windows(trace: Trace, o: Order, k: int, drift) -> list:
     """Closed forms with a window starting at the value before the cycle's change at ``k``.
 
     A window ramp plus drift; the window form alone is kept when it also gives the prefix.
@@ -792,28 +1054,51 @@ def _windows(trace: list, o: Order, k: int, drift) -> list:
     p, n = o.prefix, o.period
     start = p + (k - 1) % n
     if n == 1 and drift == 0:
-        forms = [_ramp(trace[: p + 1], G.PHI)]
+        forms = [_ramp(trace.cut(0, p + 1), G.PHI)]
     else:
         t = G.PHI - start
-        tail = _ramp(trace[start : start + n], sympy.Mod(t, n), True) + drift * sympy.floor(t / n)
-        forms = [_gated(trace, tail, start) or _join(trace[:start], tail, start)]
+        window = trace.cut(start, start + n)
+        tail = _ramp(window, sympy.Mod(t, n), True) + drift * sympy.floor(t / n)
+        kinks = {0} | {b for _, i, j in window.diffs() for b in (i - 1, j)}
+        forms = [_gated(trace, tail, start, (n, kinks)) or _join(trace.cut(0, start), tail, start)]
     out = []
     for e in forms:
         out += [e, sympy.expand(e.rewrite(sympy.Abs))]
     return out
 
 
-def _gated(trace: list, tail, start: int):
-    """``tail`` from the first ``φ`` it fits on, the constant before it; None if none fits."""
+def _gated(trace: Trace, tail, start: int, window: tuple):
+    """``tail`` from the first ``φ`` it fits on, the constant before it; None if none fits.
+
+    ``window`` is ``(n, kinks)``: ``tail`` is linear in ``φ`` between the kinks of
+    ``(φ - start) % n``, as each trace segment is, so a stretch where both are linear fits when
+    its two ends do, and a fit that stops inside it stops at its last position.
+    """
+    n, kinks = window
+
+    def fits_at(x) -> bool:
+        return sympy.expand(tail.subs(G.PHI, x) - trace[x]) == 0
+
     fits = start
-    while fits > 0 and sympy.expand(tail.subs(G.PHI, fits - 1) - trace[fits - 1]) == 0:
-        fits -= 1
-    if any(sympy.expand(trace[i] - trace[0]) != 0 for i in range(fits)):
-        return None
-    return tail if fits == 0 else trace[0] + G.ge(G.PHI, fits) * (tail - trace[0])
+    while fits > 0:
+        r = fits - 1
+        u = (r - start) % n
+        a = max(trace.starts[trace.segment(r)], r - u + max((b for b in kinks if b < u), default=u))
+        if not fits_at(r):
+            break
+        if a < r and not fits_at(a):
+            fits = r
+            break
+        fits = a
+    first = trace[0]
+    for s in range(trace.segment(fits - 1) + 1 if fits else 0):
+        lo, hi = trace.starts[s], min(fits, trace.starts[s + 1]) - 1
+        if any(sympy.expand(trace[x] - first) != 0 for x in (lo, hi)):
+            return None
+    return tail if fits == 0 else first + G.ge(G.PHI, fits) * (tail - first)
 
 
-def _join(head: list, tail, start: int):
+def _join(head: Trace, tail, start: int):
     """``head[φ]`` before ``start``, ``tail`` from it."""
     return _ramp(head, G.PHI) * G.lt(G.PHI, start) + tail * G.ge(G.PHI, start)
 
@@ -881,24 +1166,35 @@ class Prover:
                     return f"state {i}: {witness(smt.solver)}"
         return None
 
+    def phase(self, smt, phi: int, n: int):
+        """``φ`` at the ``n`` positions from ``phi``: a constant for one, else bounded to them."""
+        if n == 1:
+            return z3.BitVecVal(phi, G.BITS)
+        x = z3.BitVec("φ", G.BITS)
+        smt.solver.add(x >= phi, x < phi + n)
+        return x
+
     def node(self, graph: Graph, cls: list, i: int, phi: int, value, adv) -> str | None:
         # pylint: disable=too-many-arguments,too-many-positional-arguments
-        """None when every path of state ``i`` gives ``value`` and ``adv`` at ``φ``, else why.
+        """None when every path of state ``i`` gives ``value`` and ``adv`` at each of its
+        firings' positions from ``φ``, else why.
 
-        ``adv`` is 1 on the paths that leave the state's class, else 0.
+        ``adv`` is 1 on the paths that leave the state's position, else 0: a row's firings
+        each move on.
         """
+        n = graph.lengths[i]
         for conds, val, j in graph.cases[i]:
             smt = self.form.solver()
-            env = self.env(smt, z3.BitVecVal(phi, G.BITS))
+            env = self.env(smt, self.phase(smt, phi, n))
             smt.solver.add(*(smt.cond(c) for c in conds))
-            moved = int(cls[j] != cls[i])
+            moved = int(n > 1 or cls[j] != cls[i])
             smt.solver.add(
                 z3.Or(G.to_z3(value, env) != smt.term(val), G.to_z3(adv, env) != moved)
                 if adv is not None
                 else G.to_z3(value, env) != smt.term(val)
             )
             if smt.solver.check() != z3.unsat:
-                return f"at φ = {phi}: {witness(smt.solver)}"
+                return f"at φ = {phi}{f' + [0, {n})' if n > 1 else ''}: {witness(smt.solver)}"
         return None
 
     def periodic(self, e, start: int, period: int) -> str | None:
@@ -1005,12 +1301,12 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
         graph = machine.explore(start)
     except ValueError as exc:
         return Derived(error=str(exc))
-    cls, values, edges = minimal(graph, lift)
+    cls, raw, edges, lengths = minimal(graph, lift)
     lo, hi, r, m = (dict(start)[c] for c in DOMAIN) if machine.chip else machine.domain(start)
-    values = [G.shortest([x, G.on_domain(x, r, m, lo, hi)]) for x in values]
+    values = [G.shortest([x, G.on_domain(x, r, m, lo, hi)]) for x in raw]
     if lift.unknown:
         return Derived(states=len(graph.nodes), error=f"reads {', '.join(sorted(lift.unknown))}")
-    o = order(edges)
+    o = order(edges, lengths, raw)
     if o is None:
         return Derived(
             states=len(graph.nodes), error="more than one phase: a state advances on two tests"
@@ -1029,15 +1325,15 @@ def derive(machine: Machine, start: tuple, v0, freq: dict, extra: dict | None = 
     bad = [
         (i, why)
         for i in range(len(graph.nodes))
-        if cls[i] in o.seq
-        and (why := prover.node(graph, cls, i, o.seq.index(cls[i]), out.value,
+        if cls[i] in o.at
+        and (why := prover.node(graph, cls, i, o.at[cls[i]], out.value,
                                 out.phase if o.kind == "turn" else None))
     ]  # fmt: skip
     out.proof.append(
         (f"{len(graph.nodes)} states", not bad, f"state {bad[0][0]} {bad[0][1]}" if bad else "")
     )
     if machine.chip:
-        out.invariant = chipinv.prove(machine, graph, (lo, hi, r, m), cls, o.seq, out.value, prover)
+        out.invariant = chipinv.prove(machine, graph, (lo, hi, r, m), cls, o.at, out.value, prover)
         why = prover.closure(graph)
         out.proof.append(("every firing stays in the chip values", why is None, why or ""))
     if o.period > 1 or o.kind == "turn":

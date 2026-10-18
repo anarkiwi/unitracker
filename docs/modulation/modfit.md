@@ -40,10 +40,17 @@ value term (`exprs.Analysis.key`).
    is the hook's write of the cell, when it gives the observed value.
 2. **Graph.** From the start's concrete control, each firing runs through `form.Form` with `v`
    symbolic. The reachable control states and their guarded cases form a graph, minimised by
-   bisimulation (equal value update, equal guarded successor classes).
+   bisimulation (equal value update, equal firings, equal guarded successor classes). A state
+   (other than the start) whose firing changes one control cell alone, by a constant `d`, is a
+   *row*: the firing runs again with that cell as `k0 + d·j` over an atom `j`, and while the
+   cases whose tests hold stay the same (tests linear in `j` alone; no value or other control
+   reads `j`) the firings are one state of `n` firings. A table row's countdown (goattracker2
+   `ptime`, sidwizard `pwcnt`) is then its length, not `n` states.
 3. **Phase.** If every class has one successor, `φ` counts firings (`time`: a prefix and a
    cycle). If a class stays until a test of `v` moves it to one other class, `φ` counts turns
-   (`turn`: `a` is that test). Anything else fails (*more than one phase*).
+   (`turn`: `a` is that test); a row moves at each firing. Anything else fails (*more than one
+   phase*). A class holds its firings' positions; the prefix and period are the shortest that
+   give the positions' values and guards, found over runs of positions.
 4. **Value update.** Each class's cases become one expression (a decision tree on its tests,
    sides chosen by a test of their difference joined as `min`/`max`, comparisons of one linear
    form met as intervals). `f(v, φ)` is the shortest (`grammar.rank`) of the position-indexed
@@ -62,7 +69,7 @@ least and greatest entry.
 
 | obligation | holds for |
 |---|---|
-| `f` (and for `turn`, `a`) at the class's phase equals the player's value (and advance) | every reachable control state, every guarded path |
+| `f` (and for `turn`, `a`) at the class's phase equals the player's value (and advance) | every reachable control state, every guarded path; a row's `n` firings as one claim over `φ` in their positions |
 | every firing leaves the chip value in its domain (`lo..hi`, `r mod m`) | chip units |
 | `f(v, φ + P) = f(v, φ)`, same for `a` | `φ >=` prefix, when the period `P > 1` or the phase is `turn` |
 | `g(0) = f(v0, 0)` and `g(φ + 1) = f(g(φ), φ + 1)` | the closed form, when there is one |
@@ -71,7 +78,8 @@ A start is *exact* when every obligation holds. For a chip unit, `chipinv` also 
 invariant its recurrence holds under: `G`, guard comparisons over the hidden cells that every
 action list of the player keeps (`invariant.inductive`), and `I`, the strongest conjunction
 (Houdini) of guard comparisons and domain bounds true after the first firing and kept by
-every firing. This result is reported, not required by the conversion.
+every firing; a row's firings are checked once with its counted cell as `k0 + d·j` and
+`φ = φ0 + j`. This result is reported, not required by the conversion.
 
 ## Conversion
 
