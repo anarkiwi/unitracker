@@ -19,7 +19,8 @@ commands:
     - {name: resfilt, when: "0 < arg < 0x100", args: {res: "arg >> 4", route: "arg & 0x0F"}, raw: "(res << 4) | route"}
     - {name: resfilt, when: "arg == 0", args: {res: 0, route: 0}, raw: 0, also: "filter:none"}
   12: {name: cut, byte: arg}
-  13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
+  # D: from $10 it plays nothing; the lifter rewrites it.
+  13: {name: vol, when: "arg < 0x10"}
   # E: every voice swings, the pair written as the speed-table row's two bytes (!tempo:6/7).
   14: {name: tempo, ref: speedtab, inline: true, when: "2 <= l <= 129 and 2 <= r <= 129"}
   # F: d (bit 7 clear: all voices) gives d ticks per row for d >= 3, and d = 2 plays as 3.

@@ -51,7 +51,6 @@ instrument column, every other command in the FX column.
 | `!tempo` | 2-129, 2-129/2-129 (two different) |
 | `!vtempo` | 2-129, 2-129/2-129 (two different) |
 | `!freq` | `x` name, `none` |
-| `!mark` | 16-255 |
 | `!legato` | no argument |
 
 Every other command is refused by name.
@@ -66,7 +65,9 @@ Every other command is refused by name.
   each meets where it plays ($x1 reversed, starting on its second tempo): a phrase that meets
   different pairs at different places becomes one phrase per place, and a loop whose passes meet
   different pairs is written out from where they repeat.
-- `!vol` is command $D below $10; from $10 it is `!mark`.
+- `!vol` is command $D below $10. From $10 the command plays nothing but keeps the voice's
+  continuous command running; the lifter writes it as that command, or as an empty step when
+  there is none, once a replay proves the song unchanged.
 - `!run:none`, `!pw:none` and `!filter:none` are commands 8, 9 and 10 with argument 0, which stop
   the control, pulse and filter programs.
 - `!legato` is command 17: the lifter writes a native toneporta on a note as `!legato` plus
@@ -183,7 +184,8 @@ The lifter fails, naming what it meets:
 - wavetable $F0, $F8 and $FE, on which the playroutine stops;
 - a wavetable $F7 whose pause the song hears, and a waveform value from $E0, which no waveform
   row sets;
-- a wavetable $FD $10-$FF whose pause the song hears;
+- a wavetable $FD $10-$FF whose pause the song hears, and a pattern $D10-$DFF whose rewrite the
+  song hears;
 - a wavetable step row whose runs need different expressions (a vibrato step met on different
   phases), or whose other effects (a vibrato's phase, a toneporta's arrival) the song hears;
 - a modulation start whose expression is not proved, or expressions that do not play the native

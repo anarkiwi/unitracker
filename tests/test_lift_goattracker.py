@@ -473,3 +473,17 @@ def test_a_cutoff_byte_writes_its_top_eight_bits():
         rows["ctrltab"].decode({"cut": 0x109})
     with pytest.raises(CodecError, match="a byte form has no value"):
         RowCodec(record_types(pr)["ctrltab"], [{"keys": {"cut": {"byte": "n", "value": "n"}}}], 0)
+
+
+@pytest.mark.parametrize(
+    "commands",
+    [[(4, 13, 0x20)], [(4, 4, 1), (8, 13, 0x20), (9, 13, 0xFF)], [(4, 1, 1), (6, 13, 0x10)]],
+    ids=["after no command", "during a vibrato", "during a portamento"],
+)
+def test_a_d10_to_dff_is_the_command_it_keeps_running(commands):
+    rows = [(24, 1, 0, 0)] + [REST] * 15
+    for k, code, arg in commands:
+        rows[k] = (None, 0, code, arg)
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, speed=[(2, 0x20)])
+    text, _, _ = lifted(dec, native)
+    assert "mark" not in text and "!vol" not in text

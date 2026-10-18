@@ -47,7 +47,6 @@ COMMAND_NAMES = (
     "tempo",
     "vtempo",
     "freq",
-    "mark",
     "legato",
 )
 ARGLESS = ("legato",)
