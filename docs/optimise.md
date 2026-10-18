@@ -63,19 +63,39 @@ The check (`proof.mismatch`) is exact, not sampled:
 
 What is checked is the candidate's written text read back (`songio.loads(songio.dumps(...))`), so
 the canonical writer's own rewriting ([Canonical form](format/document.md#canonical-form)) is inside
-the check. A song that cannot be written with its playroutine by `ref` is written embedded
+the check. A candidate is written without its `phrase_steps` hint, which the writer derives again
+from its phrases. A song that cannot be written with its playroutine by `ref` is written embedded
 ([Embedding](format/document.md#embedding)).
+
+### Resuming from the input
+
+A candidate plays exactly as the input until it first reads a datum the two hold differently, so
+its trace need not start at tick 0. The input's read-back, when it plays the input's grid, is
+played once as a `Baseline` (`unitracker.player.checkpoint`), kept on the input's trace:
+
+| it notes | |
+|---|---|
+| first reads | the tick each datum is first read: a record field, a table entry, a record row's action list (by its generated source), a play of a track (phrase length, transpose, repeat), a phrase step, a track's play count and loop, an expression |
+| snapshots | every 64 ticks within the kept-state window of `reach.recurrence`, the complete player state: cells, cursors, registers, starts, write counts and open modulator occurrences |
+
+A candidate whose generated code, but for its record rows' functions, and playroutine are the
+input's compares its data with the noted reads in tick order, and its trace resumes from the last
+snapshot before the first that differs, with the input's rows and kept states before it. Anything
+else plays from tick 0. The verdict is the full replay's.
 
 ## The driver
 
 | step | what happens |
 |---|---|
-| screen | each candidate is applied, written, counted, read back and checked in a process pool; a candidate whose text is unchanged is skipped; `factor` and `share` are checked only when they shrink the text |
+| screen | each candidate is applied, written, counted, read back and checked in a process pool; a candidate whose text is unchanged is skipped; `factor` and `share` are checked only when they shrink the text; a pass is not screened again on a text it kept nothing from |
 | keep | the proved candidates are applied in candidate order, each kept in the run only if it shrinks the running text; the longest prefix of that run whose text proves is kept, found by bisection |
 | repeat | a pass repeats while it keeps an edit; the passes repeat until none does |
 | canonical | after each round the text is read and rewritten; a rewrite that differs is checked again (failure is an error) and starts another round |
 
-Screening results are ordered by candidate index, so the output does not depend on `--workers`.
+The current song is always the current text read back, so a pass's screen depends only on that
+text. One pool of `--workers` spawned processes, each holding the input's trace, screens every pass
+and is stopped when the optimiser finishes. Screening results are ordered by candidate index, so
+the output does not depend on `--workers`.
 The output is canonical: `dumps(loads(text)) == text`.
 
 ## Report

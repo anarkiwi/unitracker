@@ -233,6 +233,9 @@ class _Codegen:
         self.pending = []
         self.counter = 0
         self.row_ctx = None
+        self.sources = {}
+        self.dispatch = {}
+        self.rows = set()
 
     def need_field(self, record, field) -> int:
         """Register an int field of a record for lookup tables; return its default."""
@@ -282,17 +285,21 @@ class _Codegen:
                 self.done.add(name)
                 rows = tuple(sorted(self.records[record]))
                 self.tail.append(f"{name} = {{i: ({fn}, i) for i in {rows!r}}}")
+                self.dispatch[name] = {i: (fn, i) for i in rows}
             return name
-        items = []
+        items, table = [], {}
         for index, row in sorted(self.records[record].items()):
             actions = row.get(field)
             if actions:
                 fn = self.request(self.fname("rec", voice, record, field, index), actions, voice)
                 items.append(f"{index}: ({fn}, None)")
+                self.rows.add(fn)
+                table[index] = (fn, None)
         name = f"D_{'v' if voice else 'g'}_{record}_{field}"
         if name not in self.done:
             self.done.add(name)
             self.tail.append(f"{name} = {{{', '.join(items)}}}")
+            self.dispatch[name] = table
         return name
 
     def build(self):
@@ -306,11 +313,18 @@ class _Codegen:
             self.block(actions, voice, body, 1)
             self.row_ctx = None
             args = (["v"] if voice else []) + (["_r=None"] if row is None else ["_r"])
-            self.lines.append(f"def {name}({', '.join(args)}):")
-            self.lines.extend(body or ["    pass"])
+            lines = [f"def {name}({', '.join(args)}):", *(body or ["    pass"])]
+            self.sources[name] = "\n".join(lines)
+            self.lines.extend(lines)
         self.lines.append(self.ghost())
         self.lines.append(self.modulators())
         return "\n".join(self.lines + self.tail)
+
+    def skeleton(self) -> str:
+        """The generated source but for the functions of record rows and the dispatch tables
+        naming them: what plays the same for songs that differ only in their data."""
+        shared = [self.sources[n] for n in sorted(self.sources) if n not in self.rows]
+        return "\n".join([*shared, *self.lines[-2:], repr(self.playroutine)])
 
     def modulators(self) -> str:
         """Source of the modulator helpers: ``_F``, ``_T``, ``_n``, each unit's selector and its
@@ -572,6 +586,7 @@ class SongPlayer:
         code = compile(gen.build(), f"<playroutine {pr.get('name', '')}>", "exec")
         exec(code, namespace)  # pylint: disable=exec-used
         self.namespace = namespace
+        self.codegen = gen
         self._masks = (
             {n: m for n, (m, _) in gen.gcells.items() if m is not None},
             {n: m for n, (m, _) in gen.vcells.items() if m is not None},

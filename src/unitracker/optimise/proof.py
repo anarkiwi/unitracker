@@ -29,12 +29,16 @@ class Trace:
 
     Row ``t`` repeats with ``period`` from ``mu`` on, so :meth:`row` gives every tick. With a
     ``reference`` the run stops at the first tick that differs from it in the song's own state.
+    A reference's ``baseline``, a :class:`Baseline` of a song that plays its grid, lets a song
+    traced against it resume from the baseline's play where that is the song's own.
     """
 
     def __init__(self, ir: dict, reference=None, max_ticks: int = reach.MAX_TICKS):
         player = SongPlayer(ir)
-        self.rows = []
-        self.bad = None
+        self.bad, self.baseline = None, None
+        base = getattr(reference, "baseline", None)
+        start, rows, kept = (base and base.resume(player)) or (0, [], None)
+        self.rows = list(rows)
 
         def each(p):
             self.rows.append(tuple(p.regs))
@@ -42,7 +46,7 @@ class Trace:
                 self.bad = reference.differs(len(self.rows) - 1, self.rows[-1], p.starts)
             return self.bad is not None
 
-        found = reach.recurrence(player, max_ticks, each=each)
+        found = reach.recurrence(player, max_ticks, each=each, start=start, kept=kept)
         self.starts = list(player.starts)
         self.mu, self.period = (0, 0) if found is None else (found[0] - found[1], found[1])
 

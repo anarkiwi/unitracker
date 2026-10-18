@@ -12,7 +12,9 @@ class ReachabilityError(ValueError):
     """The song's playback state did not recur within the tick bound."""
 
 
-def recurrence(player, max_ticks: int = MAX_TICKS, progress: bool = False, each=None):
+def recurrence(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    player, max_ticks: int = MAX_TICKS, progress: bool = False, each=None, start=0, kept=None
+):
     """``(tick, period)``: a tick whose complete state equals the one ``period`` before.
 
     Playback is deterministic, so the state from ``tick - period`` on repeats with that period.
@@ -20,9 +22,13 @@ def recurrence(player, max_ticks: int = MAX_TICKS, progress: bool = False, each=
     among them is found within ``STRIDE`` ticks of the earliest; past them Brent's algorithm
     compares each tick's state with one saved state. ``each(player)`` runs after every tick, and
     a true result stops the run, returning None.
+
+    A player that has played ``start`` ticks continues from there, ``kept`` holding its states
+    kept so far (``{state: tick}``), ``start`` below ``STRIDE * REMEMBERED``.
     """
-    kept, saved, power, period = {}, None, 1, 0
-    for tick in tqdm(range(max_ticks + 1), desc="reach", unit="tick", disable=not progress):
+    kept, saved, power, period = dict(kept or {}), None, 1, 0
+    ticks = range(start, max_ticks + 1)
+    for tick in tqdm(ticks, desc="reach", unit="tick", disable=not progress):
         player.play_frame()
         if each is not None and each(player):
             return None

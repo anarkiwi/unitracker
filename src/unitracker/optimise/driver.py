@@ -12,6 +12,8 @@ from unitracker.optimise.edits import EDITS
 from unitracker.optimise.model import ERRORS
 from unitracker.optimise.passes import LARGER_UNPROVED, PASSES
 from unitracker.optimise.proof import Trace, mismatch, tokens
+from unitracker.player.checkpoint import Baseline
+from unitracker.player.vm import SongPlayer
 
 
 @dataclass
@@ -46,9 +48,12 @@ def _apply(ir: dict, edit: tuple) -> dict | None:
 
 
 def _written(ir: dict | None, embed: bool = False):
-    """``(text, tokens, read back)`` of a candidate, or None when it can't be written."""
+    """``(text, tokens, read back)`` of a candidate, or None when it can't be written. The
+    writer restates the ``phrase_steps`` hint from the candidate's phrases."""
     if ir is None:
         return None
+    if "phrase_steps" in (ir.get("hints") or {}):
+        ir = {**ir, "hints": {k: v for k, v in ir["hints"].items() if k != "phrase_steps"}}
     try:
         text = songio.dumps(ir, embed)
         return text, tokens(text), songio.loads(text)
@@ -64,34 +69,49 @@ def _init(state: dict) -> None:
 
 
 def _screen(job):
-    """``(index, delta or None, proved)`` of one candidate edit of the current base."""
-    k, edit = job
-    written = _written(_apply(_STATE["base"], edit), _STATE["embed"])
-    if written is None or written[0] == _STATE["text"]:
+    """``(index, delta or None, proved)`` of one candidate edit of ``(base, text, tokens)``."""
+    k, edit, (base, text, size) = job
+    written = _written(_apply(base, edit), _STATE["embed"])
+    if written is None or written[0] == text:
         return k, None, False
-    delta = written[1] - _STATE["tokens"]
+    delta = written[1] - size
     if delta >= 0 and edit[0] in LARGER_UNPROVED:
         return k, delta, False
     return k, delta, mismatch(_STATE["ref"], written[2]) is None
 
 
-def _screened(jobs, workers: int, desc: str, state: dict) -> list:
-    """Every job's :func:`_screen` result, in job order, over ``workers`` processes."""
-    progress = tqdm(total=len(jobs), desc=desc, unit="edit", leave=False)
-    out = []
-    if workers <= 1 or len(jobs) < 2:
-        _init(state)
-        for job in jobs:
-            out.append(_screen(job))
-            progress.update()
-    else:
-        ctx = multiprocessing.get_context("spawn")
-        with ctx.Pool(min(workers, len(jobs)), initializer=_init, initargs=(state,)) as pool:
-            for got in pool.imap_unordered(_screen, jobs, chunksize=1):
+class _Screener:
+    """Screens candidates in-process or over one pool of ``workers`` processes, started on first
+    use and holding the reference for the optimiser's lifetime."""
+
+    def __init__(self, workers: int, state: dict):
+        self.workers, self.state, self.pool = workers, state, None
+
+    def __call__(self, jobs: list, desc: str) -> list:
+        """Every job's :func:`_screen` result, in job order."""
+        progress = tqdm(total=len(jobs), desc=desc, unit="edit", leave=False)
+        out = []
+        if self.workers <= 1 or len(jobs) < 2:
+            _init(self.state)
+            for job in jobs:
+                out.append(_screen(job))
+                progress.update()
+        else:
+            if self.pool is None:
+                ctx = multiprocessing.get_context("spawn")
+                self.pool = ctx.Pool(self.workers, initializer=_init, initargs=(self.state,))
+            for got in self.pool.imap_unordered(_screen, jobs, chunksize=1):
                 out.append(got)
                 progress.update()
-    progress.close()
-    return sorted(out)
+        progress.close()
+        return sorted(out)
+
+    def close(self) -> None:
+        """Stop the pool."""
+        if self.pool is not None:
+            self.pool.close()
+            self.pool.join()
+            self.pool = None
 
 
 class Optimiser:
@@ -103,20 +123,24 @@ class Optimiser:
         self.passes = list(passes or PASSES)
         self.workers = workers if workers is not None else default_workers()
         self.ref = Trace(ir)
-        self.source = self.base = ir
+        self.source = ir
         try:
             self.embed, self.text = False, songio.dumps(ir)
         except songio.SongFormatError:
             self.embed, self.text = True, songio.dumps(ir, embed=True)
-        self.tokens = tokens(self.text)
+        self.base, self.tokens = songio.loads(self.text), tokens(self.text)
+        if mismatch(self.ref, self.base) is None:
+            self.ref.baseline = Baseline(SongPlayer(self.base))
         self.findings = {}
+        self.settled = set()
+        self.screener = _Screener(self.workers, {"ref": self.ref, "embed": self.embed})
 
     def screen(self, name: str) -> list:
         """``(edit, finding key)`` of the pass's candidates the grid proves on the current song."""
         edits = PASSES[name](self.base)
-        state = {k: getattr(self, k) for k in ("base", "text", "tokens", "ref", "embed")}
+        base = (self.base, self.text, self.tokens)
         out = []
-        for k, delta, proved in _screened(list(enumerate(edits)), self.workers, name, state):
+        for k, delta, proved in self.screener([(k, e, base) for k, e in enumerate(edits)], name):
             if proved:
                 forms = describe(self.base, edits[k])
                 self.findings.setdefault((name, forms), Finding(name, edits[k], delta, forms=forms))
@@ -125,7 +149,12 @@ class Optimiser:
 
     def keep(self, name: str) -> bool:
         """Apply the proved edits that shrink the text in order and keep the longest run whose
-        written text the grid proves, found by bisection; whether any edit was kept."""
+        written text the grid proves, found by bisection; whether any edit was kept.
+
+        The current song is always its text read back, so screening is a function of the pass
+        and the text: a pass that kept nothing from a text keeps nothing from it again."""
+        if (name, self.text) in self.settled:
+            return False
         steps, base, size = [], self.base, self.tokens
         for edit, key in self.screen(name):
             cand = _apply(base, edit)
@@ -140,14 +169,22 @@ class Optimiser:
                 good = mid
             else:
                 high = mid - 1
-        for key, cand, written, delta in steps[:good]:
+        for key, _, written, delta in steps[:good]:
             self.findings[key].kept, self.findings[key].delta = True, delta
-            self.base, self.text, self.tokens = cand, written[0], written[1]
+            self.text, self.tokens, self.base = written
+        if not good:
+            self.settled.add((name, self.text))
         return good > 0
 
     def run(self, progress: bool = True) -> Result:
         """Apply every pass until none keeps an edit; the text is written from its own reading,
         so that it is canonical, and that reading is proved too."""
+        try:
+            return self._run(progress)
+        finally:
+            self.screener.close()
+
+    def _run(self, progress: bool) -> Result:
         before = self.tokens
         changed = True
         while changed:
@@ -155,14 +192,14 @@ class Optimiser:
             for name in tqdm(self.passes, desc="passes", unit="pass", disable=not progress):
                 while self.keep(name):
                     changed = True
-            self.base = songio.loads(self.text)
             text = songio.dumps(self.base, self.embed)
             if text != self.text:
-                if mismatch(self.ref, songio.loads(text)) is not None:
+                back = songio.loads(text)
+                if mismatch(self.ref, back) is not None:
                     raise songio.SongFormatError(
                         "the optimised text does not read back canonically"
                     )
-                self.text, self.tokens, changed = text, tokens(text), True
+                self.base, self.text, self.tokens, changed = back, text, tokens(text), True
         findings = list(self.findings.values())
         return Result(self.source, self.base, self.text, before, self.tokens, findings)
 
