@@ -97,9 +97,9 @@ class RecordType:
 def record_types(playroutine: dict) -> dict:
     """``{name: RecordType}`` for a playroutine's ``record_types``, and the format's expressions.
 
-    The expression type ``x`` holds modulator expressions (docs/modulation/expressions.md). Each type has its
-    own written name, and each type a document names by number its own prefix, none of them the
-    phrases' ``p``.
+    The expression type ``x`` holds modulator expressions (docs/modulation/expressions.md).
+    Each type has its own written name, and each type a document names by number its own prefix,
+    none of them the phrases' ``p``.
     """
     specs = playroutine.get("record_types") or {}
     if EXPR in specs:
