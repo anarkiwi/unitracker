@@ -1,10 +1,14 @@
-"""Shared fixtures: the HVSC tunes the conformance tests lift."""
+"""Shared fixtures: the HVSC reference tunes, each lifted once per session, and synthetic tunes."""
 
+import os
+import pickle
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from filelock import FileLock
 from pygoattracker import (
     Instrument,
     Orderlist,
@@ -24,6 +28,7 @@ from pysidwizard import parse_sid_song
 from pysidwizard.player import INST_WF_TABLE_POS
 
 from unitracker import optimise
+from unitracker.format import songio
 from unitracker.lift import backends
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
@@ -153,24 +158,74 @@ OPTIMISED = {
     "crosseyed": ["instruments", "programs"],
     "csillag": ["instruments"],
 }
+REFERENCE_TICKS = {
+    "metal_warrior": 2 * 3840,
+    "crosseyed": 95 + 2 * 1152 + 100,
+    "csillag": 6 * 2304 + 600,
+}
 
 
-class _Optimised(dict):
-    """Each reference tune lifted and optimised on first use."""
+def once(factory, key: str, make):
+    """``make()``, computed once per test session and shared by every xdist worker."""
+    base = factory.getbasetemp()
+    root = base.parent if os.environ.get("PYTEST_XDIST_WORKER") else base
+    path = root / f"once-{key}.pkl"
+    with FileLock(f"{path}.lock"):
+        if path.is_file():
+            return pickle.loads(path.read_bytes())
+        value = make()
+        path.write_bytes(pickle.dumps(value))
+    return value
 
-    def __init__(self, request):
+
+@dataclass(frozen=True)
+class Reference:
+    """A reference tune lifted once: its path, bytes, canonical document and native grid."""
+
+    sid: Path
+    raw: bytes
+    text: str
+    native: np.ndarray
+
+    def ir(self) -> dict:
+        """A fresh copy of the lifted song."""
+        return songio.loads(self.text)
+
+
+class _Shared(dict):
+    """Each reference tune's ``make(name, sid, *needs(name))`` on first use, shared across
+    workers; ``needs`` runs before the lock, so no lock is taken while another is held."""
+
+    def __init__(self, request, kind, make, needs=lambda name: ()):
         super().__init__()
-        self.request = request
+        self.request, self.kind, self.make, self.needs = request, kind, make, needs
 
     def __missing__(self, name):
-        sid = self.request.getfixturevalue(name)
-        ir = backends.lift(sid.read_bytes())
-        self[name] = (sid, optimise.optimise(ir, OPTIMISED[name], progress=False))
+        sid, args = self.request.getfixturevalue(name), self.needs(name)
+        factory = self.request.getfixturevalue("tmp_path_factory")
+        self[name] = once(factory, f"{self.kind}-{name}", lambda: self.make(name, sid, *args))
         return self[name]
+
+
+def _reference(name, sid):
+    raw = sid.read_bytes()
+    grid = backends.native_player(raw).render_grid(REFERENCE_TICKS[name])
+    return Reference(sid, raw, songio.dumps(backends.lift(raw)), np.asarray(grid, np.uint8))
+
+
+@pytest.fixture(scope="session")
+def references(request) -> dict:
+    """``{tune: Reference}``: each reference tune lifted once per session."""
+    return _Shared(request, "reference", _reference)
 
 
 @pytest.fixture(scope="session")
 def optimised_tunes(request) -> dict:
-    """``{tune: (path, optimiser Result)}``: a reference tune lifted and optimised by the passes
-    of :data:`OPTIMISED`, a subset that keeps the suite's run time bounded."""
-    return _Optimised(request)
+    """``{tune: (path, optimiser Result)}``: a reference tune's lift optimised by the passes of
+    :data:`OPTIMISED`, a subset that keeps the suite's run time bounded."""
+
+    def make(name, sid, reference):
+        return sid, optimise.optimise(reference.ir(), OPTIMISED[name], progress=False)
+
+    refs = request.getfixturevalue("references")
+    return _Shared(request, "optimised", make, lambda name: (refs[name],))

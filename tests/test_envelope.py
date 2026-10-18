@@ -60,8 +60,6 @@ def test_the_player_writes_the_byte():
         ("-!ad:255", "sidwizard: the player can't express !ad:255 over the instrument's ad 18"),
         ("-!sr:256", "sidwizard: the player can't express !sr:256 over the instrument's sr 240"),
         ("-!sr:none", "sidwizard: the player can't express !sr:none"),
-        ("-!attack:1", "!attack is retired in v1.14: write the envelope byte as `!ad:n`"),
-        ("-!irelease:1", "!irelease is retired in v1.14"),
     ],
 )
 def test_the_reader_refuses_what_no_small_fx_writes(atom, match):

@@ -55,100 +55,6 @@ GT_SONG = doc(
 )
 
 
-@pytest.mark.parametrize(
-    "playroutine,ins,match",
-    [
-        ("goattracker2", "{sr: 240, gt: 2}", "ins.gt is retired in v1.8: write the hard restart"),
-        ("goattracker2", "{fw: 9}", "ins.fw is retired in v1.8"),
-        ("sidwizard", "{hrad: 15}", "ins.hrad is retired in v1.8"),
-        ("sidwizard", "{hrsr: 0}", "ins.hrsr is retired in v1.8"),
-        ("sidwizard", "{firstctrl: 9}", "ins.firstctrl is retired in v1.8"),
-        ("sidwizard", "{flags: 26}", "ins.flags is retired in v1.13: its bits are"),
-        ("sidwizard", "{flags: 16}", "ins.flags is retired in v1.13"),
-        ("sidwizard", "{vibrato: 51}", "ins.vibrato is retired in v1.11: write the vibrato"),
-        ("sidwizard", "{vibdelay: 4}", "ins.vibdelay is retired in v1.11"),
-        ("sidwizard", "{octave: -12}", "ins.octave is retired in v1.11: a note is written as"),
-        ("sidwizard", "{flags: 192}", "ins.flags is retired in v1.13"),
-        ("goattracker2", "{speed: 1}", "ins.speed is retired in v1.16: write the vibrato as"),
-        ("goattracker2", "{vd: 3}", "ins.vd is retired in v1.16"),
-    ],
-)
-def test_the_reader_names_retired_instrument_keys(playroutine, ins, match):
-    with pytest.raises(songio.SongFormatError, match=match):
-        songio.loads(doc(playroutine, f"      ins:\n        i1: {ins}", "[C4.i1]"))
-
-
-@pytest.mark.parametrize(
-    "playroutine,command", [("sidwizard", "!notevib:5"), ("goattracker2", "!vib:@s1")]
-)
-def test_the_reader_names_the_retired_vibrato_commands(playroutine, command):
-    text = doc(playroutine, "      ins:\n        i1: {sr: 240}", f"[C4.i1, -{command}]")
-    name = command.split(":")[0]
-    with pytest.raises(songio.SongFormatError, match=f"{name} is retired in v1.11: write"):
-        songio.loads(text)
-
-
-@pytest.mark.parametrize(
-    "fields,match",
-    [
-        ({"vibrato": 0x33}, "ins.vibrato has no written form: it is retired in v1.11"),
-        ({"vibdelay": 4}, "ins.vibdelay has no written form"),
-        ({"octave": -12}, "ins.octave has no written form"),
-        ({"flags": 0x20}, "ins.flags has no written form: it is retired in v1.13"),
-        ({"flags": 0x11}, "ins.flags has no written form"),
-    ],
-)
-def test_the_writer_refuses_the_retired_header_bytes(fields, match):
-    song = songio.loads(SW_SONG)
-    song["records"]["ins"][1].update(fields)
-    with pytest.raises(songio.SongFormatError, match=match):
-        songio.dumps(song)
-
-
-def test_the_speed_table_is_retired():
-    text = doc("goattracker2", "      speedtab:\n        s1: [4, 32]", "[C4]")
-    with pytest.raises(songio.SongFormatError, match="record type 'speedtab' is retired in v1.16"):
-        songio.loads(text)
-
-
-@pytest.mark.parametrize(
-    "fields,match",
-    [
-        ({"vd": 3}, "ins.vd has no written form: it is retired in v1.16"),
-        ({"speed": 1}, "ins.speed"),
-    ],
-)
-def test_the_writer_refuses_the_goattracker_instrument_vibrato(fields, match):
-    song = songio.loads(GT_SONG)
-    song["records"]["ins"][1].update(fields)
-    song["records"]["speedtab"] = {1: {"l": 0, "r": 32}}
-    with pytest.raises(songio.SongFormatError, match=match):
-        songio.dumps(song)
-
-
-@pytest.mark.parametrize(
-    "row,match",
-    [
-        ("{ctrl: 64, wgl: 1}", "ctrl: wgl is retired in v1.8: write"),
-        ("{ctrl: 64, af: 12}", "ctrl: af is retired in v1.11: write the pitch offset"),
-    ],
-)
-def test_the_reader_names_the_retired_sidtab_columns(row, match):
-    text = doc("defmon", f"      ins:\n        i1: {{ctrl: [{row}, end]}}", "[C4.i1]")
-    with pytest.raises(songio.SongFormatError, match=match):
-        songio.loads(text)
-
-
-@pytest.mark.parametrize(
-    "key,row",
-    [("pw", "{pw: 2048, k: 5}"), ("filter", "{mode: 16, res: 3, cut: 64, k: 5}")],
-)
-def test_the_reader_names_the_retired_keyboard_track_field(key, row):
-    text = doc("sidwizard", f"      ins:\n        i1: {{sr: 240, {key}: [{row}, end]}}", "[C4.i1]")
-    with pytest.raises(songio.SongFormatError, match="k is retired in v1.19: a keyboard-tracked"):
-        songio.loads(text)
-
-
 def test_funk_arguments_share_their_speed_table_rows():
     text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
     song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
@@ -245,14 +151,12 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
     "old,new,match",
     [
         ("unitracker: 1.19", "unitracker: 1.8", "not a unitracker v1.19 document"),
+        ("-!freq:@x1, -!freq:@x1,", "-!noteglide:0, -!freq:@x1,", "unknown command !noteglide"),
         (
-            "      x:\n",
-            "      mod:\n        m1: {reg: freq, step: 300}\n      x:\n",
-            "'mod' is retired",
+            "pw: '1024 + 16*min(3, φ)'",
+            "pw: [{pw: 1024}, {step: 16, for: 3}, end]",
+            "unknown key for in pw",
         ),
-        ("-!freq:@x1, -!freq:@x1,", "-!mod:@m1, -!freq:@x1,", "!mod is retired in v1.5"),
-        ("-!freq:@x1, -!freq:@x1,", "-!noteglide:0, -!freq:@x1,", "can't express !noteglide"),
-        ("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]", "keys"),
         ("x1: (v + 300) % 65536", "x1: v / 2", "outside the grammar"),
         ("x1: (v + 300) % 65536", "x1: W[N]", "unknown table 'W'"),
         ("x1: (v + 300) % 65536", "x1: '[0 < v < 9]'", "not one comparison"),

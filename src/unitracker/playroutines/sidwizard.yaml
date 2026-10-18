@@ -56,6 +56,7 @@ record_types:
     # flags: bits 4-5 the vibrato type, bit 6 keeps the pulse and bit 7 the filter program
     # running across notes (see lifetime); the field has no written form.
     fields: {flags: 16, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, octave: 0, ctrl: 0, pw: 0, filter: 0, freq: 0, restart: 0}
+    unwritten: [flags, vibrato, vibdelay, octave]
     refs: {ctrl: wftab, pw: pwtab, filter: flttab, freq: x, restart: restart}
   # Hard restart: a lookahead row, written hold (2 or 1) ticks before the note's row applies:
   # the gate off and the hard-restart envelope, with control $18 (staccato, the voice's tables
@@ -97,9 +98,6 @@ record_types:
     none: 0
     chain: next
     fields: {w: 0, a: 128, d: 0, h: 0, next: 0}
-    retired:
-      "a == 0x7F": "retired in v1.9: a chord is the program's own rows of relative notes"
-      "a != 0x7F": "retired in v1.10: write the row with the shared keys"
     codec:
       - when: "w >= 0x10 and a != 0x7F and d != 0xFF and 0 <= h <= 0x3F"
         keys:
@@ -130,9 +128,6 @@ record_types:
     none: 0
     chain: next
     expr: x
-    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
-    retired:
-      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {a: 0, b: 0, k: 0, next: 0, x: 0}
     refs: {x: x}
     codec:
@@ -147,9 +142,6 @@ record_types:
     none: 0
     chain: next
     expr: x
-    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
-    retired:
-      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {a: 0, b: 0, res: 0, k: 0, next: 0, x: 0}
     refs: {x: x}
     codec:

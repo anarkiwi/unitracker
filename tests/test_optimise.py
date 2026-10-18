@@ -8,7 +8,7 @@ import pytest
 from unitracker import cli, optimise
 from unitracker.format import songio
 from unitracker.lift import backends
-from unitracker.player.vm import SongPlayer, first_mismatch
+from unitracker.player.vm import SongPlayer
 
 RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]"
 PULSE = "16*abs((φ - 32) % 128 - 64) + 512"
@@ -317,16 +317,6 @@ def test_lift_optimise_flag(tmp_path, monkeypatch):
     sid.write_bytes(b"")
     assert cli.lift_main([str(sid), "-o", str(out), "--optimise"]) == 0
     assert "i2" not in out.read_text(encoding="utf-8")
-
-
-@pytest.mark.parametrize("name", ["metal_warrior", "crosseyed", "csillag"])
-def test_reference_tunes_optimised_play_their_native_players(optimised_tunes, name):
-    sid, result = optimised_tunes[name]
-    assert result.after < result.before and kept(result)
-    player = SongPlayer(songio.loads(result.text))
-    ours = player.render_grid(3007)
-    theirs = np.asarray(backends.native_player(sid.read_bytes()).render_grid(3007), dtype=np.uint8)
-    assert first_mismatch(ours, theirs, player.starts) is None
 
 
 def test_unhoist_plays_an_instrument_as_another_with_a_command():

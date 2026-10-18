@@ -42,6 +42,7 @@ record_types:
     form: map
     # speed and vd: the native instrument vibrato, which the instrument's freq replaces.
     fields: {ad: 0, sr: 0, ctrl: 0, pw: 0, filter: 0, speed: 0, vd: 0, freq: 0, restart: 0}
+    unwritten: [speed, vd]
     refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, freq: x, restart: restart}
   # Hard restart: a lookahead row, read hold ticks before the note (the gate timer), that
   # may turn the gate off and then preset the envelope to adparam; then the note's first-tick
@@ -71,7 +72,7 @@ record_types:
         raw:
           ctrl: "ctrl if has_ctrl else -1"
           gate: "gate if has_gate else -1"
-  # The speed table: no written form; !funk writes its rows inline (retired in v1.16).
+  # The speed table: no written form; !funk writes its rows inline.
   speedtab:
     prefix: s
     none: 0
@@ -82,9 +83,6 @@ record_types:
     writes_as: ctrl
     none: 0
     chain: next
-    # A list row: a wavetable command with no shared form, which the lifter names.
-    retired:
-      "1": "retired in v1.15: write the row with the shared keys"
     fields: [w, n, next, x]
     refs:
       n:
@@ -163,9 +161,6 @@ record_types:
     none: 0
     chain: next
     expr: x
-    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
-    retired:
-      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: [l, r, next, x]
     refs: {x: x}
     codec:
@@ -181,9 +176,6 @@ record_types:
     none: 0
     chain: next
     expr: x
-    # A list row: a sweep, stall or keyboard-tracked row, which is its program's expression.
-    retired:
-      "1": "retired in v1.10: a sweep, stall or keyboard-tracked row is its program's expression"
     fields: {l: 0, r: 0, cut: -1, next: 0, x: 0}
     refs: {x: x}
     codec:

@@ -1,6 +1,7 @@
 """The v1.19 document: canonical writing, reading back, and the errors a reader reports."""
 
 import copy
+import re
 
 import numpy as np
 import pytest
@@ -8,6 +9,8 @@ import yaml
 from pygoattracker import decompile_sid
 
 from unitracker.format import songio
+from unitracker.format.codec import COMMAND_NAMES, ROW_KEYS, CommandCodec
+from unitracker.format.records import EXPR
 from unitracker.format.songio import SongFormatError
 from unitracker.format.yamlstyle import parse
 from unitracker.lift.goattracker import lift
@@ -217,7 +220,7 @@ def edit(path, value):
     def apply(doc):
         node = doc
         for key in path[:-1]:
-            node = node[key]
+            node = node.setdefault(key, {}) if isinstance(node, dict) else node[key]
         node[path[-1]] = value
 
     return apply
@@ -239,7 +242,7 @@ DEF = ("song", 0, "def")
         (edit(DEF + ("prog", "w1"), [[1, 2, 3], "end"]), "bad row"),
         (edit(DEF + ("prog", "w1"), [{"v": 1}, "end"]), "bad row"),
         (edit(DEF + ("ins", "i1"), [1]), "must be a mapping"),
-        (edit(DEF + ("ins", "i1"), {"q": 1}), "unknown field"),
+        (edit(DEF + ("ins", "i1"), {"q": 1}), "unknown key q in ins"),
         (edit(DEF + ("ins", "i1"), {"a": 1.5}), "bad value"),
         (edit(DEF + ("ins", "i1"), {"a": [[1], "end"]}), "cannot hold a program"),
         (edit(DEF + ("ins", "i1"), {"p": "i2"}), "not a prog"),
@@ -268,25 +271,6 @@ def test_reader_errors(change, match):
         songio.loads(text)
 
 
-def test_reader_rejects_the_retired_registers_key():
-    doc = parse(songio.dumps(song(), embed=True))
-    doc["registers"] = {24: 0}
-    with pytest.raises(SongFormatError, match="registers is retired in v1.6: the player starts"):
-        songio.loads(yaml.safe_dump(doc))
-
-
-def test_retired_raw_rows_are_refused_both_ways():
-    ir = song()
-    ir["playroutine"]["record_types"]["prog"]["retired"] = {"v == 20": "retired in v0.1: gone"}
-    with pytest.raises(SongFormatError, match=r"prog: row .* is retired in v0.1: gone"):
-        songio.dumps(ir, embed=True)
-    ir["records"]["prog"][2]["v"] = 21
-    doc = parse(songio.dumps(ir, embed=True))
-    doc["song"][0]["def"]["prog"]["w1"][1] = [20]
-    with pytest.raises(SongFormatError, match=r"prog: row \[20\] is retired in v0.1: gone"):
-        songio.loads(yaml.safe_dump(doc, sort_keys=False))
-
-
 LIST_SONG = """
 unitracker: 1.19
 playroutine: {{ref: {pr}}}
@@ -299,55 +283,82 @@ song:
     play: [p1, p1, p1]
 loop: ~
 """
-SWEEP = r"retired in v1\.10: a sweep, stall or keyboard-tracked row is its program's expression"
-WAVE = r"retired in v1\.15: write the row with the shared keys"
+LIBRARY = ("goattracker2", "sidwizard", "defmon")
 
 
-@pytest.mark.parametrize(
-    "pr,tname,row,match",
-    [
-        ("goattracker2", "pulsetab", "[32, 16]", rf"pw: row \[32, 16\] is {SWEEP}"),
-        ("goattracker2", "filttab", "[5, 1]", "filter: row .* is retired in v1.10"),
-        ("goattracker2", "ctrltab", "[65, 128]", "write row .* with shared keys"),
-        ("goattracker2", "ctrltab", "[0xF5, 9]", "with shared keys"),
-        ("goattracker2", "ctrltab", "[0xF7, 65]", rf"ctrl: row \[247, 65\] is {WAVE}"),
-        ("goattracker2", "ctrltab", "[0xF9]", r"write row \[249\] with shared keys"),
-        ("goattracker2", "ctrltab", "[0xF2]", rf"ctrl: row \[242\] is {WAVE}"),
-        ("sidwizard", "pwtab", "[16, 4]", SWEEP),
-        ("sidwizard", "flttab", "[16, 4]", "filter: row .* is retired in v1.10"),
-        ("sidwizard", "wftab", "[2, 5, 0, 2]", "with shared keys"),
-        ("sidwizard", "wftab", "[65, 5, 255]", r"retired in v1\.10: write the row with the shared"),
-        ("sidwizard", "wftab", "[2, 5, 0, 1]", r"retired in v1\.10"),
-    ],
-)
-def test_reader_rejects_retired_list_rows(pr, tname, row, match):
-    rtype = songio.record_types(songio.library(pr))[tname]
-    text = LIST_SONG.format(pr=pr, tname=rtype.written, name=rtype.prefix, row=row)
-    with pytest.raises(SongFormatError, match=match):
-        songio.loads(text)
+def _unknown(pr: str):
+    """``(path, value, message)``: one key outside the format at each place a document can hold
+    one, generated from the playroutine's record types, codecs and commands."""
+    lib = songio.library(pr)
+    rtypes, codecs = songio.record_types(lib), songio.codecs(lib, {})
+    inline = {CommandCodec(lib["commands"], rtypes).inline(n) for n in COMMAND_NAMES}
+    out = [(("bogus",), 1, "unknown key bogus in document")]
+    out.append((DEF + ("phrase", "p1"), ["off!bogus:1"], "unknown command !bogus in 'off!bogus:1'"))
+    for rtype in rtypes.values():
+        if rtype.name == EXPR:
+            continue
+        if rtype.name != rtype.written:
+            out.append((DEF + (rtype.name, "z1"), {}, f"unknown record type {rtype.name!r}"))
+        if rtype.name in inline:
+            out.append((DEF + (rtype.written, "z1"), [], f"unknown record type {rtype.written!r}"))
+            continue
+        codec = codecs.get(rtype.name)
+        known = codec.keys if codec else set(rtype.fields) - rtype.unwritten
+        name = 0 if rtype.fixed else f"{rtype.prefix}9"
+
+        def entry(row, rtype=rtype):
+            return row if rtype.chain is None else [row, "end"]
+
+        for key in sorted((set(rtype.fields) | set(ROW_KEYS)) - known - {rtype.chain}):
+            path = DEF + (rtype.written, name)
+            out.append((path, entry({key: 1}), f"unknown key {key} in {rtype.written}"))
+        if codec and rtype.form == "list":
+            out.append((DEF + (rtype.written, name), entry([1]), "with shared keys"))
+    return out
 
 
-@pytest.mark.parametrize(
-    "pr,old,new",
-    [
-        ("goattracker2", "ctrltab", "ctrl"),
-        ("goattracker2", "pulsetab", "pw"),
-        ("goattracker2", "filttab", "filter"),
-        ("sidwizard", "wftab", "ctrl"),
-        ("sidwizard", "pwtab", "pw"),
-        ("sidwizard", "flttab", "filter"),
-        ("defmon", "sidtab", "ctrl"),
-    ],
-)
-def test_reader_refuses_a_players_own_record_type_name(pr, old, new):
-    text = LIST_SONG.format(pr=pr, tname=old, name="c", row="{ctrl: 65}")
-    with pytest.raises(
-        SongFormatError,
-        match=f"record type '{old}' is retired in v1.17: write the record type as `{new}`",
-    ):
-        songio.loads(text)
-    rtype = songio.record_types(songio.library(pr))[old]
-    assert (rtype.written, rtype.prefix) == (new, "pw" if new == "pw" else new[0])
+@pytest.mark.parametrize("pr", LIBRARY)
+def test_the_reader_refuses_any_key_outside_the_format(pr):
+    base = parse(LIST_SONG.format(pr=pr, tname="ctrl", name="c", row="{ctrl: 65}"))
+    songio.loads(yaml.safe_dump(base, sort_keys=False))
+    cases = _unknown(pr)
+    assert len(cases) > 10
+    for path, value, message in cases:
+        doc = copy.deepcopy(base)
+        edit(path, value)(doc)
+        with pytest.raises(SongFormatError, match=re.escape(message)):
+            songio.loads(yaml.safe_dump(doc, sort_keys=False))
+
+
+def _unwritable_program(lib: dict) -> dict:
+    """Records holding the instrument's control program as one looping row no codec shape
+    writes."""
+    rtypes, native = songio.record_types(lib), lib["instrument"]["type"]
+    target = rtypes[native] if rtypes[native].chain else rtypes[rtypes["ins"].refs["ctrl"][0][0]]
+    codec, blank = songio.codecs(lib, {})[target.name], {f: target.default(f) for f in target.own}
+    row = next(
+        r for f in target.own for v in range(1, 256) if codec.encode(r := {**blank, f: v}) is None
+    )
+    records = {target.name: {1: {**row, target.chain: 1 if target.none is None else target.none}}}
+    return records | ({"ins": {1: {"ctrl": 1}}} if native == "ins" else {})
+
+
+@pytest.mark.parametrize("pr", LIBRARY)
+def test_the_writer_refuses_what_has_no_written_form(pr):
+    """An unwritten instrument field off its default, and a program row no codec shape writes."""
+    lib = songio.library(pr)
+    ins = songio.record_types(lib)["ins"]
+    cases = [
+        ({"ins": {1: {f: ins.default(f) + 1}}}, f"ins.{f} has no written form")
+        for f in sorted(ins.unwritten)
+    ] + [(_unwritable_program(lib), "ctrl: row")]
+    loaded = songio.loads(LIST_SONG.format(pr=pr, tname="ctrl", name="c", row="{ctrl: 65}"))
+    for records, message in cases:
+        ir = copy.deepcopy(loaded)
+        ir["records"].update(records)
+        ir["phrases"]["p1"] = [{"note": 30, "instrument": 1 + lib["instrument"].get("base", 0)}]
+        with pytest.raises(SongFormatError, match=re.escape(message)):
+            songio.dumps(ir)
 
 
 def test_a_pulse_program_name_is_not_a_phrase_name():
@@ -358,22 +369,6 @@ def test_a_pulse_program_name_is_not_a_phrase_name():
     assert songio.dumps(songio.loads(out)) == out
     with pytest.raises(SongFormatError, match="name 'p1' defined twice"):
         songio.loads(text.replace("pw1", "p1"))
-
-
-def test_writer_refuses_a_wavetable_row_without_a_shared_form():
-    ir = songio.loads(LIST_SONG.format(pr="goattracker2", tname="ctrl", name="c", row="{ctrl: 65}"))
-    ir["records"].update(ins={1: {"ctrl": 1}}, ctrltab={1: {"w": 0xF1, "n": 1, "next": 0}})
-    ir["phrases"]["p1"] = [{"note": 30, "instrument": 1}]
-    with pytest.raises(SongFormatError, match=rf"ctrl: row .* is {WAVE}"):
-        songio.dumps(ir)
-
-
-def test_writer_refuses_a_list_row_the_format_retired():
-    ir = songio.loads(LIST_SONG.format(pr="goattracker2", tname="ctrl", name="c", row="{ctrl: 65}"))
-    ir["records"].update(ins={1: {"ctrl": 1, "pw": 1}}, pulsetab={1: {"l": 32, "r": 16, "next": 0}})
-    ir["phrases"]["p1"] = [{"note": 30, "instrument": 1}]
-    with pytest.raises(SongFormatError, match=rf"pw: row .* is {SWEEP}"):
-        songio.dumps(ir)
 
 
 def test_the_version_is_its_text():

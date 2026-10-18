@@ -31,47 +31,6 @@ ROW_KEYS = (
 )
 EXPR = "x"
 ENVELOPE = -2
-_ENVELOPE = (
-    "retired in v1.14: write the envelope byte as `!ad:n` or `!sr:n`, in the event slot of"
-    " its column"
-)
-SHARED_TYPES = {
-    "ctrl": ("ctrltab", "wftab", "sidtab"),
-    "pw": ("pulsetab", "pwtab"),
-    "filter": ("filttab", "flttab"),
-}
-RETIRED = {
-    "mod": "retired in v1.5: write the modulation as an expression (`!freq:@x`, or a program"
-    " row's `pw`, `cut` or `freq`)",
-    "chordtab": "retired in v1.9: write a chord as a `ctrl` program of relative notes",
-    "chord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
-    "ichord": "retired in v1.9: start the chord's `ctrl` program with `!run`",
-    "notevib": "retired in v1.11: write the vibrato as `!freq:@x`",
-    "vib": "retired in v1.11: write the vibrato as `!freq:@x`",
-    "run2": "retired in v1.17: name the program as the `filter` of the event's instrument",
-    "speedtab": "retired in v1.16: a vibrato or slide is a `freq` expression, and `!funk` writes"
-    " its tempos (`!funk:6/7`)",
-    **dict.fromkeys(
-        ("attack", "decay", "sustain", "release", "iattack", "idecay", "isustain", "irelease"),
-        _ENVELOPE,
-    ),
-    **{
-        name: f"retired in v1.17: write the record type as `{shared}`"
-        for shared, names in SHARED_TYPES.items()
-        for name in names
-    },
-}
-RETIRED_ROW_KEYS = {
-    "fv": "retired in v1.7: write the $D418 filter-mode bits as `mode`",
-    "resfilt": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
-    "re": "retired in v1.7: write $D417 as the resonance `res` and the routing `route`",
-    "acid": "retired in v1.7: write the ACID program as its row's `cut` expression",
-    "wgl": "retired in v1.8: write the control mask as `ctrl: ^n`",
-    "af": "retired in v1.11: write the pitch offset as the row's `freq` expression",
-    "cp": "retired in v1.12: the ACID offset is part of the program's `cut` expression",
-    "k": "retired in v1.19: a keyboard-tracked row is its program's `pw` or `cut` expression in"
-    " `N`",
-}
 COMMAND_NAMES = (
     "run",
     "ad",
@@ -290,6 +249,7 @@ class RowCodec:
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
         self.rtype = rtype
         self.shapes = [_Shape(s) for s in spec]
+        self.keys = frozenset(k for s in self.shapes for k in (*s.keys, *s.keep))
         self.offset = offset
         self.ev = evaluator or _PLAIN
 
@@ -450,9 +410,8 @@ class RowCodec:
     def decode(self, written: dict, place: dict | None = None) -> dict:
         """Raw fields for a written row at ``place`` (see :meth:`encode`); raises CodecError
         naming what the player can't express."""
-        for key in written:
-            if key in RETIRED_ROW_KEYS and not any(key in s.keep for s in self.shapes):
-                raise CodecError(f"{self.rtype.written}: {key} is {RETIRED_ROW_KEYS[key]}")
+        for key in sorted(set(written) - self.keys):
+            raise CodecError(f"unknown key {key} in {self.rtype.written}")
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:
@@ -567,8 +526,8 @@ class CommandCodec:
 
     def decode(self, name: str, value) -> tuple[int, int]:
         """``(code, arg)`` for a written command; ``value`` as :meth:`encode` returns it."""
-        if name in RETIRED:
-            raise CodecError(f"!{name} is {RETIRED[name]}")
+        if name not in COMMAND_NAMES:
+            raise CodecError(f"unknown command !{name}")
         for code, ename, ref, var in self.entries:
             arg = self._arg(ref, var, value) if ename == name else None
             if arg is None:

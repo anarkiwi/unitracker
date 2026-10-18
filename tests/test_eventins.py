@@ -113,9 +113,8 @@ def test_the_writer_names_the_layers_of_a_native_event():
 @pytest.mark.parametrize(
     "phrase,ins,match",
     [
-        ("[C4.i1!run2:@c1*8]", "i1: {ctrl: c1}", "!run2 is retired in v1.17"),
-        ("[C4.i1*8]", "i1: {ctrl: c1, pw: 256}", "unknown field 'pw'"),
-        ("[C4.i1*8]", "i1: {ctrl: c1, restart: c2}", "unknown field 'restart'"),
+        ("[C4.i1*8]", "i1: {ctrl: c1, pw: 256}", "unknown key pw in ins"),
+        ("[C4.i1*8]", "i1: {ctrl: c1, restart: c2}", "unknown key restart in ins"),
         ("[C4.i1*8]", "i1: {}", "phrase p1: an instrument arms no program"),
         ("[C4.c1*8]", "i1: {ctrl: c1}", "'c1' is a ctrl, not a ins"),
     ],
