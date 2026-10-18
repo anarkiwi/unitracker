@@ -43,8 +43,8 @@ record_types:
     optional: [ctrl, gate, ad, sr]
     codec:
       - when: "first and not last and hold >= 1 and hold <= 0x3F and ctrl < 0 and gate <= 0 and ((ad < 0 and sr < 0) or (gate == 0 and ad == adparam >> 8 and sr == (adparam & 0xFF)))"
-        keys: {hold: {value: hold, omit: "hold == 1"}}
-        raw: {hold: "hold if has_hold else 1"}
+        keys: {hold: hold}
+        raw: {hold: hold}
       - when: "last and not first and hold == 0 and ad < 0 and sr < 0 and ((ctrl < 0 and gate <= 1) or (ctrl >= 1 and ctrl < 0xFE and gate == 1))"
   # The speed table: no written form; !funk writes its rows inline.
   speedtab:

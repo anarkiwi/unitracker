@@ -161,8 +161,9 @@ is not the written name's first letter. `none`, the index meaning "no row", is 0
 instrument an event names unless `instrument` says otherwise, and `note_offset` is 0 unless given.
 A field for which 0 is meaningful goes in `optional`, read as
 -1, "absent", when missing (the `restart` rows, `defmon`'s sidTAB columns); an optional field that is
-a shared key needs no `keys` or `raw` entry of its own. Read a signed byte or word with the builtins
-`s8` and `s16`.
+a shared key needs no `keys` or `raw` entry of its own. A `hold` key needs no `omit` or
+`has_hold` fallback: it is left out at 1 and reads as 1 when left out. Read a signed byte or word
+with the builtins `s8` and `s16`.
 
 **Codec shapes.** Each `codec` entry is one row kind: `when` over the raw fields, the constants and,
 for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back;

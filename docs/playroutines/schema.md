@@ -83,7 +83,9 @@ its mask as `{value, omit}`), `raw` (each raw field from the written keys, with 
 expression's reference or 0, defined) and `keep` (raw fields written under their own names; a kept
 reference is written as a name). An `optional` field `f` that is a shared key gives each shape the
 key `f: {value: f, omit: "f < 0"}` and the raw field `f: "f if has_f else -1"`; a shape that gives
-key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one. A key with `expr` is written as the expression
+key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one.
+A key with a vocabulary default (`hold`: 1) is left out at that value unless it gives its own
+`omit`, and `raw` reads it as the default when it is left out (`hold: "w + 1"` with `w: "hold - 1"`). A key with `expr` is written as the expression
 when that field is set; a key with both `value` and `expr` reads an integer as a value and a string
 as an expression. A `cut` key given as `{byte: b}` is a cutoff the player stores as its top
 byte: its value is `b << 3`, and `raw` reads `cut` as that byte, the written value `>> 3`; a

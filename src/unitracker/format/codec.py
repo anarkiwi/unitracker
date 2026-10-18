@@ -49,6 +49,7 @@ COMMAND_NAMES = (
     "legato",
 )
 BYTE_SHIFT = {"cut": 3}
+KEY_DEFAULTS = {"hold": 1}
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
@@ -203,6 +204,14 @@ def byte_form(name: str, spec: dict, field: str) -> dict:
     return {**spec, field: f"({spec['byte']}) << {BYTE_SHIFT[name]}"}
 
 
+def key_default(key: str, kspec: dict) -> dict:
+    """``kspec`` with the ``omit`` a key with a vocabulary default gets when it gives none: left
+    out when its value is the default."""
+    if key not in KEY_DEFAULTS or "omit" in kspec or "value" not in kspec:
+        return kspec
+    return {**kspec, "omit": f"({kspec['value']}) == {KEY_DEFAULTS[key]}"}
+
+
 def optional_codec(optional) -> tuple[dict, dict]:
     """``(keys, raw)`` a shape gets for its record type's optional fields that are shared keys:
     the key is the field, left out when it is :data:`ABSENT`, and reads back as it."""
@@ -218,7 +227,9 @@ class _Shape:
     :func:`route_value`). A key's ``expr`` names the raw field of its expression, a key with
     ``ref`` is the reference to that record type its raw ``field`` holds, and a key with
     ``none`` is written ``none``. The record type's ``optional`` fields give the keys and raw
-    fields of :func:`optional_codec`; a key the shape gives replaces both, a raw field the raw.
+    fields of :func:`optional_codec`; a key the shape gives replaces both, a raw field the raw. A
+    key of :data:`KEY_DEFAULTS` is left out at its default unless it gives ``omit`` (see
+    :func:`key_default`), and reads as the default in ``raw`` when it is left out.
     """
 
     # pylint: disable=too-few-public-methods
@@ -231,9 +242,8 @@ class _Shape:
         for key, kspec in {**gen_keys, **own}.items():
             if key not in ROW_KEYS:
                 raise CodecError(f"{key!r} is not a shared row key")
-            self.keys[key] = byte_form(
-                key, kspec if isinstance(kspec, dict) else {"value": kspec}, "value"
-            )
+            kspec = kspec if isinstance(kspec, dict) else {"value": kspec}
+            self.keys[key] = key_default(key, byte_form(key, kspec, "value"))
             if ("ref" in self.keys[key]) != ("field" in self.keys[key]):
                 raise CodecError(f"{key}: a reference key has both ref and field")
         self.refs = {k for k, s in self.keys.items() if "ref" in s}
@@ -370,6 +380,8 @@ class RowCodec:
             elif plain:
                 shift = BYTE_SHIFT[key] if "byte" in shape.keys[key] else 0
                 env[env_name(key)] = norm[key] >> shift
+            elif key not in norm and key in KEY_DEFAULTS:
+                env[env_name(key)] = KEY_DEFAULTS[key]
         return env
 
     @staticmethod
