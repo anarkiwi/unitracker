@@ -173,7 +173,7 @@ as `{byte: f}` and the `cut` command as `{name: cut, byte: arg}`, and its `raw` 
 byte. The reader accepts a written row only when encoding its raw inverse gives the
 row again, so a shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
 `commands`: code to `{name, ref, when, arg, raw}` (or `byte` for `arg`), `{name, when, args, raw}` for several values,
-`{name, none}` for the argument written `none`, or `{name, nibble, slot}` for an envelope command.
+`{name, ref, inline: true}` for a row written in place, or `{name, nibble, slot}` for an envelope command.
 
 **A document names no player.** No key, command or record type is one player's own. What the
 player cannot play has no shape, so the reader refuses it naming the key or command and the

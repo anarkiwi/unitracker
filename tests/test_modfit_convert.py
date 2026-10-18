@@ -110,12 +110,12 @@ DM_AF = doc(
 # ---- expressions in documents ------------------------------------------------------------
 
 
-def test_funk_arguments_carry_their_speed_table_bytes():
+def test_funk_arguments_share_their_speed_table_rows():
     text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
     song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
-    assert not song["records"].get("speedtab")
+    assert song["records"]["speedtab"] == {1: {"l": 6, "r": 9}, 2: {"l": 3, "r": 4}}
     cmds = [e.get("command") or e["commands"][-1] for e in song["phrases"]["p1"]]
-    assert cmds == [[14, 0x10609], [14, 0x10609], [14, 0x10304], [14, 0]]
+    assert cmds == [[14, 1], [14, 1], [14, 2], [14, 0]]
     assert "-!funk:3/4, -!funk:none]" in songio.dumps(song)
 
 
@@ -215,11 +215,11 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
         ([("-!freq:@x1, -!freq:@x1,", "-!freq:@x9, -!freq:@x1,")], "unknown name 'x9'"),
         (
             [("-!freq:@x1, -!freq:@x1,", "-!funk:6, -!freq:@x1,")],
-            r"can't express !funk:6 in",
+            r"!funk: the argument is 2 values",
         ),
         (
             [("-!freq:@x1, -!freq:@x1,", "-!funk:6/256, -!freq:@x1,")],
-            r"can't express !funk:6/256 in",
+            r"!funk: each value is a byte",
         ),
         (
             [("-!freq:@x1, -!freq:@x1,", "-!run:6/9, -!freq:@x1,")],

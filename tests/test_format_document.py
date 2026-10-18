@@ -11,7 +11,7 @@ from conftest import mini_song
 
 from unitracker.format import songio
 from unitracker.format import timeline as tl
-from unitracker.format.codec import ROW_KEYS
+from unitracker.format.codec import COMMAND_NAMES, ROW_KEYS, CommandCodec
 from unitracker.format.expr import ExprError
 from unitracker.format.records import EXPR, RecordType, RecordTypeError, record_types
 from unitracker.format.songio import SongFormatError
@@ -272,6 +272,7 @@ def _unknown(pr: str):
     one, generated from the playroutine's record types, codecs and commands."""
     lib = songio.library(pr)
     rtypes, codecs = songio.record_types(lib), songio.codecs(lib, {})
+    inline = {CommandCodec(lib["commands"], rtypes).inline(n) for n in COMMAND_NAMES}
     out = [(("bogus",), 1, "unknown key bogus in document")]
     out.append((DEF + ("phrase", "p1"), ["off!bogus:1"], "unknown command !bogus in 'off!bogus:1'"))
     for rtype in rtypes.values():
@@ -279,7 +280,7 @@ def _unknown(pr: str):
             continue
         if rtype.name != rtype.written:
             out.append((DEF + (rtype.name, "z1"), {}, f"unknown record type {rtype.name!r}"))
-        if not rtype.writable:
+        if rtype.name in inline:
             out.append((DEF + (rtype.written, "z1"), [], f"unknown record type {rtype.written!r}"))
             continue
         codec = codecs.get(rtype.name)

@@ -23,6 +23,8 @@ from unitracker.format.codec import (
     Evaluator,
     RowCodec,
     arg_text,
+    inline_row,
+    inline_text,
     is_expr,
     note_text,
     row_place,
@@ -382,6 +384,9 @@ class _Writer:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+        if isinstance(value, tuple) and self.commands.inline(name):
+            rtype = self.rtypes[value[0]]
+            return f"{name}:{inline_text(rtype, self._row(rtype, value[1]))}"
         if isinstance(value, tuple) and not self.commands.values(name):
             return f"{name}:@{self.names[self.key(*value)]}"
         return f"{name}:{arg_text(value)}"
@@ -398,7 +403,7 @@ class _Writer:
                     yield (restart.NAME, int(arg)), "command"
                     continue
                 target = self.commands.ref(int(cmd))
-                if target is not None:
+                if target is not None and not self.commands.inline(int(cmd)):
                     none = self.rtypes[target].none
                     if none is None or int(arg) != none:
                         yield self.key(target, int(arg)), "command"
@@ -577,7 +582,8 @@ class _Reader:
         self.names = {}
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
-        self.written = {rt.written: rt for rt in self.rtypes.values() if rt.writable}
+        inline = {self.commands.inline(name) for name in COMMAND_NAMES}
+        self.written = {rt.written: rt for rt in self.rtypes.values() if rt.name not in inline}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
 
@@ -831,7 +837,9 @@ class _Reader:
             raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
         if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
             return [restart.CODE, self.lookup(arg[1:], restart.NAME)]
-        if isinstance(arg, str) and arg != NONE:
+        if self.commands.inline(cmd) and arg != NONE:
+            arg = self._inline(cmd, arg, atom)
+        elif isinstance(arg, str) and arg != NONE:
             if arg[1:] not in self.names:
                 raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
             arg = self.names[arg[1:]]
@@ -839,6 +847,21 @@ class _Reader:
             return list(self.commands.decode(cmd, arg))
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
+
+    def _inline(self, cmd: str, values, atom) -> tuple:
+        """``(type, index)`` of the row an inline argument writes: an equal row already read, else
+        one allocated for it."""
+        rtype = self.rtypes[self.commands.inline(cmd)]
+        try:
+            row = inline_row(rtype, values)
+        except CodecError as exc:
+            raise SongFormatError(f"!{cmd}: {exc} in {atom!r}") from exc
+        rows = self.records[rtype.name]
+        index = next((i for i, r in rows.items() if r == row), None)
+        if index is None:
+            index = self._alloc(rtype, 1)
+            rows[index] = row
+        return rtype.name, index
 
     def _collect(self, song):
         """Define every record and phrase; ``(phrase atoms, play rows)``."""

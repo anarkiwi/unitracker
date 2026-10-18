@@ -49,7 +49,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see [Codecs](#codecs)) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field holding a row's modulator expression, a reference to `x` with no `refs` entry; a program of one row that sets only it is written as the expression |
-| `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default; a type whose fields are all unwritten has no written form, and a document naming it is refused (`unknown record type 'speedtab'`) |
+| `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default |
 | any other key | a template: an action list run for a row |
 
 The record type `x` is the format's own: it holds the expressions, and a playroutine
@@ -96,8 +96,10 @@ gives the row again. A command entry has a `name`, an optional `ref` (a record t
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
 written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!funk:6/7`). An entry `{name, none: n}` writes
-argument `n` as `none` (`!funk:none`) and matches no other argument. An entry `{name: ad,
+joined by `/`, which `raw` reads by those names (`!funk:6/7`). A `ref` entry with `inline: true`
+writes the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
+one row per distinct argument, and the type has no definitions of its own (`unknown record type
+'speedtab'`). A `ref` entry's argument `none` is the type's `none` (`!funk:none`). An entry `{name: ad,
 nibble: s, slot: k}` is an envelope command: the code sets the nibble at shift `s` of the register
 `name` over the instrument's field `name`, played from event slot `k`, and is written as the byte it
 writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).

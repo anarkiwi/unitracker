@@ -481,10 +481,29 @@ def envelope_names(spec: dict) -> list:
     return sorted({str(v["name"]) for _, v in command_variants(spec) if "nibble" in v})
 
 
+def inline_text(rtype, row: dict) -> str:
+    """The written argument of an inline reference to ``row`` of ``rtype``: its fields in
+    declaration order joined by ``/``."""
+    return "/".join(str(int(row.get(f, rtype.default(f)))) for f in rtype.own)
+
+
+def inline_row(rtype, values) -> dict:
+    """The row of ``rtype`` an inline argument's values write; raises CodecError naming what is
+    wrong."""
+    values = values if isinstance(values, tuple) else (values,)
+    if not is_values(values) or len(values) != len(rtype.own):
+        raise CodecError(f"the argument is {len(rtype.own)} values, {'/'.join(rtype.own)}")
+    if not all(0 <= v <= 0xFF for v in values):
+        raise CodecError("each value is a byte (0-255)")
+    return dict(zip(rtype.own, values))
+
+
 class CommandCodec:
     """A playroutine's command codes as shared names; an envelope command's internal code (see
     :func:`envelope_names`) as its name and byte. A code with no ``name`` has no written form of
-    its own: a document writes it through another record (see ``format.events.instrument``)."""
+    its own: a document writes it through another record (see ``format.events.instrument``). An
+    entry with ``inline`` writes the row its reference names in place (see :func:`inline_text`).
+    """
 
     def __init__(self, spec: dict, rtypes: dict):
         self.entries, self.unnamed = [], {}
@@ -510,6 +529,13 @@ class CommandCodec:
                 return ref
         return self.unnamed.get(code)
 
+    def inline(self, key: int | str) -> str | None:
+        """The record type whose row a command (a code or a name) writes as its argument."""
+        for code, name, ref, var in self.entries:
+            if key in (code, name) and ref is not None and var.get("inline"):
+                return ref
+        return None
+
     def values(self, name: str) -> bool:
         """Whether command ``name`` takes several values that are no record's row."""
         return any(n == name and "args" in var for _, n, _, var in self.entries)
@@ -519,10 +545,6 @@ class CommandCodec:
         ``(type, index)`` for a reference, or ``none``."""
         for ecode, name, ref, var in self.entries:
             if ecode != code or ("when" in var and not evaluate(var["when"], {"arg": arg})):
-                continue
-            if "none" in var:
-                if arg == var["none"]:
-                    return name, NONE
                 continue
             if "args" in var:
                 return name, tuple(evaluate(e, {"arg": arg}) for e in var["args"].values())
@@ -537,9 +559,8 @@ class CommandCodec:
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
     def _arg(self, name, ref, var, value):
-        if value == NONE or "none" in var:
-            none = var.get("none", None if ref is None else self.rtypes[ref].none)
-            return none if value == NONE else None
+        if value == NONE:
+            return None if ref is None else self.rtypes[ref].none
         if "args" in var:
             fits = is_values(value) and len(value) == len(var["args"])
             return evaluate(var["raw"], dict(zip(var["args"], value))) if fits else None
