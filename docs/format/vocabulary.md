@@ -110,29 +110,30 @@ to a note with a free command slot, and its program ends and fits in the steps.
 ## Lifetime
 
 Whether a note restarts its instrument's pulse or filter program is a property of the note:
-`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. They
-need a note and refuse one that itself starts the program. A note that names no instrument plays
-the voice's last one; the reader finds it by walking each voice's plays twice through its loop.
-The playroutine declares the commands it plays as
-`lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`, or `lifetime: [pw, filter]` when no entry
-has a key; an entry's `field` is the instrument key of the program (default: the slot's name):
-
-| declaration | the command |
-|---|---|
-| with `flag` (an instrument field and bit mask) | the bit, which keeps the program on a note that names no instrument: the writer puts the command on every such note of an instrument with the bit set, and the reader sets the bit from those notes; it refuses an instrument some of whose such notes carry it and others not, and the command on a note that names an instrument |
-| without `flag` | holds on a note whose instrument starts no such program; the reader refuses it on a note whose instrument starts one |
-
-A note played under instruments of which some keep a program and others restart it has no
-written form. A legato note restarts nothing, so the command adds nothing there.
+`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. They need a note
+that names no instrument. A playroutine that plays them keeps the program by an instrument bit,
+and declares `lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`: `flag` is the instrument
+field and bit mask, and `field` the instrument key of the program (default: the slot's name). The
+writer puts the command on every note that names no instrument and plays one with the bit set,
+and the reader sets the bit from those notes; it refuses an instrument some of whose such notes
+carry it and others not, and the command on a note that names an instrument. A note that names
+no instrument plays the voice's last one (see [Walking the plays](#walking-the-plays)). A note
+played under instruments of which some keep a program and others restart it has no written form.
+A legato note restarts nothing, so the command adds nothing there.
 
 ## Envelope commands
 
 A command entry `{name: ad, nibble: s, column: c}` sets one nibble of an envelope register over
 the instrument's byte. The document writes each as the byte it writes, `!ad:n` or `!sr:n` in the
-slot of its column, from the voice's instrument (found by walking each voice's plays twice
-through its loop); the reader plays each byte as the nibble command that changes one nibble of
-the instrument's byte. A phrase whose bytes differ between the places it plays becomes one phrase
-per place.
+slot of its column, from the voice's instrument (see [Walking the plays](#walking-the-plays));
+the reader plays each byte as the nibble command that changes one nibble of the instrument's byte.
+A phrase whose bytes differ between the places it plays becomes one phrase per place.
+
+## Walking the plays
+
+What a command means can depend on what the voice played before it: the instrument a note that
+names none plays, and the byte an envelope command writes. The writer and the reader find it by
+walking each voice's plays, repeats written out, twice through its loop.
 
 ## Instrument columns
 

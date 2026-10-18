@@ -13,7 +13,7 @@ instrument: {type: ins, base: 0}          # the record type .name refers to; ind
                                           # default: the type written as ins, base 0
                                           # event: {type, column, commands, restart}: see Instrument columns
 tempo: {cells: {tl: a, tr: b}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
-lifetime: {pw: {flag: {flags: 0x40}}, filter: {}}     # !pw and !filter, or [pw, filter] (see Lifetime)
+lifetime: {pw: {flag: {flags: 0x40}}, filter: {flag: {flags: 0x80}}}   # !pw and !filter (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions

@@ -40,8 +40,8 @@ instrument column, every other command in the FX column.
 | command | argument |
 |---|---|
 | `!run` | `ctrl` name, `pw` name, `filter` name, `none` |
-| `!pw` | no argument, `none` |
-| `!filter` | no argument, `none` |
+| `!pw` | `none` |
+| `!filter` | `none` |
 | `!ad` | 0-255 |
 | `!sr` | 0-255 |
 | `!ctrl` | 0-255 |
@@ -136,10 +136,9 @@ so every lookahead row that sets `ad` and `sr` sets the same values (`uniform`).
 
 ## Lifetime
 
-`lifetime` declares no `flag`: a note starts the instrument's `pw` and `filter` programs, and
-wavetable `run` rows ($F9, $FA) start them where the composer put them. The reader accepts
-`!pw` and `!filter` on a note whose instrument starts no such program, through its fields
-or its programs' rows, and whose event runs none (`!run`); the writer leaves them out.
+A note starts the instrument's `pw` and `filter` programs, and wavetable `run` rows ($F9, $FA)
+start them where the composer put them; the playroutine declares no `lifetime`, so `!pw` and
+`!filter` without an argument are refused.
 
 ## Modulators
 

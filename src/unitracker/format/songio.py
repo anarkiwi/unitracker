@@ -856,8 +856,7 @@ class _Reader:
         if len(written) > MAX_COMMANDS:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
         commands = [self.command(cmd, arg, atom) for cmd, arg in written]
-        refs = {self.commands.ref(code) for code, _ in commands}
-        keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"], refs)
+        keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"])
         event.update({"keep": keep} if keep else {})
         if len(commands) == 1:
             event["command"] = commands[0]

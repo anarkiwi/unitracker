@@ -451,11 +451,12 @@ def test_a_note_under_instruments_that_keep_and_restart_has_no_written_form():
     assert ": [D4!pw*4]" in songio.dumps(ir)
 
 
-def test_goattracker_accepts_the_command_where_no_program_starts_and_writes_it_implicitly():
+@pytest.mark.parametrize("atoms", ["D4.i2!pw", "E4!pw", "D4.i2!filter", "C4.i1!pw!filter"])
+def test_goattracker_refuses_the_lifetime_commands_where_they_do_nothing(atoms):
     plain = songio.loads(song("goattracker2", GT_INS, {"p1": GT_PHRASE}))
-    kept = GT_PHRASE.replace("D4.i2", "D4.i2!pw!filter").replace("E4", "E4!pw")
-    ir = songio.loads(song("goattracker2", GT_INS, {"p1": kept}))
-    assert ir == plain and "!pw" not in songio.dumps(ir)
+    assert "!pw" not in songio.dumps(plain) and "!filter" not in songio.dumps(plain)
+    with pytest.raises(songio.SongFormatError, match="goattracker2: the player can't express !"):
+        songio.loads(song("goattracker2", GT_INS, {"p1": f"C4.i1*2, {atoms}*2"}))
 
 
 @pytest.mark.parametrize(
@@ -465,9 +466,6 @@ def test_goattracker_accepts_the_command_where_no_program_starts_and_writes_it_i
         ("sidwizard", SW_INS, "C4.i1!pw*4, D4*4", "selects an instrument, which restarts"),
         ("sidwizard", SW_INS, "C4.i1*4, -!filter*4", "!filter needs a note"),
         ("sidwizard", SW_INS, "C4.i1*4, D4!pw:1*4", "the player can't express !pw:1"),
-        ("goattracker2", GT_INS, "C4.i1!pw*2", "whose instrument i1 starts the pw"),
-        ("goattracker2", GT_INS, "F4.i3!pw*2", "whose instrument i3 starts the pw"),
-        ("goattracker2", GT_INS, "D4.i2!run:pw1!pw*2", "on a note that starts the program"),
         (
             "defmon",
             "      ins:\n        i1: {ctrl: [{ctrl: 65}, end]}\n",
@@ -504,7 +502,7 @@ def test_a_stop_command_names_its_slot():
 
 
 def test_an_events_commands_are_written_in_one_order_whatever_their_slots():
-    text = song("goattracker2", GT_INS, {"p1": "C4.i1!freq:x1!legato*2, D4.i2!pw!filter*2"})
+    text = song("goattracker2", GT_INS, {"p1": "C4.i1!freq:x1!legato*2, D4.i2*2"})
     ir = songio.loads(text)
     swapped = songio.loads(text)
     swapped["phrases"]["p1"][0]["commands"].reverse()
@@ -519,8 +517,8 @@ def test_an_events_commands_are_written_in_one_order_whatever_their_slots():
     [
         ("goattracker2", GT_INS, "C4.i1!legato!freq:x1", "in the order !freq, !legato"),
         ("sidwizard", COL_DEFS, "C4.i1*4, D4!legato!tempo:4", "in the order !tempo, !legato"),
-        ("goattracker2", GT_INS, "D4.i2!pw!vol:3", "!pw and !filter follow the other"),
-        ("goattracker2", GT_INS, "D4.i2!filter!pw", "!pw and !filter follow the other"),
+        ("sidwizard", SW_INS, "C4.i1*4, D4!pw!legato*4", "!pw and !filter follow the other"),
+        ("sidwizard", SW_INS, "C4.i1*4, D4!filter!pw*4", "!pw and !filter follow the other"),
         ("goattracker2", GT_INS, "C4.i1!vol:3!cut:8", "can't play !vol and !cut on one event"),
     ],
 )
