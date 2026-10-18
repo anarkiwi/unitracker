@@ -47,7 +47,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see [Codecs](#codecs)) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field (a reference to `x`) holding a row's modulator expression; a program of one row that sets only it is written as the expression |
-| `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default |
+| `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default; a type whose fields are all unwritten has no written form, and a document naming it is refused (`unknown record type 'speedtab'`) |
 | any other key | a template: an action list run for a row |
 
 The record type `x` is the format's own: it holds the expressions, and a playroutine
@@ -88,9 +88,8 @@ The writer uses the first shape whose `when` holds and refuses a row that would 
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or `x` for an
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way; `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!funk:6/7`). A `ref` entry with `inline: true`
-writes the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
-one row per distinct argument, and the type has no definitions of its own. An entry `{name: ad,
+joined by `/`, which `raw` reads by those names (`!funk:6/7`). An entry `{name, none: n}` writes
+argument `n` as `none` (`!funk:none`) and matches no other argument. An entry `{name: ad,
 nibble: s, slot: k}` is an envelope command: the code sets the nibble at shift `s` of the register
 `name` over the instrument's field `name`, played from event slot `k`, and is written as the byte it
 writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).
@@ -179,7 +178,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `freq` | the word `F(k)` reads at index `k + note_offset`: `{word: table}`, or `{hi: table, lo: table}` joined as `hi << 8 \| lo` |
 | `notes` | the voice cells that hold the note; `N` is the first, less `note_offset` |
 | `transpose` | a voice cell added to the note for `N` |
-| `legato` | `{cell, command}`: the cell set while a note does not retrigger, and the command code written as `!legato:0` |
+| `legato` | `{cell}`: the cell set while a note does not retrigger, which the `legato` command (`!legato:0`) sets |
 | `tables` | `{name: {entry: expr, size: n}}`: the tables `name[k]` expressions read; `entry` reads `i` and the playroutine's tables |
 | `functions` | `{name: expr}`: playroutine functions rewritten over the named tables, for analysis |
 | `units` | the units, below |
@@ -201,8 +200,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `relative` | cells a start reads as `N` plus their offset from the note |
 | `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the document does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
-| `command` | the command code that names an expression (`!freq`) |
-| `commands` | the native command codes the lifter replaces by `command` |
+| `commands` | the native command codes the lifter replaces by the command named `key` that references `x` (`!freq`) |
 
 A function is named `procs.<proc>`, `records.<record>.<field>[.<index>]` or
 `record_types.<type>.<template>`.

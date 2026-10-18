@@ -13,7 +13,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker.format import hints, inline, refkeys, timeline, xexpr
+from unitracker.format import hints, refkeys, timeline, xexpr
 from unitracker.format.atoms import format_atom, parse_atom, runs
 from unitracker.format.codec import (
     COMMAND_NAMES,
@@ -382,9 +382,6 @@ class _Writer:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
-        if isinstance(value, tuple) and self.commands.inline(name):
-            rtype = self.rtypes[value[0]]
-            return f"{name}:{inline.written(rtype, self._row(rtype, value[1]))}"
         if isinstance(value, tuple) and not self.commands.values(name):
             return f"{name}:@{self.names[self.key(*value)]}"
         return f"{name}:{arg_text(value)}"
@@ -401,7 +398,7 @@ class _Writer:
                     yield (restart.NAME, int(arg)), "command"
                     continue
                 target = self.commands.ref(int(cmd))
-                if target is not None and not self.commands.inline(int(cmd)):
+                if target is not None:
                     none = self.rtypes[target].none
                     if none is None or int(arg) != none:
                         yield self.key(target, int(arg)), "command"
@@ -580,10 +577,7 @@ class _Reader:
         self.names = {}
         self.pending = []
         self.records = {name: {} for name in self.rtypes}
-        inline_types = {self.commands.inline(name) for name in COMMAND_NAMES}
-        self.written = {
-            rt.written: rt for rt in self.rtypes.values() if rt.name not in inline_types
-        }
+        self.written = {rt.written: rt for rt in self.rtypes.values() if rt.writable}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
 
@@ -837,10 +831,7 @@ class _Reader:
             raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
         if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
             return [restart.CODE, self.lookup(arg[1:], restart.NAME)]
-        row = isinstance(arg, tuple) and not self.commands.values(cmd)
-        if row or (isinstance(arg, int) and self.commands.inline(cmd)):
-            arg = self._inline(cmd, arg if isinstance(arg, tuple) else (arg,), atom)
-        elif isinstance(arg, str) and arg != NONE:
+        if isinstance(arg, str) and arg != NONE:
             if arg[1:] not in self.names:
                 raise SongFormatError(f"unknown name {arg[1:]!r} in {atom!r}")
             arg = self.names[arg[1:]]
@@ -848,14 +839,6 @@ class _Reader:
             return list(self.commands.decode(cmd, arg))
         except CodecError as exc:
             raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
-
-    def _inline(self, cmd: str, values: tuple, atom) -> tuple:
-        """``(type, index)`` of the row an inline argument writes, allocated on first use."""
-        ref = self.commands.inline(cmd)
-        try:
-            return inline.allocated(self.rtypes.get(ref), values, self.records, self._alloc)
-        except ValueError as exc:
-            raise SongFormatError(f"!{cmd}: {exc} in {atom!r}") from exc
 
     def _collect(self, song):
         """Define every record and phrase; ``(phrase atoms, play rows)``."""

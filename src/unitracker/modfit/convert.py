@@ -16,7 +16,7 @@ from pathlib import Path
 
 import sympy
 
-from unitracker.format.codec import command_variants, evaluate
+from unitracker.format.codec import command_code, command_variants, evaluate
 from unitracker.format.records import chained, program_path, record_types
 from unitracker.format.songio import codecs
 from unitracker.format.xexpr import ExpressionError, source
@@ -24,7 +24,7 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
 from unitracker.player import reach
-from unitracker.player.modulation import declared
+from unitracker.player.modulation import declared, unit_command
 from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
 
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
@@ -590,9 +590,11 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         # pylint: disable=too-many-locals
         occs = self.obs["occurrences"]
         legato = self.spec.get("legato") or {}
+        legato_code = command_code(self.pr.get("commands"), "legato")
         for (unit, instance), i in sorted(self.obs["events"].items(), key=repr):
             spec, occ, text = self.units[unit], occs[i], self.texts[i]
-            if "command" not in spec or self.site(occ) is not None:
+            code = unit_command(self.pr, spec)
+            if code is None or self.site(occ) is not None:
                 continue
             where = self.event_at(instance)
             if where is None:
@@ -610,13 +612,13 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 and isinstance(ev.get("note"), int)
                 and legato
                 and occ.start.get(legato["cell"])
-                and [legato["command"], 0] not in cmds
+                and [legato_code, 0] not in cmds
             ):
-                cmds.insert(0, [legato["command"], 0])
+                cmds.insert(0, [legato_code, 0])
             index = self.x(text or IDENTITY)
             if index > 0xFF:
                 raise ConversionError(f"!freq names expression {index}: an argument is a byte")
-            cmds.append([spec["command"], index])
+            cmds.append([code, index])
             _set_cmds(ev, cmds)
 
     # -- phrases and tracks --

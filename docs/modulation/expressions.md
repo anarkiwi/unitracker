@@ -65,4 +65,5 @@ is a constant expression. An expression that contains a comma is quoted inside a
 ## Legato
 
 `!legato:0` makes the event's note sound without retriggering it: no gate-off, hard restart or
-instrument start. The playroutine declares the command code it is (`modulators.legato`).
+instrument start. The playroutine's `commands` entry named `legato` gives its code, and
+`modulators.legato` the cell it sets.
