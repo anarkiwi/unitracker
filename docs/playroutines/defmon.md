@@ -90,25 +90,35 @@ A sidTAB row writes `$D417` in one of three ways: `{res: r, route: m}` with bit 
 sets the byte (the byte 0 is `route: '-'`); `{res: r, route: + m}` with bit 3 of `m` set keeps
 the routing and adds the voice and `m`; `route: '-'` removes the voice and keeps the resonance.
 
-`cut` is the ACID accumulator: bits 8-15 are the cutoff byte, bits 0-7 its fraction and bit 16
-the carry of the last step. The playroutine writes `$D416` as the cutoff byte plus the carry,
-wrapped to 8 bits, raised to the model floor when it is below the floor or above $7F, and doubled
-on the SID model that needs it. The replay's offset `cp`, which it adds to the accumulator's high
-byte only on the way to `$D416`, is part of the accumulator: its high byte holds the offset,
-wrapped to 8 bits as the replay's add-with-carry wraps it, so the cutoff byte is exact for every
-offset. An ACID program, and a layer-B program that sets `cp`, is written as its row's `cut`
+`cut` is the ACID unit, which the replay steps once a tick. Its state is a 15-bit accumulator
+`r`, whose high byte the replay never stores above $7F:
+
+```
+r' = r + s (ADC) or r - s - 1 (SBC);  r' = floor·256 + r' mod 256 when r' leaves 0..$7FFF
+```
+
+The cutoff byte it writes is `r'`'s high byte plus the offset `cp` plus the step's carry `C`,
+wrapped to 8 bits: `C` is 1 exactly when an SBC step does not saturate, and 0 after an ADC step
+(which never carries) or a saturation. The playroutine writes `$D416` as that byte, raised to the
+model floor when it is below the floor or above $7F, and doubled on the SID model that needs it.
+The carry belongs to the step, not to `r'`: an SBC step that saturates to `floor·256 + k` and
+one that falls to `(floor - 1)·256 + k` write the same cutoff byte, and their next steps differ,
+so neither `r'` nor the cutoff byte is a state the unit can be written over. Its value `v` holds both: bits 0-15
+are `r'` with `cp` added to its high byte (wrapped as the replay's add-with-carry wraps it), bit 16
+is `C`, and the cutoff byte is `(v >> 8) + (v >> 16)`. With no offset an expression reads `r` as
+`v % 32768`. An ACID program, and a layer-B program that sets `cp`, is written as its row's `cut`
 expression, its steps and saturation test carrying the offset as constants; `ginit` holds no
 offset (the replay's init clears it and the accumulator). Layer B is the filter's: only a
 layer-B row's `cut` is the ACID unit's.
 
 The ACID step's direction is an opcode the module carries through init (`$10B8`, SBC or ADC), and
-the step runs from init: init clears the step, so under SBC (subtract the step and one) the
-accumulator falls by one each tick until a layer-B row sets the step (setting the cutoff keeps
-the direction), saturating to the floor, and under ADC it holds. The init's start of the ACID unit
-writes that as `ginit`'s `cut`, the expression of a one-per-tick fall:
-`ginit: {0: {cut: ((v - 1) % 256 + 512)*(v % 65536 < 1) + ...}}` at floor 2; the direction under
-ADC plays as the playroutine's own and writes nothing. The playroutine's raw `ginit` field `sub` is
-what the expression replaces, and has no written form.
+the step runs from init: init clears the step, so under SBC `r` falls by one each tick until a
+layer-B row sets the step (setting the cutoff keeps the direction), saturating to the floor, and
+under ADC it holds. The init's start of the ACID unit writes that as `ginit`'s `cut`, at floor 2
+`(v % 32768 + 65535)*(v % 32768 >= 1) + ((v - 1) % 256 + 512)*(v % 32768 < 1)`: `r - 1` with the
+carry, and at 0 the floor with the low byte $FF and no carry. The direction under ADC plays as the
+playroutine's own and writes nothing. The playroutine's raw `ginit` field `sub` is what the
+expression replaces, and has no written form.
 
 ## Hard restart
 
@@ -140,7 +150,7 @@ its index carries the 24.
 |---|---|---|---|---|---|---|
 | `pitch A` | `freq` | `sacc` | the 16-bit offset added to the note's frequency: the slide accumulator, or with `af` below $80 the offset `S[N + 24 + af]` | every tick, from layer A's row to the pitch step | a note, or layer A armed with a program that sets `af` or `freq` | the program's first row, which runs the slide mode $80 (the program's other rows set no `af`) |
 | `pulse A` | `pw` | `pw` | `pw & $FFF`: the 16-bit cell's top 4 bits are not part of `v`, and a result that differs from its low 12 bits is stored as the cell, clearing them | every tick, from layer A's row to the pulse step | layer A armed with a program that sets `pw`, `ps` or a pulse expression | the program's first row, replacing its `pw` and `ps` columns |
-| `acid B` | `cut` | `acc`, global | the 17-bit accumulator, `cp` in its high byte (see Filter) | every tick, from layer B's row to the next ACID step | the init (from its own ACID step), or layer B armed with a program that sets `acid`, `cp` or a cutoff expression | `ginit`'s `cut` for the init's start, replacing the direction; else the program's first row, replacing its `acid` and `cp` columns |
+| `acid B` | `cut` | `acc`, global | the accumulator with `cp` in its high byte and the step's carry in bit 16 (see Filter) | every tick, from layer B's row to the next ACID step | the init (from its own ACID step), or layer B armed with a program that sets `acid`, `cp` or a cutoff expression | `ginit`'s `cut` for the init's start, replacing the direction; else the program's first row, replacing its `acid` and `cp` columns |
 
 `af` below $80 adds a fixed offset to the note's frequency; the lifter writes it as the first
 row's `freq` expression, `S[N + 36]` for `af` 12, which plays in the slide mode with the same

@@ -49,8 +49,9 @@ def lifted(source: str, subtune) -> dict:
 
 def starts(source: str, subtune) -> tuple:
     """``(analysis, [start key], {start key: occurrence count})`` of a tune, the song and its
-    keys kept under ``out/modfit/profile`` by source and subtune."""
-    where = KEYS / f"{hashlib.sha256(f'{source}:{subtune}'.encode()).hexdigest()[:16]}.pkl"
+    keys kept under ``out/modfit/profile`` by source, subtune and code identity."""
+    name = f"{source}:{subtune}:{C.code_identity()}"
+    where = KEYS / f"{hashlib.sha256(name.encode()).hexdigest()[:16]}.pkl"
     if where.exists():
         ir, counts = pickle.loads(where.read_bytes())
     else:
