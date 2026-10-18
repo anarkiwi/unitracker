@@ -1,7 +1,7 @@
 """Program lifetime: a note's ``!pulse:0`` or ``!filter:0``, that it does not restart that program.
 
 A playroutine declares ``lifetime: {name: {field: f, flag: {g: mask}}}``: ``f`` is the instrument
-field naming the program, and ``flag`` the header bit that keeps it (docs/format.md, *Lifetime*).
+field naming the program, and ``flag`` the header bit that keeps it (docs/format/vocabulary.md).
 """
 
 import numpy as np

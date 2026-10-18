@@ -1,7 +1,7 @@
 # Modulation analysis (`unitracker.modfit`)
 
 `unitracker.modfit` derives each modulator occurrence of a song as phase and value
-expressions in the format's grammar (see *Modulators* in [format.md](format.md)), proves
+expressions in the format's grammar (see [expressions.md](expressions.md)), proves
 them against the playroutine's own action lists with z3, and rewrites the song with them
 (`convert`). The `unitracker-modfit` command reports these derivations and the
 playroutine-level analyses (accumulator fits, keyword composition and signatures).
@@ -10,9 +10,9 @@ playroutine-level analyses (accumulator fits, keyword composition and signatures
 
 | input | read by |
 |---|---|
-| the playroutine's `modulators` declaration (see *Modulator declarations* in [format.md](format.md)); each player's units are listed in the *Modulators* section of [playroutines/goattracker2.md](playroutines/goattracker2.md), [playroutines/sidwizard.md](playroutines/sidwizard.md) and [playroutines/defmon.md](playroutines/defmon.md) | derivation, conversion, `exprs` |
+| the playroutine's `modulators` declaration (see [Modulator declarations](../playroutines/schema.md#modulator-declarations)); each player's units are listed in the *Modulators* section of [playroutines/goattracker2.md](../playroutines/goattracker2.md), [playroutines/sidwizard.md](../playroutines/sidwizard.md) and [playroutines/defmon.md](../playroutines/defmon.md) | derivation, conversion, `exprs` |
 | the playroutine library (`src/unitracker/playroutines/*.yaml`): cells, procs, record types, commands | every analysis |
-| `src/unitracker/modfit/specs.yaml` | `fit`, `command`, `sweeps`, `orbit` (see *Specs*) |
+| `src/unitracker/modfit/specs.yaml` | `fit`, `command`, `sweeps`, `orbit` (see [Specs](#specs)) |
 
 How a declaration feeds the analysis:
 
@@ -26,7 +26,7 @@ How a declaration feeds the analysis:
   offset; `freq` gives `F(k)`; `tables` are the named tables `T[k]` and `functions` the
   playroutine functions rewritten over them.
 - `label` groups occurrences; `site`, `command`, `commands`, `legato` and `retire` say where
-  and how the conversion writes texts (see *Conversion*).
+  and how the conversion writes texts (see [Conversion](#conversion)).
 
 ## Phase and value expressions
 
@@ -117,7 +117,7 @@ of the song and the sources they depend on (`convert.SOURCES`).
 |---|---|
 | start key | a cell the slice reads has no start value |
 | derivation | control reads the value; a pair's value reads its parts beyond their sum; a chip value is not its pair plus an offset; a term the grammar has no form for (`reads ...`); more than one phase |
-| proof | an obligation of *What is proved* is refuted (`not proved`, with a witness) |
+| proof | an obligation of [What is proved](#what-is-proved) is refuted (`not proved`, with a witness) |
 | text | the phase is not one per firing (a `turn` phase written as a recurrence); the text is outside the fixed grammar (`xexpr.source`) |
 | site | two units at one site each need several texts; a `row` site needs several; a record type runs out of rows; no event selects (or names) the site |
 | event | an expression index above a byte; three commands on one event; a track's later loop passes differ |
@@ -161,7 +161,7 @@ is `hi:lo` or `hi:lo:k`.
 | `fit` | `[PLAYROUTINE:PATH:CELL ...]` (default: `fits` and `checks` of the specs) | per dispatch guard, the proved `set`/`accumulate` rewrite, or the nearest candidate with a witness and the fit re-proved under the cell's inductive invariants; each given check proved or refuted with a witness |
 | `poly` | `PLAYROUTINE:PATH ...` | each written cell's arithmetic form `x + Σ [G_i]·(u_i − x)` (`arith`) |
 | `command` | `[PLAYROUTINE[:NAME] ...]` (default: the specs' `commands`) | each keyword's setup and per-tick effect on a row with and without a note, freed cells fitted as accumulators (`compose`) |
-| `keywords` | `[PLAYROUTINE ...]` | one row per keyword or field: playroutine, shared key, signature, matches, verdict, reason (*Signatures*) |
+| `keywords` | `[PLAYROUTINE ...]` | one row per keyword or field: playroutine, shared key, signature, matches, verdict, reason ([Signatures](#signatures)) |
 | `generic` | `[PLAYROUTINE ...] [--ticks N]` | each keyword and record row kind factorised as one generic accumulator (step, basis, hit, respond, gate, proof status), the rows grouped, timers, vibrato and bounce orbits |
 | `sweeps` | `[SONG ...]` | the specs' `bounces`, the `fit` lines of the specs' pair-cell fits and checks, and each song's table programs matched to one accumulator |
 | `exprs` | `[SONG ...] [--before DIR] [--after DIR] [--workers N]` (default: `cli.SONGS`) | per song: occurrences over the window, the grid check, its text read back against the native player, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; token counts against the `--before` and `--after` documents |
