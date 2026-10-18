@@ -888,7 +888,7 @@ class Programs(Form):
         """A template ``run`` on its row, then the rest; other actions are unsupported."""
         run = a.get("run") or {}
         template = (
-            (self.pr.get("record_types") or {}).get(run.get("record"), {}).get(run.get("field"))
+            (self.pr.get("record_types") or {}).get(run.get("record"), {}).get(run.get("template"))
         )
         if not isinstance(template, list):
             return super().opaque(a, rest, conds, state)

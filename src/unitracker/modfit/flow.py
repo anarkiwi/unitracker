@@ -111,9 +111,8 @@ def action_lists(pr: dict) -> dict:
 
 def run_lists(pr: dict, run: dict) -> list:
     """The action lists a ``run`` action can execute."""
-    rt = record_types(pr).get(run["record"])
-    if rt is not None and run["field"] in rt.templates:
-        return [rt.templates[run["field"]]]
+    if "template" in run:
+        return [record_types(pr)[run["record"]].templates[run["template"]]]
     rows = (pr.get("records") or {}).get(run["record"]) or {}
     return [r[run["field"]] for r in rows.values() if (r or {}).get(run["field"])]
 

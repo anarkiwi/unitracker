@@ -228,7 +228,7 @@ procs:
       then:
         - set: {cur: row}
         - set: {cnt: "sidtab[cur].dl", row: "sidtab[cur].next"}
-        - run: {record: sidtab, index: cur, field: do}
+        - run: {record: sidtab, index: cur, template: do}
       else:
         - {if: "cnt < 0x80", then: [{set: {cnt: "cnt - 1"}}]}
   layer_a:
@@ -331,8 +331,6 @@ modulators:
       cell: sacc
       chip: {width: 16, value: "sacc if mode >= 0x80 or mode == 0 else por((note + mode) & 0xFF)", store: {sacc: value}}
       fire: [layer_a, pitch_acc]
-      pre: procs.layer_a
-      post: procs.pitch_acc
       label: [rowA]
       x: "sidtab[rowA].xf"
       program: {pointer: rowA, record: sidtab, fields: [af, xf]}
@@ -342,28 +340,24 @@ modulators:
         field: xf
         clear: {af: -1}
         first: {af: 0x80}
-      hooks: [{at: procs.pattern, written: [sacc], pointer: [rowA]}]
+      hooks: [{at: {proc: pattern}, written: [sacc], pointer: [rowA]}]
     - name: pulse A
       key: pw
       cell: pw
       chip: {width: 12, value: "pw & 0xFFF", store: {pw: value}}
       fire: [layer_a, pulse]
-      pre: procs.layer_a
-      post: procs.pulse
       label: [rowA]
       x: "sidtab[rowA].xp"
       program: {pointer: rowA, record: sidtab, fields: [pw, ps, xp]}
       site: {record: sidtab, index: rowA, field: xp, clear: {pw: -1, ps: -1}}
-      hooks: [{at: procs.pattern, pointer: [rowA]}]
+      hooks: [{at: {proc: pattern}, pointer: [rowA]}]
     - name: acid B
       scope: global
       key: cut
       cell: acc
       fire: [layer_b, acid_step]
-      pre: procs.layer_b
-      post: procs.acid_step
       label: [rowB]
       x: "sidtab[rowB].xc"
       program: {pointer: rowB, record: sidtab, fields: [cp, acid, xc]}
       site: {record: sidtab, index: rowB, field: xc, clear: {cp: -1, acid: -1}}
-      hooks: [{at: procs.pattern, pointer: [rowB]}]
+      hooks: [{at: {proc: pattern}, pointer: [rowB]}]

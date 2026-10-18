@@ -206,11 +206,12 @@ class Merge(Form):
     def merge_run(self, run: dict, state: dict, live, conds) -> None:
         """A ``run``: a template with ``row`` bound, or each record row where its index is hit."""
         index = self.num(self.expr(run["index"], state))
-        rt = record_types(self.pr).get(run["record"])
-        if rt is not None and run["field"] in rt.templates:
+        if "template" in run:
             row = state.get("row", "row")
             out, _ = self.merge(
-                rt.templates[run["field"]], {**state, "row": ("rec", run["record"], index)}, conds
+                record_types(self.pr)[run["record"]].templates[run["template"]],
+                {**state, "row": ("rec", run["record"], index)},
+                conds,
             )
             out["row"] = row
             self.join(state, out, True, live)

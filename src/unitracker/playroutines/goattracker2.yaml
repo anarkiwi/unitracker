@@ -373,18 +373,18 @@ procs:
       then: [{set: {wtime: "wtime + 1"}}, {return: true}]
     - set: {wtime: 0, wcur: wptr}
     - set: {wptr: "ctrltab[wcur].next"}
-    - run: {record: ctrltab, index: wcur, field: do}
+    - run: {record: ctrltab, index: wcur, template: do}
   pulse_exec:
     - if: "ptime == 0"
       then:
         - if: "pulsetab[pptr].l >= 0x80"
           then:
-            - run: {record: pulsetab, index: pptr, field: do}
+            - run: {record: pulsetab, index: pptr, template: do}
             - set: {pptr: "pulsetab[pptr].next"}
           else: [{set: {ptime: "pulsetab[pptr].l"}}]
     - if: "ptime != 0"
       then:
-        - run: {record: pulsetab, index: pptr, field: each}
+        - run: {record: pulsetab, index: pptr, template: each}
         - set: {ptime: "ptime - 1"}
         - {if: "ptime == 0", then: [{set: {pptr: "pulsetab[pptr].next"}}]}
   filter_exec:
@@ -393,12 +393,12 @@ procs:
       then:
         - if: "filttab[fptr].l >= 0x80 or filttab[fptr].l == 0"
           then:
-            - run: {record: filttab, index: fptr, field: do}
+            - run: {record: filttab, index: fptr, template: do}
             - set: {fptr: "filttab[fptr].next"}
           else: [{set: {ftime: "filttab[fptr].l"}}]
     - if: "ftime != 0"
       then:
-        - run: {record: filttab, index: fptr, field: each}
+        - run: {record: filttab, index: fptr, template: each}
         - set: {ftime: "ftime - 1"}
         - {if: "ftime == 0", then: [{set: {fptr: "filttab[fptr].next"}}]}
   new_note_init:
@@ -507,7 +507,6 @@ modulators:
       cell: freq
       chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
       fire: [{run: {record: tickn, index: command, field: do}}]
-      pre: records.tickn.do
       label: [command, cmddata]
       # A step without a command runs the instrument's freq, as the native instrument vibrato.
       x: "cmddata if command == 16 else (ins[ii].freq if command == 0 else 0)"
@@ -515,40 +514,37 @@ modulators:
       site: {when: "command == 0 and onset and not fired", record: ins, index: ii, field: freq}
       retire: {record: ins, clear: {speed: 0, vd: 0}}
       hooks:
-        - {at: records.tick0.do, key: [command, cmddata]}
-        - {at: procs.new_note_init, written: [vibdelay]}
-        - {at: record_types.ctrltab.do, written: [lastnote]}
+        - {at: {record: tick0, field: do}, key: [command, cmddata]}
+        - {at: {proc: new_note_init}, written: [vibdelay]}
+        - {at: {type: ctrltab, template: do}, written: [lastnote]}
     - name: wave
       key: freq
       cell: freq
       chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
-      fire: [{run: {record: wavecmd, index: wc, field: do}}]
-      pre: procs.wstep
+      fire: [wstep]
       label: [wcur]
       x: "ctrltab[wcur].x"
       relative: [lastnote]
       site: {record: ctrltab, index: wcur, field: x, row: true, clear: {w: 0xF1, n: 0}}
       hooks:
-        - {at: procs.wstart, written: [wc]}
+        - {at: {proc: wstart}, written: [wc]}
     - name: pulse
       key: pw
       cell: pulse
       fire: [pulse_exec]
-      pre: procs.pulse_exec
       label: [pptr]
       x: "pulsetab[pptr].x"
       site: {record: pulsetab, index: pptr, field: x, clear: {l: 0, r: 0}}
       hooks:
-        - {at: procs.new_note_init, written: [pptr]}
-        - {at: records.tick0.do.9, written: [pptr]}
-        - {at: records.wavecmd.do.9, written: [pptr]}
+        - {at: {proc: new_note_init}, written: [pptr]}
+        - {at: {record: tick0, field: do, index: 9}, written: [pptr]}
+        - {at: {record: wavecmd, field: do, index: 9}, written: [pptr]}
     - name: filter
       scope: global
       key: cut
       cell: filtercutoff
       chip: {width: 11, value: "filtercutoff << 3", store: {filtercutoff: "value >> 3"}}
       fire: [filter_exec]
-      pre: procs.filter_exec
       label: [fptr]
       x: "filttab[fptr].x"
       site:
@@ -557,8 +553,8 @@ modulators:
         field: x
         clear: {l: "l if l >= 0x80 else 0", r: "r if l >= 0x80 else 0", cut: -1}
       hooks:
-        - {at: procs.new_note_init, written: [fptr]}
-        - {at: records.tick0.do.10, written: [fptr]}
-        - {at: records.tick0.do.11, written: [fptr]}
-        - {at: records.wavecmd.do.10, written: [fptr]}
-        - {at: records.wavecmd.do.11, written: [fptr]}
+        - {at: {proc: new_note_init}, written: [fptr]}
+        - {at: {record: tick0, field: do, index: 10}, written: [fptr]}
+        - {at: {record: tick0, field: do, index: 11}, written: [fptr]}
+        - {at: {record: wavecmd, field: do, index: 10}, written: [fptr]}
+        - {at: {record: wavecmd, field: do, index: 11}, written: [fptr]}

@@ -640,7 +640,6 @@ modulators:
       key: freq
       cell: voff
       fire: [tick_vibrato]
-      pre: procs.tick_vibrato
       label: [svib, pk, pfx, pfv, pnfx, pleg, ci]
       x: fx
       commands: [1, 2, 3, 608, 632]
@@ -654,8 +653,8 @@ modulators:
         record: ins
         clear: {vibrato: 0, vibdelay: 0, flags: "(flags & 0xCF) | 0x10"}
       hooks:
-        - {at: procs.apply_row, written: [voff], key: [svib, fml, fmh, vper, fx]}
-        - {at: procs.run_deferred, key: [svib, fml, fmh, vper, fx]}
+        - {at: {proc: apply_row}, written: [voff], key: [svib, fml, fmh, vper, fx]}
+        - {at: {proc: run_deferred}, key: [svib, fml, fmh, vper, fx]}
     - name: pulse
       key: pw
       cell: "pwhi:pwlo"
@@ -665,11 +664,10 @@ modulators:
         value: "(((pwhi + pwtrack(pwkt, note + oct)) & 0x0F) << 8) | pwlo"
         store: {pwhi: "((value >> 8) - pwtrack(pwkt, note + oct)) & 0x0F", pwlo: value}
       fire: [tick_pw]
-      pre: procs.tick_pw
       label: [ppos]
       x: "pwtab[ppos].x"
       site: {record: pwtab, index: ppos, field: x, clear: {a: 0, b: 0, k: 0}}
-      hooks: [{at: procs.start_note, written: [ppos]}]
+      hooks: [{at: {proc: start_note}, written: [ppos]}]
     - name: filter
       key: cut
       cell: "vfhi:vflo:3"
@@ -681,8 +679,7 @@ modulators:
         store: {vfhi: "(value >> 3) - fkd(fkt, note + oct)", vflo: "value & 7"}
       mirror: "fcuthi:fcutlo:3"
       fire: [filt_row]
-      pre: procs.filt_row
       label: [fpos]
       x: "flttab[fpos].x"
       site: {record: flttab, index: fpos, field: x, clear: {a: "a if a >= 0x80 else 0", b: 0, k: 0}}
-      hooks: [{at: procs.start_note, written: [fpos]}]
+      hooks: [{at: {proc: start_note}, written: [fpos]}]

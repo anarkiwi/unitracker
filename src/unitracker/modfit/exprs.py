@@ -18,7 +18,7 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.form import atoms
 from unitracker.modfit.phase import Lift, Machine, derive, dispatch
 from unitracker.modfit.replay import Stepper
-from unitracker.player.modulation import declared
+from unitracker.player.modulation import declared, run_of
 
 # ---- derivation --------------------------------------------------------------------------
 
@@ -71,16 +71,13 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         """Cells the start hook writes from the note, as terms of ``N`` at the start's transpose."""
         # pylint: disable=too-many-locals
         at, row, pre = hook
-        parts = at.split(".")
-        if parts[0] == "procs":
-            actions = [{"call": parts[1]}]
+        if "proc" in at:
+            actions = [{"call": at["proc"]}]
         else:
-            index = (
-                row if parts[0] == "record_types" else (int(parts[3]) if len(parts) > 3 else None)
-            )
+            index = row if "type" in at else at.get("index")
             if index is None:
                 return {}
-            actions = [{"run": {"record": parts[1], "index": int(index), "field": parts[2]}}]
+            actions = [{"run": {**run_of(at), "index": int(index)}}]
         state = {k: v for k, v in pre.items() if isinstance(v, int) and k not in machine.parts}
         for c in self.spec["notes"]:
             state[c] = self.note_term(start)

@@ -60,7 +60,7 @@ PLAYROUTINE = {
             {
                 "if": "ptr",
                 "then": [
-                    {"run": {"record": "prog", "index": "ptr", "field": "do"}},
+                    {"run": {"record": "prog", "index": "ptr", "template": "do"}},
                     {"set": {"ptr": "prog[ptr].x if prog[ptr].v == 99 else prog[ptr].next"}},
                 ],
             },
@@ -397,8 +397,8 @@ def test_templates_run_only_for_defined_rows():
     playroutine = {
         "global": {"g": {}},
         "record_types": {"r": {"fields": ["v"], "do": [{"set": {"g": "row.v + 1"}}]}},
-        "init": [{"run": {"record": "r", "index": 3, "field": "do"}}],
-        "tick": [{"run": {"record": "r", "index": 2, "field": "do"}}],
+        "init": [{"run": {"record": "r", "index": 3, "template": "do"}}],
+        "tick": [{"run": {"record": "r", "index": 2, "template": "do"}}],
         "ghost": {"global": {0x15: "g"}},
     }
     player = SongPlayer(mini_song(playroutine, records={"r": {2: {"v": 7}}}))
@@ -433,7 +433,7 @@ def template_player(where, row):
     pr = songio.library(name)
     tables = pr.pop("tables")
     run = [{"set": cells}] if cells else []
-    run.append({"run": {"record": rtype, "index": 1, "field": field}})
+    run.append({"run": {"record": rtype, "index": 1, "template": field}})
     pr["init"], pr["tick"] = ([{"for_voices": run}] if voice else run), []
     tracks = [{"plays": [{"phrase": "a"}], "loop": 0}] * 3
     song3 = mini_song(pr, tracks, voices=3, tables=tables, records={rtype: {1: row}})
