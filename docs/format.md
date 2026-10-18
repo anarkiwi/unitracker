@@ -199,7 +199,10 @@ wherever it appears: in program rows, in fixed records, and in instruments, wher
 the program run on the control register, `pw` and `filter` the pulse and filter programs, and
 `restart` the hard restart. A row or command a player can't express is rejected on reading,
 naming the key or command and the player (`defmon: the player can't express !tempo:6`); the
-writer refuses to write a value that would not read back.
+writer refuses to write a value that would not read back. A key, command or record type outside the
+playroutine's codec shapes, record types and the shared command names is refused with one
+message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in '-!mod:1'`,
+`unknown record type 'speedtab'`, `unknown key registers in document`).
 
 ### Chords
 
@@ -409,7 +412,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see Codecs) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field (a reference to `x`) holding a row's modulator expression; a program of one row that sets only it is written as the expression |
-| `retired` | `{expression: reason}`: raw rows that have no written form; the reader and the writer refuse a row for which an expression holds, giving the reason |
+| `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default |
 | any other key | a template: an action list run for a row |
 
 The record type `x` is the format's own: it holds the expressions, and a playroutine

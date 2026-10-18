@@ -147,7 +147,7 @@ Declare each native table as a record type (*Record types*):
 | rows whose effect depends on their kind | templates (any other key, such as `do` and `each`), reading `row.<field>` |
 | module state carried through init | `fixed: true` (`defmon`'s `vinit`, `ginit`) |
 | a modulated program | `expr: x`, the field holding a row's expression |
-| raw rows with no written form | `retired: {expression: reason}` |
+| raw fields with no written form | `unwritten: [field, ...]` |
 
 `writes_as` names the record type the table is written as (`ins`, `ctrl`, `pw`, `filter`,
 `restart`; the table in *Definitions*), and `prefix` its name prefix when that is not the written
