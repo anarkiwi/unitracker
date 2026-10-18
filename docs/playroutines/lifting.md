@@ -1,8 +1,22 @@
 # Lifting
 
-A lifter (`unitracker.lift.backends.lift`, dispatching to `goattracker.lift`, `defmon.lift` and
-`sidwizard.lift`) decodes a native tune and writes each native modulation as an expression;
-`expressions=False` returns the internal representation with the native modulations. The conversion
+A lifter decodes a native tune and writes each native modulation as an expression;
+`unitracker.lift.backends.lift` dispatches to the lifter of the backend that recognises the tune,
+and `expressions=False` returns the internal representation with the native modulations.
+
+A lifter is a subclass of `unitracker.lift.base.Lift`: GoatTracker 2's is
+`goattracker.GoatTrackerLift`; defMON and SID-Wizard (`defmon.lift`, `sidwizard.lift`) are to
+follow. `Lift.from_sid(raw, subtune, expressions)` decodes the tune, and `run()` takes it through
+the passes `passes()` names in order, after `check_build` refuses a build the playroutine does not
+cover:
+
+| pass | content |
+|---|---|
+| `structure` | the native module transcribed to [the internal representation](#the-internal-representation) |
+| each of `normalisations` | a player-specific rewrite `(lift, song) -> song`, proved by a replay (GoatTracker 2: `unpause`, `explicit_swing`, `unmark`) |
+| `convert` | with `expressions` only: the modulations as expressions (GoatTracker 2 then writes a toneporta of speed 0 as `!freq`, `snapped`) |
+
+`stages()` yields each pass's name and the song after it. The conversion
 (`unitracker.modfit.convert`, see [modfit.md](../modulation/modfit.md)) must leave the song playing
 the native register grid exactly, each voice from its onset (see [Checking against the native
 player](schema.md#checking-against-the-native-player)); a start whose expression is not proved, and

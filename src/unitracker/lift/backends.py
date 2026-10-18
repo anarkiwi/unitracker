@@ -2,14 +2,11 @@
 
 from pysidtracker import SidError, SidImage
 
+from unitracker.lift.base import start_song
+
 
 class UnknownFormat(ValueError):
     """No backend recognises the tune."""
-
-
-def _start_song(raw: bytes) -> int:
-    header = SidImage.from_bytes(raw).header
-    return (header.start_song or 1) - 1 if header is not None else 0
 
 
 def detect(raw: bytes) -> str:
@@ -36,7 +33,7 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     With ``expressions`` its modulations are written as the format's expressions.
     """
     if subtune is None:
-        subtune = _start_song(raw)
+        subtune = start_song(raw)
     backend = detect(raw)
     if backend == "defmon":
         from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
@@ -46,17 +43,15 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
         from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
 
         return sidwizard.lift(raw, subtune, expressions)
-    from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
-
     from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
 
-    return goattracker.lift(decompile_sid(raw, subtune=subtune), expressions)
+    return goattracker.GoatTrackerLift.from_sid(raw, subtune, expressions).run()
 
 
 def native_player(raw: bytes, subtune=None):
     """The native player for ``raw``, a ``pysidtracker.MemPlayer``."""
     if subtune is None:
-        subtune = _start_song(raw)
+        subtune = start_song(raw)
     backend = detect(raw)
     if backend == "defmon":
         from pydefmon import DefmonPlayer  # pylint: disable=import-outside-toplevel
@@ -66,6 +61,6 @@ def native_player(raw: bytes, subtune=None):
         from pysidwizard import SWMPlayer, parse_sid_song  # pylint: disable=import-outside-toplevel
 
         return SWMPlayer(parse_sid_song(raw, subtune + 1))
-    from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
+    from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
 
-    return decompile_sid(raw, subtune=subtune).player()
+    return goattracker.GoatTrackerLift.from_sid(raw, subtune).native()

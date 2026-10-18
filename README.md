@@ -69,6 +69,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modulation/modfit.md](docs/modulation/modfit.md)) |
 | tokens per section of a document | `python tools/token_report.py song.yaml` |
 | dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report report.md` ([docs/optimise.md](docs/optimise.md)) |
+| does a lifter change alter any tune's lift? | `python tools/lift_snapshot.py OUTDIR SID ... [--plain]` before and after, then `diff -r` |
 | do the docs' relative links resolve? | `python tools/doc_links.py` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (above) |
 | lift (and `--check`) a tune list in parallel, results by cause | `python tools/lift_tally.py TUNES.csv --player SidWizard [--check 3007] [--registers 2,3]` |
@@ -77,7 +78,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 ## Layout
 
 `src/unitracker/`: `format/` (reading and writing documents, the shared vocabulary, event folds),
-`player/` (the generic player), `lift/` (detection and the three lifters), `modfit/` (proved
+`player/` (the generic player), `lift/` (detection, the `Lift` passes and the three lifters), `modfit/` (proved
 modulation conversion), `optimise/` (smaller documents), `analysis/` (format studies),
 `playroutines/` (the library).
 
