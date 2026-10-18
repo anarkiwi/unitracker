@@ -8,6 +8,7 @@ from pydefmon import DefmonPlayer
 from pysidtracker import SidImage
 
 from unitracker.format import songio, xexpr
+from unitracker.format.events.lifetime import selected
 from unitracker.format.songio import library
 from unitracker.lift import defmon
 from unitracker.modfit import convert
@@ -436,6 +437,39 @@ def test_a_clone_without_a_naming_event_is_refused():
     occs[1].instance = None
     with pytest.raises(convert.ConversionError, match="no event selects"):
         convert.Rewrite(ir, obs_of(occs), ["1024 + φ", "3000 + φ"]).run()
+    start = {"command": 0, "onset": 1, "fired": 0, "ii": 1}
+    occs = [occurrence("command", (0, 0, 0), start, k, (0, 0)) for k in range(2)]
+    with pytest.raises(convert.ConversionError, match="one event plays two"):
+        convert.Rewrite(ir, obs_of(occs), ["v + 1", "v + 2"]).run()
+
+
+def lifetime_freqs(ir: dict) -> list:
+    """Voice 0's ``(note, freq expression of the instrument its lifetime plays)``."""
+    (play,) = ir["tracks"][0]["plays"]
+    events = ir["phrases"][play["phrase"]]
+    rows, exprs = ir["records"]["ins"], ir["exprs"]
+    return [
+        (event["note"], exprs[rows[events[head]["instrument"] if head is not None else 1]["freq"]])
+        for _, event, head in selected(enumerate(events))
+        if isinstance(event.get("note"), int)
+    ]
+
+
+@pytest.mark.parametrize(
+    "phrase,texts,named",
+    [
+        ("[C4.i1*4, D4*4, E4*4]", ["v + 2", "v + 1", "v + 1"], [2, 1, None]),
+        ("[C4*4, D4*4, E4*4]", ["v + 1", "v + 1", "v + 2"], [None, None, 2]),
+    ],
+)
+def test_a_command_on_a_note_naming_no_instrument_selects_its_lifetimes_copy(phrase, texts, named):
+    ir = gt_ir(phrase)
+    start = {"command": 0, "onset": 1, "fired": 0, "ii": 1}
+    occs = [occurrence("command", (0, 0, 4 * k), start, k, (0, 0)) for k in range(3)]
+    out = convert.Rewrite(ir, obs_of(occs), texts).run()
+    assert lifetime_freqs(out) == list(zip((48, 50, 52), texts))
+    (play,) = out["tracks"][0]["plays"]
+    assert [e.get("instrument") for e in out["phrases"][play["phrase"]]] == named
 
 
 def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own():

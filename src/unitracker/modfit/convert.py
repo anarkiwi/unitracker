@@ -8,6 +8,7 @@ lives: a record site (a program's first row, an instrument field) or the event's
 import ast
 import copy
 import dataclasses
+import functools
 import importlib.util
 import json
 import os
@@ -17,6 +18,7 @@ from pathlib import Path
 import sympy
 
 from unitracker.format.codec import command_code, command_variants, evaluate
+from unitracker.format.events.lifetime import selected
 from unitracker.format.records import chained, program_path, record_types
 from unitracker.format.songio import codecs
 from unitracker.format.xexpr import ExpressionError, source
@@ -433,10 +435,11 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             return
         unit = many[0]
         ordered = sorted(texts[unit].items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        chosen = [(occ, where[1]) for occ in ordered[0][1]]
         for text, occs in ordered[1:]:
             clone = self.written(where, {**single, unit: text}, copy_row=True)
-            for occ in occs:
-                self.select(occ, where, clone)
+            chosen += [(occ, clone) for occ in occs]
+        self.select(where, chosen)
         self.redirect(where, self.written(where, {**single, unit: ordered[0][0]}))
 
     def native(self, where: tuple, unit: str, texts: dict) -> bool:
@@ -548,6 +551,13 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             code for code, v in command_variants(self.pr.get("commands")) if v.get("ref") == name
         }
 
+    def _names(self, event: dict, name: str, index: int, commands: set) -> bool:
+        """True when an event references record ``index`` of ``name``."""
+        base = int(self.instrument.get("base", 0))
+        if self.instrument.get("type") == name and event.get("instrument") == index + base:
+            return True
+        return any(int(c[0]) in commands and int(c[1]) == index for c in _cmds(event))
+
     def point(self, event: dict, name: str, old: int, new: int, commands: set) -> bool:
         """Make an event's reference to record ``old`` of ``name`` reference ``new``."""
         hit = False
@@ -560,13 +570,65 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 cmd[1], hit = new, True
         return hit
 
-    def select(self, occ, where: tuple, clone: int) -> None:
-        """Make the event that started ``occ`` select record copy ``clone``."""
-        if occ.instance is None:
-            raise ConversionError(f"{occ.unit} at tick {occ.tick}: no event selects {where}")
-        event = self.edit(occ.instance)
-        if not self.point(event, where[0], where[1], clone, self.commands(where[0])):
-            raise ConversionError(f"{occ.unit} at tick {occ.tick}: its event does not name {where}")
+    @functools.cached_property
+    def _heads(self) -> dict:
+        """``{instance: head}``: the instance whose event names the instrument each instance
+        plays, None for none (``lifetime.selected``)."""
+        out = {}
+        for voice, counts in enumerate(self.obs["plays"]):
+            plays = self.ir["tracks"][voice]["plays"]
+            steps = (
+                ((voice, count, step), event)
+                for count, pos in enumerate(counts)
+                for step, event in enumerate(_steps(self.ir["phrases"][plays[pos]["phrase"]]))
+            )
+            out.update((key, head) for key, _, head in selected(steps))
+        return out
+
+    def select(self, where: tuple, chosen: list) -> None:
+        """Make each ``(occurrence, copy)``'s event play that copy of record ``where``.
+
+        An event that names the record selects it; an instrument an event does not name is the
+        one its lifetime plays, so the event that names it selects the first copy of the
+        lifetime's occurrences, and an event whose copy differs from the one before it in the
+        lifetime names its own.
+        """
+        name, old = where
+        commands, lives = self.commands(name), {}
+        for occ, record in chosen:
+            if occ.instance is None:
+                raise ConversionError(f"{occ.unit} at tick {occ.tick}: no event selects {where}")
+            head = occ.instance
+            if not self._names(self._event(head), name, old, commands):
+                if name == self.instrument.get("type"):
+                    head = self._heads.get(head)
+                elif record == old:
+                    continue
+                else:
+                    raise ConversionError(
+                        f"{occ.unit} at tick {occ.tick}: its event does not name {where}"
+                    )
+            life = lives.setdefault(head, {})
+            if life.setdefault(occ.instance, record) != record:
+                raise ConversionError(f"{occ.unit} at tick {occ.tick}: one event plays two {where}")
+        base = int(self.instrument.get("base", 0))
+        for head, life in lives.items():
+            current = old
+            for k, instance in enumerate(sorted(life)):
+                if life[instance] == current:
+                    continue
+                if k > 0 or head is None:
+                    self.edit(instance)["instrument"] = life[instance] + base
+                elif not self.point(self.edit(head), name, old, life[instance], commands):
+                    raise ConversionError(f"{head}: its event does not name {where}")
+                current = life[instance]
+
+    def _event(self, instance: tuple) -> dict:
+        """The event an instance plays, as rewritten so far."""
+        if instance in self.events:
+            return self.events[instance]
+        where = self.event_at(instance)
+        return {} if where is None else self._step_event(where)
 
     # -- event sites --
     def event_at(self, instance: tuple) -> tuple:
