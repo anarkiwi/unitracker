@@ -26,6 +26,20 @@ The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame,
 
 A note is read as the player's note with no octave shift, which plays the same pitch.
 
+## Table jumps
+
+A table row whose first byte is $FE jumps: its second byte is an offset in the instrument's
+memory (header, WF table, its $FF, pulse table, its $FF, filter table), which the player reads
+from wherever it lands. The lifter follows each program from its entry through its jumps, so a
+program is the rows it plays in order: a jump back to a row it has played is its loop (`next` to
+that row), a jump forward or into another table's bytes continues there, and a jump to its own
+row rests, as the end does.
+
+- A WF jump plays its target row on the same tick.
+- A pulse or filter jump to a set row plays it on the same tick; one to a sweep row only moves
+  there, which spends a tick: the lifter writes a sweep row of no ticks, carrying the keyboard
+  track of the row before the jump.
+
 ## Events
 
 `.i3` names the instrument. The first slot is the instrument column and the second the FX
@@ -163,7 +177,10 @@ The lifter fails, naming what it meets:
 - a keyboard-tracked cutoff past $FF, whose carry into `$D416` no cutoff value states; a filter
   third byte of $80-$8F, which sets the routing;
 - a voice's first note that selects no instrument;
-- table jumps, the orderlist's transpose, tempo and volume commands, multispeed, other player
+- a table that starts with a jump; a jump that lands on no row (a jump, an end marker or past
+  the instrument); a WF jump to a hold row, which the player plays as a waveform; a WF jump
+  past $7F, which the player abandons, resting without the end's pitch carry;
+- the orderlist's transpose, tempo and volume commands, multispeed, other player
   builds, init-routine voice-register writes, a tune with no instruments, and the effects not
   listed above (small FX $4x and $8x-$Fx, big FX but $01-$03, $10, $11, $13 and $14,
   note-column values past $78 but $7D and $7E).

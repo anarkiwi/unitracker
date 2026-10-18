@@ -71,6 +71,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report report.md` ([docs/optimise.md](docs/optimise.md)) |
 | do the docs' relative links resolve? | `python tools/doc_links.py` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (above) |
+| lift (and `--check`) a tune list in parallel, results by cause | `python tools/lift_tally.py TUNES.csv --player SidWizard [--check 3007] [--registers 2,3]` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `sw_fx`, `sw_table_byte`, `mini_song`, `table`, `hvsc_tune` |
 
 ## Layout

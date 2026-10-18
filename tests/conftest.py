@@ -65,6 +65,21 @@ csillag = hvsc_tune(
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
     "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
 )
+addaraya = hvsc_tune(
+    "addaraya",
+    "MUSICIANS/H/Hermit/Stalker-Addaraya_Gurza_Dreaming.sid",
+    "Path to Hermit's Stalker - Addaraya Gurza Dreaming, SID-Wizard filter and pulse jumps.",
+)
+civilization = hvsc_tune(
+    "civilization",
+    "MUSICIANS/H/Hermit/Civilization.sid",
+    "Path to Hermit's Civilization, SID-Wizard pulse table jumps.",
+)
+third_ninja = hvsc_tune(
+    "third_ninja",
+    "MUSICIANS/S/Spiikki/Third_Ninja.sid",
+    "Path to Spiikki's Third Ninja, SID-Wizard WF table jumps.",
+)
 
 
 def doc_text(doc: dict) -> str:
@@ -102,15 +117,14 @@ def sw_fx(raw: bytes, rows: dict):
 
 
 def sw_table_byte(raw: bytes, instrument: int, which: str, offset: int, value: int) -> bytes:
-    """SID-Wizard tune ``raw`` with byte ``offset`` of instrument ``instrument``'s ``pw`` or
-    ``filter`` table set to ``value``; the instruments lie in order in the file."""
+    """SID-Wizard tune ``raw`` with byte ``offset`` of instrument ``instrument``'s ``wf``, ``pw``
+    or ``filter`` table set to ``value``; the instruments lie in order in the file."""
     pos, instruments = -1, parse_sid_song(raw, 1).instruments[:instrument]
     for one in instruments:
         pos = raw.index(one.memory_image(), pos + 1)
     ins = instruments[-1]
-    start = pos + INST_WF_TABLE_POS + len(ins.wf_table) + 1
-    if which == "filter":
-        start += len(ins.pw_table) + 1
+    tables = (ins.wf_table, ins.pw_table)[: ("wf", "pw", "filter").index(which)]
+    start = pos + INST_WF_TABLE_POS + sum(len(table) + 1 for table in tables)
     out = bytearray(raw)
     out[start + offset] = value
     return bytes(out)

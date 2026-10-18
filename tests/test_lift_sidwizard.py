@@ -2,8 +2,10 @@
 Csillag (its reference lift, and patched cuts of it) playing its native player."""
 
 import dataclasses
+import importlib
 import itertools
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -19,8 +21,9 @@ from pysidwizard import (
     Transpose,
     parse_sid_song,
 )
+from pysidwizard.constants import INST_WF_TABLE_POS
 from pysidwizard.features import features_for_driver
-from pysidwizard.model import encode_sequence
+from pysidwizard.model import Instrument, encode_sequence
 
 from unitracker.format import songio
 from unitracker.format.codec import Evaluator
@@ -30,27 +33,99 @@ from unitracker.lift.sidwizard import LiftError
 from unitracker.player.vm import SongPlayer
 
 TICKS = 2000
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_table_rows_stop_at_the_end_marker_and_refuse_jumps():
+def test_tables_allocate_programs_that_end_or_loop():
     tables = sidwizard.Tables()
-    entry = tables.program(
-        "pwtab", bytes([0x41, 0x00, 0x00, 0x21, 0x0C, 0x00, 0xFF]), sidwizard.pw_record
-    )
-    assert entry == 1
+    ins = Instrument(pw_table=bytes([0x41, 0, 0, 0x21, 0x0C, 0, 0xFE, 0x14, 0]))
+    assert tables.program("pwtab", ins, sidwizard.pw_record) == 1
     assert tables.records["pwtab"] == {
         1: {"a": 0x41, "b": 0, "k": 0, "next": 2},
-        2: {"a": 0x21, "b": 0x0C, "k": 0, "next": 0},
+        2: {"a": 0x21, "b": 0x0C, "k": 0, "next": 3},
+        3: {"a": 0, "b": 0, "k": 0, "next": 2},
     }
-    assert tables.program("wftab", b"", sidwizard.pw_record) == 0
-    assert tables.allocate("pwtab", [{"a": 1}, {"a": 2}], loop=1) == 3
-    assert tables.records["pwtab"][4] == {"a": 2, "next": 4}
-    for data, match in (
-        (bytes([0x41, 0, 0, 0xFE, 0, 0]), "jumps"),
-        (bytes([0x41, 0, 0, 0x11]), "partial"),
-    ):
-        with pytest.raises(LiftError, match=match):
-            sidwizard.table_rows("wftab", data)
+    assert tables.program("wftab", ins, sidwizard.pw_record) == 0
+    assert tables.allocate("pwtab", [{"a": 1}, {"a": 2}], loop=1) == 4
+    assert tables.records["pwtab"][5] == {"a": 2, "next": 5}
+
+
+# Jump targets are offsets in the instrument's memory image: the WF table from $10, the pulse
+# table after it and its end marker, then the filter table.
+@pytest.mark.parametrize(
+    "name,tables,rows,loop",
+    [
+        (
+            "pwtab",
+            {"pw_table": [0x88, 0, 5, 0x10, 0x20, 7, 0xFE, 0x14, 0]},
+            [0x88, 0, 5, 0x10, 0x20, 7, 0, 0, 7],
+            1,
+        ),
+        (
+            "pwtab",
+            {"pw_table": [0x88, 0, 0, 0x10, 0x20, 0, 0xFE, 0x11, 0]},
+            [0x88, 0, 0, 0x10, 0x20, 0],
+            0,
+        ),
+        ("pwtab", {"pw_table": [0x88, 0, 0, 0xFE, 0x14, 0]}, [0x88, 0, 0], None),
+        (
+            "pwtab",
+            {"pw_table": [0x88, 0, 0, 0xFE, 0x1A, 0, 0x99, 0, 0, 0x84, 0, 0]},
+            [0x88, 0, 0, 0x84, 0, 0],
+            None,
+        ),
+        (
+            "pwtab",
+            {"wf_table": [0x41, 0, 0], "pw_table": [0x88, 0, 0, 0xFE, 0x10, 0]},
+            [0x88, 0, 0, 0, 0, 0, 0x41, 0, 0],
+            None,
+        ),
+        (
+            "wftab",
+            {"wf_table": [0x41, 0, 0, 0x21, 0, 0, 0xFE, 0x13, 0]},
+            [0x41, 0, 0, 0x21, 0, 0],
+            1,
+        ),
+        (
+            "flttab",
+            {"filter_table": [0x90, 0x20, 0, 0x04, 0xF0, 0, 0xFE, 0x15, 0]},
+            [0x90, 0x20, 0, 0x04, 0xF0, 0, 0, 0, 0],
+            1,
+        ),
+    ],
+    ids=[
+        "a pulse loop to a sweep spends a tick keeping the track",
+        "a pulse loop to a set row",
+        "a pulse jump to itself rests",
+        "a forward jump skips its rows",
+        "a jump into another table reads its rows",
+        "a WF loop",
+        "a filter loop to a sweep",
+    ],
+)
+def test_table_rows_follow_jumps(name, tables, rows, loop):
+    ins = Instrument(**{key: bytes(table) for key, table in tables.items()})
+    expected = [bytes(rows[k : k + 3]) for k in range(0, len(rows), 3)]
+    assert sidwizard.table_rows(name, ins) == (expected, loop)
+
+
+@pytest.mark.parametrize(
+    "name,tables,match",
+    [
+        ("pwtab", {"pw_table": [0xFE, 0x11, 0]}, "starts with a jump"),
+        ("wftab", {"wf_table": [0x41, 0, 0, 0xFE, 0xD0, 0]}, "pitch carry"),
+        ("pwtab", {"pw_table": [0x88, 0, 0, 0xFE, 0x17, 0, 0xFE, 0x11, 0]}, "lands on no row"),
+        ("pwtab", {"pw_table": [0x88, 0, 0, 0xFE, 0x17, 0]}, "lands on no row"),
+        ("pwtab", {"pw_table": [0x88, 0, 0, 0xFE, 0x7D, 0]}, "lands on no row"),
+        ("wftab", {"wf_table": [0x41, 0, 0, 0xFE, 0x13, 0]}, "lands on no row"),
+        ("wftab", {"wf_table": [0x41, 0, 0, 0x02, 0, 0, 0xFE, 0x13, 0]}, "a hold row"),
+        ("flttab", {"filter_table": [0x90, 0, 0, 0x11]}, "partial"),
+    ],
+)
+def test_table_jumps_the_chain_cannot_say_are_named(name, tables, match):
+    ins = Instrument(**{key: bytes(table) for key, table in tables.items()})
+    with pytest.raises(LiftError, match=match):
+        sidwizard.table_rows(name, ins)
 
 
 def test_a_wf_row_that_keeps_the_detune_is_given_the_one_it_keeps():
@@ -92,7 +167,7 @@ def test_chords_loop_return_and_open_end():
 
 
 def native(wf, arp_speed=1, chord=1):
-    return SimpleNamespace(wf_table=bytes(wf), arp_speed=arp_speed, default_chord=chord)
+    return Instrument(wf_table=bytes(wf), arp_speed=arp_speed, default_chord=chord)
 
 
 @pytest.mark.parametrize(
@@ -542,6 +617,65 @@ def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(csillag, 
         entry = row["next"]
     assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9, "gate": 1}]
     assert SongPlayer(ir).mismatch(theirs) is None
+
+
+def looped(records: dict) -> bool:
+    """Whether a program of ``records`` continues to one of its earlier rows."""
+    return any(0 < rec["next"] <= i for i, rec in records.items())
+
+
+@pytest.mark.parametrize(
+    "tune,tables",
+    [("addaraya", ("pwtab", "flttab")), ("civilization", ("pwtab",)), ("third_ninja", ("wftab",))],
+)
+def test_table_jumps_loop_their_programs_and_play_the_player(tune, tables, request):
+    raw = request.getfixturevalue(tune).read_bytes()
+    ir = sidwizard.lift(raw, expressions=False)
+    assert all(looped(ir["records"][name]) for name in tables)
+    theirs = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(TICKS), dtype=np.uint8)
+    assert SongPlayer(ir).mismatch(theirs) is None
+
+
+def test_the_tally_tool_lifts_checks_and_counts_a_tune_list(
+    addaraya, tmp_path, capsys, monkeypatch
+):
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    tool = importlib.import_module("lift_tally")
+    (tmp_path / "bad.sid").write_bytes(b"PSID")
+    tunes = tmp_path / "tunes.csv"
+    tunes.write_text(
+        f"path,player,songs\n{addaraya},SidWizard,1\nbad.sid,SidWizard,1\nother.sid,GoatTracker,1\n"
+    )
+    out = tmp_path / "results.csv"
+    argv = [str(tunes), "--root", str(tmp_path), "--player", "SidWizard", "--songs", "1"]
+    assert tool.main([*argv, "--check", "200", "--registers", "2,3", "--out", str(out)]) == 0
+    results = dict(line.split(",", 1) for line in out.read_text().splitlines()[1:])
+    assert results[str(addaraya)] == "match" and len(results) == 2
+    assert "    1  match" in capsys.readouterr().out
+    assert tool.main([str(out), "--only", "^match$", "--workers", "1"]) == 0
+    assert capsys.readouterr().out.strip() == "1  lifted"
+    assert tool.cause("pattern $1A row 12: tick 3") == "pattern # row #: tick #"
+
+
+# Csillag's table rows turned into jumps, as ``(instrument, table, row, target row)``: a pulse
+# and a filter loop to a sweep row, a filter loop to its set row, and a WF loop.
+JUMPS = [(1, "pw", 2, 1), (8, "filter", 3, 1), (4, "filter", 2, 0), (6, "wf", 2, 1)]
+
+
+def test_table_jumps_play_the_player(csillag):
+    raw = plain = window(csillag.read_bytes())
+    for instrument, which, row, target in JUMPS:
+        ins = parse_sid_song(raw, 1).instruments[instrument - 1]
+        tables = (ins.wf_table, ins.pw_table)[: ("wf", "pw", "filter").index(which)]
+        base = INST_WF_TABLE_POS + sum(len(table) + 1 for table in tables)
+        raw = sw_table_byte(raw, instrument, which, 3 * row, 0xFE)
+        raw = sw_table_byte(raw, instrument, which, 3 * row + 1, base + 3 * target)
+    theirs = oracle(raw, WINDOW_TICKS)
+    assert not np.array_equal(theirs, oracle(plain, WINDOW_TICKS))
+    ir = sidwizard.lift(raw, expressions=False)
+    assert all(looped(ir["records"][name]) for name in ("wftab", "pwtab", "flttab"))
+    assert SongPlayer(ir).mismatch(theirs) is None
+    assert SongPlayer(ir).mismatch(swm_grid(parse_sid_song(raw, 1))) is None
 
 
 def test_frequency_tables():
