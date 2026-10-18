@@ -6,14 +6,18 @@ from simulating the replay's arranger and pattern counters.
 """
 
 import itertools
+from functools import cached_property
+from typing import NamedTuple
 
 import numpy as np
 import yaml
+from pydefmon import DefmonPlayer
 from pysidtracker import CodePattern, SidImage, find_code_all
 from pysidtracker.mos6502 import OP_LEN, OPCODES
 
 from unitracker.format.songio import library, song_meta
-from unitracker.modfit.convert import convert, window
+from unitracker.lift.base import Lift, LiftError
+from unitracker.modfit.convert import window
 from unitracker.player.vm import SongPlayer, first_mismatch
 
 PAL_HZ = 985248
@@ -137,10 +141,6 @@ VOICE_SET = {
     "cntA": 0xFF,
     "cntB": 0xFF,
 }
-
-
-class LiftError(ValueError):
-    """The tune is not a replay build the defMON playroutine covers."""
 
 
 UNREPEATED = "the play routine's sub-tick calls do not repeat within the song"
@@ -317,11 +317,12 @@ def voice_init(rep: Replay) -> dict:
     return out
 
 
-def unheard_init(ir: dict, theirs: np.ndarray) -> dict:
+def unheard_init(lift, ir: dict) -> dict:
     """``ir`` without the ``vinit`` notes its replay does not hear, once a replay to the song's
-    recurrence and one period more proves it plays the replay's grid ``theirs`` (the module's
+    recurrence and one period more proves it plays ``lift``'s replay grid (the module's
     frequency registers, which the playroutine does not carry, unheard)."""
-    ticks = len(theirs)
+    ticks = window(ir)
+    theirs = lift.grid(ticks)
 
     def mismatch(song):
         player = SongPlayer(song)
@@ -547,7 +548,7 @@ def _compress(names, loop):
     return {"plays": plays, "loop": loop_play}
 
 
-def structure(rep: Replay, subtune):
+def song_structure(rep: Replay, subtune):
     """Tracks, phrases, and the sidTAB rows the patterns arm."""
     steps, loop = song_steps(rep, subtune)
     phrases, names_of = {}, {}
@@ -574,45 +575,70 @@ def structure(rep: Replay, subtune):
     return tracks, phrases, seeds
 
 
-def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
-    """A unitracker song dict for a defMON replay ``.sid``.
+class Decoded(NamedTuple):
+    """A defMON replay's subtune: its ``.sid``, pydefmon player after init, PSID header and
+    0-based number."""
 
-    With ``expressions`` its modulations are written as the format's expressions.
-    """
-    from pydefmon import DefmonPlayer  # pylint: disable=import-outside-toplevel
+    raw: bytes
+    player: object
+    header: object
+    subtune: int
 
-    header = SidImage.from_bytes(raw).header
-    if header.second_sid:
-        raise LiftError(f"a multi-SID tune (SID 2 at ${0xD000 | header.second_sid << 4:04X})")
-    if subtune is None:
-        subtune = (header.start_song or 1) - 1
-    player = DefmonPlayer(raw, subtune=subtune)
-    mem = player._mem  # pylint: disable=protected-access
-    rep = Replay(mem, DefmonPlayer(raw, subtune=subtune))
-    vinit = voice_init(rep)
-    tracks, phrases, seeds = structure(rep, subtune)
-    playroutine = library("defmon")
-    playroutine["constants"] = model_constants(rep)
-    ir = {
-        "unitracker": "ir",
-        "meta": song_meta(header, f"defmon subtune {subtune}"),
-        "clock": {
-            "cycles_per_tick": int(player.cycles_per_frame),
-            "clock_hz": NTSC_HZ if (header.flags >> 2) & 3 == 2 else PAL_HZ,
-        },
-        "voices": 3,
-        "tables": {name: rep.span(addr, n) for name, addr, n in TABLES},
-        "playroutine": playroutine,
-        "records": {
-            "vinit": vinit,
-            "ginit": {0: global_init(rep)},
-            "sidtab": sidtab_records(rep, seeds),
-        },
-        "tracks": tracks,
-        "phrases": phrases,
-    }
-    ticks = window(ir)
-    if rep.period(ticks) != rep.cycle:
-        raise LiftError(UNREPEATED)
-    ir = unheard_init(ir, rep.calls.grid(ticks))
-    return convert(ir) if expressions else ir
+
+class DefmonLift(Lift):
+    """A defMON replay, ``tune`` a :class:`Decoded`."""
+
+    playroutine = "defmon"
+    normalisations = (unheard_init,)
+
+    @staticmethod
+    def decode(raw: bytes, subtune: int) -> Decoded:
+        header = SidImage.from_bytes(raw).header
+        return Decoded(raw, DefmonPlayer(raw, subtune=subtune), header, subtune)
+
+    def native(self):
+        return DefmonPlayer(self.tune.raw, subtune=self.tune.subtune)
+
+    @cached_property
+    def replay(self) -> Replay:
+        """The build's replay, its calls timed on a native player."""
+        return Replay(self.tune.player._mem, self.native())  # pylint: disable=protected-access
+
+    def check_build(self) -> None:
+        header = self.tune.header
+        if header.second_sid:
+            raise LiftError(f"a multi-SID tune (SID 2 at ${0xD000 | header.second_sid << 4:04X})")
+        _ = self.replay
+
+    def grid(self, ticks: int) -> np.ndarray:
+        """The replay's register grid of its first ``ticks`` calls, whose pattern steps must keep
+        the period the song's steps are timed with."""
+        rep = self.replay
+        if rep.period(ticks) != rep.cycle:
+            raise LiftError(UNREPEATED)
+        return rep.calls.grid(ticks)
+
+    def structure(self) -> dict:
+        rep, (_, player, header, subtune) = self.replay, self.tune
+        vinit = voice_init(rep)
+        tracks, phrases, seeds = song_structure(rep, subtune)
+        playroutine = library(self.playroutine)
+        playroutine["constants"] = model_constants(rep)
+        return {
+            "unitracker": "ir",
+            "meta": song_meta(header, f"{self.playroutine} subtune {subtune}"),
+            "clock": {
+                "cycles_per_tick": int(player.cycles_per_frame),
+                "clock_hz": NTSC_HZ if (header.flags >> 2) & 3 == 2 else PAL_HZ,
+            },
+            "voices": 3,
+            "tables": {name: rep.span(addr, n) for name, addr, n in TABLES},
+            "playroutine": playroutine,
+            "records": {
+                "vinit": vinit,
+                "ginit": {0: global_init(rep)},
+                "sidtab": sidtab_records(rep, seeds),
+            },
+            "tracks": tracks,
+            "phrases": phrases,
+        }

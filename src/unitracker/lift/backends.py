@@ -38,7 +38,7 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     if backend == "defmon":
         from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
 
-        return defmon.lift(raw, subtune, expressions)
+        return defmon.DefmonLift.from_sid(raw, subtune, expressions).run()
     if backend == "sidwizard":
         from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
 
@@ -54,9 +54,9 @@ def native_player(raw: bytes, subtune=None):
         subtune = start_song(raw)
     backend = detect(raw)
     if backend == "defmon":
-        from pydefmon import DefmonPlayer  # pylint: disable=import-outside-toplevel
+        from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
 
-        return DefmonPlayer(raw, subtune=subtune)
+        return defmon.DefmonLift.from_sid(raw, subtune).native()
     if backend == "sidwizard":
         from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
 

@@ -310,7 +310,7 @@ envelope nibbles, restarts, one-command columns) beside the existing players'. *
 ## 6. The lifter
 
 `src/unitracker/lift/<name>.py` subclasses `unitracker.lift.base.Lift`, as
-`goattracker.GoatTrackerLift` and `sidwizard.SidWizardLift` do (defMON is to follow), and raises
+`goattracker.GoatTrackerLift`, `sidwizard.SidWizardLift` and `defmon.DefmonLift` do, and raises
 `base.LiftError`. The base runs the passes ([Lifting](playroutines/lifting.md)); the subclass
 supplies the player:
 
@@ -318,7 +318,7 @@ supplies the player:
 |---|---|
 | `playroutine` | the library name, `"<name>"` |
 | `decode(raw, subtune)` | the native package's decoded module, kept as `self.tune` |
-| `native()` | a fresh native player of the tune; state its passes share, read from it once, is a `functools.cached_property` (GoatTracker's `start`, the tempo cells after init) |
+| `native()` | a fresh native player of the tune; state its passes share, read from it once, is a `functools.cached_property` (GoatTracker's `start`, the tempo cells after init; defMON's `replay`, the build located and its calls timed) |
 | `check_build()` | raises `LiftError` naming the builds and features the playroutine does not cover |
 | `structure()` | the internal representation, below |
 | `normalisations` | the ordered player-specific passes `(lift, song) -> song`, each proved by a replay |

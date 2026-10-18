@@ -5,15 +5,15 @@ A lifter decodes a native tune and writes each native modulation as an expressio
 and `expressions=False` returns the internal representation with the native modulations.
 
 A lifter is a subclass of `unitracker.lift.base.Lift`: GoatTracker 2's is
-`goattracker.GoatTrackerLift`, SID-Wizard's `sidwizard.SidWizardLift`; defMON (`defmon.lift`) is to
-follow. `Lift.from_sid(raw, subtune, expressions)` decodes the tune, and `run()` takes it through
+`goattracker.GoatTrackerLift`, SID-Wizard's `sidwizard.SidWizardLift` and defMON's
+`defmon.DefmonLift`. `Lift.from_sid(raw, subtune, expressions)` decodes the tune, and `run()` takes it through
 the passes `passes()` names in order, after `check_build` refuses a build the playroutine does not
 cover:
 
 | pass | content |
 |---|---|
 | `structure` | the native module transcribed to [the internal representation](#the-internal-representation) |
-| each of `normalisations` | a player-specific rewrite `(lift, song) -> song` (GoatTracker 2, each proved by a replay: `unpause`, `explicit_swing`, `unmark`; SID-Wizard: `first_note_selects`, `chord_runs`, `fold_octaves`) |
+| each of `normalisations` | a player-specific rewrite `(lift, song) -> song` (GoatTracker 2, each proved by a replay: `unpause`, `explicit_swing`, `unmark`; SID-Wizard: `first_note_selects`, `chord_runs`, `fold_octaves`; defMON: `unheard_init`, proved by the replay's grid) |
 | `convert` | with `expressions` only: the modulations as expressions (GoatTracker 2 then writes a toneporta of speed 0 as `!freq`, `snapped`) |
 | `canonical` | with `expressions` only: modulation written shattered in the format's canonical form, by the optimiser's canonical passes ([Canonical passes](../optimise.md#canonical-passes)), each proved on the written text; cached by content beside the conversion's cache; a song whose state does not recur is left as converted |
 
