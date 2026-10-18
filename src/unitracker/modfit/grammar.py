@@ -307,19 +307,24 @@ def _uncut(fact, context: tuple, brackets, domain: tuple) -> bool:
     lines = [_line(b) for b in near] + [_line(b) for b, _ in others]
     if any(line is None or line[0] != sym for line in lines):
         return False
-    bounds = [(lo, hi) for name, lo, hi in domain if name == sym.name]
-    lo, hi = bounds[0] if bounds else (0 if sym.is_nonnegative else None, None)
-    points = {p for _, kind, c in [x, *lines] for p in ((c, c + 1) if kind == "eq" else (c,))}
-    points |= {p for p in (lo, None if hi is None else hi + 1) if p is not None}
-    points = sorted(points)
     seen = {}
-    for p in [points[0] - 1, *points]:
-        if (lo is not None and p < lo) or (hi is not None and p > hi):
-            continue
+    for p in _points(sym, [x, *lines], domain):
         if all(_holds(_line(b), p) == v for b, v in others):
             cell = tuple(_holds(_line(b), p) for b in near)
             seen.setdefault(cell, set()).add(_holds(x, p) == fact[1])
     return all(True in kept for kept in seen.values())
+
+
+def _points(sym, lines: list, domain: tuple) -> list:
+    """One value of ``sym`` in its domain per stretch between the breakpoints of ``lines``."""
+    bounds = [(lo, hi) for name, lo, hi in domain if name == sym.name]
+    lo, hi = bounds[0] if bounds else (0 if sym.is_nonnegative else None, None)
+    points = {p for _, kind, c in lines for p in ((c, c + 1) if kind == "eq" else (c,))}
+    points |= {p for p in (lo, None if hi is None else hi + 1) if p is not None}
+    points = sorted(points)
+    return [
+        p for p in [points[0] - 1, *points] if (lo is None or p >= lo) and (hi is None or p <= hi)
+    ]
 
 
 def _line(b):
