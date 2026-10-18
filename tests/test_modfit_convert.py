@@ -17,7 +17,7 @@ from unitracker.lift import defmon
 from unitracker.modfit import convert
 from unitracker.modfit import grammar as G
 from unitracker.modfit.form import Form
-from unitracker.player.modulation import Occurrence
+from unitracker.player.modulation import INIT, Occurrence
 from unitracker.player.vm import SongError, SongPlayer
 
 V, PHI = G.V, G.PHI
@@ -751,6 +751,38 @@ def test_an_offset_outside_the_acid_program_fails_naming_its_row():
     ir["records"]["sidtab"][2]["cp"] = 0x10
     with pytest.raises(songio.SongFormatError, match=r"ctrl: row \{.*'cp': 16.*\} has no shared"):
         songio.dumps(convert.convert(ir, cache=None, workers=1))
+
+
+SUB = (
+    "((v - 1) % 256 + 512)*(v % 65536 < 1) + ((-(v % 65536) + (v - 1) % 256 - 130559)*((v - 1) "
+    "% 65536 >= 32768) + v % 65536 + 65535)*(v % 65536 >= 1)"
+)
+
+
+@pytest.mark.parametrize("sub", [1, 0])
+def test_the_acid_direction_through_init_is_the_inits_cut_expression(sub):
+    ir = songio.loads(DM_AF)
+    ir["records"]["ginit"][0]["sub"] = sub
+    want = regs(ir, 800)
+    assert set(want[:, 22]) == ({2, 3} if sub else {2})
+    conv = convert.analyse(ir, cache=None, workers=1)
+    (init,) = [o for o in conv.obs["occurrences"] if o.hook == INIT]
+    assert (init.unit, init.tick, init.label, init.v_in, init.start["sub"]) == (
+        "acid B",
+        0,
+        (),
+        0,
+        sub,
+    )
+    text = songio.dumps(conv.out)
+    back = songio.loads(text)
+    assert "sub" not in text and np.array_equal(regs(back, 800), want)
+    assert back["records"]["ginit"][0] == ({"xc": 1} if sub else {})
+    assert back.get("exprs", {}).get(1) == (SUB if sub else None)
+    with pytest.raises(songio.SongFormatError, match="ginit: row .* no shared-vocabulary form"):
+        songio.dumps({**ir, "records": {**ir["records"], "ginit": {0: {"sub": 1}}}})
+    with pytest.raises(songio.SongFormatError, match="unknown key sub in ginit"):
+        songio.loads(DM_AF.replace("ginit: {0: {}}", "ginit: {0: {sub: 1}}"))
 
 
 def row_body(fields: dict) -> bytes:

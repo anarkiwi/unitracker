@@ -1,6 +1,7 @@
 """A song's modulator units: what starts each one, its firings, and the expression driving it.
 
-A start opens an occurrence at the unit's next firing (its first to last ``fire`` entry). While an
+A start opens an occurrence at the unit's next firing (its first to last ``fire`` entry); a unit
+with an ``init`` also starts at the playroutine's init. While an
 expression is active each firing sets ``v' = f(v, φ, N)`` from the cell's value before the
 firing, then ``φ += 1``; otherwise the playroutine's own firing stands. A unit with a ``chip``
 map drives the chip register value its cells give (``value``); an expression's result is stored
@@ -13,6 +14,8 @@ from unitracker.format.codec import command_code, evaluate
 from unitracker.format.records import EXPR, record_types
 
 VALUE = "value"
+# The hook of the start a playroutine's init makes (a unit's ``init``).
+INIT = "init"
 
 
 @dataclasses.dataclass
@@ -172,7 +175,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         self.writes = self.ns["_W"]
         self.note = self.ns.get("_n")
         self.voice_of = {id(v): i for i, v in enumerate(player.voice_cells)}
-        self.active, self.pending, self.pre = {}, {}, {}
+        self.active, self.pending, self.pre, self.inited = {}, {}, {}, set()
         self.occurrences, self.keep = [], keep
         self.chips = {}
         widths = {u["name"]: unit_width(pr, u) for u in self.units}
@@ -188,6 +191,11 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             self.wrap(function(fire[-1]), None, lambda args, unit=unit: self.on_post(unit, args))
             for hook in unit.get("hooks") or []:
                 self.wrap_hook(unit, hook)
+            if unit.get("init"):
+                for entry in (fire[0], fire[-1]):
+                    self.wrap(
+                        function(entry), lambda args, unit=unit: self.on_init(unit, args), None
+                    )
 
     @property
     def tick(self) -> int:
@@ -354,6 +362,20 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             return 0
         return self.note(self.player.voice_cells[voice])
 
+    def on_init(self, unit: dict, args) -> None:
+        """At the init's first call of a unit's firing, start the unit (``INIT``), a global
+        unit's start the first voice's: a firing the init enters at its last function begins
+        there."""
+        voice = self.voice(args)
+        glob = unit.get("scope") == "global"
+        name = (unit["name"], None if glob else voice)
+        if self.tick or name in self.inited:
+            return
+        self.inited.add(name)
+        self.restart(unit, 0 if glob and voice is None else voice, INIT)
+        if name not in self.pre:
+            self.on_pre(unit, args)
+
     def on_pre(self, unit: dict, args) -> None:
         """Before a firing: the cell's value, a start's snapshot, writes between firings."""
         owner = self.owner(unit, args)
@@ -361,7 +383,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             return
         key, voice = owner
         name = (unit["name"], key)
-        snap = self.capture(unit, voice) if name in self.pending else None
+        snap = self.capture(unit, voice, self.pending[name][1]) if name in self.pending else None
         occ = self.active.get(name)
         driven = snap.get("x") if snap is not None else occ is not None and occ.derived
         now = self.read(unit, voice) if self.keep or driven else None
@@ -409,8 +431,9 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             if mirror and self.cells.get(mirror, voice) == cell:
                 self.cells.set(mirror, voice, self.cells.get(unit["cell"], voice))
 
-    def capture(self, unit: dict, voice) -> dict:  # pylint: disable=unused-argument
-        """What a start keeps of the cells before its first firing: every cell by name."""
+    def capture(self, unit: dict, voice, hook) -> dict:  # pylint: disable=unused-argument
+        """What a start of ``hook`` keeps of the cells before its first firing: every cell by
+        name."""
         return self.cells.snapshot(voice)
 
     def open(self, unit: dict, name: tuple, voice, snap: dict, before: int) -> None:
@@ -420,7 +443,7 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             unit["name"],
             hvoice if hvoice is not None else voice,
             self.tick,
-            tuple(snap.get(c) for c in unit.get("label") or []),
+            () if hook == INIT else tuple(snap.get(c) for c in unit.get("label") or []),
             snap,
             hook,
         )

@@ -27,7 +27,7 @@ a nibble, as the reference grid does.
 | `ctrl` | sidTAB | a sidTAB row writes any register, so it is defMON's one program table; see Control programs |
 | `restart` | sidTAB programs on layer B before a note | see Hard restart |
 | `vinit` | each voice's state after init (fixed) | `pw`, the pulse cell, at most $0FFF; `freq`, the pitch unit's start value, the slide accumulator's offset from the note's frequency; `note`, a note name, the note its relative rows add to |
-| `ginit` | the global state after init (fixed) | `sub`: 1 when the ACID step subtracts (its SBC), 0 when it adds (its ADC), which the replay's own ACID firing reads until a layer-B row sets the step (setting the cutoff keeps it) |
+| `ginit` | the global state after init (fixed) | `cut`, the ACID unit's expression from init (see Filter) |
 
 The module also carries each voice's frequency registers through init, which sound on the first
 tick only, before the pitch step sets them from the note; the playroutine starts them at 0 and the
@@ -101,6 +101,15 @@ expression, its steps and saturation test carrying the offset as constants; `gin
 offset (the replay's init clears it and the accumulator). Layer B is the filter's: only a
 layer-B row's `cut` is the ACID unit's.
 
+The ACID step's direction is an opcode the module carries through init (`$10B8`, SBC or ADC), and
+the step runs from init: init clears the step, so under SBC (subtract the step and one) the
+accumulator falls by one each tick until a layer-B row sets the step (setting the cutoff keeps
+the direction), saturating to the floor, and under ADC it holds. The init's start of the ACID unit
+writes that as `ginit`'s `cut`, the expression of a one-per-tick fall:
+`ginit: {0: {cut: ((v - 1) % 256 + 512)*(v % 65536 < 1) + ...}}` at floor 2; the direction under
+ADC plays as the playroutine's own and writes nothing. The playroutine's raw `ginit` field `sub` is
+what the expression replaces, and has no written form.
+
 ## Hard restart
 
 | lookahead row | first-tick row |
@@ -131,7 +140,7 @@ its index carries the 24.
 |---|---|---|---|---|---|---|
 | `pitch A` | `freq` | `sacc` | the 16-bit offset added to the note's frequency: the slide accumulator, or with `af` below $80 the offset `S[N + 24 + af]` | every tick, from layer A's row to the pitch step | a note, or layer A armed with a program that sets `af` or `freq` | the program's first row, which runs the slide mode $80 (the program's other rows set no `af`) |
 | `pulse A` | `pw` | `pw` | `pw & $FFF`: the 16-bit cell's top 4 bits are not part of `v`, and a result that differs from its low 12 bits is stored as the cell, clearing them | every tick, from layer A's row to the pulse step | layer A armed with a program that sets `pw`, `ps` or a pulse expression | the program's first row, replacing its `pw` and `ps` columns |
-| `acid B` | `cut` | `acc`, global | the 17-bit accumulator, `cp` in its high byte (see Filter) | every tick, from layer B's row to the next ACID step | layer B armed with a program that sets `acid`, `cp` or a cutoff expression | the program's first row, replacing its `acid` and `cp` columns |
+| `acid B` | `cut` | `acc`, global | the 17-bit accumulator, `cp` in its high byte (see Filter) | every tick, from layer B's row to the next ACID step | the init (from its own ACID step), or layer B armed with a program that sets `acid`, `cp` or a cutoff expression | `ginit`'s `cut` for the init's start, replacing the direction; else the program's first row, replacing its `acid` and `cp` columns |
 
 `af` below $80 adds a fixed offset to the note's frequency; the lifter writes it as the first
 row's `freq` expression, `S[N + 36]` for `af` 12, which plays in the slide mode with the same
@@ -152,7 +161,8 @@ The lifter fails, naming what it meets:
 - a modulation start whose expression is not proved (see [modfit.md](../modulation/modfit.md)).
 
 Writing the lifted song fails, naming the row or record, on what has no written form: a `cp` on a
-layer-A row, and a voice's initial pulse cell over $0FFF.
+layer-A row, a voice's initial pulse cell over $0FFF, and, in a lift without expressions, the
+SBC direction through init.
 
 A program that changes the pitch mode after its first row, or sets `af` below $80 under
 relative-note rows, is not covered: the slide mode drops the voice's detune before the change, and

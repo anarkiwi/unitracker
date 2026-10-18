@@ -479,6 +479,7 @@ def test_expression_and_reference_keys():
         "flttab": ({"cut": True}, {}),
         "sidtab": ({"pw": False, "cut": False, "freq": False}, {}),
         "vinit": ({}, {}),
+        "ginit": ({"cut": False}, {}),
     }
 
 
@@ -691,10 +692,11 @@ def nfreq(note):
 
 @pytest.mark.parametrize("freq", [3, -5, 0])
 def test_defmon_init_keys_mean_what_they_mean_in_rows(freq):
-    ir = defmon_doc({"pw": 0x0567, "note": "C3", **({"freq": freq} if freq else {})}, {"sub": 1})
+    ginit = {"cut": "(v - 1) % 65536"}
+    ir = defmon_doc({"pw": 0x0567, "note": "C3", **({"freq": freq} if freq else {})}, ginit)
     voice = ir["records"]["vinit"][0]
     assert (voice["pw"], voice["tbase"], voice["sacc"]) == (0x0567, 60, freq & 0xFFFF)
-    assert ir["records"]["ginit"][0] == {"sub": 1}
+    assert ir["exprs"][ir["records"]["ginit"][0]["xc"]] == ginit["cut"]
     assert list(SongPlayer(ir).render_grid(2)[0][2:4]) == [0x67, 0x05]
     text = songio.dumps(ir)
     assert f"0: {{note: C3, pw: 1383{f', freq: {freq}' if freq else ''}}}" in text

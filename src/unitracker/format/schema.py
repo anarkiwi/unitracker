@@ -127,9 +127,12 @@ def _registers(regs: dict, cells: dict) -> dict:
 
 
 def _unit(unit: dict, voice: dict, glob: dict) -> None:
-    """A unit's ``x``, ``label`` and ``program`` from its ``site``, its ``scope`` from its cell,
-    and its chip map's ``value`` and ``store`` from ``width`` and ``offset``."""
-    site = unit.get("site") or {}
+    """A unit's ``x``, ``label`` and ``program`` from its ``site``, its init's ``x`` from its
+    record, its ``scope`` from its cell, and its chip map's ``value`` and ``store`` from
+    ``width`` and ``offset``."""
+    site, init = unit.get("site") or {}, unit.get("init")
+    if init:
+        init.setdefault("x", f"{init['record']}[{init['index']}].{init['field']}")
     if {"record", "index", "field"} <= site.keys():
         unit.setdefault("x", f"{site['record']}[{site['index']}].{site['field']}")
         unit.setdefault("label", [site["index"]])
