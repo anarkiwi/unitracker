@@ -62,18 +62,26 @@ def order(track: dict) -> list[tuple[int, str]]:
     ]
 
 
+def selected(steps):
+    """``(key, event, head)`` for each ``(key, event)`` a voice plays, in order: ``head`` is the
+    key of the event that names the instrument it plays, its own or the voice's last before it,
+    None for none."""
+    head = None
+    for key, event in steps:
+        if event.get("instrument"):
+            head = key
+        yield key, event, head
+
+
 def notes(tracks, phrases: dict, base: int, legato):
     """``(phrase, index, instrument, selects)`` for each note that starts an instrument, per voice
-    twice through its loop; the instrument is the event's, else the voice's last, 0 for none."""
+    twice through its loop; the instrument is the one ``selected`` names, 0 for none."""
     for trk in tracks:
-        current = 0
-        for _, name in order(trk):
-            for k, event in enumerate(phrases[name]):
-                selects = bool(event.get("instrument"))
-                if selects:
-                    current = int(event["instrument"]) - base
-                if starts(event, legato):
-                    yield name, k, current, selects
+        steps = (((name, k), e) for _, name in order(trk) for k, e in enumerate(phrases[name]))
+        for (name, k), event, head in selected(steps):
+            if starts(event, legato):
+                ins = 0 if head is None else int(phrases[head[0]][head[1]]["instrument"]) - base
+                yield name, k, ins, bool(event.get("instrument"))
 
 
 def _flag(spec: dict) -> tuple[str, int]:
