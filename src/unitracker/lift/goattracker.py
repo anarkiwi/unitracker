@@ -319,12 +319,13 @@ def explicit_swing(ir: dict) -> dict:
     seen = stored_pairs(ir, ticks)
     phrases = {name: [dict(e) for e in events] for name, events in ir["phrases"].items()}
     speed = dict(ir["records"]["speedtab"])
-    initial = tuple(int(ir["playroutine"]["global"][f"funk{i}"]["init"]) + 1 for i in (0, 1))
+    initial = Counter(
+        {tuple(int(ir["playroutine"]["global"][f"funk{i}"]["init"]) + 1 for i in (0, 1)): 1}
+    )
     met = set()
     for name, k, j in users:
-        pairs = seen.get((name, k, j), Counter({initial: 1}))
-        met.update(pairs)
-        _named(phrases[name][k], j, pairs.most_common(1)[0][0], speed)
+        met.update(seen.get((name, k, j), initial))
+        _named(phrases[name][k], j, seen.get((name, k, j), initial).most_common(1)[0][0], speed)
     out = {**ir, "phrases": phrases, "records": {**ir["records"], "speedtab": speed}}
     diff = np.argwhere(SongPlayer(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
     if len(diff):

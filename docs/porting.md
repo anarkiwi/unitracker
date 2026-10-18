@@ -53,7 +53,7 @@ Start from the existing port closest to the target player:
 |---|---|---|
 | [`goattracker2`](playroutines/goattracker2.md) | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `cmd`, `tickn`, `wavecmd`), wavetable command rows written as the `commands` they run, the gate-timer lookahead |
 | [`sidwizard`](playroutines/sidwizard.md) | an instrument header plus WF/arp, pulse and filter programs; a pattern row with an instrument column and an FX column | header bytes as instrument keys, two event slots, envelope nibble commands, `lifetime` flags |
-| [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: event`, event restarts (`restart: {command}`), `fixed` init records, a `global` unit |
+| [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: event` with the notes' restarts (`event: {restart}`), `fixed` init records, a `global` unit |
 
 **Files:** none yet. **Verify** the toolchain and the existing ports:
 `PYTHONPATH=src .venv/bin/python tools/reference_check.py out/porting` prints
@@ -281,7 +281,7 @@ the existing ports do.
 
 | feature | shared form | declare | each player's codec constraints |
 |---|---|---|---|
-| hard restart | a `restart` program anchored to the note: lookahead rows with `hold`, `gate`, `ctrl`, `ad`, `sr`, then the note's first-tick row ([Hard restart](format/vocabulary.md#hard-restart)) | a `restart` record type with shapes on `first` and `last`; an instrument field `restart`, or `restart: {command: c}` for a player whose notes arm it on the steps before them | each playroutine file's *Hard restart* |
+| hard restart | a `restart` program anchored to the note: lookahead rows with `hold`, `gate`, `ctrl`, `ad`, `sr`, then the note's first-tick row ([Hard restart](format/vocabulary.md#hard-restart)) | a `restart` record type with shapes on `first` and `last`; an instrument field `restart`, played by command `c` (`instrument: {event: {restart: c}}`) for a player whose notes arm it on the steps before them | each playroutine file's *Hard restart* |
 | chords and arpeggios | a `ctrl` program of relative-note rows, a different chord started with `!run` ([Chords](format/vocabulary.md#chords)) | `note: +n` in the wave or arp table's shapes; the lifter inlines a separate chord table into the program | sidwizard.md, *Control programs* |
 | filter | `res`, `route` (a mask, or the edit `+ m`, `-`), `mode`, `cut`, and `!vol` ([Filter](format/vocabulary.md#filter)) | filter program shapes; `rel` on `route` for an edit | each playroutine file's *Filter* or *Records* |
 | lifetime | `!pw`, `!filter` on the note ([Lifetime](format/vocabulary.md#lifetime)) | `lifetime: {pw: {field, flag}, filter: {field, flag}}` | each playroutine file's *Lifetime* |

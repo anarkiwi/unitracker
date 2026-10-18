@@ -141,16 +141,22 @@ def documented(player: str, header: str) -> list[str]:
     return lines[start:end]
 
 
+def tables(player: str) -> dict:
+    """``{header: lines}``: the command and ``ctrl`` row-key tables of a playroutine's doc, a
+    table with no rows left out."""
+    cells, keys = accepted(player), key_forms(player)
+    commands = [f"| `!{n}` | {cells[n]} |" for n in COMMAND_NAMES if n in cells]
+    row_keys = [f"| `{k}` | {keys[k]} |" for k in ROW_KEYS if k in keys]
+    return {
+        h: [h, "|---|---|", *rows] if rows else []
+        for h, rows in ((HEADER, commands), (KEYS_HEADER, row_keys))
+    }
+
+
 @pytest.mark.parametrize("player", PLAYERS)
 def test_the_documented_tables_are_the_playroutines(player):
-    cells, keys = accepted(player), key_forms(player)
-    names = (n for n in COMMAND_NAMES if n in cells)
-    commands = [HEADER, "|---|---|"] + [f"| `!{n}` | {cells[n]} |" for n in names]
-    row_keys = [KEYS_HEADER, "|---|---|"] + [
-        f"| `{k}` | {keys[k]} |" for k in ROW_KEYS if k in keys
-    ]
-    assert documented(player, HEADER) == commands, "\n".join(commands)
-    assert documented(player, KEYS_HEADER) == row_keys, "\n".join(row_keys)
+    for header, lines in tables(player).items():
+        assert documented(player, header) == lines, "\n".join(lines)
 
 
 def test_spans():

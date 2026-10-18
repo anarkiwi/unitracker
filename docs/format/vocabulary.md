@@ -37,10 +37,9 @@ A command means one thing in every player; it applies on the step that carries i
 | `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
 | `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
 | `!mark:n` | a mark that changes no sound: the player reads the byte and plays nothing |
-| `!restart:r` | play hard restart `r` before the note (see [Hard restart](#hard-restart)) |
 | `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
 
-A playroutine takes the commands its `commands`, `restart` and `lifetime` declare, over the
+A playroutine takes the commands its `commands` and `lifetime` declare, over the
 arguments its codec accepts; each playroutine's file
 ([goattracker2](../playroutines/goattracker2.md#commands),
 [sidwizard](../playroutines/sidwizard.md#commands), [defmon](../playroutines/defmon.md#commands))
@@ -88,9 +87,8 @@ voice and the bits of `m`, `route: - m` removes them, and `m` is left out when i
 
 A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last row
 applies on the note's first tick, and each earlier row its `hold` ticks before the row after it.
-A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. An instrument names its restart
-(`restart: r1`); in a playroutine whose instruments have none, a note names its own
-(`C3.i2!restart:r1`):
+A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. A note's restart is its instrument's
+(`restart: r1`) in every player:
 
 ```yaml
 restart:
@@ -102,11 +100,12 @@ register takes $09 with the gate on. A note with `!legato` runs no restart, and 
 without `restart` has none. A playroutine plays the shapes its codec accepts; a row's place in
 its program is part of its shape (see [Codecs](../playroutines/schema.md#codecs)).
 
-A playroutine declares event restarts with `restart: {command: c}`: a note's `!restart:r` is
+A player whose notes arm the restart on the steps before them declares it with its [instrument
+columns](#instrument-columns), `event: {..., restart: c}`: the restart of a note's instrument is
 read as command `c` on the step its lookahead rows' holds put before the note, running those rows
 as a program of the command's record type, and that step must be empty. The writer folds such a
-command back onto its note when it is alone on its step, followed only by empty steps up to a
-note with a free command slot, and its program ends and fits in the steps.
+command into its note's instrument when it is alone on its step, followed only by empty steps up
+to a note with a free command slot, and its program ends and fits in the steps.
 
 ## Lifetime
 

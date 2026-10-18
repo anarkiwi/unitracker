@@ -30,7 +30,7 @@ from unitracker.format.codec import (
     row_place,
     written_value,
 )
-from unitracker.format.events import column, envelope, fold, instrument, lifetime, restart
+from unitracker.format.events import column, envelope, fold, instrument, lifetime
 from unitracker.format.schema import expand
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.tablepatch import table_diff, unread_dropped
@@ -383,8 +383,6 @@ class _Writer:
         """A command as ``name[:arg]``, or None for no command."""
         if not (cmd or raw):
             return None
-        if cmd == restart.CODE:
-            return f"{restart.NAME}:{self.names[(restart.NAME, raw)]}"
         try:
             name, value = self.commands.encode(cmd, raw)
         except CodecError as exc:
@@ -409,9 +407,6 @@ class _Writer:
                 yield (self.ins_type, int(row[2]) - self.ins_base), "event"
             cmds = row[3:EVENT_COLUMNS]
             for cmd, arg in zip(cmds[::2], cmds[1::2]):
-                if cmd == restart.CODE:
-                    yield (restart.NAME, int(arg)), "command"
-                    continue
                 target = self.commands.ref(int(cmd))
                 if target is not None and not self.commands.inline(int(cmd)):
                     none = self.rtypes[target].none
@@ -824,9 +819,6 @@ class _Reader:
         refs = {self.commands.ref(code) for code, _ in commands}
         keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"], refs)
         event.update({"keep": keep} if keep else {})
-        for code, index in [c for c in commands if c[0] == restart.CODE]:
-            event["restart"] = index
-            commands.remove([code, index])
         if len(commands) == 1:
             event["command"] = commands[0]
         elif commands:
@@ -846,8 +838,6 @@ class _Reader:
         """``[code, arg]`` for one written command of ``atom``."""
         if cmd not in COMMAND_NAMES:
             raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
-        if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
-            return [restart.CODE, self.lookup(arg, restart.NAME)]
         if self.commands.inline(cmd) and isinstance(arg, tuple):
             arg = self._inline(cmd, arg, atom)
         elif isinstance(arg, str) and arg != NONE:

@@ -48,7 +48,6 @@ COMMAND_NAMES = (
     "vtempo",
     "freq",
     "mark",
-    "restart",
     "legato",
 )
 ARGLESS = ("legato",)
@@ -649,21 +648,22 @@ class CommandCodec:
         return name if written == "ctrl" else written
 
     def _arg(self, name, ref, var, value):
+        """The raw argument entry ``var`` (of command ``name``, reference ``ref``) reads a written
+        value as, or None when it takes no such value."""
         if (name in ARGLESS) != (value is None):
             return None
         if value is None or value == NONE:
-            if value is None:
-                return evaluate(var.get("raw", 0), {})
-            return None if ref is None else self.rtypes[ref].none
+            none = None if ref is None else self.rtypes[ref].none
+            return evaluate(var.get("raw", 0), {}) if value is None else none
         if "args" in var:
             fits = is_values(value) and len(value) == len(var["args"])
             return evaluate(var["raw"], dict(zip(var["args"], value))) if fits else None
         if ref is not None:
             return value[1] if isinstance(value, tuple) and value[0] == ref else None
-        if isinstance(value, int) and not isinstance(value, bool):
-            arg = value >> BYTE_SHIFT[name] if "byte" in var else value
-            return evaluate(var["raw"], {"arg": arg}) if "raw" in var else arg
-        return None
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        arg = value >> BYTE_SHIFT[name] if "byte" in var else value
+        return evaluate(var["raw"], {"arg": arg}) if "raw" in var else arg
 
     def decode(self, name: str, value) -> tuple[int, int]:
         """``(code, arg)`` for a written command; ``value`` as :meth:`encode` returns it."""

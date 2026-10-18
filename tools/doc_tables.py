@@ -16,17 +16,6 @@ sys.path.insert(0, str(ROOT / "tests"))
 import test_format_docs as T  # noqa: E402  pylint: disable=wrong-import-position
 
 
-def tables(player: str) -> dict:
-    """``{header: lines}`` of a playroutine's two generated tables."""
-    cells, keys = T.accepted(player), T.key_forms(player)
-    names = (n for n in T.COMMAND_NAMES if n in cells)
-    commands = [T.HEADER, "|---|---|"] + [f"| `!{n}` | {cells[n]} |" for n in names]
-    rows = [T.KEYS_HEADER, "|---|---|"] + [
-        f"| `{k}` | {keys[k]} |" for k in T.ROW_KEYS if k in keys
-    ]
-    return {T.HEADER: commands, T.KEYS_HEADER: rows}
-
-
 def main(argv=None) -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -35,7 +24,7 @@ def main(argv=None) -> int:
     for player in T.PLAYERS:
         path = T.DOCS / f"{player}.md"
         lines = path.read_text().splitlines()
-        for header, new in tables(player).items():
+        for header, new in T.tables(player).items():
             if header not in lines:
                 continue
             start = lines.index(header)

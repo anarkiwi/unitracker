@@ -19,6 +19,7 @@ from unitracker.format.codec import (
     row_place,
     command_variants,
 )
+from unitracker.format.events.instrument import spec as event_instrument
 from unitracker.format.events.instrument import written_as
 from unitracker.format.expr import with_builtins
 from unitracker.format.records import META_KEYS, field_defaults, record_types
@@ -390,7 +391,7 @@ def _field_fix(pr: dict, tname: str, fname: str) -> str:
     }
     if fname in retired:
         return "retired: the expression replaces it, the format does not write it"
-    if tname == "restart" and pr.get("restart"):
+    if tname == "restart" and (event_instrument(pr) or {}).get("restart") is not None:
         return "format-side: the reader plays the note's restart as a program of the player's own"
     if fname == spec.get("chain") or fname in (spec.get("refs") or {}):
         return "read by the format's program walk, not by the player"
@@ -503,7 +504,7 @@ def vocabulary(songs: list) -> list:
     out += [
         Line(UNREACHABLE, "all", f"command `!{c}`", "no player's commands name it", "retire")
         for c, players in cmds.items()
-        if not players and c != "restart"
+        if not players
     ]
     for label, ir in songs:
         out += _unreached(label, ir)

@@ -104,9 +104,9 @@ def test_the_writer_refuses_an_event_that_arms_layer_b_twice():
 
 # -- restart: a note's restart program, run on layer B on the steps before it --
 
-RS_INS = "i1: {ctrl: [{ctrl: 65, gate: 1}, end]}"
+RS_INS = "i1: {ctrl: [{ctrl: 65, gate: 1}, end], restart: r1}"
 RS_PROGRAM = "[{hold: 3, ctrl: ^8, gate: 0}, {}, end]"
-GT_RS_INS = "i1: {ctrl: [{ctrl: 65}, end]}"
+GT_RS_INS = "i1: {ctrl: [{ctrl: 65}, end], restart: r1}"
 
 
 def rs_song(p1, program=RS_PROGRAM, ins=RS_INS, pr="defmon"):
@@ -187,10 +187,11 @@ def test_unfold_refuses_a_restart_without_room(events, match):
 
 
 def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
-    text = songio.dumps(songio.loads(rs_song("-*4, C3.i1!restart:r1*8")))
+    text = songio.dumps(songio.loads(rs_song("-*4, C3.i1*8")))
     ir = songio.loads(text)
     assert songio.dumps(ir) == text
-    assert "!restart:r1" in text and "filter" not in text and "restart" not in ir["records"]
+    assert f"restart: {RS_PROGRAM}}}" in text and "filter" not in text
+    assert "restart" not in ir["records"]
     steps = compile_phrase(ir["phrases"]["p1"])
     assert steps[1, 3] == LAYER_B and steps[4, 0] == 1 and not steps[2:4].any()
     assert ir["records"]["sidtab"][steps[1, 4]] == {
@@ -202,25 +203,27 @@ def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
         "next": 0,
     }
     assert grid(ir, 8)[1:, 4].tolist() == [0, 8, 8, 8, 65, 65, 65]
+
+
+def test_the_writer_folds_a_lone_layer_b_start_into_the_notes_instrument():
+    plain = RS_INS.replace(", restart: r1", "")
+    native = f"{plain}\n        i2: {{filter: [{{ctrl: ^8, gate: 0}}, end]}}"
+    native += "\n        i3: {ctrl: [{ctrl: 17, gate: 1}], end]}".replace("}]", "}")
     folded = songio.dumps(
-        songio.loads(
-            rs_song(
-                "-, -.i2*3, C3.i1*8",
-                ins=f"{RS_INS}\n        i2: {{filter: [{{ctrl: ^8, gate: 0}}, end]}}",
-            )
-        )
+        songio.loads(rs_song("-, -.i2*3, C3.i1*8, -, -.i2*3, C3.i3*8, C3.i1*8", ins=native))
     )
-    assert "i2" not in folded and "[-*4, C3.i1!restart:r1*8]" in folded
-    assert f"r1: {RS_PROGRAM}" in folded
+    assert "[-*4, C3.i1*12, C3.i2*8, C3.i3*8]" in folded
+    assert f"r1: {RS_PROGRAM}" in folded and folded.count("restart: r1}") == 2
+    assert songio.dumps(songio.loads(folded)) == folded
 
 
-RS_P1 = "-*4, C3.i1!restart:r1*8"
+RS_P1 = "-*4, C3.i1*8"
 
 
 @pytest.mark.parametrize(
     "p1,program,pr,ins,match",
     [
-        ("-*2, C3.i1!restart:r1*8", RS_PROGRAM, "defmon", RS_INS, "3 empty steps"),
+        ("-*2, C3.i1*8", RS_PROGRAM, "defmon", RS_INS, "3 empty steps"),
         (RS_P1, "[{}, end]", "defmon", RS_INS, "a row before its note"),
         (RS_P1, "[{hold: 3}, {ctrl: 9}, end]", "defmon", RS_INS, "can't express row"),
         (RS_P1, "[{hold: 3, ctrl: ^8, gate: 0}, {}, {loop: 0}]", "defmon", RS_INS, "can't loop"),

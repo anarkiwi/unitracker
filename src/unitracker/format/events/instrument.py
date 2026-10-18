@@ -1,11 +1,14 @@
 """Event instruments: one record naming the programs an event's native columns arm.
 
-With ``instrument: {type: t, base: b, event: {type: ins, column: k, commands: {c: f}}}`` an
-event's instrument column (record ``t`` at index value - ``b``) is field ``k`` of an ``ins`` record
-and the argument of its command ``c`` field ``f``; the event names that record instead.
+With ``instrument: {type: t, base: b, event: {type: ins, column: k, commands: {c: f}, restart: r}}``
+an event's instrument column (record ``t`` at index value - ``b``) is field ``k`` of an ``ins``
+record, the argument of its command ``c`` field ``f``, and its note's restart (played by command
+``r``, see ``restart``) field ``restart``; the event names that record instead.
 """
 
 import numpy as np
+
+from unitracker.format.events import restart
 
 NAME = "event"
 SLOTS = (3, 5)
@@ -40,6 +43,7 @@ def fold(arr: np.ndarray, ins: dict, base: int, entry) -> np.ndarray:
     into one instrument; ``entry(fields)`` is the instrument's index for the fields it holds."""
     out = arr.copy()
     commands = {int(c): str(f) for c, f in ins["commands"].items()}
+    commands.update({restart.CODE: restart.NAME} if ins.get(restart.NAME) is not None else {})
     for row in out:
         held = {ins["column"]: int(row[2]) - base} if row[2] else {}
         for slot in SLOTS:
@@ -67,6 +71,8 @@ def unfold(event: dict, row: dict, ins: dict, rtype, base: int) -> dict:
     for code, field in ins["commands"].items():
         if armed[field] != rtype.default(field):
             commands = [[int(code), armed[field]], *commands]
+    if armed.get(restart.NAME, -1) != rtype.default(restart.NAME):
+        out[restart.NAME] = armed[restart.NAME]
     if len(commands) == 1:
         out["command"] = commands[0]
     elif commands:

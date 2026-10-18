@@ -37,25 +37,24 @@ slide a layer-A program starts before the voice's first note, which clears it. T
 ## Events
 
 The playroutine declares [Instrument columns](../format/vocabulary.md#instrument-columns):
-`instrument: {type: sidtab, base: 1, event: {type: ins, column: ctrl, commands: {1: filter}}}`.
+`instrument: {type: sidtab, base: 1, event: {type: ins, column: ctrl, commands: {1: filter},
+restart: 1}}`.
 
 - `.i3` names the instrument: its `ctrl` is the sidTAB program sidcall layer A starts (the
   event's instrument column), its `filter` the one layer B starts (the event's command), and a
   layer the instrument leaves out keeps running. The writer names one instrument per pair of
   programs the events arm (`{ctrl: c1, filter: c2}`, `{filter: c2}` on an event that arms only
-  layer B), so `C2.i4` and `-.i5` are a note and an empty step arming them. An instrument holds
-  no other key and arms at least one program.
-- `!restart:r1` arms layer B on the steps before the note (see Hard restart).
+  layer B), so `C2.i4` and `-.i5` are a note and an empty step arming them. An instrument's
+  `restart` arms layer B on the steps before the note (see Hard restart), so the notes of one
+  program with and without a restart name two instruments. An instrument holds no other key and
+  arms a program or a restart.
 - An event reads one command, so the slots are only an order.
 
 ## Commands
 
-| command | argument |
-|---|---|
-| `!restart` | `restart` name |
-
-Every other command is refused by name (`defmon: the player can't express !tempo:6`), and so is
-a document's `tempo`: timing is the timeline's, and the volume is fixed at 15.
+The player takes no shared command: each is refused by name (`defmon: the player can't express
+!tempo:6`), and so is a document's `tempo`: timing is the timeline's, and the volume is fixed at
+15.
 
 ## Control programs
 
@@ -105,9 +104,10 @@ layer-B row's `cut` is the ACID unit's.
 | one or more: `hold`, `ctrl` (a value, a mask `^n`, or both), `gate`, `ad`, `sr` | `{}` |
 
 defMON has no instrument restart: composers run a short sidTAB program on layer B on the empty
-steps before a note. The playroutine declares this with `restart: {command: 1}` (see *Hard
-restart*): a note's `!restart:r` reads as a layer-B start (the event command an instrument's
-`filter` is) of a sidTAB program of the lookahead rows, the last one frozen, holding until the
+steps before a note. The playroutine declares this with `event: {..., restart: 1}` (see
+[Hard restart](../format/vocabulary.md#hard-restart)): the `restart` of a note's instrument reads
+as a layer-B start (the event command an instrument's `filter` is) of a sidTAB program of the
+lookahead rows, the last one frozen, holding until the
 note, started as many steps before the note as they hold, all of them empty. The writer folds such a
 start back before it names the events' instruments when it is alone on its step, followed only by
 empty steps up to a note with a free command slot, and its program ends, sets no column but `dl`,

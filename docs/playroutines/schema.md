@@ -11,8 +11,7 @@ tables: {name: [ints]}                    # player-build data; reads out of rang
 note_offset: 0                            # frequency-table index of format note 0; default 0
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
                                           # default: the type written as ins, base 0
-                                          # event: {type, column, commands}: see Instrument columns
-restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
+                                          # event: {type, column, commands, restart}: see Instrument columns
 tempo: {cells: {tl: a, tr: b}, swing: {}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
 lifetime: {pw: {flag: {flags: 0x40}}, filter: {}}     # !pw and !filter, or [pw, filter] (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
