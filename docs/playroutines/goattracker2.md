@@ -120,7 +120,7 @@ or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step wri
 
 | lookahead row | first-tick row |
 |---|---|
-| exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n, gate: 1}` (n $01-$FD, the first wave), `{gate: g}`, or `{}` |
+| exactly one: `hold` 1-63 (the gate timer); `gate: 0` or nothing; with `gate: 0`, `ad`/`sr` equal to the `adparam` constant or neither | `{ctrl: n}` (n $01-$FD, the first wave, which sets the gate on), `{gate: g}`, or `{}` |
 
 The player reads the voice's next step its instrument's gate timer ahead of each note; an
 instrument without a restart reads it on the note's first tick. A note keeps the gate as the

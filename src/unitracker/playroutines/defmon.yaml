@@ -34,14 +34,15 @@ record_types:
     fields: [dl, next]
     optional: [wgh, wgl, ad, sr]
     codec:
-      - when: "not last and dl >= 0 and dl < 0x80"
+      - when: "not last and dl >= 0 and dl < 0x80 and (wgh < 0 or (wgh & 1) == 0)"
         keys:
           hold: "dl + 1"
-          ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
+          ctrl: {value: "wgh | 1", omit: "wgh < 0", eor: {value: "wgl & 0xFE", omit: "wgl < 0 or (wgl & 0xFE) == 0"}}
+          gate: {value: "wgl & 1", omit: "wgl < 0"}
         raw:
           dl: "hold - 1"
-          wgh: "ctrl if has_ctrl else -1"
-          wgl: "eor if has_eor else -1"
+          wgh: "(ctrl & 0xFE) if has_ctrl else -1"
+          wgl: "((eor if has_eor else 0) | (gate & 1)) if has_gate else -1"
       - when: "last and dl == 0 and wgh < 0 and wgl < 0 and ad < 0 and sr < 0"
   # sidTAB row: dl holds the row dl + 1 ticks ($80+ freezes the layer); each column, -1 when
   # absent, applies in the replay's bitmap-walk order ($16B0).
@@ -58,10 +59,11 @@ record_types:
     # keeps the routing and adds the voice and the low nibble under resonance re >> 4
     # (route + m), any other value is the byte (res, route).
     codec:
-      - when: "(af == 0x80 if xf else af < 0) and pw < 0 and ps < 0 and cp < 0 and acid < 0"
+      - when: "(af == 0x80 if xf else af < 0) and pw < 0 and ps < 0 and cp < 0 and acid < 0 and (wgh < 0 or (wgh & 1) == 0)"
         keys:
           hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
-          ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
+          ctrl: {value: "wgh | 1", omit: "wgh < 0", eor: {value: "wgl & 0xFE", omit: "wgl < 0 or (wgl & 0xFE) == 0"}}
+          gate: {value: "wgl & 1", omit: "wgl < 0"}
           note: {byte: tr, none: -1}
           freq: {expr: xf}
           pw: {expr: xp}
@@ -71,8 +73,8 @@ record_types:
           mode: {value: "fv & 0xF0", omit: "fv < 0"}
         raw:
           dl: "hold - 1"
-          wgh: "ctrl if has_ctrl else -1"
-          wgl: "eor if has_eor else -1"
+          wgh: "(ctrl & 0xFE) if has_ctrl else -1"
+          wgl: "((eor if has_eor else 0) | (gate & 1)) if has_gate else -1"
           af: "0x80 if xf else -1"
           re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
           fv: "mode if has_mode else -1"

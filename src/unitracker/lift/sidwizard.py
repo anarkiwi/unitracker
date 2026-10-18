@@ -144,7 +144,8 @@ def restart_rows(control: int, hrad: int, hrsr: int, first: int) -> tuple:
     """The hard-restart program of an instrument header's control byte, as hashable rows.
 
     Bits 0 and 1 fire the restart one and two ticks before the row applies; bit 2 makes it
-    staccato (control $18); bit 3 writes the first waveform on the note's first tick.
+    staccato (control $18); bit 3 writes the first waveform on the note's first tick, which gates
+    the voice on.
     """
     timer = control & HR_TIMER
     if timer == HR_TIMER:
@@ -155,9 +156,8 @@ def restart_rows(control: int, hrad: int, hrsr: int, first: int) -> tuple:
         if control & HR_STACCATO:
             ahead["ctrl"] = STACCATO
         rows.append(ahead)
-    note = {"ctrl": first} if control & HR_FIRSTCTRL else {}
-    if rows or note:
-        rows.append(note)
+    if rows or control & HR_FIRSTCTRL:
+        rows.append({"gate": 1, **({"ctrl": first} if control & HR_FIRSTCTRL else {})})
     return tuple(tuple(sorted(row.items())) for row in rows)
 
 

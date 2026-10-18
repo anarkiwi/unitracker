@@ -5,8 +5,8 @@ record type is one player's own.
 
 | row key | meaning |
 |---|---|
-| `ctrl` | control register value; `^n` sets an exclusive-or mask the voice's control output keeps until a row sets another, `v^n` both |
-| `gate` | the gate the control register is written with until a row, note or `off`/`on` sets it: 0 off, 1 on |
+| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, `v^n` both (see [The gate](#the-gate)) |
+| `gate` | the gate, 0 off or 1 on (see [The gate](#the-gate)) |
 | `note` | `+n` / `-n` relative to the event note, or a note name (`G#5`) for an absolute note; omitted: no change |
 | `wait` | ticks before the row applies |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
@@ -50,6 +50,14 @@ type outside the playroutine's codec shapes, record types and the shared command
 with one message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in
 '-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`).
 
+## The gate
+
+`ctrl` and `gate` each hold until a row sets them; a note, `off` and `on` set the gate as the
+player does. A row's `ctrl` leaves the gate as it is, but on a restart's first-tick row, where a
+`ctrl` sets the gate on: the row is written without `gate: 1`, and `gate: 0` there is refused.
+The mask `^n` holds until a row sets `gate` or another mask; a row that sets `gate` without a mask
+sets it to 0.
+
 ## Chords
 
 A chord or arpeggio is a `ctrl` program of relative-note rows:
@@ -77,7 +85,7 @@ A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. An instrument names its restar
 
 ```yaml
 restart:
-  r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]
+  r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]
 ```
 
 Four ticks before the note the gate goes off with envelope $0F00; on its first tick the control

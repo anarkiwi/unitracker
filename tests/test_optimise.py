@@ -12,7 +12,7 @@ from unitracker.format import songio
 from unitracker.lift import backends
 from unitracker.player.vm import SongPlayer
 
-RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]"
+RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]"
 PULSE = "16*abs((φ - 32) % 128 - 64) + 512"
 
 

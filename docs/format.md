@@ -28,7 +28,7 @@ hints: {ticks_per_step: 16, phrase_steps: 48}
 song:
   - def:
       restart:
-        r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]
+        r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]
       ins:
         i1: {ad: 1, sr: 136, ctrl: [{ctrl: 9, note: +0}, {ctrl: 9, note: +0}, {ctrl: 129, note: G#5},
             {ctrl: 65, note: +0}, end], pw: 16*abs((φ - 32) % 128 - 64) + 512, filter: [{cut: 1024, res: 12,

@@ -63,6 +63,7 @@ the timeline's, and the volume is fixed at 15.
 |---|---|
 | `hold` | value |
 | `ctrl` | value, `^n` |
+| `gate` | value |
 | `note` | value |
 | `ad` | value |
 | `sr` | value |
@@ -74,8 +75,9 @@ the timeline's, and the volume is fixed at 15.
 | `freq` | expression |
 
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk order: `dl` is
-`hold` (a frozen row ends its program), `wgh` and `wgl` are `ctrl` and its mask
-(`ctrl: 64^1`), `tr` is `note`, `fv` is `mode` (bits 4-7), `re` is `res` and `route`, and the
+`hold` (a frozen row ends its program), `wgh` is `ctrl` (the waveform nibble, written with bit 0
+set: the replay's gate is `wgl`'s bit 0), `wgl` is `gate` and the mask of its other bits
+(`{ctrl: 81^4, gate: 1}` is `wgh` $50, `wgl` $05; a `wgl` row always writes `gate`), `tr` is `note`, `fv` is `mode` (bits 4-7), `re` is `res` and `route`, and the
 row's pitch, pulse and ACID modulators are `freq`, `pw` and `cut` (see Modulators). A step is one
 tick, so `hold` counts both.
 
@@ -100,7 +102,7 @@ layer-B row's `cut` is the ACID unit's.
 
 | lookahead row | first-tick row |
 |---|---|
-| one or more: `hold`, `ctrl` (a value, a mask `^n`, or both), `ad`, `sr` | `{}` |
+| one or more: `hold`, `ctrl` (a value, a mask `^n`, or both), `gate`, `ad`, `sr` | `{}` |
 
 defMON has no instrument restart: composers run a short sidTAB program on layer B on the empty
 steps before a note. The playroutine declares this with `restart: {command: 1}` (see *Hard

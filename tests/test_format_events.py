@@ -35,7 +35,7 @@ def commands(ir, phrase="p1"):
 # -- instrument: one ins record naming the sidTAB programs of layers A and B --
 
 DM_DEFS = """      ctrl:
-        c1: [{ctrl: 65, hold: 4}, {ctrl: 64}, end]
+        c1: [{ctrl: 65, gate: 1, hold: 4}, {gate: 0}, end]
         c2: [{res: 15, route: 7, mode: 16}, end]
       ins:
         i1: {ctrl: c1, filter: c2}
@@ -60,7 +60,7 @@ def test_an_instrument_reads_as_both_layers_and_the_writer_names_native_layers()
     assert steps[4, :5].tolist() == [0, 0, 0, LAYER_B, 2]
     text = songio.dumps(ir)
     assert "p1: [C4.i1*4, -.i2*4]" in text
-    assert "i1: {ctrl: [{hold: 4, ctrl: 65}, {ctrl: 64}, end], filter: c1}" in text
+    assert "i1: {ctrl: [{hold: 4, ctrl: 65, gate: 1}, {gate: 0}, end], filter: c1}" in text
     assert songio.dumps(songio.loads(text)) == text
     out = grid(ir, 8)
     assert out[1:5, 4].tolist() == [65] * 4 and out[2, 0x17] == 0xF7
@@ -104,8 +104,8 @@ def test_the_writer_refuses_an_event_that_arms_layer_b_twice():
 
 # -- restart: a note's restart program, run on layer B on the steps before it --
 
-RS_INS = "i1: {ctrl: [{ctrl: 64^1}, end]}"
-RS_PROGRAM = "[{hold: 3, ctrl: ^8}, {}, end]"
+RS_INS = "i1: {ctrl: [{ctrl: 65, gate: 1}, end]}"
+RS_PROGRAM = "[{hold: 3, ctrl: ^8, gate: 0}, {}, end]"
 GT_RS_INS = "i1: {ctrl: [{ctrl: 65}, end]}"
 
 
@@ -205,7 +205,8 @@ def test_a_restart_reads_as_layer_b_before_its_note_and_writes_back():
     folded = songio.dumps(
         songio.loads(
             rs_song(
-                "-, -.i2*3, C3.i1*8", ins=f"{RS_INS}\n        i2: {{filter: [{{ctrl: ^8}}, end]}}"
+                "-, -.i2*3, C3.i1*8",
+                ins=f"{RS_INS}\n        i2: {{filter: [{{ctrl: ^8, gate: 0}}, end]}}",
             )
         )
     )
@@ -222,9 +223,9 @@ RS_P1 = "-*4, C3.i1!restart:r1*8"
         ("-*2, C3.i1!restart:r1*8", RS_PROGRAM, "defmon", RS_INS, "3 empty steps"),
         (RS_P1, "[{}, end]", "defmon", RS_INS, "a row before its note"),
         (RS_P1, "[{hold: 3}, {ctrl: 9}, end]", "defmon", RS_INS, "can't express row"),
-        (RS_P1, "[{hold: 3, ctrl: ^8}, {}, {loop: 0}]", "defmon", RS_INS, "can't loop"),
+        (RS_P1, "[{hold: 3, ctrl: ^8, gate: 0}, {}, {loop: 0}]", "defmon", RS_INS, "can't loop"),
         (RS_P1, RS_PROGRAM, "goattracker2", GT_RS_INS, "restart: .*can't express row"),
-        ("C3.i1*8", RS_PROGRAM, "goattracker2", RS_INS, "ctrl holds no mask here"),
+        ("C3.i1*8", RS_PROGRAM, "goattracker2", GT_RS_INS, "ctrl holds no mask here"),
     ],
 )
 def test_the_reader_refuses_a_restart_it_cannot_play(p1, program, pr, ins, match):
@@ -386,7 +387,7 @@ GT_INS = """      x:
         pw1: '2048 + 16*min(3, φ)'
       ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(3, φ)',
-          restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]}
+          restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]}
         i2: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}
         i3: {sr: 240, ctrl: [{ctrl: 65, note: +0}, {run: pw1}, end]}
 """

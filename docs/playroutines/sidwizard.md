@@ -102,9 +102,9 @@ voices play, and `route` is refused. The volume is not covered.
 
 | lookahead row | first-tick row |
 |---|---|
-| at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform), or `{}` |
+| at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform) or `{gate: 1}` |
 
-A note sets the gate itself.
+A note sets the gate on itself, so the first-tick row always does.
 
 ## Lifetime
 

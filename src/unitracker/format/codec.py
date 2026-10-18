@@ -32,6 +32,7 @@ ROW_KEYS = (
     "vol",
 )
 EXPR = "x"
+RESTART = "restart"
 ENVELOPE = -2
 COMMAND_NAMES = (
     "run",
@@ -311,8 +312,18 @@ def is_expr(value) -> bool:
     return isinstance(value, tuple) and len(value) == 2 and value[0] == EXPR
 
 
+def first_tick(rtype, place) -> bool:
+    """Whether a row of ``rtype`` at ``place`` is a restart's first-tick row (its last), where a
+    ``ctrl`` sets the gate on."""
+    return rtype.name == RESTART and bool(place and place.get("last"))
+
+
 class RowCodec:
-    """A record type's shapes, with the playroutine's note offset."""
+    """A record type's shapes, with the playroutine's note offset.
+
+    On a restart's first-tick row a ``ctrl`` implies ``gate: 1``: the row is written without it
+    and read with it (see :func:`first_tick`).
+    """
 
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
         self.rtype = rtype
@@ -393,7 +404,10 @@ class RowCodec:
         full = self._full(row)
         for shape in self.shapes:
             if self._fits(shape, full, place):
-                return self._encode(shape, full)
+                out = self._encode(shape, full)
+                if first_tick(self.rtype, place) and "ctrl" in out and out.get("gate") == 1:
+                    del out["gate"]
+                return out
         return None
 
     def _fits(self, shape, full: dict, place) -> bool:
@@ -477,6 +491,13 @@ class RowCodec:
         naming what the player can't express."""
         for key in sorted(set(written) - self.keys):
             raise CodecError(f"unknown key {key} in {self.rtype.written}")
+        if first_tick(self.rtype, place) and "ctrl" in written:
+            if written.get("gate", 1) != 1:
+                raise CodecError(
+                    f"{self.rtype.written}: the player can't express row {written!r}"
+                    " (a ctrl on the note's first tick sets the gate on)"
+                )
+            written = {**written, "gate": 1}
         norm = self.normalize(written)
         problems = []
         for shape in self.shapes:

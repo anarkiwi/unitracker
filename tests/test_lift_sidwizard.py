@@ -366,9 +366,9 @@ def test_build_and_header_checks():
 @pytest.mark.parametrize(
     "control,rows",
     [
-        (0x1A, [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0x10}, {"ctrl": 9}]),
-        (0x05, [{"hold": 1, "ctrl": 0x18, "gate": 0, "ad": 0x0F, "sr": 0x10}, {}]),
-        (0x08, [{"ctrl": 9}]),
+        (0x1A, [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0x10}, {"ctrl": 9, "gate": 1}]),
+        (0x05, [{"hold": 1, "ctrl": 0x18, "gate": 0, "ad": 0x0F, "sr": 0x10}, {"gate": 1}]),
+        (0x08, [{"ctrl": 9, "gate": 1}]),
         (0x14, []),
     ],
 )
@@ -550,7 +550,7 @@ def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(csillag, 
         row = ir["records"]["restart"][entry]
         path.append({k: v for k, v in row.items() if k != "next"})
         entry = row["next"]
-    assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9}]
+    assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9, "gate": 1}]
     assert SongPlayer(ir).mismatch(theirs) is None
 
 

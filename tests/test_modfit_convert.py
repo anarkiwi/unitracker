@@ -22,7 +22,7 @@ SW = library("sidwizard")["tables"]
 # A plain gated instrument whose hard restart turns the gate off two ticks ahead.
 INS = (
     "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], "
-    "restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9, gate: 1}, end]"
+    "restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]"
 )
 
 
@@ -100,8 +100,8 @@ DM_SONG = doc(
 DM_AF = doc(
     "defmon",
     """      ins:
-        i1: {ctrl: [{ctrl: 65, hold: 4}, {ctrl: 64}, end]}
-        i2: {ctrl: [{ctrl: 65, hold: 3}, {ctrl: 64}, end]}""",
+        i1: {ctrl: [{ctrl: 65, gate: 1, hold: 4}, {gate: 0}, end]}
+        i2: {ctrl: [{ctrl: 65, gate: 1, hold: 3}, {gate: 0}, end]}""",
     "[C4.i1*12, E4*12, G4.i2*12, A4.i1*12]",
     DM_VOICES,
 )
@@ -112,11 +112,13 @@ DM_AF = doc(
 
 def test_funk_arguments_share_their_speed_table_rows():
     text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
-    song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4, -!funk:none]"))
+    song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4]"))
     assert song["records"]["speedtab"] == {1: {"l": 6, "r": 9}, 2: {"l": 3, "r": 4}}
     cmds = [e.get("command") or e["commands"][-1] for e in song["phrases"]["p1"]]
-    assert cmds == [[14, 1], [14, 1], [14, 2], [14, 0]]
-    assert "-!funk:3/4, -!funk:none]" in songio.dumps(song)
+    assert cmds == [[14, 1], [14, 1], [14, 2]]
+    assert "-!funk:3/4]" in songio.dumps(song)
+    with pytest.raises(songio.SongFormatError, match="can't express !funk:none"):
+        songio.loads(text.replace("-!funk:6/9]", "-!funk:none]"))
 
 
 def test_goattracker_freq_command_pulse_expression_and_legato():
