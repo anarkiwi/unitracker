@@ -576,7 +576,8 @@ class SongPlayer:
         self.globals = [init for _, init in gen.gcells.values()]
         self._index = (gen.gindex, gen.vindex)
         self.voice_cells = _voice_cells(song, gen)
-        self._set_tempo(gen, tempo.cells(pr, song.get(tempo.NAME)))
+        self.codegen = gen
+        self.set_cells(tempo.cells(pr, song.get(tempo.NAME)))
         self.table_reads: dict[str, set[int]] | None = None
         namespace = {
             "g": self.globals,
@@ -591,7 +592,6 @@ class SongPlayer:
         code = compile(gen.build(), f"<playroutine {pr.get('name', '')}>", "exec")
         exec(code, namespace)  # pylint: disable=exec-used
         self.namespace = namespace
-        self.codegen = gen
         self._masks = (
             {n: m for n, (m, _) in gen.gcells.items() if m is not None},
             {n: m for n, (m, _) in gen.vcells.items() if m is not None},
@@ -603,15 +603,16 @@ class SongPlayer:
         self.regs = [0] * REG_COUNT
         self.ticks = 0
 
-    def _set_tempo(self, gen, cells: dict) -> None:
-        """Start each of ``cells`` at its value: a global cell, or a voice cell in every voice."""
+    def set_cells(self, cells: dict) -> None:
+        """Set each of ``cells`` to its value: a global cell, or a voice cell in every voice."""
+        gen = self.codegen
         for name, value in cells.items():
             if name in gen.gindex:
                 mask = gen.gcells[name][0]
                 self.globals[gen.gindex[name]] = value if mask is None else value & mask
                 continue
             if name not in gen.vindex:
-                raise SongError(f"the tempo sets unknown cell {name!r}")
+                raise SongError(f"unknown cell {name!r}")
             mask = gen.vcells[name][0]
             for cells_ in self.voice_cells:
                 cells_[gen.vindex[name]] = value if mask is None else value & mask

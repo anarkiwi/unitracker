@@ -12,7 +12,7 @@ note_offset: 0                            # frequency-table index of format note
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
                                           # default: the type written as ins, base 0
                                           # event: {type, column, commands, restart}: see Instrument columns
-tempo: {cells: {tl: a, tr: b}, swing: {}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
+tempo: {cells: {tl: a, tr: b}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
 lifetime: {pw: {flag: {flags: 0x40}}, filter: {}}     # !pw and !filter, or [pw, filter] (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
@@ -126,9 +126,9 @@ playroutine's functions. A list row a shape covers is rejected: it has a shared-
 ## Tempo
 
 A song's `tempo` (see [Document](../format/document.md)) is `n` ticks per step or a swing pair
-`[a, b]`. The playroutine's `tempo` gives the cells it starts: `cells` (`{cell: expr}`) for every
-tempo and `swing` too for a pair, each expression over `a` and `b` (`b` is `a` for one tempo),
-assigned over the cells' `init` before the first tick; `when` is the tempos the player plays. A
+`[a, b]`. The playroutine's `tempo` gives the cells it starts, `cells` (`{cell: expr}`), each
+expression over `a` and `b` (`b` is `a` for one tempo), assigned over the cells' `init` before the
+first tick; `when` is the tempos the player plays. A
 playroutine without `tempo` has none, and a song that names one is refused.
 
 ## Cells and expressions

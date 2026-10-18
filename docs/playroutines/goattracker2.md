@@ -57,9 +57,10 @@ other; otherwise the slots are only an order.
 Every other command is refused by name.
 
 - `!tempo:n` and `!vtempo:n` are command $F; it plays a tempo of 2 as 3, so they start at 3.
-- `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each. `!vtempo:a/b` is playroutine command 18: the player keeps one swing
-  pair, and command $F's $80/$81 swing one voice on it, so 18 sets the pair, as every voice that
-  swings plays it, and swings this voice. The lifter writes $E00 and $F00/$F01/$F80/$F81, which
+- `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each. Each voice
+  keeps its own swing pair: `!tempo:a/b` sets every voice's, and `!vtempo:a/b`, playroutine
+  command 18, this voice's. The native player keeps one pair, which only $E and its init set, so
+  every voice's pair is that one in a native song. The lifter writes $E00 and $F00/$F01/$F80/$F81, which
   swing on the pair already set, as the commands that name the pair they meet ($x1 reversed,
   starting on its second tempo), once a replay proves the song unchanged; a command that meets
   pairs no one of which plays the song is not covered.

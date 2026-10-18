@@ -244,7 +244,7 @@ def initial_tempo(deftempo: int, pr: dict):
         return deftempo + 1
     if deftempo == 1:
         raise LiftError("a default tempo of 1, a swing from its second tempo, is not covered")
-    return [int(pr["global"][f"funk{k}"]["init"]) + 1 for k in (0, 1)]
+    return [int(pr["voice"][f"funk{k}"]["init"]) + 1 for k in (0, 1)]
 
 
 # The commands that swing on the stored funk pair: E00 and $F00/$F01 every voice, $F80/$F81 this
@@ -258,10 +258,18 @@ STORED = {
 }
 
 
+def _native(ir: dict) -> SongPlayer:
+    """A player of ``ir`` starting on the native player's funk pair, which the commands of
+    :data:`STORED` read."""
+    player = SongPlayer(ir)
+    player.set_cells({f"funk{i}": ir["playroutine"]["voice"][f"funk{i}"]["init"] for i in (0, 1)})
+    return player
+
+
 def stored_pairs(ir: dict, ticks: int) -> dict:
     """``{(phrase, event, command index): Counter of (l, r)}``: the funk pair stored each time a
     command of :data:`STORED` is read, over ``ticks`` ticks."""
-    player = SongPlayer(ir)
+    player = _native(ir)
     fetch, starts = player.namespace["_fetch"], {}
     for name, events in ir["phrases"].items():
         steps = np.cumsum([0] + [int(e.get("steps", 1)) for e in events[:-1]])
@@ -278,7 +286,8 @@ def stored_pairs(ir: dict, ticks: int) -> dict:
                 event_commands(ir["phrases"][name][k]) if k is not None else ()
             ):
                 if tuple(cmd) in STORED:
-                    pair = tuple((player.cell(f"funk{i}") + 1) & 0xFF for i in (0, 1))
+                    voice = voice_of[id(cells)]
+                    pair = tuple((player.cell(f"funk{i}", voice) + 1) & 0xFF for i in (0, 1))
                     seen.setdefault((name, k, j), Counter())[pair] += 1
         fetch(cells)
 
@@ -320,14 +329,14 @@ def explicit_swing(ir: dict) -> dict:
     phrases = {name: [dict(e) for e in events] for name, events in ir["phrases"].items()}
     speed = dict(ir["records"]["speedtab"])
     initial = Counter(
-        {tuple(int(ir["playroutine"]["global"][f"funk{i}"]["init"]) + 1 for i in (0, 1)): 1}
+        {tuple(int(ir["playroutine"]["voice"][f"funk{i}"]["init"]) + 1 for i in (0, 1)): 1}
     )
     met = set()
     for name, k, j in users:
         met.update(seen.get((name, k, j), initial))
         _named(phrases[name][k], j, seen.get((name, k, j), initial).most_common(1)[0][0], speed)
     out = {**ir, "phrases": phrases, "records": {**ir["records"], "speedtab": speed}}
-    diff = np.argwhere(SongPlayer(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
+    diff = np.argwhere(_native(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
     if len(diff):
         tick, reg = (int(x) for x in diff[0])
         raise LiftError(
