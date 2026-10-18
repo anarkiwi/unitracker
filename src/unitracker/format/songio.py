@@ -42,7 +42,7 @@ from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compil
 VERSION = "1.20"
 WIDTH = 100
 PHRASE = "phrase"
-DOC_KEYS = ("unitracker", "playroutine", "meta", "hints", "clock", "voices", "song", "loop")
+DOC_KEYS = ("unitracker", "playroutine", "meta", "hints", "clock", "voices", "song")
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 DEFAULTS = {"clock": {"cycles_per_tick": 19656, "clock_hz": 985248}, "voices": 3}
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -63,6 +63,11 @@ def _library_text(name: str) -> str:
 def library(name: str) -> dict:
     """The library definition of playroutine ``name``, named by its file."""
     return expand({"name": name, **yaml.safe_load(_library_text(name))})
+
+
+def song_rows(doc: dict) -> list:
+    """The rows of a written document's ``song``, without the ``end`` or ``{loop: k}`` after them."""
+    return doc["song"][:-1]
 
 
 def defaults(pr: dict) -> dict:
@@ -556,8 +561,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
     if found:
         doc["hints"] = FlowMap(found)
     doc.update(writer.environment())
-    doc["song"] = rows
-    doc["loop"] = loop
+    doc["song"] = [*rows, Atom(timeline.END) if loop is None else FlowMap(loop=loop)]
     doc = respell(doc) if respell else doc
     return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
 
@@ -864,9 +868,16 @@ class _Reader:
         return rtype.name, index
 
     def _collect(self, song):
-        """Define every record and phrase; ``(phrase atoms, play rows)``."""
-        if not isinstance(song, list) or not song:
-            raise SongFormatError("song must be a list of rows")
+        """Define every record and phrase; ``(phrase atoms, play rows, loop row or None)``."""
+        if not isinstance(song, list) or len(song) < 2:
+            raise SongFormatError("song must be a list of rows then end or {loop: k}")
+        song, term = song[:-1], song[-1]
+        if term == timeline.END:
+            loop = None
+        elif isinstance(term, dict) and set(term) == {"loop"} and isinstance(term["loop"], int):
+            loop = term["loop"]
+        else:
+            raise SongFormatError(f"the song ends with end or {{loop: k}}, not {term!r}")
         phrases, rows = {}, []
         for r, item in enumerate(song):
             if not isinstance(item, dict) or "play" not in item:
@@ -881,19 +892,22 @@ class _Reader:
                         self._define(tname, name, value)
             rows.append([self._entry(e) for e in item["play"]])
         self._resolve()
-        return phrases, rows
+        return phrases, rows, loop
 
     def read(self) -> dict:
         """The internal representation."""
         doc = self.doc
-        phrases, rows = self._collect(doc.get("song"))
+        phrases, rows, loop = self._collect(doc.get("song"))
         events = {
             name: self._unfolded([self.event(a) for a in atoms], name)
             for name, atoms in phrases.items()
         }
         lengths = {name: len(compile_phrase(ev)) for name, ev in events.items()}
         voices = int(doc.get("voices", self.defaults["voices"]))
-        tracks = timeline.from_rows(rows, doc.get("loop"), lengths, voices)
+        try:
+            tracks = timeline.from_rows(rows, loop, lengths, voices)
+        except timeline.TimelineError as exc:
+            raise SongFormatError(str(exc)) from exc
         _player(self.pr, self.lifetime.read, tracks, events, self.records, self.names)
         ir = {
             "unitracker": IR_VERSION,

@@ -131,7 +131,7 @@ song:
       phrase:
         p1: [off]
     play: [p1, p1, p1]
-loop: ~
+  - end
 """
 LIBRARY = ("goattracker2", "sidwizard", "defmon")
 
@@ -147,7 +147,7 @@ def test_roundtrip_plays_identically_and_is_canonical():
     np.testing.assert_array_equal(SongPlayer(back).render_grid(64), SongPlayer(ir).render_grid(64))
     assert songio.dumps(back, embed=True) == text
     doc = parse(text)
-    assert list(doc) == ["unitracker", "playroutine", "meta", "hints", "song", "loop"]
+    assert list(doc) == ["unitracker", "playroutine", "meta", "hints", "song"]
     assert doc["meta"] == {"title": "Mini", "author": "Test", "released": "2026"}
     assert doc["hints"] == {"ticks_per_step": 1, "phrase_steps": 4}
     first = doc["song"][0]["def"]
@@ -161,7 +161,7 @@ def test_roundtrip_plays_identically_and_is_canonical():
     assert first["phrase"]["p2"] == ["-!run:w1", "F#2.i3*3"]
     assert doc["song"][0]["play"] == ["p1", "p2"]
     assert doc["song"][1]["play"] == ["p1+3", "p2"]
-    assert doc["loop"] == 0
+    assert doc["song"][-1] == {"loop": 0}
 
 
 def test_document_without_hints_reads_and_writes(tmp_path):
@@ -230,6 +230,9 @@ def test_writer_errors(change, match):
         (edit(("hints",), [6]), "hints must be a mapping"),
         (edit(("song",), []), "list of rows"),
         (edit(("song", 1), {"def": {}}), "play list"),
+        (edit(("song", 2), {"play": ["p1", "p2"]}), r"ends with end or \{loop: k\}"),
+        (edit(("song", 2), {"loop": 9}), "loop row 9 is outside"),
+        (edit(("loop",), 0), "unknown key loop in document"),
         (edit(("playroutine",), "mini"), "mapping"),
         (edit(("playroutine",), {"ref": "nope"}), "no playroutine"),
         (edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}), "no library"),

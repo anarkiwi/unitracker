@@ -149,7 +149,7 @@ def test_mockups_rewrite_what_they_name():
 
 def test_hoisted_instruments_merge_phrases_alike_but_for_instruments():
     phrases = {"p1": ["C4.i1", "D4"], "p2": ["C4.i2", "D4"]}
-    doc_ = {"song": [{"def": {"phrase": phrases}, "play": ["p1"]}, {"play": ["p2+3"]}]}
+    doc_ = {"song": [{"def": {"phrase": phrases}, "play": ["p1"]}, {"play": ["p2+3"]}, "end"]}
     out = tokenstudy.hoisted_instruments(doc_)
     assert "p2" not in out["song"][0]["def"]["phrase"] and out["song"][1]["play"] == ["p1(i1=i2)+3"]
 

@@ -32,7 +32,7 @@ song:
         p1: {phrase}
         p2: [-*{steps}]
     play: [p1, p2, p2]
-{extra}loop: 0
+{extra}  - {{loop: 0}}
 """
 
 

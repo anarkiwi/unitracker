@@ -495,7 +495,10 @@ def test_defmon_programs_end_on_a_freeze():
     doc = {
         "unitracker": songio.VERSION,
         "playroutine": {"ref": "defmon"},
-        "song": [{"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3}],
+        "song": [
+            {"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3},
+            "end",
+        ],
     }
     with pytest.raises(songio.SongFormatError, match="can't end a program"):
         songio.loads(yaml.safe_dump(doc))
@@ -669,8 +672,12 @@ def defmon_doc(vinit, ginit=None):
         "def": {"vinit": {0: vinit}, "ginit": {0: ginit or {}}, "phrase": {"p1": ["-*4"]}},
         "play": ["p1"] * 3,
     }
-    doc = {"unitracker": songio.VERSION, "playroutine": {"ref": "defmon"}, "song": [song]}
-    return songio.loads(yaml.safe_dump({**doc, "loop": 0}))
+    doc = {
+        "unitracker": songio.VERSION,
+        "playroutine": {"ref": "defmon"},
+        "song": [song, {"loop": 0}],
+    }
+    return songio.loads(yaml.safe_dump(doc))
 
 
 def nfreq(note):
@@ -729,7 +736,7 @@ song:
         p1: [-*8]
         p2: [-.i1*2, -.i2*4, -.i3*2]
     play: [p1, p2, p1]
-loop: 0
+  - {loop: 0}
 """
 
 
@@ -755,7 +762,7 @@ song:
       phrase:
         p1: [C4.i1*4, C4!run:c1*4]
     play: [p1, p1, p1]
-loop: 0
+  - {loop: 0}
 """
 
 
@@ -773,7 +780,7 @@ def test_sidwizard_chords_are_ctrl_programs_started_by_run():
 def atom_doc(player: str, atom: str) -> str:
     return (
         f"unitracker: {songio.VERSION}\nplayroutine: {{ref: {player}}}\nsong:\n  - def:\n"
-        f"      phrase:\n        p1: ['{atom}']\n    play: [p1, p1, p1]\nloop: 0\n"
+        f"      phrase:\n        p1: ['{atom}']\n    play: [p1, p1, p1]\n  - {{loop: 0}}\n"
     )
 
 

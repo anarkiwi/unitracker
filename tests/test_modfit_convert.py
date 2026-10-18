@@ -54,7 +54,7 @@ song:
       phrase:
         p1: {phrase}{rest}
     play: {play}
-loop: ~
+  - end
 """
 
 

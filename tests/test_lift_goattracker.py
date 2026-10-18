@@ -217,7 +217,7 @@ song:
         p1: [C4.i1*8]
         p2: [off*8]
     play: [p1, p2, p2]
-loop: ~
+  - end
 """
 
 

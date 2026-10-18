@@ -20,7 +20,7 @@ def song(pr, defs, phrases, rows=ONCE, loop="~"):
     phrase = "".join(f"        {name}: [{atoms}]\n" for name, atoms in phrases.items())
     return (
         f"unitracker: {songio.VERSION}\nplayroutine: {{ref: {pr}}}\nsong:\n  - def:\n{defs}"
-        f"      phrase:\n{phrase}{rows}loop: {loop}\n"
+        f"      phrase:\n{phrase}{rows}  - {'end' if loop == '~' else f'{{loop: {loop}}}'}\n"
     )
 
 

@@ -9,8 +9,7 @@ Top-level keys, in this order:
 | `meta` | `title`, `author`, `released` |
 | `hints` | reading aids the player ignores, each a positive integer and both optional: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
 | `clock`, `voices` | only where they differ from the playroutine's `defaults` |
-| `song` | the timeline: a list of rows |
-| `loop` | the row the song loops to, or `~` to end |
+| `song` | the timeline: rows, then `end` or `{loop: k}`, as a program ends |
 
 `playroutine.constants` lists only the constants that differ from the library's.
 `playroutine.tables` patches the library's tables: `{index: value}` for the entries that
@@ -29,8 +28,9 @@ complete, so the file plays without the library.
 
 ## Timeline
 
-Each row is `{def: {...}, play: [entry per voice]}`; `def` is present only when something is
-first used in that row. An entry is:
+`song` is a list of rows followed by `end`, where the song stops, or `{loop: k}`, where it
+continues at row `k`. Each row is `{def: {...}, play: [entry per voice]}`; `def` is present only
+when something is first used in that row. An entry is:
 
 | entry | meaning |
 |---|---|
@@ -42,8 +42,8 @@ first used in that row. An entry is:
 A row starts at the earliest end of the voices' current phrases. Every voice whose phrase ends
 there must have an entry, and every other voice must be `~`; readers reject anything else.
 Repeats are written out as rows. When the voices' loops have different lengths, the rows run
-until all of them are back in the same state together, and `loop` is the row where that state
-first occurred.
+until all of them are back in the same state together, and `{loop: k}` names the row where that
+state first occurred.
 
 ## Definitions
 
