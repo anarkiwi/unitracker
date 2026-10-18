@@ -1,8 +1,9 @@
 """The passes: each lists the candidate edits of a song, in a deterministic order."""
 
 from unitracker.format.records import EXPR
-from unitracker.optimise.edits import hoist_value, repeats
 from unitracker.format.refs import entries, slots, view
+from unitracker.optimise import shattered
+from unitracker.optimise.edits import hoist_value, repeats
 from unitracker.optimise.model import (
     apart,
     is_note,
@@ -134,7 +135,17 @@ def fields(ir: dict) -> list:
 LARGER_UNPROVED = frozenset({"factor", "share"})
 
 
+CANONICAL = {
+    "staircases": shattered.staircases,
+    "slides": shattered.slides,
+    "holds": shattered.holds,
+    "anchors": shattered.anchors,
+    "restitch": shattered.restitch,
+}
+
+
 PASSES = {
+    **CANONICAL,
     "hoist": hoists,
     "instruments": instruments,
     "programs": programs,

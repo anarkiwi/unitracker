@@ -2,10 +2,12 @@
 
 import copy
 
-from unitracker.format.codec import CodecError
+from unitracker.format.codec import EXPR, NONE, CodecError, command_code
 from unitracker.format.events import column
+from unitracker.format.events.running import lasts_step
 from unitracker.format.records import RowEval, chained, program_path, ref_type
 from unitracker.format.refs import put_slots, redirect, slots, view
+from unitracker.format.xexpr import canonical
 from unitracker.optimise.model import (
     apart,
     copied,
@@ -327,6 +329,70 @@ def clear(ir: dict, tname: str, index: int, fname: str) -> dict | None:
     return out
 
 
+def _expression(ir: dict, text: str) -> int:
+    """The index of expression ``text`` in ``ir``, added after the others when it is new."""
+    exprs = ir.setdefault("exprs", {})
+    one = canonical(text)
+    found = next((i for i, t in sorted(exprs.items()) if canonical(str(t)) == one), None)
+    if found is None:
+        found = max(exprs, default=0) + 1
+        exprs[found] = one
+    return found
+
+
+def _freq_slot(cmds: list, code: int) -> int:
+    return next(s for s, (c, a) in enumerate(cmds) if c == code and a)
+
+
+def stitch(ir: dict, name: str, start: int, end: int, text: str) -> dict | None:
+    """The song with the ``!freq`` of events ``start`` to ``end`` of phrase ``name`` one
+    occurrence of expression ``text`` from ``start``: named on each step where ``!freq`` lasts a
+    step, else on the first alone; None where an event beside them names it, continuing it."""
+    code = command_code(ir["playroutine"].get("commands"), "freq", EXPR)
+    out = copied(ir)
+    x, step = _expression(out, text), lasts_step(ir["playroutine"])
+    beside = out["phrases"][name][max(0, start - 1) : start] + out["phrases"][name][end : end + 1]
+    if any([code, x] in slots(e) for e in beside):
+        return None
+    for k, event in enumerate(out["phrases"][name][start:end]):
+        cmds = slots(event)
+        cmds[_freq_slot(cmds, code)] = [code, x] if step or k == 0 else [0, 0]
+        put_slots(event, cmds)
+    return out if out["phrases"][name] != ir["phrases"][name] else None
+
+
+def hold(ir: dict, name: str, k: int) -> dict | None:
+    """The song with event ``k`` of phrase ``name`` playing ``!freq:none`` for its ``!freq``."""
+    v = view(ir)
+    try:
+        code, none = v.commands.decode("freq", NONE)
+    except CodecError:
+        return None
+    out = copied(ir)
+    event = out["phrases"][name][k]
+    cmds = slots(event)
+    cmds[_freq_slot(cmds, code)] = [code, none]
+    put_slots(event, cmds)
+    return out
+
+
+def staircase(ir: dict, name: str, start: int, end: int, key: str, text: str) -> dict | None:
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    """The song with the ``key`` commands of events ``start`` to ``end`` of phrase ``name`` one
+    command of expression ``text`` at ``start``; None where the player has no such command."""
+    v, out = view(ir), copied(ir)
+    try:
+        code, arg = v.commands.decode(key, (EXPR, _expression(out, text)))
+    except CodecError:
+        return None
+    for k, event in enumerate(out["phrases"][name][start:end]):
+        cmds = slots(event)
+        s = next(s for s, (c, a) in enumerate(cmds) if c and v.commands.encode(c, a)[0] == key)
+        cmds[s] = [code, arg] if k == 0 else [0, 0]
+        put_slots(event, cmds)
+    return out
+
+
 EDITS = {
     f.__name__: f
     for f in (
@@ -342,5 +408,8 @@ EDITS = {
         drop_keep,
         drop_instrument,
         clear,
+        staircase,
+        stitch,
+        hold,
     )
 }

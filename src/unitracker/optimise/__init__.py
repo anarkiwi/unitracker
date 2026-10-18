@@ -6,7 +6,7 @@ applies the passes to a fixpoint (see docs/optimise.md).
 """
 
 from unitracker.optimise.describe import describe, first_difference, one_line, writer
-from unitracker.optimise.driver import Finding, Optimiser, Result, optimise
+from unitracker.optimise.driver import Finding, Optimiser, Result, canonical, optimise
 from unitracker.optimise.edits import (
     EDITS,
     alias,
@@ -16,15 +16,19 @@ from unitracker.optimise.edits import (
     drop_keep,
     factor,
     hoist,
+    hold,
     hoist_value,
     merge,
     reloop,
     share,
+    staircase,
+    stitch,
     truncate,
     unhoist,
 )
 from unitracker.optimise.model import programs_of, shape
 from unitracker.optimise.passes import (
+    CANONICAL,
     LARGER_UNPROVED,
     PASSES,
     commands,
@@ -41,6 +45,8 @@ from unitracker.player import reach
 
 __all__ = [
     "alias",
+    "CANONICAL",
+    "canonical",
     "clear",
     "commands",
     "describe",
@@ -56,6 +62,7 @@ __all__ = [
     "first_difference",
     "hoist",
     "hoist_value",
+    "hold",
     "hoists",
     "instruments",
     "LARGER_UNPROVED",
@@ -74,6 +81,8 @@ __all__ = [
     "shape",
     "share",
     "shared_runs",
+    "staircase",
+    "stitch",
     "tokens",
     "Trace",
     "truncate",

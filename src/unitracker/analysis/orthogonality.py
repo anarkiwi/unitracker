@@ -71,6 +71,9 @@ _EDIT_KINDS = {
     "reloop": (SONG, "optimiser: a loop is written with its shortest cycle"),
     "alias": (SONG, "optimiser: one phrase for two that play alike"),
     "factor": (SONG, "optimiser: a repeating phrase is plays of its part"),
+    "stitch": (SONG, "canonicalise: a modulation the lift wrote shattered is one expression"),
+    "hold": (SONG, "canonicalise: a !freq that holds the frequency is !freq:none"),
+    "staircase": (SONG, "canonicalise: a staircase of values is one expression"),
 }
 _CLEAR = {
     "fixed": "codec rule: the lifter leaves out initial state the song overwrites unheard",
