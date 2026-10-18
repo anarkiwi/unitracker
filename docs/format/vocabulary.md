@@ -21,7 +21,7 @@ record type is one player's own.
 | `filter` | `none`: the row stops the filter program, as `pw: none` the pulse program |
 | `vol` | the volume, the low nibble of `$D418` |
 
-A command means one thing in every player; it applies on the step that carries it.
+A command means one thing in every player; it applies from the step that carries it.
 
 | command | meaning |
 |---|---|
