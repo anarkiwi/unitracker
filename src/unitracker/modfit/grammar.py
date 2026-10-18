@@ -556,7 +556,11 @@ def parse(s: str, symbols=()) -> sympy.Expr:
 
     def walk(n):
         # pylint: disable=too-many-return-statements
-        if isinstance(n, ast.Constant) and type(n.value) is int:
+        if (
+            isinstance(n, ast.Constant)
+            and isinstance(n.value, int)
+            and not isinstance(n.value, bool)
+        ):
             return sympy.Integer(n.value)
         if isinstance(n, ast.Name):
             return names.get(n.id) or sympy.Symbol(n.id, integer=True)
