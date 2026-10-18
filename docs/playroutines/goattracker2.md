@@ -127,7 +127,7 @@ A control mask (`ctrl: ^n`) is refused.
 | `res`, `route` (a mask) | filter parameter rows, which set both; `!resfilt` |
 | `mode` | filter parameter rows, bits 4-6 |
 | `cut` | the filter program's `cut` expression; a parameter row carries the following cutoff row's value, because the player reads both in one tick; `!cut` |
-| `hold` | a cutoff sweep row of speed 0 (`l` $01-$7F, `r` 0), which holds the cutoff, or the expression driving it, `l` ticks; the expression conversion clears each sweep row it replaces to one, keeping `l` |
+| `hold` | a cutoff sweep row of speed 0 (`l` $01-$7F, `r` 0), which holds the cutoff, or the expression driving it, `l` ticks; the expression conversion clears each sweep row it replaces to one, keeping `l`, and a set-cutoff row (`l` 0) it replaces to one of `l` 1, which, like the set-cutoff row, lasts one tick |
 | volume | `!vol` |
 
 `res` and `route` are one byte, which a filter parameter row, `!resfilt:r/m` (command $B) and a

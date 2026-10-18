@@ -506,4 +506,4 @@ modulators:
         record: filttab
         index: fptr
         field: x
-        clear: {r: "r if l >= 0x80 else 0", cut: -1}
+        clear: {l: "l if l else 1", r: "r if l >= 0x80 else 0", cut: -1}
