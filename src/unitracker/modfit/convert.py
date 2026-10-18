@@ -72,7 +72,9 @@ class Observer(Replay):
     """A native replay that records the event instance each occurrence belongs to.
 
     An instance is ``(voice, play count, step)``; ``events`` maps ``(unit, instance)`` to the
-    occurrence a start hook of the unit was applying when that event was the voice's last.
+    occurrence a start hook of the unit was applying when that event was the voice's last. An
+    occurrence's ``instance`` is the voice's last event at its start, ``fetched`` at its first
+    firing.
     """
 
     def __init__(self, ir: dict):
@@ -107,6 +109,7 @@ class Observer(Replay):
         super().open(unit, name, voice, snap, before)
         occ = self.active[name]
         occ.instance, occ.index = self.started.pop(name, None), len(self.occurrences) - 1
+        occ.fetched = None if voice is None else self.last[voice]
 
     def fired(self, unit: dict, occ) -> None:
         inst = self.hooked.pop((unit["name"], occ.voice), None)
@@ -234,6 +237,13 @@ def falls_back(spec: dict) -> bool:
     )
 
 
+def fallback(spec: dict, occ) -> tuple | None:
+    """``(record, index)`` an occurrence's selector falls back to (``falls_back``), or None."""
+    if not falls_back(spec):
+        return None
+    return spec["site"]["record"], evaluate(spec["site"]["index"], occ.start)
+
+
 def diagnosis(spec: dict, occ) -> str:
     """The unit, program and start of an occurrence, as a lift error names them."""
     where = site_of(spec, occ)
@@ -329,7 +339,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         self.obs, self.texts = obs, texts
         self.exprs = {int(i): str(t) for i, t in (self.ir.get("exprs") or {}).items()}
         self.xindex = {t: i for i, t in sorted(self.exprs.items(), reverse=True)}
-        self.events = {}
+        self.events, self.held = {}, set()
         self.instrument = self.pr.get("instrument") or {}
         self.records = self.ir.setdefault("records", {})
         self.codecs = codecs(self.pr, self.ir.get("tables"))
@@ -407,18 +417,33 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             out |= {int(c[1]) for e in events for c in _cmds(e) if int(c[0]) in codes}
         return out - ({rtype.none} if rtype.none is not None else set())
 
-    def record_site(self, where: tuple, by_unit: dict) -> None:
-        """Write a record's units' expressions; a unit with several gets one copy per text.
+    def _site_texts(self, where: tuple, by_unit: dict) -> dict:
+        """``{unit: {text: [occurrence]}}`` a record site writes.
 
-        A unit whose site is a program row writes every start's text there, the identity too.
+        A start at the site selects the expression written there, so on a program row, or a
+        record written in place that some start of the unit writes an expression in, a start
+        without modulation plays the identity. A program copy is reached through the references
+        to it, and a site no start writes an expression in leaves its starts to the
+        playroutine's own firing.
         """
+        inplace = self.rtypes[where[0]].chain is None
+        texts = {}
+        for unit, got in by_unit.items():
+            rowed = bool(self.units[unit]["site"].get("row"))
+            some = {t: o for t, o in got.items() if t is not None}
+            if (some or rowed) and not (some and self.native(where, unit, some)):
+                if None in got and (inplace or rowed):
+                    some[IDENTITY] = some.get(IDENTITY, []) + got[None]
+                texts[unit] = some
+        if inplace:
+            self.held |= {(u, where) for u in texts}
+        return texts
+
+    def record_site(self, where: tuple, by_unit: dict) -> None:
+        """Write a record's units' expressions (``_site_texts``); a unit with several gets one
+        copy per text."""
         rowed = {u for u in by_unit if self.units[u]["site"].get("row")}
-        texts = {
-            u: {(IDENTITY if t is None and u in rowed else t): o for t, o in got.items()}
-            for u, got in by_unit.items()
-        }
-        texts = {u: {t: o for t, o in got.items() if t is not None} for u, got in texts.items()}
-        texts = {u: got for u, got in texts.items() if got and not self.native(where, u, got)}
+        texts = self._site_texts(where, by_unit)
         if not texts:
             return
         many = [u for u, got in texts.items() if len(got) > 1]
@@ -594,17 +619,19 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     def select(self, where: tuple, chosen: list) -> None:
         """Make each ``(occurrence, copy)``'s event play that copy of record ``where``.
 
-        An event that names the record selects it; an instrument an event does not name is the
-        one its lifetime plays, so the event that names it selects the first copy of the
-        lifetime's occurrences, and an event whose copy differs from the one before it in the
-        lifetime names its own.
+        An event that names the record selects it. The instrument an occurrence plays is the
+        one the voice's last event at its first firing selects (its ``fetched``), which is the
+        one that event's lifetime plays when the event does not name it; so the event that names
+        it selects the first copy of the lifetime's occurrences, and an event whose copy differs
+        from the one before it in the lifetime names its own.
         """
         name, old = where
         commands, lives = self.commands(name), {}
         for occ, record in chosen:
-            if occ.instance is None:
+            instance = occ.fetched if name == self.instrument.get("type") else occ.instance
+            if instance is None:
                 raise ConversionError(f"{occ.unit} at tick {occ.tick}: no event selects {where}")
-            head = occ.instance
+            head = instance
             if not self._names(self._event(head), name, old, commands):
                 if name == self.instrument.get("type"):
                     head = self._heads.get(head)
@@ -615,7 +642,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                         f"{occ.unit} at tick {occ.tick}: its event does not name {where}"
                     )
             life = lives.setdefault(head, {})
-            if life.setdefault(occ.instance, record) != record:
+            if life.setdefault(instance, record) != record:
                 raise ConversionError(f"{occ.unit} at tick {occ.tick}: one event plays two {where}")
         base = int(self.instrument.get("base", 0))
         for head, life in lives.items():
@@ -677,7 +704,8 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             native = [c for c in _cmds(event) if int(c[0]) in spec.get("commands", ())]
             started = occ.instance == instance
             onward = falls_back(spec) and not _cmds(event) and occ.start.get(ONSET, 1)
-            if not (native or (text is not None and (started or onward))):
+            held = (unit, fallback(spec, occ)) in self.held
+            if not (native or ((text is not None or held) and (started or onward))):
                 continue
             ev = self.edit(instance)
             cmds = [c for c in _cmds(ev) if int(c[0]) not in spec.get("commands", ())]

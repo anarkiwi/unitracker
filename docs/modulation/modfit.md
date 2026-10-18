@@ -96,7 +96,8 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
    start has the same one, else each start's own (closed form if any, else recurrence). A start
    whose first value differs from the player's by a carried constant `c` is written `f - c·(φ < 1)`
    (a shared closed form gives way to the recurrence first). A start that does not modulate
-   writes nothing (`v` at a row site or where a native command is replaced).
+   writes nothing (`v` at a row site, at a record written in place where another start of its
+   unit writes a text, or where a native command is replaced).
 4. **Write.** At the unit's `site` when it exists and its `when` holds over the start cells:
    - a program site: the program is copied with `clear` applied to every row, `first` set on
      its first row and the text in its first row's `field`; trailing rows that set nothing are
@@ -105,12 +106,14 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
      are redirected to the copy;
    - a `row` site: the text at `φ = 0` is written in the row itself;
    - several texts for one unit: the most frequent takes the site, each other gets a copy and
-     each starting event is pointed at its copy;
+     each starting event is pointed at its copy; an instrument is selected through the event the
+     voice last fetched at the occurrence's first firing, which may already be the next note's;
    - integer texts in a program whose rows have other data the format writes stay native rows.
 
    Otherwise the event's `commands` codes are replaced by the `!freq` command naming the text,
    preceded by `!legato` when the start's `legato` cell is set on a note; with an `x` that
-   reads the site's field, commandless steps the occurrence spans get it too. Changed events
+   reads the site's field, commandless steps the occurrence spans get it too, and a start that
+   does not modulate gets `v` where that field's record holds a text. Changed events
    go into phrase variants (`p3~1`); a track's loop is unrolled where its passes differ.
    `retire` fields are cleared in every row of their record.
 5. **Verify.** The rewritten song's register grid must equal the native song's over the whole

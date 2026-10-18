@@ -383,7 +383,7 @@ def test_the_player_floors_a_scaled_expression_to_the_cell():
 
 def occurrence(unit, instance, start, index, label=()):
     occ = Occurrence(unit, instance[0], 0, label, start, ())
-    occ.instance, occ.index = instance, index
+    occ.instance, occ.index, occ.fetched = instance, index, instance
     return occ
 
 
@@ -470,6 +470,28 @@ def test_a_command_on_a_note_naming_no_instrument_selects_its_lifetimes_copy(phr
     assert lifetime_freqs(out) == list(zip((48, 50, 52), texts))
     (play,) = out["tracks"][0]["plays"]
     assert [e.get("instrument") for e in out["phrases"][play["phrase"]]] == named
+
+
+def test_a_start_without_modulation_plays_the_identity_where_its_site_holds_an_expression():
+    ir = gt_ir("[C4.i1*4, D4.i2*4, E4*4, F4*4]", INS + "}\n        i2: " + INS + "}")
+    at_site = {"command": 0, "onset": 1, "fired": 0, "ii": 2}
+    occs = [
+        occurrence("command", (0, 0, 0), at_site, 0, (0, 5)),
+        occurrence("command", (0, 0, 8), at_site, 1, (0, 0)),
+        occurrence("command", (0, 0, 12), {**at_site, "fired": 1}, 2, (0, 0)),
+    ]
+    occs[0].fetched = (0, 0, 4)
+    events = {("command", (0, 0, 12)): 2}
+    out = convert.Rewrite(ir, obs_of(occs, events), ["v + 1", None, None]).run()
+    (play,) = out["tracks"][0]["plays"]
+    steps = convert._steps(out["phrases"][play["phrase"]])  # pylint: disable=protected-access
+    freq = {i: out["exprs"][r["freq"]] for i, r in out["records"]["ins"].items() if "freq" in r}
+    assert [freq.get(steps[k].get("instrument")) for k in (4, 8)] == ["v + 1", "v"]
+    assert steps[12]["command"] == [16, {t: i for i, t in out["exprs"].items()}["v"]]
+    native = set(regs(ir, 130)[:, 0:2] @ [1, 256])
+    _, d4, e4, _ = sorted(native - {0})
+    ramp = set(regs(out, 130)[:, 0:2] @ [1, 256]) - native
+    assert ramp and all(d4 < w < e4 for w in ramp)
 
 
 def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own():
