@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from unitracker.format import songio
 from unitracker.format.atoms import AtomError, format_atom, note_index, note_name, parse_atom, runs
 from unitracker.format.expr import ExprError, Resolver, parse
 
@@ -49,8 +50,8 @@ def test_atoms_format_and_parse():
         assert parsed["commands"] == [
             (n, a if a is None or a[0].isalpha() else int(a)) for n, a in args
         ]
-    assert (parse_atom(False)["kind"], parse_atom(True)["kind"]) == (2, 3)
-    for bad in BAD_ATOMS:
+    assert (parse_atom("off")["kind"], parse_atom("on")["kind"]) == (2, 3)
+    for bad in [*BAD_ATOMS, False, True, "C02", "C4!vol:03", "C4!tempo:6/07", "C-01"]:
         with pytest.raises(AtomError):
             parse_atom(bad)
     with pytest.raises(AtomError, match="without \\*1"):
@@ -129,3 +130,27 @@ def test_expression_errors(resolver, texts, match):
 def test_a_function_cannot_shadow_a_builtin():
     with pytest.raises(ExprError, match="builtins"):
         Names({"s8": {"args": ["a"], "expr": "a"}})
+
+
+@pytest.mark.parametrize(
+    "old,new,match",
+    [
+        ("C4.i1, off", "C4.i1, no", "'no' is not a value of the format"),
+        ("C4.i1, off", "C4.i1, False", "'False' is not a value of the format"),
+        ("C4.i1, off", "C4.i1, false", "not an atom: False"),
+        ("C4.i1, off", "C4.i1, -!vol:01", "bad atom '-!vol:01'"),
+        ("C4.i1, off", "C4.i1, C02", "bad atom 'C02'"),
+        ("ctrl: 129", "ctrl: 0x81", "'0x81' is not a decimal integer"),
+        ("ctrl: 129", "ctrl: 0201", "'0201' is not a decimal integer"),
+        ("note: +0", "note: 0", "note 0 is written \\+0"),
+    ],
+)
+def test_the_reader_takes_one_spelling_of_a_value(old, new, match):
+    text = (
+        f"unitracker: {songio.VERSION}\nplayroutine: {{ref: goattracker2}}\nsong:\n"
+        "  - def:\n      ins:\n        i1: {ctrl: [{ctrl: 129, note: +0}, end]}\n"
+        "      phrase:\n        p1: [C4.i1, off]\n    play: [p1, p1, p1]\n  - end\n"
+    )
+    assert songio.dumps(songio.loads(text)) == text.replace("song:", "meta: {}\nsong:")
+    with pytest.raises(ValueError, match=match):
+        songio.loads(text.replace(old, new))

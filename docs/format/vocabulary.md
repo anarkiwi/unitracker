@@ -86,7 +86,9 @@ voice and the bits of `m`, `route: - m` removes them, and `m` is left out when i
 
 A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last row
 applies on the note's first tick, and each earlier row its `hold` ticks before the row after it.
-A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`. A note's restart is its instrument's
+A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`; a player may give a lookahead row's `ctrl` a
+further effect, which its file states where it defines the row (SID-Wizard's `ctrl: 24` also pauses
+the voice's tables). A note's restart is its instrument's
 (`restart: r1`) in every player:
 
 ```yaml

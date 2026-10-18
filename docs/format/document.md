@@ -11,6 +11,11 @@ Top-level keys, in this order:
 | `tempo` | the initial tempo, only where it differs from the playroutine's `defaults`: `n` ticks per step, or `[a, b]`, a swing whose steps alternate `a` and `b` ticks (two different tempos); a playroutine without a tempo refuses it |
 | `song` | the timeline: rows, then `end` or `{loop: k}`, as a program ends |
 
+Each value has one spelling: an integer is decimal without leading zeros (`129`, not `0x81` or
+`0201`), a relative note carries its sign (`note: +0`), a note name its octave without leading
+zeros (`C2`, not `C02`), and the only booleans are `true` and `false` (`off` and `on` are atoms);
+the reader refuses YAML's other spellings (`no`, `False`, `0x81`).
+
 `playroutine.constants` lists only the constants that differ from the library's.
 `playroutine.tables` patches the library's tables: `{index: value}` for the entries that
 differ, or a full list when the length differs.

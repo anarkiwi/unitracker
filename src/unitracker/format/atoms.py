@@ -6,9 +6,10 @@ import numpy as np
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 _NOTE_INDEX = {name: i for i, name in enumerate(NOTE_NAMES)}
-_ARG = r"[A-Za-z_]\w*|\d+(?:/\d+)*"
+_NUMBER = r"(?:0|[1-9]\d*)"
+_ARG = rf"[A-Za-z_]\w*|{_NUMBER}(?:/{_NUMBER})*"
 _ATOM = re.compile(
-    r"^(?P<note>-|off|on|(?P<pc>[A-G]#?)(?P<oct>-?\d+))"
+    r"^(?P<note>-|off|on|(?P<pc>[A-G]#?)(?P<oct>-?(?:0|[1-9]\d*)))"
     r"(?:\.(?P<ins>[A-Za-z_]\w*))?"
     rf"(?P<cmds>(?:![a-z][a-z0-9]*(?::(?:{_ARG}))?)*)"
     r"(?:\*(?P<steps>[2-9]|[1-9]\d+))?$"
@@ -55,8 +56,6 @@ def parse_atom(atom) -> dict:
     A name or ``none`` stays text, an argument ``a/b`` is the tuple ``(a, b)``, and a command
     without an argument has ``None``. ``*1`` is refused: one step is the default.
     """
-    if isinstance(atom, bool):
-        atom = "on" if atom else "off"
     if not isinstance(atom, str):
         raise AtomError(f"not an atom: {atom!r}")
     match = _ATOM.match(atom)

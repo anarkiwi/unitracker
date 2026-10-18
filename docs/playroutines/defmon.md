@@ -11,7 +11,7 @@ The defMON `$1000` replay of [`defmon.yaml`](../../src/unitracker/playroutines/d
 | lifted from | the replay's memory after init |
 | step | one tick: the lifter simulates the arranger and pattern counters, so each song step becomes one phrase per voice, all of the same length in ticks, with each event on the tick the replay applies it; the playroutine fetches every tick |
 | notes | `note_offset` 24: defMON index 48 is `C2`; a note is a GATE_N note |
-| constants | `floor` and `dbl`, the result of the replay's `$D41B` probe at init, which tells the SID models apart |
+| constants | `floor` and `dbl`, the result of the replay's `$D41B` probe at init, which tells the SID models apart: they are the SID model of the environment the tune is lifted in, not data of the tune |
 
 The replay's init ($1522) clears `$D417`, `$D418`'s filter bits, the ACID accumulator, step and
 offset `cp`, and each voice's envelope, control register and mask, pitch mode, pulse step,

@@ -37,7 +37,7 @@ from unitracker.format.schema import expand
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
 from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.xexpr import ExpressionError, text_of
-from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, parse
+from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, Signed, parse
 from unitracker.player.modulation import declared
 from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
 
@@ -721,8 +721,12 @@ class _Reader:
         return row
 
     def _decoded(self, codec, rtype, value: dict, place) -> tuple:
-        """``(row, decoded fields)`` of a codec row, its named references kept as written."""
+        """``(row, decoded fields)`` of a codec row, its named references kept as written; a
+        relative note is written with its sign."""
         value = dict(value)
+        note = value.get("note")
+        if "note" in codec.keys and isinstance(note, int) and not isinstance(note, (bool, Signed)):
+            raise SongFormatError(f"note {note} is written {note:+d} in {rtype.written}")
         for key, number in codec.expr_keys().items():
             v = value.get(key)
             if isinstance(v, str) or (not number and isinstance(v, int) and key in value):
@@ -1026,7 +1030,10 @@ class _Reader:
 
 def loads(text: str) -> dict:
     """The internal representation of a v1.20 document."""
-    doc = parse(text)
+    try:
+        doc = parse(text)
+    except yaml.YAMLError as exc:
+        raise SongFormatError(f"not a unitracker v{VERSION} document: {exc}") from exc
     version = doc.get("unitracker") if isinstance(doc, dict) else None
     if getattr(version, "text", version) != VERSION:
         raise SongFormatError(f"not a unitracker v{VERSION} document")

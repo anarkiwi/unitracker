@@ -128,7 +128,7 @@ def note_value(value) -> tuple[bool, int]:
     if isinstance(value, bool):
         raise CodecError(f"bad note {value!r}")
     if isinstance(value, int):
-        return False, value
+        return False, int(value)
     if _RELATIVE.match(str(value)):
         return False, int(value)
     try:
