@@ -1,5 +1,7 @@
 """v1.20 expressions in documents and the lift-time conversion of native modulations to them."""
 
+import copy
+
 import numpy as np
 import pytest
 import sympy
@@ -371,6 +373,30 @@ def test_a_filter_sweep_is_written_in_cutoff_units(ramp, fall, text, wrong):
     assert not np.array_equal(regs(songio.loads(written.replace(*wrong)), 200), want)
 
 
+def test_a_sweep_that_turns_at_a_row_boundary_plays_as_written():
+    ir = gt_ir("[C4.i1*16, D4*16]", FILTER)
+    ft = ir["records"]["filttab"]
+    ft[1]["next"], ft[2] = 2, {"l": 0, "r": 102, "next": 3}
+    ft[3], ft[4], ft[5] = (
+        {"l": 30, "r": 253, "next": 4},
+        {"l": 1, "r": 3, "next": 5},
+        {
+            "l": 1,
+            "r": 255,
+            "next": 4,
+        },
+    )
+    want = regs(ir, 200)
+    out = convert.convert(ir, cache=None, workers=1)
+    [text] = out["exprs"].values()
+    assert text.endswith("8*(φ >= 32)*((-(φ % 2) + 2*(φ // 2) - 17) % 256)")
+    written = songio.dumps(out)
+    assert np.array_equal(regs(songio.loads(written), 200), want)
+    misread = written.replace("+ 2*(φ // 2)", "- 2*(φ // 2)")
+    assert misread != written
+    assert not np.array_equal(regs(songio.loads(misread), 200), want)
+
+
 def test_the_player_floors_a_scaled_expression_to_the_cell():
     ins = INS + ", filter: [{cut: '1024 + 12*min(φ, 6)', res: 12, route: 1, mode: 16}, end]}"
     cut = regs(gt_ir("[C4.i1*8]", ins), 40)[:, 22]
@@ -518,6 +544,17 @@ def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own
     assert np.array_equal(regs(out, 80), want)
     events[1]["command"] = events[1].pop("commands")[1]
     assert not np.array_equal(regs(out, 80), want)
+
+
+def test_a_phrase_every_play_of_which_plays_a_variant_is_dropped():
+    ir = gt_ir("[C4.i1*4, D4*4, E4*4]")
+    ir["phrases"]["p1"][1]["command"] = [3, 0]
+    ir["phrases"]["unplayed"] = copy.deepcopy(ir["phrases"]["p1"][:1])
+    want = regs(ir, 80)
+    out = convert.convert(ir, cache=None, workers=1)
+    (variant,) = [p["phrase"] for p in out["tracks"][0]["plays"]]
+    assert variant == "p1~1" and "p1" not in out["phrases"] and "unplayed" in out["phrases"]
+    assert np.array_equal(regs(songio.loads(songio.dumps(out)), 80), want)
 
 
 def test_a_started_event_without_a_command_gets_the_identity_and_legato():
