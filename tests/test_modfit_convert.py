@@ -790,10 +790,10 @@ def patched(raw: bytes, columns: dict) -> bytes:
     mem = SidImage.from_bytes(raw).mem
     data = int.from_bytes(raw[6:8], "big") + 2
     base = int.from_bytes(raw[data - 2 : data], "little")
-    out = bytearray(raw)
+    out, rep = bytearray(raw), defmon.Replay(mem)
     for row, extra in columns.items():
-        eff = defmon.resolve_row(mem, row)
-        addr = mem[defmon.SIDTAB_LO + eff] | (mem[defmon.SIDTAB_HI + eff] << 8)
+        eff = defmon.resolve_row(rep, row)
+        addr = rep.word(defmon.SIDTAB_LO, defmon.SIDTAB_HI, eff)
         new = base + len(out) - data
         out += row_body({**defmon.row_fields(mem, addr), **extra})
         out[data + defmon.SIDTAB_LO + eff - base] = new & 0xFF

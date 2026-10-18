@@ -1,13 +1,16 @@
 """Lift a defMON replay (.sid) to a unitracker song.
 
-The $1000 replay build keeps its state in self-modified operands; init runs on
-pydefmon's DefmonPlayer and tables and state are read from that memory. Song timing
-comes from simulating the replay's arranger and pattern counters.
+The replay keeps its state in self-modified operands; init runs on pydefmon's DefmonPlayer, and
+that memory, relocated to the $1000 build's layout, gives the tables and state. Song timing comes
+from simulating the replay's arranger and pattern counters.
 """
+
+import itertools
 
 import numpy as np
 import yaml
-from pysidtracker import SidImage
+from pysidtracker import CodePattern, SidImage, find_code_all
+from pysidtracker.mos6502 import OP_LEN, OPCODES
 
 from unitracker.format.songio import library, song_meta
 from unitracker.modfit.convert import convert, window
@@ -19,54 +22,65 @@ VOICE_OFFSETS = (0x00, 0x31, 0x62)
 MAX_STEP_TICKS = 1 << 14
 MAX_SONG_STEPS = 4096
 
-# Replay code that must be present byte-for-byte; ?? are self-modified operands.
-ANCHORS = (
-    (0x1003, "4C 22 10"),
+# The $1000 build's replay code by region, a part code or each build's variant of it (see locate).
+REGIONS = (
     (
         0x1022,
+        "SID band",
         "A2 ?? A9 ?? 8E 02 D4 8D 03 D4 A2 ?? A9 ?? 8E 00 D4 8D 01 D4 A2 ?? A0 ?? A9 ?? 49 ??"
         " 8E 06 D4 8C 05 D4 8D 04 D4",
     ),
     (
         0x10A9,
+        "ACID step and arranger",
         "A9 ?? 8D 17 D4 A9 ?? 09 0F 8D 18 D4 A9 ?? 18 ?? ?? 8D B6 10 A9 ?? ?? ?? 10 03 AD CE 10"
-        " 8D BE 10 69 ?? 30 04 C9 ?? B0 03 AD CE 10 ?? 8D 16 D4 A9 ?? 10 6B",
-    ),
-    (
-        0x10EA,
-        "A0 ?? BE 00 1B 10 28 B9 00 1D F0 1C CC EC 14 F0 09 8C EC 14 8D ED 14 4C 12 11 CE ED"
-        " 14 D0 09 A9 00 8D EC 14 C8 4C 16 11 B9 00 1C A8 BE 00 1B BD 00 1A 8D 86 11 BD 80 1A"
-        " 8D 87 11 BE 00 1C BD 00 1A 8D 0E 12 BD 80 1A 8D 0F 12 BE 00 1D BD 00 1A 8D 96 12 BD"
-        " 80 1A 8D 97 12 C8 8C EB 10",
+        " 8D BE 10 69 ?? 30 04 C9 ?? B0 03 AD CE 10 ?? 8D 16 D4 A9 ?? 10 ?? 29 0F 8D D9 10 8D"
+        " 4A 11 8D D2 11 8D 5A 12 A0 ?? BE 00 1B 10",
+        {
+            "counted": "28 B9 00 1D F0 1C CC EC 14 F0 09 8C EC 14 8D ED 14 4C 12 11 CE ED 14 D0"
+            " 09 A9 00 8D EC 14 C8 4C 16 11",
+            "plain": "07",
+        },
+        "B9 00 1C A8 BE 00 1B BD 00 1A 8D 86 11 BD 80 1A 8D 87 11 BE 00 1C BD 00 1A 8D 0E 12 BD"
+        " 80 1A 8D 0F 12 BE 00 1D BD 00 1A 8D 96 12 BD 80 1A 8D 97 12 C8 8C EB 10",
     ),
     (
         0x117F,
+        "pattern event",
         "A0 01 A9 ?? 10 0A B9 ?? ?? 8D EF 12 8E E0 12 C8 A9 ?? 10 0A B9 ?? ?? 8D 82 13 8E 73 13"
         " C8 A9 ?? 10 13 B9 ?? ?? 8D ED 12 8D 7F 13 8E 19 10 8E 1A 10 8E 1B 10 C8 A2 ?? 10 05"
         " 8E D9 10 30 12 98 18 6D 86 11 8D 86 11 90 03 EE 87 11 A9 0F 8F 4A 11",
     ),
     (
         0x12DF,
+        "sidcall cascade",
         "A9 ?? F0 0B 30 2B CE E0 12 4C 10 13 ?? ?? ?? A0 ?? B9 00 19 D0 07 B9 00 18 A8 B9 00 19"
         " 85 FC B9 00 1E 8D E0 12 B9 00 18 C8 8C EF 12 A2 00 20 B0 16",
     ),
     (
         0x1405,
+        "pitch and pulse steps",
         "A2 62 BD 1B 10 F0 47 10 5B 0A A8 10 15 BD 19 10 F9 F8 14 9D 19 10 BD 1A 10 F9 94 15 9D"
         " 1A 10 4C 3A 14 B9 78 15 18 7D 19 10 9D 19 10 B9 14 16 7D 1A 10 9D 1A 10 18 BC 7F 13"
         " BD 19 10 79 9C 15 9D 2D 10 B9 38 16 7D 1A 10 9D 2F 10 4C 95 14 BC 7F 13 B9 9C 15 18"
         " 7D 1F 10 9D 2D 10 B9 38 16 9D 2F 10 4C 95 14 18 7D 7F 13 A8 B9 84 15 38 F9 83 15 8D"
         " 89 14 B9 20 16 F9 1F 16 8D 91 14 BC 7F 13 B9 9C 15 18 69 ?? 9D 2D 10 B9 38 16 69 ??"
-        " 9D 2F 10 BC 1E 10 F0 49 10 34 98 0B 7F 7D 23 10 9D 23 10 90 3C BD 25 10 C9 0F F0 06"
+        " 9D 2F 10 BC 1E 10 F0 49 10 34 98 0B|2B 7F 7D 23 10 9D 23 10 90 3C BD 25 10 C9 0F F0 06"
         " FE 25 10 4C E3 14 A9 F8 9D 23 10 98 49 80 9D 1E 10 4C E3 14 A9 01 9D 23 10 98 49 80"
         " 9D 1E 10 4C E3 14 BD 23 10 FD 1E 10 9D 23 10 B0 08 BD 25 10 F0 E2 DE 25 10 8A CB 31"
         " 30 03 4C 07 14 60",
     ),
     (
         0x16B0,
-        "85 FB A0 00 B1 FB F0 5A 0A 85 96 10 06 C8 B1 FB 9D 3B 10 90 06 C8 B1 FB 9D 3D 10 24 96"
-        " 50 06 C8 B1 FB 9D 39 10 A5 96 29 20 F0 06 C8 B1 FB 9D 37 10 A5 96 29 10 F0 0E C8 B1"
-        " FB 30 04 18 7D ED 12 29 7F 9D 7F 13 A5 96 29 08 F0 06 C8 B1 FB 9D 1B 10 A5 96 29 04"
+        "sidTAB walk",
+        "85 FB A0 00 B1 FB F0 ?? 0A 85 96 10 06 C8 B1 FB 9D 3B 10 90 06 C8 B1 FB 9D 3D 10 24 96"
+        " 50 06 C8 B1 FB 9D 39 10 A5 96 29 20 F0 06 C8 B1 FB 9D 37 10 A5 96 29 10 F0 ?? C8 B1"
+        " FB",
+        {
+            "absolute": "30 04 18 7D ED 12 29 7F 9D 7F 13",
+            "relative": "18 7D ED 12 9D 7F 13",
+        },
+        "A5 96 29 08 F0 06 C8 B1 FB 9D 1B 10 A5 96 29 04"
         " F0 0B C8 B1 FB 9D 25 10 29 F0 9D 23 10 C8 B1 FB F0 7E 0A 85 96 90 06 C8 B1 FB 9D 1E"
         " 10 A5 96 F0 6F 29 80 F0 24 C8 B1 FB F0 09 29 08 D0 0E B1 FB 4C 4B 17 AD AA 10 3D 21"
         " 10 4C 4B 17 AD AA 10 29 0F 11 FB 1D 20 10 8D AA 10 A7 96 F0 43 29 40 F0 06 C8 B1 FB"
@@ -88,6 +102,11 @@ TABLES = (
 SIDTAB_LO, SIDTAB_HI, SIDTAB_DL = 0x1800, 0x1900, 0x1E00
 PATTERN_LO, PATTERN_HI = 0x1A00, 0x1A80
 ARRANGER = (0x1B00, 0x1C00, 0x1D00)
+UNRELOCATED_OPS = {0x20, 0x4C, 0x6C}
+FIXED_MODES = {"imm", "rel", "impl", "acc"}
+SID_PAGE = 0xD4
+# Each voice's detune, routing bit and routing mask.
+DETUNE = (0x101F, 0x1020, 0x1021)
 GATE_A, GATE_B, GATE_N, ALT = 0x40, 0x20, 0x10, 0x80
 
 # Voice state operands at base + voice offset: (cell, lo address, hi address or None).
@@ -124,26 +143,162 @@ class LiftError(ValueError):
     """The tune is not a replay build the defMON playroutine covers."""
 
 
-def check_build(mem) -> None:
-    """Raise unless every anchor of the $1000 replay build is in ``mem``."""
-    for addr, pattern in ANCHORS:
-        for i, tok in enumerate(pattern.split()):
-            if tok != "??" and mem[addr + i] != int(tok, 16):
+UNREPEATED = "the play routine's sub-tick calls do not repeat within the song"
+
+
+def code_pattern(code: str) -> tuple[CodePattern, dict]:
+    """``code`` as a pattern capturing each relocatable operand by its $1000 build value, a zero
+    page one as ``zXX`` and an absolute one as ``aXXXX``, and the offsets of its ``a|b`` tokens
+    with their encodings."""
+    toks, out, alts, i = code.split(), [], {}, 0
+    while i < len(toks):
+        if toks[i] == "??":
+            out.append("??")
+            i += 1
+            continue
+        ops = [int(b, 16) for b in toks[i].split("|")]
+        if len(ops) > 1:
+            alts[i] = set(ops)
+        ins = toks[i : i + OP_LEN[ops[0]]]
+        i += len(ins)
+        head, mode = "??" if len(ops) > 1 else ins[0], OPCODES[ops[0]][1]
+        if "??" in ins or mode in FIXED_MODES:
+            out += [head, *ins[1:]]
+        elif ops[0] in UNRELOCATED_OPS:
+            out += [head, "??", "??"]
+        elif len(ins) == 2:
+            out += [head, f"{{z{ins[1]}}}"]
+        else:
+            out += (
+                [head, *ins[1:]]
+                if int(ins[2], 16) == SID_PAGE
+                else [head, f"{{a{ins[2]}{ins[1]}:w}}"]
+            )
+    return CodePattern(" ".join(out)), alts
+
+
+def region_builds(parts):
+    """``(variants, code, layout)`` of each build's code of a region's ``parts``: ``layout`` lists
+    each part's ``($1000 build offset, offset, length)``."""
+    options = [list(p.items()) if isinstance(p, dict) else [(None, p)] for p in parts]
+    canon = [len(opts[0][1].split()) for opts in options]
+    for combo in itertools.product(*options):
+        sizes = [len(code.split()) for _, code in combo]
+        starts = zip(itertools.accumulate([0, *canon]), itertools.accumulate([0, *sizes]), sizes)
+        yield {name for name, _ in combo if name}, " ".join(c for _, c in combo), list(starts)
+
+
+def locate(mem) -> tuple[dict, set]:
+    """``({$1000 build address: address}, variants)`` of a replay build in ``mem``: each region's
+    code is found wherever it lies, and its relocatable operands and its own bytes must place each
+    address of the $1000 build once."""
+    at, variants = {}, set()
+    for addr, name, *parts in REGIONS:
+        for names, code, layout in region_builds(parts):
+            pattern, alts = code_pattern(code)
+            match = next(
+                (
+                    m.addr
+                    for m in find_code_all(mem, pattern, start=0, end=len(mem))
+                    if all(mem[m.addr + k] in v for k, v in alts.items())
+                ),
+                None,
+            )
+            if match is not None:
+                break
+        else:
+            raise LiftError(
+                f"not a defMON replay build: no {name} code (${addr:04X} in the $1000 build)"
+            )
+        variants |= names
+        places = [
+            (int(n[1:], 16), int.from_bytes(mem[match + k : match + k + w], "little"))
+            for n, k, w in pattern.captures
+        ]
+        places += [(addr + c + k, match + o + k) for c, o, n in layout for k in range(n)]
+        for canon, actual in places:
+            if at.setdefault(canon, actual) != actual:
                 raise LiftError(
-                    f"not the $1000 defMON replay build (code differs at ${addr + i:04X})"
+                    f"the {name} code places ${canon:04X} of the $1000 build at both"
+                    f" ${at[canon]:04X} and ${actual:04X}"
                 )
+    return at, variants
 
 
-def _word(mem, lo, hi):
-    return mem[lo] | (mem[hi] << 8)
+class Calls:
+    """The calls the tune's play routine makes to the replay, run on ``native`` as far as they are
+    asked for: each call's register grid row, and whether it ran the pattern step, stepping voice
+    0's pattern counter or arming the arranger (a byte at ``marks``), as a multispeed play
+    routine's sub-tick calls do not."""
+
+    def __init__(self, native, marks):
+        self.native, self.marks, self.rows, self.full = native, marks, [], []
+
+    def run(self, ticks: int) -> None:
+        """Run the calls to ``ticks``; a call lost while the one before it still runs is refused."""
+        mem, cpu = self.native._mem, self.native._mpu  # pylint: disable=protected-access
+        while len(self.rows) < ticks:
+            before, cycles = [mem[a] for a in self.marks], cpu.processorCycles
+            self.native.play_frame()
+            if cpu.processorCycles == cycles:
+                raise LiftError(f"call {len(self.rows)} is lost: the call before it still runs")
+            self.rows.append(self.native.regs[:])
+            self.full.append([mem[a] for a in self.marks] != before)
+
+    def grid(self, ticks: int) -> np.ndarray:
+        """The register grid of the first ``ticks`` calls."""
+        self.run(ticks)
+        return np.asarray(self.rows[:ticks], dtype=np.uint8)
+
+    def period(self, ticks: int) -> int:
+        """The least period of the first ``ticks`` calls' pattern steps."""
+        self.run(ticks)
+        full = np.asarray(self.full[:ticks])
+        return next((p for p in range(1, ticks) if (full[p:] == full[:-p]).all()), ticks)
 
 
-def voice_init(mem) -> dict:
+class Replay:
+    """A replay build's memory after init, read at the $1000 build's addresses (see :func:`locate`);
+    ``mem`` is the build's own memory, which pattern and sidTAB row pointers address. With a
+    ``native`` player of the tune its :class:`Calls` time the pattern steps; else every call runs
+    one; ``cycle`` is the period of the calls the song's steps are timed with."""
+
+    def __init__(self, mem, native=None):
+        self.mem = mem
+        self.at, self.variants = locate(mem)
+        self.calls = None if native is None else Calls(native, [self.at[0x114A], self.at[0x10D9]])
+        self.cycle = 1
+
+    def full(self, tick: int) -> bool:
+        """Whether call ``tick`` runs the pattern step."""
+        if self.calls is None:
+            return True
+        self.calls.run(tick + 1)
+        return self.calls.full[tick]
+
+    def period(self, ticks: int) -> int:
+        """The least period of the first ``ticks`` calls' pattern steps."""
+        return 1 if self.calls is None else self.calls.period(ticks)
+
+    def __call__(self, addr, off=0) -> int:
+        """The byte ``off`` past the build's place of ``addr``."""
+        return self.mem[self.at[addr] + off]
+
+    def word(self, lo, hi, off=0) -> int:
+        """The word of the bytes ``off`` past ``lo`` and ``hi``."""
+        return self(lo, off) | (self(hi, off) << 8)
+
+    def span(self, addr, n) -> list:
+        """The ``n`` bytes from ``addr``."""
+        return list(self.mem[self.at[addr] : self.at[addr] + n])
+
+
+def voice_init(rep: Replay) -> dict:
     """Each voice's state the module carries through init, as ``vinit`` records; the cells init
     sets (:data:`VOICE_SET`) must hold the playroutine's values."""
     out = {}
     for v, off in enumerate(VOICE_OFFSETS):
-        if (mem[0x101F + off], mem[0x1020 + off], mem[0x1021 + off]) != (
+        if tuple(rep(a, off) for a in DETUNE) != (
             v,
             1 << v,
             0xFF ^ (1 << v),
@@ -151,7 +306,7 @@ def voice_init(mem) -> dict:
             raise LiftError(f"voice {v} detune/routing constants are not the standard ones")
         rec = {}
         for cell, lo, hi in VOICE_STATE:
-            rec[cell] = mem[lo + off] if hi is None else _word(mem, lo + off, hi + off)
+            rec[cell] = rep(lo, off) if hi is None else rep.word(lo, hi, off)
             if rec[cell] != VOICE_SET.get(cell, rec[cell]):
                 raise LiftError(f"init leaves voice {v}'s {cell} at ${rec[cell]:02X}")
         out[v] = {
@@ -162,12 +317,11 @@ def voice_init(mem) -> dict:
     return out
 
 
-def unheard_init(ir: dict, native) -> dict:
+def unheard_init(ir: dict, theirs: np.ndarray) -> dict:
     """``ir`` without the ``vinit`` notes its replay does not hear, once a replay to the song's
-    recurrence and one period more proves it plays ``native``'s grid (the module's frequency
-    registers, which the playroutine does not carry, unheard)."""
-    ticks = window(ir)
-    theirs = np.asarray(native.render_grid(ticks), dtype=np.uint8)
+    recurrence and one period more proves it plays the replay's grid ``theirs`` (the module's
+    frequency registers, which the playroutine does not carry, unheard)."""
+    ticks = len(theirs)
 
     def mismatch(song):
         player = SongPlayer(song)
@@ -188,37 +342,39 @@ def unheard_init(ir: dict, native) -> dict:
     return {**ir, "records": {**ir["records"], "vinit": voices}}
 
 
-def global_init(mem) -> dict:
+def global_init(rep: Replay) -> dict:
     """The ACID step's direction the module carries through init, as the ``ginit`` record.
 
     The build's init zeroes the filter registers, the accumulator, its step and its offset ``cp``
     (the accumulator holds any later offset), so an init that leaves another value is refused."""
-    ops = {mem[0x10B8], mem[0x10BF]}
+    ops = {rep(0x10B8), rep(0x10BF)}
     if len(ops) != 1 or not ops <= {0xE9, 0x69}:
         raise LiftError("ACID opcodes are not a matching SBC/ADC pair")
     cleared = {
-        "the ACID offset cp": mem[0x10CA],
-        "resfilt": mem[0x10AA],
-        "fv": mem[0x10AF],
-        "acc": _word(mem, 0x10B6, 0x10BE),
-        "astep": _word(mem, 0x10B9, 0x10C0),
+        "the ACID offset cp": rep(0x10CA),
+        "resfilt": rep(0x10AA),
+        "fv": rep(0x10AF),
+        "acc": rep.word(0x10B6, 0x10BE),
+        "astep": rep.word(0x10B9, 0x10C0),
     }
     for cell, value in cleared.items():
         if value:
             raise LiftError(f"init leaves {cell} at ${value:02X}, not 0")
-    return {"sub": int(mem[0x10B8] == 0xE9)}
+    return {"sub": int(rep(0x10B8) == 0xE9)}
 
 
-def model_constants(mem) -> dict:
-    """The SID-model constants init's $D41B probe patches into the cutoff output."""
-    if mem[0x10D4] not in (0xEA, 0x0A):
+def model_constants(rep: Replay) -> dict:
+    """The SID-model constants init's $D41B probe patches into the cutoff output, and ``trabs``,
+    whether the build's sidTAB note column has an absolute form."""
+    if rep(0x10D4) not in (0xEA, 0x0A):
         raise LiftError("cutoff output opcode is neither NOP nor ASL")
-    return {"floor": mem[0x10CE], "dbl": int(mem[0x10D4] == 0x0A)}
+    trabs = int("absolute" in rep.variants)
+    return {"floor": rep(0x10CE), "dbl": int(rep(0x10D4) == 0x0A), "trabs": trabs}
 
 
-def resolve_row(mem, row):
+def resolve_row(rep: Replay, row):
     """The row a sidcall fetch of ``row`` reads after the JP redirect."""
-    return row if mem[SIDTAB_HI + row] else mem[SIDTAB_LO + row]
+    return row if rep(SIDTAB_HI, row) else rep(SIDTAB_LO, row)
 
 
 # sidTAB columns in the walk's read order: (bitmap, bit, value bytes, field).
@@ -251,19 +407,19 @@ def row_fields(mem, addr) -> dict:
     return out
 
 
-def sidtab_records(mem, seeds) -> dict:
+def sidtab_records(rep: Replay, seeds) -> dict:
     """Records for every sidTAB row a cascade can fetch from ``seeds``."""
     out, todo = {}, sorted(set(seeds))
     while todo:
         row = todo.pop()
         if row in out:
             continue
-        eff = resolve_row(mem, row)
-        if not mem[SIDTAB_HI + eff]:
+        eff = resolve_row(rep, row)
+        if not rep(SIDTAB_HI, eff):
             raise LiftError(f"sidTAB row {row} resolves to row {eff}, which has no body")
-        dl = mem[SIDTAB_DL + eff]
+        dl = rep(SIDTAB_DL, eff)
         rec = {"dl": dl, "next": (eff + 1) & 0xFF}
-        rec.update(row_fields(mem, _word(mem, SIDTAB_LO + eff, SIDTAB_HI + eff)))
+        rec.update(row_fields(rep.mem, rep.word(SIDTAB_LO, SIDTAB_HI, eff)))
         out[row] = rec
         if dl < 0x80:
             todo.append(rec["next"])
@@ -281,34 +437,38 @@ def decode_event(mem, ptr):
     return flag, vals.get(GATE_A), vals.get(GATE_B), vals.get(GATE_N), size
 
 
-def arranger_step(mem, y, jr, jc):
-    """The replay's arranger at $10EA: ``(pattern numbers, next y, jr, jc)``."""
-    if mem[ARRANGER[0] + y] & 0x80:
-        count = mem[ARRANGER[2] + y]
+def arranger_step(rep: Replay, y, jr, jc):
+    """The replay's arranger at $10EA: ``(pattern numbers, next y, jr, jc)``; a jump row of a
+    build without the ``counted`` arranger jumps every time."""
+    if rep(ARRANGER[0], y) & 0x80:
+        count = rep(ARRANGER[2], y) if "counted" in rep.variants else 0
         if count == 0:
-            y = mem[ARRANGER[1] + y]
+            y = rep(ARRANGER[1], y)
         elif y == jr:
             jc = (jc - 1) & 0xFF
             if jc:
-                y = mem[ARRANGER[1] + y]
+                y = rep(ARRANGER[1], y)
             else:
                 jr, y = 0, (y + 1) & 0xFF
         else:
-            jr, jc, y = y, count, mem[ARRANGER[1] + y]
-    pats = tuple(mem[base + y] for base in ARRANGER)
+            jr, jc, y = y, count, rep(ARRANGER[1], y)
+    pats = tuple(rep(base, y) for base in ARRANGER)
     return pats, (y + 1) & 0xFF, jr, jc
 
 
-def simulate_step(mem, pats, e):
-    """One song step: per voice ``[(tick, flag, a, b, n)]`` applied, step length, next e."""
-    ptrs = [_word(mem, PATTERN_LO + x, PATTERN_HI + x) for x in pats]
+def simulate_step(rep: Replay, pats, e, start=0):
+    """One song step from call ``start``: per voice ``[(tick, flag, a, b, n)]`` applied, step
+    length, next e."""
+    ptrs = [rep.word(PATTERN_LO, PATTERN_HI, x) for x in pats]
     cnt = [e] * 3
     applied = [[], [], []]
     for tick in range(MAX_STEP_TICKS):
+        if not rep.full(start + tick):
+            continue
         alt = None
         for v in range(3):
             if cnt[v] & 0x80:
-                flag, a, b, n, size = decode_event(mem, ptrs[v])
+                flag, a, b, n, size = decode_event(rep.mem, ptrs[v])
                 applied[v].append((tick, flag, a, b, n))
                 if flag & ALT:
                     alt = flag
@@ -346,20 +506,32 @@ def phrase_events(applied, length) -> list:
     return events
 
 
-def song_steps(mem, subtune):
-    """The song steps the arranger plays from init, and the step index the song loops to."""
-    if not mem[0x10D9] & 0x80:
+def song_steps(rep: Replay, subtune):
+    """The song steps the arranger plays from init, and the step index the song loops to: the
+    song's state recurs at a call of the same phase of the calls' pattern-step period, which the
+    calls must repeat within the song."""
+    if not rep(0x10D9) & 0x80:
         raise LiftError("init did not arm the arranger")
-    y, jr, jc, e = subtune & 0xFF, mem[0x14EC], mem[0x14ED], mem[0x10D9] & 0x0F
-    seen, steps = {}, []
-    while (y, jr, jc, e) not in seen:
-        if len(steps) >= MAX_SONG_STEPS:
-            raise LiftError("arranger does not loop")
-        seen[(y, jr, jc, e)] = len(steps)
-        pats, y, jr, jc = arranger_step(mem, y, jr, jc)
-        applied, length, e = simulate_step(mem, pats, e)
-        steps.append((applied, length))
-    return steps, seen[(y, jr, jc, e)]
+    period = 1
+    while True:
+        jr, jc = (rep(0x14EC), rep(0x14ED)) if "counted" in rep.variants else (0, 0)
+        y, e, tick = subtune & 0xFF, rep(0x10D9) & 0x0F, 0
+        seen, steps = {}, []
+        while (y, jr, jc, e, tick % period) not in seen:
+            if len(steps) >= MAX_SONG_STEPS:
+                raise LiftError("arranger does not loop")
+            seen[(y, jr, jc, e, tick % period)] = len(steps)
+            pats, y, jr, jc = arranger_step(rep, y, jr, jc)
+            applied, length, e = simulate_step(rep, pats, e, tick)
+            steps.append((applied, length))
+            tick += length
+        found = rep.period(tick)
+        if found == period:
+            rep.cycle = period
+            return steps, seen[(y, jr, jc, e, tick % period)]
+        if 2 * found > tick:
+            raise LiftError(UNREPEATED)
+        period = found
 
 
 def _compress(names, loop):
@@ -375,9 +547,9 @@ def _compress(names, loop):
     return {"plays": plays, "loop": loop_play}
 
 
-def structure(mem, subtune):
+def structure(rep: Replay, subtune):
     """Tracks, phrases, and the sidTAB rows the patterns arm."""
-    steps, loop = song_steps(mem, subtune)
+    steps, loop = song_steps(rep, subtune)
     phrases, names_of = {}, {}
 
     def name(events):
@@ -410,15 +582,17 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     from pydefmon import DefmonPlayer  # pylint: disable=import-outside-toplevel
 
     header = SidImage.from_bytes(raw).header
+    if header.second_sid:
+        raise LiftError(f"a multi-SID tune (SID 2 at ${0xD000 | header.second_sid << 4:04X})")
     if subtune is None:
         subtune = (header.start_song or 1) - 1
     player = DefmonPlayer(raw, subtune=subtune)
     mem = player._mem  # pylint: disable=protected-access
-    check_build(mem)
-    vinit = voice_init(mem)
-    tracks, phrases, seeds = structure(mem, subtune)
+    rep = Replay(mem, DefmonPlayer(raw, subtune=subtune))
+    vinit = voice_init(rep)
+    tracks, phrases, seeds = structure(rep, subtune)
     playroutine = library("defmon")
-    playroutine["constants"] = model_constants(mem)
+    playroutine["constants"] = model_constants(rep)
     ir = {
         "unitracker": "ir",
         "meta": song_meta(header, f"defmon subtune {subtune}"),
@@ -427,15 +601,18 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
             "clock_hz": NTSC_HZ if (header.flags >> 2) & 3 == 2 else PAL_HZ,
         },
         "voices": 3,
-        "tables": {name: list(mem[addr : addr + n]) for name, addr, n in TABLES},
+        "tables": {name: rep.span(addr, n) for name, addr, n in TABLES},
         "playroutine": playroutine,
         "records": {
             "vinit": vinit,
-            "ginit": {0: global_init(mem)},
-            "sidtab": sidtab_records(mem, seeds),
+            "ginit": {0: global_init(rep)},
+            "sidtab": sidtab_records(rep, seeds),
         },
         "tracks": tracks,
         "phrases": phrases,
     }
-    ir = unheard_init(ir, DefmonPlayer(raw, subtune=subtune))
+    ticks = window(ir)
+    if rep.period(ticks) != rep.cycle:
+        raise LiftError(UNREPEATED)
+    ir = unheard_init(ir, rep.calls.grid(ticks))
     return convert(ir) if expressions else ir

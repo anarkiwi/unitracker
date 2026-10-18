@@ -27,7 +27,7 @@ its lifter does not cover.
 |---|---|---|
 | [`goattracker2`](goattracker2.md) | packed GoatTracker 2 `.sid` (pygoattracker) | one pattern row |
 | [`sidwizard`](sidwizard.md) | SID-Wizard 1.x export, normal build (pysidwizard) | one pattern row |
-| [`defmon`](defmon.md) | defMON `$1000` replay `.sid` (pydefmon) | one tick |
+| [`defmon`](defmon.md) | defMON replay `.sid` of a build of the `$1000` replay's code (pydefmon) | one tick |
 ## The internal representation
 
 `unitracker.format.songio.loads` expands a document to the dict `SongPlayer` runs

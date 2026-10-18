@@ -60,6 +60,27 @@ crosseyed = hvsc_tune(
     "MUSICIANS/I/Ilkke/Crosseyed.sid",
     "Path to iLKke's Crosseyed .sid, a defMON replay.",
 )
+rent_a_cop = hvsc_tune(
+    "rent_a_cop",
+    "MUSICIANS/G/Goto80/Rent-A-Cop_Reloaded_title.sid",
+    "Path to Goto80's Rent-A-Cop Reloaded title, a defMON replay at $9000 of the plain-arranger,"
+    " relative-note build.",
+)
+tractorbeam = hvsc_tune(
+    "tractorbeam",
+    "MUSICIANS/V/Vincenzo/Broken_Tractorbeam.sid",
+    "Path to Vincenzo's Broken Tractorbeam, a defMON replay whose ANC is encoded $2B.",
+)
+persei = hvsc_tune(
+    "persei",
+    "MUSICIANS/F/F7sus4/Persei.sid",
+    "Path to F7sus4's Persei, a defMON replay whose play routine calls it twice a frame.",
+)
+ngc1277 = hvsc_tune(
+    "ngc1277",
+    "MUSICIANS/F/F7sus4/NGC1277_tune_1.sid",
+    "Path to F7sus4's NGC1277 tune 1, a defMON replay at $0400 with its pointer at $02.",
+)
 csillag = hvsc_tune(
     "csillag",
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
