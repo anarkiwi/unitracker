@@ -1,479 +1,176 @@
-# Modulation fitting (`unitracker.modfit`)
+# Modulation analysis (`unitracker.modfit`)
 
-`unitracker-modfit` reads modulation procs straight from the playroutine library
-(`src/unitracker/playroutines/*.yaml`) and tries to rewrite each one as a compact
-bounded accumulator (see *The bounded accumulator* in [format.md](format.md)). It proves
-every rewrite it reports, or shows where none holds. It derives and proves each song
-modulator's expression (see *Modulators* in [format.md](format.md)), which the lifters
-use to convert native modulations. It also composes each keyword's
-setup and per-tick effect, and matches keywords and record fields across playroutines
-by what they do to the SID.
+`unitracker.modfit` derives each modulator occurrence of a song as phase and value
+expressions in the format's grammar (see *Modulators* in [format.md](format.md)), proves
+them against the playroutine's own action lists with z3, and rewrites the song with them
+(`convert`). The `unitracker-modfit` command reports these derivations and the
+playroutine-level analyses (accumulator fits, keyword composition and signatures).
 
-## Method
+## Inputs
 
-1. **Guarded cases** (`form.Form`). The action language is evaluated symbolically.
-   Sequential sets wrap to the cell width, expressions are unbounded integers, and
-   `accumulate` expands exactly as `vm._acc`. `Form.paths` returns the guarded cases: a
-   path condition plus each cell's final term. z3 prunes infeasible paths. Terms are
-   normalised as linear forms, Iverson brackets and interval ranges:
-   - masks are dropped when the range is already covered;
-   - wraps are reduced modulo the width, and carries are removed when the guard pins them;
-   - `256·((E>>8)&255) + (E&255)` folds to `E`;
-   - comparisons are canonicalised to `lt(E,0)` / `eq(E,0)`.
+| input | read by |
+|---|---|
+| the playroutine's `modulators` declaration (see *Modulator declarations* in [format.md](format.md)); each player's units are listed in the *Modulators* section of [playroutines/goattracker2.md](playroutines/goattracker2.md), [playroutines/sidwizard.md](playroutines/sidwizard.md) and [playroutines/defmon.md](playroutines/defmon.md) | derivation, conversion, `exprs` |
+| the playroutine library (`src/unitracker/playroutines/*.yaml`): cells, procs, record types, commands | every analysis |
+| `src/unitracker/modfit/specs.yaml` | `fit`, `command`, `sweeps`, `orbit` (see *Specs*) |
 
-   Cell pairs `(lo, hi, k)`, meaning `P = hi·2^k + (lo & (2^k−1))`, come from the
-   structure of the playroutine: a joined `(hi<<k)|lo` or `(hi<<k)|(lo&mask)` for any
-   constant `k`, or dataflow into the low and high register of one SID register pair
-   (`$00/$01`, `$02/$03`, `$15/$16`). For the dataflow case, `k` is the number of bits any
-   write ever gives `lo`, read from the masks and shifts of the bit dataflow (step 5). A
-   pair is kept only when `lo` never holds more than `k` bits. A pair's joint update is
-   fused into one `(k + width(hi))`-bit update `P + D` only when `D` is proved free of the
-   pair's parts; a fit on a pair cell runs on the fused paths.
-2. **Arithmetic form** (`arith.Arith`). Each written cell becomes
-   `x + Σ [G_i]·(u_i − x)`, a multilinear polynomial in the brackets that does not depend
-   on the order of the tests. Brackets are idempotent, infeasible products are dropped
-   and implied brackets are absorbed. Equivalent or complementary conditions share one
-   atom, and each atom's polarity is chosen to give fewer monomials.
-3. **One-tick fits** (`fit.Fitter`). For each modulated cell and dispatch guard, candidate
-   `set`/`accumulate` actions are built from the cell's own cases: steps, thresholds and
-   reload values. The forms are plain, `min`/`max` clamp, `on_bound` reload and `toward`,
-   each also `signed` when the cell has a width.
-   A candidate is accepted only when z3 shows that every pair of original and candidate
-   paths gives the cell identical values under the guard. Otherwise `witness` returns a
-   counterexample. For a fused pair, a condition on either part (a carry) is dynamic, not a
-   dispatch guard. Two plain accumulates whose guards differ in one complementary test join
-   into one whose step selects on that test, when that is proved.
-4. **Orbits** (`orbit`). For multi-tick rewrites such as vibrato, the proc is run
-   concretely, once per period value, with record data and constant tables folded in.
-   Each per-tick delta is wrapped to the cell's width as a signed value. A ping-pong of
-   the cumulative offsets (one step size, reversing only at both bounds) gives the bounds
-   and first step of a candidate `clamp: reflect` accumulator, its direction a fresh 1-bit
-   cell flipped in `on_bound` (and `signed` when the bounds leave the unsigned range). The
-   candidate is run concretely and accepted only when its per-tick deltas equal the
-   original's over the whole run.
+How a declaration feeds the analysis:
 
-5. **Bit dataflow and register roles** (`flow.Flow`). Every assignment is read as a bit
-   relation from each source name to the result bits each source bit can reach.
-   - Shifts and masks move bits; `x | c` cannot reach the bits `c` sets.
-   - A carry spreads upwards, except in a sum of operands with disjoint bits.
-   - A table, record index or test steers every bit of the value it selects.
-   - Temporaries come from def-before-use summaries: a widthless cell never read
-     before its own list assigns it.
+- `fire` is the action list of one firing; `pre`/`post` bound a firing in the compiled player
+  (`unitracker.player.modulation`), and `hooks` mark a start, which opens an occurrence at the
+  unit's next firing and runs to its next start. `scope: global` makes one occurrence per unit.
+- `cell` is the modulated value `v`; a pair `hi:lo[:k]` is fused into one value. With `chip`,
+  `v` is the chip value `value` (`width` bits) and `store` writes it back; on a pair cell the
+  chip value must be the pair plus an offset free of its parts.
+- `notes`, `transpose` and `note_offset` give `N`; `relative` cells start as `N` plus their
+  offset; `freq` gives `F(k)`; `tables` are the named tables `T[k]` and `functions` the
+  playroutine functions rewritten over them.
+- `label` groups occurrences; `site`, `command`, `commands`, `legato` and `retire` say where
+  and how the conversion writes texts (see *Conversion*).
 
-   The relations are composed to a fixpoint into the ghost registers, giving the byte
-   pairs below and the `TIMING` role: a cell that can steer a test guarding a `fetch`,
-   through data or the branches the test guards.
+## Phase and value expressions
 
-   A cell's or field's *role* (the SID quantity bits its value reaches) comes from the
-   composed `init` and `tick` (`flow.Composed`): calls are inlined with their `with`
-   bindings and every cell is resolved along its path, so a parameter or scratch cell
-   carries only what each call site gives it. Tests steer nothing (a phase, carry or mode
-   cell only gates), and a pointer into a chained record selects control, not a value.
-   Quantities are `FREQ`, `PW` 12-bit, `CUT` 11-bit (`$D415` bits 0–2, `$D416` bits 3–10),
-   `CTRL` bits, `AD`/`SR` nibbles, `RESFILT` (`$D417`) and `MODEVOL` (`$D418`). Bits that
-   reach a register only through `&` with another cell, or `|`/`^` over bits both can set
-   (cell bit ranges from inductive invariants), are a `MASK`.
-6. **Inductive invariants** (`invariant`). When a fit is refuted by a witness, the
-   candidates are comparisons `cell op T`. `T` is a bound or reload term of the cell's
-   cases, a term compared with a wrapped expression of the cell, 0 or the width maximum.
-   A candidate is accepted when z3 proves two things. First, it holds at the cells'
-   initial values. Second, it holds after every action list that assigns one of its
-   cells (procs, templates, record lists, `init`), starting from any state that satisfies
-   it. Each such list is sliced to the actions that can affect the candidate's cells. A
-   nested `for_voices`, `run` or `fetch` havocs what it can write: the invariant is proved
-   before it and assumed after it. The refuted fit is then re-proved under each accepted
-   invariant (candidates from every case of the cell), and then under all of them
-   together.
-7. **Keyword composition** (`compose.Composer`). `specs.yaml` `commands:` gives, per
-   playroutine:
-   - the setup template (`CODE`, `arg`);
-   - the tick lists;
-   - the routing cells, which are left out of the report;
-   - a row template without a note, and one with a note.
+A start is derived from its *start key*: the unit, its start control state and its start
+value term (`exprs.Analysis.key`).
 
-   The keywords are the playroutine's own `commands:` map, and a `when` is assumed
-   true. The setup is evaluated with branches joined: each cell becomes one `ite` term,
-   and a `return` clears a live condition that later assignments respect. Each `ite`
-   side is simplified under its condition. A tick list joins when it reads a cell the
-   setup changes. Cells the ticks change are freed (later ticks), the rest keep their
-   setup values. Each freed cell is fitted with `fit.Fitter`, on its tick term split at
-   the branch joins. On a row with a note, cells appear only where they can differ from
-   the same row with no command. *Routed tests* are the tests outside the setup's procs
-   that read a routing cell and whose value the keyword changes.
-8. **Signatures** (`keywords.Signer`). A keyword's or field's signature is a set of
-   `(role, kind, argument use)`:
-   - `LOAD` (the arg's bits reaching the role), `MASK` (see step 5), `RESET` (a constant);
-   - `ARM`: a constant the ticks read, armed for per-tick behaviour;
-   - `MODE`: a cell the row procs test, a mode for later notes;
-   - `PTR`: a pointer into a chained record type, a program start;
-   - `REF`: a declared reference to an unchained record type;
-   - per tick: `ACC+`/`ACC-`/`ACC±` (the step's provable sign), `TOWARD` and `LOAD` from
-     the fits, `MOD` when no single accumulator holds, and `REFLECT` when the orbit spec's
-     proc runs and the fitted step turns (several steps, or one reading a cell the tick
-     moves);
-   - `TEST`: a field read by a test or an `ite` test (not matched).
+1. **Slice.** `fire` (record `run`s dispatched as `if` chains) is sliced to the cell. Cells it
+   reads before writing and writes again are the *control*; other cells it reads are parameters.
+   Note cells become `N`; the start hook is re-run with the note as `N`, and a cell it writes is
+   kept as a term of `N` where that term gives the observed start value. The start value `v0`
+   is the hook's write of the cell, when it gives the observed value.
+2. **Graph.** From the start's concrete control, each firing runs through `form.Form` with `v`
+   symbolic. The reachable control states and their guarded cases form a graph, minimised by
+   bisimulation (equal value update, equal guarded successor classes).
+3. **Phase.** If every class has one successor, `φ` counts firings (`time`: a prefix and a
+   cycle). If a class stays until a test of `v` moves it to one other class, `φ` counts turns
+   (`turn`: `a` is that test). Anything else fails (*more than one phase*).
+4. **Value update.** Each class's cases become one expression (a decision tree on its tests,
+   sides chosen by a test of their difference joined as `min`/`max`, comparisons of one linear
+   form met as intervals). `f(v, φ)` is the shortest (`grammar.rank`) of the position-indexed
+   form and, when every class adds or sets, the add form; cycles are rotated to start at a
+   change. Frequency-table reads fold to `F`; named tables replace the functions they rewrite.
+5. **Closed form.** When every class adds or sets and the start value is known (or set before
+   any add), candidate `g(φ)` (the value after the firing at `φ`) are window ramps over the
+   cycle plus its drift, gated `[φ >= d]` after a constant prefix, also rewritten through `abs`;
+   wrapped only when the range leaves the cell. The shortest proved candidate is kept.
 
-   A field's entries are the cells the composed lists give it, merged by kind.
+### What is proved
 
-   Argument use is the arg's bit mapping into the role, `ref <type>`, `note-relative` (a
-   table index that also reads the event note) or `table`. Per-tick effects steered by a
-   started program's pointer are the program's, and are left out. Matches come from the
-   other playroutines, by class:
-   - *same effect*: identical signature;
-   - *same effect, different argument decoding*: same roles and kinds;
-   - *partial*: entries of the same kind over an intersecting quantity;
-   - *different*: nothing shared, or only tests.
+z3 over 48-bit bit-vectors; `φ` ranges over `[0, 2^20)`; `v` over the cell's (or chip value's)
+domain; `N` over 7 bits; table reads as uninterpreted functions bounded by the table's
+least and greatest entry.
 
-   A keyword with an identical signature in its own playroutine is a duplicate. It is
-   *partial* when the two differ on a row with a note (setup cells or routed tests).
-   Reasons name the differing entries, a *sticky override* and a *mode for later notes*. A
-   sticky override is an arg load folded by a setup proc into another loaded cell, where
-   that proc also runs outside the setup.
+| obligation | holds for |
+|---|---|
+| `f` (and for `turn`, `a`) at the class's phase equals the player's value (and advance) | every reachable control state, every guarded path |
+| every firing leaves the chip value in its domain (`lo..hi`, `r mod m`) | chip units |
+| `f(v, φ + P) = f(v, φ)`, same for `a` | `φ >=` prefix, when the period `P > 1` or the phase is `turn` |
+| `g(0) = f(v0, 0)` and `g(φ + 1) = f(g(φ), φ + 1)` | the closed form, when there is one |
 
-9. **Generic accumulator** (`factor.Factorer`). Every effect on `x` is
-   `x' = respond(v0, v)` when `hit(v)`, else `v = v0 + step`, applied under `gate`. A
-   cell's guarded cases (cut to what can affect it, pairs fused, tests simplified on their
-   own and split into conjuncts) are split at the brackets reading `x` or a moved cell.
-   Conditions free of `x` are the gate, brackets reading it the hit; the change most cases
-   share is the step, the values under the hit the respond: `hold`, `clamp` (a bound the
-   hit compares with), `reflect` (`v0 − s`), `reload`, `bounce` (a constant and a flipped
-   mode cell) or `reads v`. Gates differing only in a test of bound cells join with a
-   selecting step. The lambdas are source over `v0`, `v` and `s`, re-read and proved equal
-   to the original over all path pairs (`Fitter.check_paths`). Otherwise the reason is
-   `step reads x`, `hit reads non-bound state` or `respond outside (v0, v, bounds)` (a cell
-   that changes on steady ticks), or a witness. The step's *basis* is `constant`,
-   `note-relative` tables (an index reading a note cell), `decoded` tables, fields and
-   the argument, or the cells it reads.
-10. **Timers** (`timer.Timers`). Every list writing a cell (except `init`) is analysed
-   on its own; calls, runs and fetches leave fresh values for what they write. A timer's
-   cases are proved `t ± c` (one `c`), a reload or reset free of `t`, or a flip `k − t`.
-   A reload reading a cell the same path flips is an alternating reload. An orbit steps the
-   timer through its counting list's cases with z3. A non-constant bound of its tests is
-   the parameter, starting from the reset; otherwise the start value is. A model of a
-   counting case fixes the other atoms, and a run stops at a firing case that reads any of
-   them. Durations to the first fire and each test's sequence are classified: `constant`,
-   `delay d`, `duration n`, `period p` (two equal runs per cycle: a sign flip), or `drift`
-   (the run lengths). Their numbers are fitted exactly as `(a·p + b)//k` over maximal
-   runs of the domain (least `k`, at most the point count), with more than three points;
-   otherwise a table. Orbit specs' per-tick steps give the vibrato signatures the same way.
-11. **Bounce orbits** (`bounce.Bounce`). A mode cell flipped `q ^ k` in a case leaves the
-   parameter `m = q & ~k`. For each flip bit and each `m`, z3 finds the non-hit step (one some
-   value takes, of one sign for every input) or proves the cell constant. Over all `m` of a
-   step at once it then proves, for the first threshold `B` (a hit test's constant at each
-   bracket value, or a width edge) and reload that hold: `v0 + s` within `B` steps the cell,
-   past `B` it reloads and flips the mode, and beyond `B` the cell wraps with no hit. A phase
-   from `x` lasts `|B − x|//|s| + 1` ticks and turns at `B ∓ |B − x| % |s|`, so two opposite
-   phases give the cycle's period and bounds. The cycle is also stepped through the guarded
-   cases for every `m` and input value and must recur first after the period, within the
-   bounds.
-12. **Table programs** (`sweeps`). A spec names a record type, the list that steps it, the
-   swept cell, the program pointer and the control state at a start. The list is cut to what
-   can affect the swept cell, pointer and control. A tick runs it on the concrete control state
-   over the song's records (missing rows and fields at their defaults, templates run with
-   `row` bound) with the swept cell symbolic: every path must give one op, `set c` or
-   `add d` (wrapped, pairs fused), and one concrete control state. The control state recurs.
-   From the cycle's set row (else the prefix's last one) the ticks that change the value are
-   matched to one accumulator: a reload closing a sawtooth, a ping-pong (`clamp: reflect`), an
-   endless sweep (wrap) or a sweep that stops (clamp at its last value). The candidate runs
-   through `vm._acc` and must give every changing tick's value, and a bounded candidate must
-   recur with the cycle. Otherwise the reason names the step sizes, the turns inside the
-   bounds, the set rows in the cycle, or a value the program never sets. Starts are reference
-   fields (with `when`) and command arguments.
-13. **Report** (`generic`). One row per keyword (its composed per-tick effect's gate
-   groups, or its setup) and per modulation gate group (a record row kind). Each row gives
-   role, step, basis, hit, respond, gate and status. The gate is the timers it reads with
-   their duration's closed form, else the lifetime: `until the next note` when a note row
-   resets an armed cell, `until replaced`, or `row duration`. Rows are grouped by
-   (role, respond kind, temporal kind).
+A start is *exact* when every obligation holds. For a chip unit, `chipinv` also reports the
+invariant its recurrence holds under: `G`, guard comparisons over the hidden cells that every
+action list of the player keeps (`invariant.inductive`), and `I`, the strongest conjunction
+(Houdini) of guard comparisons and domain bounds true after the first firing and kept by
+every firing. This result is reported, not required by the conversion.
 
-14. **Phase and value expressions** (`phase`, `grammar`, `replay`, `exprs`). A modulator is
-   a pair of integer expressions applied per firing on the state before it:
-   `φ' = φ + a(v, φ)` and `v' = f(v, φ)`, with `φ = 0` and `v` the cell's incoming value at
-   its start. The derivation's grammar is integers, `+ - * // % & | ^`, `abs`, `min`, `max`,
-   Iverson brackets, `v`, `φ`, `N` (the voice's sounding note), `F(k)` (the player's
-   frequency of format note `k`) and player tables `name[k]`; shifts and all-ones masks fold
-   into `*`, `//` and `%`. A written expression must fall in the format's grammar (see
-   *Modulators* in [format.md](format.md)).
-   - The units are the playroutine's `modulators:` declaration (`exprs.Analysis`). A unit's
-     `fire` list is sliced to its cell; the cells it reads before writing them and the
-     cells it writes that are needed again are the control.
-   - A unit with a `chip` map runs on its chip value. On a pair cell the chip value must be the
-     pair plus an offset free of its parts (z3 proves it at each control state, else the start
-     is reported): a firing's value is the fused pair update plus the offset after it less the
-     offset before (SID-Wizard's keyboard-tracked pulse).
-   - From a start's concrete control (note cells as `N`) every firing runs through `Form` with
-     the value symbolic; the reachable control states and their guarded cases are a graph,
-     minimised by bisimulation (equal value updates, equal guarded successor classes). One
-     successor per class makes `φ` the elapsed firings (`a = 1`, a prefix and a cycle); a
-     class that stays until a test of `v` advances it makes `φ` count turns (`a` is that test).
-     Anything else needs more than one phase and is reported.
-   - Each class's cases become one expression: a decision tree on its tests, sides a test of
-     their difference chooses joined as `min`/`max`, regions with the comparisons of one linear
-     form met as intervals. The value update is the shortest (tokens, then characters, then
-     text) of the position-indexed form and, when every class adds or sets, the add form;
-     cycles are rotated to start at a change. The player's frequency words fold to `F`, and
-     the playroutine's named tables (`modulators: tables:`) replace the functions it rewrites
-     over them (`modulators: functions:`), checked equal on every argument byte.
-   - A closed form `g(φ)` (the value after the firing at `φ`) is built when the start value
-     is known (a set row, or a value the start hook writes) and every class adds or sets: a
-     window ramp `Σ d·min(max(x − s, 0), L)` over the cycle from a turning value, with its
-     drift, gated `[φ >= d]` after a constant delay, also rewritten through `abs`; it is
-     wrapped only when its range leaves the cell.
-   - Display is deterministic from the canonical (expanded) form: brackets are split in sort
-     order (`b·X + Y`, `(1 − b)·(−X) + (X + Y)`, `b·(X + Y) + (1 − b)·Y`), implied
-     brackets dropped under the split's context and the cell's range, nested brackets split.
-   - z3 proves, over 48-bit integers: for every reachable control state and every one of its
-     paths, `f` and `a` at that state's phase equal the player's value and advance;
-     `f(v, φ + P) = f(v, φ)` and the same for `a` from the prefix on; `g(0) = f(v0, 0)` and
-     `g(φ + 1) = f(g(φ), φ + 1)`.
-   - Starts and firings come from the compiled player (`unitracker.player.modulation`): each unit's
-     `pre`/`post` functions bound a firing and its `hooks` mark a restart, which opens an
-     occurrence at the next firing. The hook is run again symbolically with the note as `N`
-     for the start's terms (amplitudes, start values).
-15. **Conversion** (`convert`). The lifters write a song's modulations as expressions with
-   `convert.convert`; `convert.analyse` returns the whole conversion.
-   - The song, its repeats written out, is replayed natively to the recurrence of its state
-     and one period more (`reach.table_reads`), recording each occurrence with its start
-     cells and the event instance (voice, play count, step) that started it.
-   - Each occurrence's start key (unit, start control, start value term) is computed; each
-     distinct key is derived and proved once.
-   - Occurrences group by unit and `label`. A group shares its closed form when every live
-     start has the same one, else its recurrence when every start has the same one, else
-     each start keeps its own. A unit with `scale` is written over the chip value
-     (`grammar.scaled`). A start that does not modulate writes nothing, or `v` where an
-     event's native command must be replaced.
-   - Each text is written at the unit's `site` (the program's first row or the instrument
-     field, the unit's `clear` fields removed and its `first` fields set) when its `when`
-     holds, else as the event's `command` (`!freq`) in place of the unit's native
-     `commands`, with `!legato:0` when the start's legato cell is set; on each commandless
-     step it spans too when the unit's `x` reads the site's field, which such a step falls
-     back to. A record whose
-     occurrences need several texts is copied per text and each starting event points at its
-     copy; changed events go into phrase variants (`p3~1`), unrolling a track's loop where
-     its passes differ. A unit whose texts are all constants stays in a program's own rows
-     when the program has other data the format writes as it is.
-   - The rewritten song's register grid must equal the native song's over the whole window;
-     otherwise the conversion raises `ConversionError`.
-   - Values a start carries from earlier playback are constants of its text. The report
-     proves one general form over them (`inherit`): the start cells that differ between a
-     group's starts are made symbolic and derived once more. A cell the firing never counts
-     becomes an input, proved for every value of its width and equal to each start's
-     expression; one carried counter the firing counts down by one is a delay gate
-     `[φ >= d]` into the run of the start whose counter ran out. Otherwise the reason is
-     reported.
-   - Stages run in one process pool (`--workers`, default the host's cores, two BLAS threads
-     each): start keys in chunks, then each distinct start's derivation and proofs.
-     Native replays, conversions and derivations are cached in `out/modfit/cache/` under the
-     sha256 of the song and the code they depend on.
-   - The `exprs` report (`exprs_report`) lifts each tune with `expressions=False`, converts
-     it, and gives per song the occurrences over the window, the grid check, whether its
-     v1.5 text read back plays the native player's grid, and any named-table function that
-     differs from the player's. Per unit and label it gives the occurrences and distinct
-     starts, each start's phase, value update, closed form and proof, each written text
-     with where the document writes it, and the general form when the texts differ. It
-     ends with each song's token count as v1.3 (`--before`), v1.4 (`--after`) and v1.5.
+## Conversion
 
-## Assumptions
+`convert.convert(ir)` returns the song with every declared unit's native modulation
+written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
 
-- A record field is a byte (0..255) unless its default is negative.
-- A cell with no `width` is scratch to `Form`: it is resolved within its action list and
-  never reported as an update by `fit`. Composition reports every cell whose value can
-  carry to the next tick or reach the ghost.
-- Composition runs `for_voices` once for the current voice, takes `fetch` cells from the
-  row template, and assumes a template's record row exists.
-- z3 works on 48-bit two's-complement bit-vectors. Playroutine values stay far inside
-  this range, so bit-vector arithmetic, masks, shifts and signed comparisons agree with
-  the unbounded integers.
+1. **Window.** Repeats are written out; the song is replayed natively to the recurrence of its
+   state and one period more (`reach.table_reads`). Each occurrence records its start cells
+   and the event instance `(voice, play count, step)` that started it.
+2. **Derive.** Start keys are computed in chunks; each distinct key is derived and proved
+   once (`exprs.Pool`, `--workers` processes, two BLAS threads each).
+3. **Group.** Occurrences group by unit and `label`. Over a group's starts that modulate: a
+   shared closed form when every start has the same one, else a shared recurrence when every
+   start has the same one, else each start's own (closed form if any, else recurrence). A start
+   whose first value differs from the player's by a carried constant `c` is written `f - c·[φ < 1]`
+   (a shared closed form gives way to the recurrence first). A start that does not modulate
+   writes nothing (`v` at a row site or where a native command is replaced).
+4. **Write.** At the unit's `site` when it exists and its `when` holds over the start cells:
+   - a program site: the program is copied with `clear` applied to every row, `first` set on
+     its first row and the text in its first row's `field`; trailing rows that set nothing are
+     dropped; references to the program are redirected to the copy;
+   - a `row` site: the text at `φ = 0` is written in the row itself;
+   - several texts for one unit: the most frequent takes the site, each other gets a copy and
+     each starting event is pointed at its copy;
+   - integer texts in a program whose rows have other data the format writes stay native rows.
 
-## Run
+   Otherwise the event's `commands` codes are replaced by `command` naming the text (`!freq`),
+   preceded by `!legato:0` when the start's `legato` cell is set on a note; with an `x` that
+   reads the site's field, commandless steps the occurrence spans get it too. Changed events
+   go into phrase variants (`p3~1`); a track's loop is unrolled where its passes differ.
+   `retire` fields are cleared in every row of their record.
+5. **Verify.** The rewritten song's register grid must equal the native song's over the whole
+   window, each voice from its first note (`vm.first_mismatch`).
 
-```sh
-unitracker-modfit fit [PLAYROUTINE:PATH:CELL ...]    # default: every fit and check in modfit/specs.yaml
-unitracker-modfit poly PLAYROUTINE:PATH ...          # arithmetic form by bracket monomial
-unitracker-modfit orbit [PLAYROUTINE ...] [--ticks N]
-unitracker-modfit command [PLAYROUTINE[:NAME] ...]   # keyword setup and per-tick effects
-unitracker-modfit keywords [PLAYROUTINE ...]         # signature table with matches and verdicts
-unitracker-modfit --out out/modfit/keywords.txt keywords
-unitracker-modfit generic [PLAYROUTINE ...] [--ticks N]  # factorised events, grouping, timers, vibrato
-unitracker-modfit --out out/modfit/generic.txt generic
-unitracker-modfit sweeps [SONG ...]                  # bounce orbits, fused pair fits, table programs
-unitracker-modfit exprs [SONG ...] [--before DIR] [--after DIR] [--workers N]
-                                                     # songs' modulators as proved expressions
-                                                     # (writes out/modfit/exprs.txt)
-unitracker-modfit --out out/modfit/sweeps.txt sweeps \
-  .tunecache/MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid \
-  .tunecache/MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid
-```
+Observations, derivations and conversions are cached in `out/modfit/cache/` under the sha256
+of the song and the sources they depend on (`convert.SOURCES`).
 
-A song is a unitracker YAML or a tune its backend lifts.
+### Failures
 
-A pair cell is named `hi:lo` (`k = 8`) or `hi:lo:k`, e.g. `sidwizard:procs.tick_filt:vfhi:vflo:3`.
+`ConversionError` names the unit, program and start (`convert.diagnosis`) where it can.
 
-`src/unitracker/modfit/specs.yaml` lists the modulations to fit, the given candidates to
-check (proved, or refuted with a witness, under an optional guard), the orbit specs, the
-bounce units and the sweep specs. An orbit spec gives the period cell or
-`record.index.field`, the period range, the initial state and the record rows.
+| stage | reason |
+|---|---|
+| start key | a cell the slice reads has no start value |
+| derivation | control reads the value; a pair's value reads its parts beyond their sum; a chip value is not its pair plus an offset; a term the grammar has no form for (`reads ...`); more than one phase |
+| proof | an obligation of *What is proved* is refuted (`not proved`, with a witness) |
+| text | the phase is not one per firing (a `turn` phase written as a recurrence); the text is outside the fixed grammar (`xexpr.source`) |
+| site | two units at one site each need several texts; a `row` site needs several; a record type runs out of rows; no event selects (or names) the site |
+| event | an expression index above a byte; three commands on one event; a track's later loop passes differ |
+| program | a referenced program of a site type keeps no shared form and no start proves its expression |
+| verify | the rewritten song plays a different register at some tick |
 
-## Results
+## General forms
 
-| Modulation | Rewrite |
-| --- | --- |
-| GT `record_types.pulsetab.each` → `pulse` | `accumulate`, step `s8(row.r)` |
-| GT `records.tickn.1.do` → `freq` | `accumulate`, step the slide speed |
-| GT `procs.toneporta` → `freq` | `toward ftab[note]` when `arg≠0`; `set ftab[note]` when `arg=0` |
-| defMON `procs.pitch` → `sacc` | `accumulate`, signed `rate(mode)` |
-| defMON `procs.pulse` → `pw` | no single accumulator |
-| SID-Wizard `procs.tick_porta` → `voff` | no single accumulator; see below |
-| SID-Wizard `procs.tick_vibrato` → `vfc` | `accumulate`, step −1 (`255`), `max: (vper−1)&255`, proved under the invariant `vfc <= (vper−1)&255` |
-| GT `record_types.filttab.each` → `filtercutoff` | `accumulate`, step `row.r` |
-| SID-Wizard `procs.tick_pw` → `pwhi:pwlo` | one fused 16-bit `accumulate` over both carries, step `b + 65280·[b ≥ 128]`; `s8(b)` proved under the sweep guard |
-| SID-Wizard `procs.tick_filt` → `vfhi:vflo:3` | 11-bit `accumulate`, step `s8(flttab[fpos].b)`; set rows `8·b` |
-| defMON `procs.acid_step` → `acc` | no single accumulator, with the offset `cp` or without |
-| defMON `procs.acid` → `acc`, given | `accumulate`, `max: 0x7FFF`, `clamp: false`, `on_bound: acc := 512 + (acc & 255)`: proved |
+Within a group whose texts differ only in values carried from earlier playback, `inherit`
+proves one form for every value: the differing start cells are made symbolic and derived
+again; a cell the firing never counts becomes an input, proved for every value of its width
+and equal to each start's expression. Otherwise one carried counter that each firing lowers by
+one, keeping `v`, is a delay gate `[φ >= d]` before the run of the start whose counter ran out.
+Otherwise the reason is reported. This is reported by `exprs`; the conversion writes each
+start's constants.
 
-Each vibrato below is a single reflect accumulator, verified against the original over
-the full orbit (`D` is the spec's unit depth, `vd` a fresh 1-bit direction cell):
+## Signatures
 
-```yaml
-accumulate: CELL
-step: "D if vd == 0 else 0 - D"
-min: start + lo
-max: start + hi
-clamp: reflect
-on_bound: [{set: {vd: "vd ^ 1"}}]
-```
+`keywords.Signer` gives each keyword and record field a set of `(role, kind, argument use)`:
 
-| Vibrato orbit | Reflect accumulator |
-| --- | --- |
-| GoatTracker, period `p` in 0..125 | bounds `[−((p+1)//2+1), p//2+1]`, first step +1 |
-| GoatTracker, periods 126, 127 | none: a constant slide |
-| SID-Wizard, even period `p` | bounds `[−p/2, 0]`, first step −1, `signed` |
-| SID-Wizard, odd period ≥ 3 | none: drifts (runs −1, +1, +1 for period 3) |
-| SID-Wizard, period 1 | none: a constant slide |
+- role: the SID bits the effect reaches through the bit dataflow (`flow`): `FREQ`, `PW`, `CUT`,
+  `CTRL`, `AD`, `SR`, `RESFILT`, `MODEVOL`;
+- kind: `LOAD`, `MASK`, `RESET`, `ARM`, `MODE`, `PTR`, `REF`, `TEST`, and per tick `ACC` with
+  the step's provable sign (`+`, `-`, `±`, `0`), `TOWARD`, `LOAD`, `REFLECT`, or `MOD` when no
+  single accumulator fits;
+- argument use: its bit mapping into the role, `ref <type>`, `note-relative` or `table`.
 
-SID-Wizard's porta against `accumulate voff, step ((fmh << 8) | fml) + 1, toward 0,
-signed: true` is refuted. With a depth `F = (fmh << 8) | fml` below `0x8000` it is proved
-everywhere except `s16(voff) + F == 0`: approaching 0 from below, the original
-overshoots to `+1` where the accumulator clamps to 0. With `F ≥ 0x8000` the step wraps
-past the signed range and the two also differ.
+Matches against the other playroutines are *same effect* (identical), *same effect, different
+argument decoding* (same roles and kinds), *partial* (a kind over an intersecting quantity) or
+*different*. An identical signature in the same playroutine is a duplicate, *partial* when the
+two differ on a row with a note.
 
-Not expressible yet:
+## `unitracker-modfit`
 
-- defMON's pulse bounds depend on the high byte (`(pw >> 8) == 0x0F`); its bounce orbit is
-  below.
-- defMON's ACID reload `(floor << 8) | (acc & 0xFF)` reads the stepped cell, which the step
-  takes out of and back into the offset `cp`; the candidate reloads are cell-free, so no
-  single accumulator fits.
+`--out FILE` writes the report to a file instead of standard output (`exprs` defaults to
+`out/modfit/exprs.txt`). A `SONG` is a unitracker YAML or a tune a backend lifts; a pair cell
+is `hi:lo` or `hi:lo:k`.
 
-| Pair | Source |
-| --- | --- |
-| `vfhi:vflo:3`, `fcuthi:fcutlo:3` | SID-Wizard: `(vfhi << 3) \| (vflo & 7)`; `fcutlo` reaches only `$D415`, written `t3 & 7` |
-| all 8:8 pairs | unchanged |
+| subcommand | arguments | output |
+|---|---|---|
+| `fit` | `[PLAYROUTINE:PATH:CELL ...]` (default: `fits` and `checks` of the specs) | per dispatch guard, the proved `set`/`accumulate` rewrite, or the nearest candidate with a witness and the fit re-proved under the cell's inductive invariants; each given check proved or refuted with a witness |
+| `poly` | `PLAYROUTINE:PATH ...` | each written cell's arithmetic form `x + Σ [G_i]·(u_i − x)` (`arith`) |
+| `command` | `[PLAYROUTINE[:NAME] ...]` (default: the specs' `commands`) | each keyword's setup and per-tick effect on a row with and without a note, freed cells fitted as accumulators (`compose`) |
+| `keywords` | `[PLAYROUTINE ...]` | one row per keyword or field: playroutine, shared key, signature, matches, verdict, reason (*Signatures*) |
+| `generic` | `[PLAYROUTINE ...] [--ticks N]` | each keyword and record row kind factorised as one generic accumulator (step, basis, hit, respond, gate, proof status), the rows grouped, timers, vibrato and bounce orbits |
+| `sweeps` | `[SONG ...]` | the specs' `bounces`, the `fit` lines of the specs' pair-cell fits and checks, and each song's table programs matched to one accumulator |
+| `exprs` | `[SONG ...] [--before DIR] [--after DIR] [--workers N]` (default: `cli.SONGS`) | per song: occurrences over the window, the grid check, its text read back against the native player, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; token counts against the `--before` and `--after` documents |
+| `orbit` | `[PLAYROUTINE ...] [--ticks N]` (default: the specs' `orbits`) | per period, the reflect accumulator whose per-tick deltas equal the original's over the run, then the periods with none |
 
-| Keyword composition | Effect |
-| --- | --- |
-| SID-Wizard big FX $01 / $02 | `svib := $81`/`$82`; per tick `voff ± fm(arg, note+oct)` when `ci ≠ 0`, 0 when `arg = 0` |
-| SID-Wizard small FX $2x (`!ad`, slot 1) | `aov := arg`, `dov := −1`, `sad := (arg << 4) \| (ins[ci].ad & 15)` when `ci ≠ 0` |
-| SID-Wizard small FX $12x-$16x (slot 0) | setup and ticks equal the plain small FX on a row without a note |
-| SID-Wizard small FX $12x on a note row | `note_setup` test `… and pifx != 0` sets `carry` |
-| GoatTracker `!ad` | `ad := arg` |
-| GoatTracker command 3 | per tick `toward ftab[note]` at `spd(arg)`; `set ftab[note]` when `arg = 0` |
-| defMON command 1 (`ins.filter`) | `rowB := arg`, `cntB := 0`; per tick `layer_b` runs the sidTAB row |
+### Specs
 
-The keyword and field table is written by `unitracker-modfit keywords` (one row per keyword
-or field: signature, matches, verdict, reason).
-
-### Factorisation
-
-| Effect | Step, basis | Hit, respond | Status |
-| --- | --- | --- | --- |
-| GT slide (`tickn.1`, command 1) | `spd(arg)`: note-relative `ftab`, decoded `speedtab` | none | proved |
-| GT porta (`toneporta`, arg ≠ 0) | `spd(arg)` | toward `ftab[note]`: hold, clamp, reflect | proved |
-| GT porta, arg = 0 | 0 | always: reload `ftab[note]` | proved |
-| GT pulse, filter table step | `s8(row.r)`, `row.r` | none | proved |
-| SW big FX $01 / $02 | `±fm(arg, note+oct)`: note-relative `exptab`, `freqlo`, `freqhi` | none | proved |
-| SW big FX $03, `tick_porta` | `F + 1` | overshoot to +1 from below, 0 from above: hold, clamp, reflect | proved |
-| SW pulse sweep `pwhi:pwlo` | `s8(pwtab.b)` (set rows: reload) | none | proved |
-| SW filter sweep `vfhi:vflo:3` | `s8(flttab.b)` (set rows: reload `8·b`) | none | proved |
-| defMON slide (`pitch` `sacc`) | `±rate(mode)`: decoded `rate_lo`, `rate_hi` | none | proved |
-| defMON pulse `ps` | `ps & 0x7F`, `−ps − (1 − fc)` | `v` past `0x0FFF`/`0xFFFF` by `pw >> 8`: bounce | proved |
-| defMON ACID | `astep` or `−astep − 1` | `v > 0x7FFF`: reads v, `512 + (v & 255)` | proved |
-
-### Timers
-
-A timer *counts n ticks* from its start (or reset, with a bound `p`) until a tick that does
-not count it.
-
-| Timer | Update | Counts n ticks |
-| --- | --- | --- |
-| GT `ptime`, `ftime` | −1, reload `l` | `p + 1` from start `p` |
-| GT `tick` | −1, reload `tempo`, or `funk1`/`funk0` alternating on `tempo` | `p + 1` for `p` ≤ 128 |
-| GT `vibtime` | +2, flip `1 − t` | `(p + 4)//2` for bound `l = p` in 0..125 |
-| GT `vibdelay` | −1 while > 1 | `(254·p + 255)//255` (`max(p, 1)`) |
-| GT `wtime` | +1, reset 0 | `p + 1` for `w = p` in 0..15 |
-| defMON `cnt` | −1, reload `dl` | `p + 1` for `p` in 0..127, 1 from `0x80` (frozen) |
-| SW `pwcnt`, `fsweep` | +1, reset 0 | `p + 1` for `a = p` in 0..127 |
-| SW `sc` | +1, reset 0 | `p` for tempo `p` ≥ 2 |
-| SW `arpcnt` | −1, reload `rw`, reset 255 | `p + 1` for `p` ≤ 128 |
-| SW `vdc` | −1 while ≥ 0 | `p + 2`; the vibrato's `vdc >= 0` lasts `p + 1` |
-| SW `vfc` | −1, reload `vper − 1` | `p + 1` |
-| SW `hr` | −1, reset 1 | `p + 1` |
-
-| Vibrato orbit | Signature |
-| --- | --- |
-| GT, `p` in 0..125 | period, bounds `[(−p − 2)//2, (p + 2)//2]` |
-| SW, even `p` | period, bounds `[(−p)//2, 0]` |
-| SW, odd `p` ≥ 3 | drift, runs `(p − 1)//2` down, `(p + 1)//2` up |
-
-defMON's pulse sweep, `m = ps & 127`, `d = 1 − fc + m`, proved for every `m` and stepped for
-every `m` and `fc`:
-
-| Mode | Phase |
-| --- | --- |
-| `ps ≥ 128`, `m` in 1..127 | `+m` while `v ≤ 0x0FFF`, else `pw := 0x0FF8`, down; from `x ≤ 0x0FFF`: `(4095 − x)//m + 1` ticks; above, wraps at `0x10000` first |
-| `ps < 128`, `m` in 1..127 | `−d` while `v ≥ 0`, else `pw := 1`, up; from `x`: `x//d + 1` ticks |
-| `ps` 0 or 128 | constant |
-| cycle | period `4094//m + 4088//d + 2`, bounds `[min(1, 4088 % d), max(4088, 4095 − 4094 % m)]` |
-
-`fc` (the pitch carry) is read per tick: with it held the forms are exact, otherwise a phase
-lasts between its forms at `fc = 0` and `fc = 1`.
-
-Phase and value expressions (`exprs.txt`, the three conformance songs): every
-modulator's occurrences over the conversion window have one proved expression, the
-rewritten song plays the native register grid exactly over it, and its v1.5 text read back
-plays the native player's grid. Four groups carry values from the modulator before them;
-each has one proved general form:
-
-| Form | Carried | General form |
-| --- | --- | --- |
-| defMON `acid B` | the ACID direction `sub` | input `sub` |
-| SW `pitch`, `!legato:0` glide | the speed's low byte `fml` | input `fml` |
-| SW `pitch`, `!legato:0` glide on another instrument | the whole speed `fmh:fml` | input `fmh:fml` |
-| SW `pitch`, note-column vibrato | the instrument vibrato's delay counter `vdc` | delay gate `[φ >= d]` over `vdc` |
-
-The grammar as written: integers, `+ - * % abs min max`, Iverson brackets, `v`, `φ`, `N`,
-`F(k)` and the table `W[k]`. Examples:
-
-| Form | Written |
-| --- | --- |
-| GT slide (command 1), `!freq:@x1` | `(v + 32) % 65536` |
-| GT toneporta (command 3), `!legato:0!freq:@x2` | `-F(N)*[v != F(N)] + [v < F(N)]*min(F(N), (v + 32) % 65536) + [v > F(N)]*max(F(N), (v - 32) % 65536) + F(N)` |
-| GT vibrato (command 4), `!freq:@x3` | `(v + 64*[(φ - 3) % 12 >= 6] - 32) % 65536` |
-| GT Metal Warrior pulse `i1` | `16*abs((φ - 32) % 128 - 64) + 512` |
-| defMON `t2` slide | `(v - 139) % 65536` |
-| SW Csillag pulse `i1` | `2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048` |
-| SW Csillag `i1` vibrato | `[φ >= 32]*((-W[N + 13]*abs(φ % 6 - 3) + W[N + 13]) % 65536)` |
-| SW slide, `!freq:@x1` | `(v + W[N + 25]) % 65536` |
-
-Reference-song table programs (`sweeps.txt`):
-
-| Program | Accumulator |
-| --- | --- |
-| GT Metal Warrior pulse, `i1`, `i3` | set, then a reflect ping-pong on every tick |
-| GT Metal Warrior pulse `i2`, filters `i1`, `i2` | set, then holds |
-| SW Csillag pulse `i6`, `i8` | set, then one sweep clamped at its end |
-| SW Csillag pulse `i3`, `i7` | set, then holds |
-| SW Csillag pulse `i1`, `i2`, filters `i4`, `i5` | none: several step sizes |
-
-Instruments are numbered as in the song file read back (tunes are lifted and written
-canonically first).
+`specs.yaml` keys: `fits` (playroutine, dotted path, cell), `checks` (a given candidate and an
+optional guard), `orbits` (period cell or `record.index.field`, inclusive `periods`, initial
+`state`, record `data`), `commands` (setup template with `CODE` and `arg`, tick lists, routing
+cells left out of reports, `plain` and `note` row templates), `bounces` and `sweeps` (record
+type, stepping list, swept cell, program pointer, control state at a start, instrument cell).
