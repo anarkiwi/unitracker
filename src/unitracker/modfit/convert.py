@@ -32,21 +32,21 @@ from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
 IDENTITY = "v"
 _HERE = Path(__file__).resolve().parent
-SOURCES = [
-    _HERE / f
-    for f in (
-        "convert.py",
-        "exprs.py",
-        "phase.py",
-        "grammar.py",
-        "form.py",
-        "chipinv.py",
-        "invariant.py",
-    )
-] + [
-    Path(importlib.util.find_spec(f"unitracker.{m}").origin)
-    for m in ("player.modulation", "player.vm", "format.records", "format.codec")
-]
+SOURCES = (
+    sorted(_HERE.glob("*.py"))
+    + [_HERE / "specs.yaml"]
+    + sorted((_HERE.parent / "playroutines").glob("*.yaml"))
+    + [
+        Path(importlib.util.find_spec(f"unitracker.{m}").origin)
+        for m in ("player.modulation", "player.vm", "format.records", "format.codec")
+    ]
+)
+
+
+@functools.cache
+def code_identity() -> str:
+    """The content key of the code a conversion depends on (``SOURCES``), once per process."""
+    return content_key(*(p.read_bytes() for p in SOURCES))
 
 
 class ConversionError(ValueError):
@@ -118,9 +118,8 @@ class Observer(Replay):
 
 
 def ir_key(ir: dict) -> str:
-    """The content key of an internal song and the sources its conversion depends on."""
-    text = json.dumps(ir, sort_keys=True, default=repr)
-    return content_key(text, *(p.read_text() for p in SOURCES))
+    """The content key of an internal song and the code its conversion depends on."""
+    return content_key(json.dumps(ir, sort_keys=True, default=repr), code_identity())
 
 
 def window(ir: dict) -> int:

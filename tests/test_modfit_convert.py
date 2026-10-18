@@ -1,6 +1,7 @@
 """v1.20 expressions in documents and the lift-time conversion of native modulations to them."""
 
 import copy
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -853,3 +854,26 @@ def test_an_offset_row_keeps_the_accumulator_and_its_carry_for_every_state():
 
     assert not refuted([row], claim)
     assert refuted([row], lambda z, after: claim(z, after, 256))
+
+
+def test_a_derivation_is_cached_only_for_the_code_that_derived_it(tmp_path, monkeypatch):
+    ir, start, calls = gt_ir("[C4.i1*4]"), ("start",), []
+
+    def derived(key):
+        calls.append(key)
+        return len(calls)
+
+    monkeypatch.setattr(convert, "_analysis", lambda _ir, _key: SimpleNamespace(derived=derived))
+
+    def derive(identity):
+        monkeypatch.setattr(convert, "code_identity", lambda: identity)
+        return convert.derive_task(ir, convert.ir_key(ir), start, tmp_path)
+
+    assert [derive("a"), derive("a"), derive("b"), derive("a")] == [1, 1, 2, 1]
+    assert calls == [start, start] and len(list((tmp_path / "derived").glob("*.pkl"))) == 2
+
+
+def test_the_code_identity_covers_every_modfit_module_and_the_playroutine_library():
+    names = {p.name for p in convert.SOURCES}
+    assert {"fit.py", "sweeps.py", "specs.yaml", "goattracker2.yaml", "defmon.yaml"} <= names
+    assert convert.code_identity() == convert.code_identity()

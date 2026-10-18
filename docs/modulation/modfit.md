@@ -121,8 +121,14 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
 5. **Verify.** The rewritten song's register grid must equal the native song's over the whole
    window, each voice from its first note (`vm.first_mismatch`).
 
-Observations, derivations and conversions are cached in `out/modfit/cache/` under the sha256
-of the song and the sources they depend on (`convert.SOURCES`).
+Observations, derivations and conversions are cached in `$UNITRACKER_CACHE` (default
+`out/modfit/cache/`) under the sha256 of the song and the code identity
+(`convert.code_identity`): one sha256 per process over the contents of `convert.SOURCES`, which
+are every `modfit/*.py`, `modfit/specs.yaml`, the playroutine library and the player and format
+modules a conversion reads. An entry is valid only for the code that wrote it, so a cache shared
+across commits or worktrees never serves another commit's result. Starts are derived in a pool of
+`$UNITRACKER_WORKERS` processes, else one per core the process may run on; the pool reads no other
+cap, so set it to bound a lift.
 
 ### Failures
 
