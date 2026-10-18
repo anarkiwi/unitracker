@@ -143,6 +143,7 @@ The writer produces one text per song:
 - records and rows the song never reaches are dropped;
 - identical phrases, and phrases that are equal up to a transpose, are merged, and the transpose
   moves into the play entry;
+- equal records (instruments, programs, restarts) are one record, and each reference names it;
 - expressions are written in one form (see [Grammar](../modulation/expressions.md#grammar)) and equal
   ones share one definition, and a constant is written in its plain form
   (`pw: 2048`; see [Where expressions go](../modulation/expressions.md#where-expressions-go));

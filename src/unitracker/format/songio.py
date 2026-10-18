@@ -4,7 +4,6 @@ The player runs the expanded internal representation (``"unitracker": "ir"``): e
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
 """
 
-import contextlib
 import os
 import re
 import tempfile
@@ -17,9 +16,6 @@ from unitracker.format.codec import (
     COMMAND_NAMES,
     ROW_KEYS,
     CodecError,
-    CommandCodec,
-    Evaluator,
-    RowCodec,
     command_text,
     envelope_names,
     inline_text,
@@ -37,9 +33,21 @@ from unitracker.format.header import (  # pylint: disable=unused-import
     library,
 )
 from unitracker.format.schema import first_only
-from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
+from unitracker.format.shared import codecs  # pylint: disable=unused-import
+from unitracker.format.shared import (
+    RowErrors as _RowEval,
+    codec_set as _codecs,
+    expr_fields as _expr_fields,
+    refuse as _refuse,
+    uniform as _uniform,
+    relative as _relative,
+    plain_value as _plain_value,
+    refuse_quoted as _refuse_quoted,
+    player as _player,
+)
+from unitracker.format.records import EXPR, chained, program_path, record_types, ref_type
 from unitracker.format.xexpr import ExpressionError, text_of
-from unitracker.format.yamlstyle import Atom, Decimal, Dumper, Flow, FlowMap, Quoted, Signed, parse
+from unitracker.format.yamlstyle import Atom, Decimal, Dumper, Flow, FlowMap, Quoted, parse
 from unitracker.player.modulation import declared
 from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, compile_phrase
 
@@ -67,92 +75,6 @@ def song_meta(psid, source: str) -> dict:
     }
 
 
-class _RowEval(RowEval):
-    """Row expressions, their errors the reader's and writer's."""
-
-    error = SongFormatError
-
-
-def _codecs(pr, rtypes, tables):
-    """``(note offset, {type: RowCodec}, CommandCodec)`` for a playroutine and a song's tables."""
-    offset = int(pr.get("note_offset", 0))
-    ev = Evaluator(pr.get("functions"), tables, pr.get("constants"))
-    try:
-        rows = {n: RowCodec(rt, rt.codec, offset, ev) for n, rt in rtypes.items() if rt.codec}
-        return offset, rows, CommandCodec(pr.get("commands"), rtypes)
-    except CodecError as exc:
-        raise SongFormatError(f"{pr.get('name')}: {exc}") from exc
-
-
-def codecs(pr: dict, tables) -> dict:
-    """``{type: RowCodec}`` of a playroutine over a song's tables."""
-    return _codecs(pr, record_types(pr), tables)[1]
-
-
-def _expr_fields(codec) -> set:
-    """The raw fields a codec writes as expression or reference keys."""
-    if codec is None:
-        return set()
-    keys = [k for shape in codec.shapes for k in shape.keys.values()]
-    return {k["expr"] for k in keys if "expr" in k} | {k["field"] for k in keys if "ref" in k}
-
-
-def _refuse(problem) -> None:
-    """Raise for a problem, if there is one."""
-    if problem is not None:
-        raise SongFormatError(problem)
-
-
-def _uniform(pr: dict, rtypes: dict, records: dict) -> None:
-    """Refuse rows of a type that set one of its ``uniform`` fields to different values."""
-    for name, rtype in rtypes.items():
-        field = rtype.disagree(records.get(name) or {})
-        if field is not None:
-            raise SongFormatError(
-                f"{pr['name']}: the {rtype.written} rows set {field} to different values;"
-                " the player has one"
-            )
-
-
-def _relative(codec, note) -> None:
-    """Raise for a written row's ``note`` that is a relative note without its sign, or quoted."""
-    if "note" not in codec.keys:
-        return
-    if isinstance(note, int) and not isinstance(note, (bool, Signed)):
-        raise SongFormatError(f"note {note} is written {note:+d} in {codec.rtype.written}")
-    if isinstance(note, Quoted):
-        raise SongFormatError(f"note {str(note)!r} is written unquoted in {codec.rtype.written}")
-
-
-def _plain_value(codec, written: dict, place, what: str) -> None:
-    """Raise for ``what``, a constant expression, where ``written`` with it as the value reads."""
-    with contextlib.suppress(CodecError):
-        codec.decode(written, place)
-        raise SongFormatError(f"{codec.rtype.written}: {what} is written as its value")
-
-
-def _refuse_quoted(value, what: str) -> None:
-    """Raise for ``value`` written in quotes where ``what`` is written plain."""
-    try:
-        spelling.plain(value, what)
-    except spelling.SpellingError as exc:
-        raise SongFormatError(str(exc)) from exc
-
-
-def _player(pr, call, *args):
-    """``call(*args)``, its lifetime, envelope and column errors the player's."""
-    try:
-        return call(*args)
-    except (
-        lifetime.LifetimeError,
-        envelope.EnvelopeError,
-        column.ColumnError,
-        running.RunningError,
-        naming.NamingError,
-    ) as exc:
-        raise SongFormatError(f"{pr['name']}: {exc}") from exc
-
-
 # ---- writing -----------------------------------------------------------------------
 
 
@@ -175,6 +97,7 @@ class _Writer:
         canon = {}
         self.xcanon = {i: canon.setdefault(t, i) for i, t in sorted(self.exprs.items())}
         self.first_row = {}
+        self.equal, self.signatures = {}, {}
         self.order = []
         self.post = []
         self.referrers = {}
@@ -269,8 +192,37 @@ class _Writer:
         return out
 
     def key(self, rtype: str, index: int) -> tuple:
-        """The object ``(type, index)``; equal expressions are one."""
-        return (rtype, self.xcanon.get(index, index) if rtype == EXPR else index)
+        """The object ``(type, index)``; equal expressions are one, and equal records."""
+        if rtype == EXPR:
+            return (rtype, self.xcanon.get(index, index))
+        if self.rtypes[rtype].fixed:
+            return (rtype, index)
+        return self.equal.setdefault(self._signature(rtype, index), (rtype, index))
+
+    def _signature(self, rtype: str, index: int) -> tuple:
+        """What record ``(type, index)`` holds, its references as what they hold."""
+        if (rtype, index) not in self.signatures:
+            rt = self.rtypes[rtype]
+            rows, loop = [self._row(rt, index)], None
+            if rt.chain is not None:
+                rows, loop = self.program_rows(rt, *self.program(rt, index))
+            refs = [dict(self._refs(rt, row)) for row in rows]
+            body = tuple(
+                tuple(
+                    sorted(
+                        (
+                            (f, self._signature(*ref[f]) if ref[f][0] != EXPR else ref[f])
+                            if f in ref
+                            else (f, int(v))
+                        )
+                        for f, v in row.items()
+                        if f != rt.chain
+                    )
+                )
+                for row, ref in zip(rows, refs)
+            )
+            self.signatures[(rtype, index)] = (rtype, body, loop)
+        return self.signatures[(rtype, index)]
 
     def _children(self, key):
         rtype = self.rtypes[key[0]]
@@ -443,7 +395,7 @@ class _Writer:
             kind, note, ins, *cmds, keep = (int(x) for x in arr[start])
             name = None
             if ins:
-                name = self.names[(self.ins_type, ins - self.ins_base)]
+                name = self.names[self.key(self.ins_type, ins - self.ins_base)]
             pairs = list(zip(cmds[::2], cmds[1::2]))
             commands = [self.command(c, a) for c, a in pairs]
             commands += [also for c, a in pairs if (also := self.commands.also(c, a)) is not None]
@@ -481,7 +433,7 @@ class _Writer:
     def _event_refs(self, arr):
         for row in arr:
             if row[2]:
-                yield (self.ins_type, int(row[2]) - self.ins_base), "event"
+                yield self.key(self.ins_type, int(row[2]) - self.ins_base), "event"
             cmds = row[3:EVENT_COLUMNS]
             for cmd, arg in zip(cmds[::2], cmds[1::2]):
                 target = self.commands.ref(int(cmd))
@@ -494,7 +446,7 @@ class _Writer:
         """Visit the playroutine's pinned rows and the fixed rows; ``{type: indices}`` fixed."""
         for rtype in self.rtypes.values():
             for index in rtype.pin:
-                self.visit((rtype.name, index), "playroutine")
+                self.visit(self.key(rtype.name, index), "playroutine")
         fixed = {}
         for rtype in (rt for rt in self.rtypes.values() if rt.fixed):
             fixed[rtype.name] = sorted(self._rows(rtype))

@@ -556,3 +556,32 @@ def test_a_command_is_kept_where_something_else_may_change_what_it_sets(defs, ph
     defs += "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
     text = canonical(doc("goattracker2", defs, phrases, rows))
     assert all(f"{n}: [{a}]" in text for n, a in phrases.items())
+
+
+# -- 11: equal records are one --
+
+
+def test_equal_records_are_one():
+    defs = (
+        "      restart:\n        r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]\n"
+        "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
+        "      ins:\n        i1: {ctrl: c1, restart: r1}\n"
+        "        i2: {sr: 5, ctrl: c1, restart: r1}\n"
+    )
+    text = canonical(doc("goattracker2", defs, {"p1": "C4.i1*4, D4.i2*4"}))
+    ir = songio.loads(text)
+    ins, restarts, ctrl = (ir["records"][t] for t in ("ins", "restart", "ctrltab"))
+    entry = ins[2]["ctrl"]
+    path = [entry]
+    while ctrl[path[-1]].get("next"):
+        path.append(ctrl[path[-1]]["next"])
+    start = max(ctrl) + 1
+    for k, index in enumerate(path):
+        ctrl[start + k] = {**ctrl[index], "next": start + k + 1 if ctrl[index].get("next") else 0}
+    first = ins[2]["restart"]
+    copy = max(restarts) + 1
+    restarts[copy] = {**restarts[first], "next": copy + 1}
+    restarts[copy + 1] = dict(restarts[restarts[first]["next"]])
+    ins[2] = {**ins[2], "ctrl": start, "restart": copy}
+    assert songio.dumps(ir) == text
+    assert same_play(text, ir)
