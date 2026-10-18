@@ -14,7 +14,6 @@ instrument: {type: ins, base: 0}          # the record type .name refers to; ind
                                           # event: {type, column, commands}: see Instrument columns
 restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
 lifetime: {pulse: {field: pw, flag: {flags: 0x40}}}   # !pulse:0 and !filter:0 (see Lifetime)
-exclusive: "code < 0x100"                 # over code and instrument: commands of a one-command column
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
@@ -111,10 +110,13 @@ written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`);
 joined by `/`, which `raw` reads by those names (`!funk:6/7`). A `ref` entry with `inline: true`
 writes the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
 one row per distinct argument, and the type has no definitions of its own (`unknown record type
-'speedtab'`). A `ref` entry's argument `none` is the type's `none` (`!funk:none`). An entry `{name: ad,
-nibble: s, slot: k}` is an envelope command: the code sets the nibble at shift `s` of the register
-`name` over the instrument's field `name`, played from event slot `k`, and is written as the byte it
-writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).
+'speedtab'`). A `ref` entry's argument `none` is the type's `none` (`!funk:none`). An entry's `column`
+is the event column its command is read into, `instrument` (event slot 0) or `fx` (slot 1), or a
+list of them of which it takes the first the event leaves free (an event that names an instrument
+fills `instrument`); a column holds one command, and an event with two in one is refused. An entry
+`{name: ad, nibble: s, column: c}` is an envelope command: the code sets the nibble at shift `s` of
+the register `name` over the instrument's field `name`, played from the slot of column `c`, and is
+written as the byte it writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).
 
 Codec expressions may read the song's tables and the
 playroutine's functions. A list row a shape covers is rejected: it has a shared-key form.

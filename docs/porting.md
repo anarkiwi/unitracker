@@ -176,7 +176,8 @@ byte; a note byte (bit 7 absolute, the rest a signed relative note, one byte no 
 `raw` entry. The reader accepts a written row only when encoding its raw inverse gives the
 row again, so a shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
 `commands`: code to `{name, ref, when, arg, raw}` (or `byte` for `arg`), `{name, when, args, raw}` for several values,
-`{name, ref, inline: true}` for a row written in place, or `{name, nibble, slot}` for an envelope command.
+`{name, ref, inline: true}` for a row written in place, or `{name, nibble, column}` for an envelope command; `column` gives the event column a command is
+read into.
 
 **A document names no player.** No key, command or record type is one player's own. What the
 player cannot play has no shape, so the reader refuses it naming the key or command and the
@@ -288,8 +289,8 @@ The writer and reader resolve the context these forms need by walking each voice
 envelope nibble command as the byte it writes), and the event folds `fold.py`, `instrument.py` (the
 record an event's columns arm) and `restart.py` (a restart run on the steps before its note), and
 `column.py` refuses two commands on one event for a column that holds one. They read the
-playroutine's `lifetime`, `commands` with `nibble`, `instrument: event`, `restart` and
-`exclusive` declarations, so a port declares them rather than codes them; each raises its own error
+playroutine's `lifetime`, `commands` with `nibble` or `column`, `instrument: event` and `restart`
+declarations, so a port declares them rather than codes them; each raises its own error
 naming what has no written form.
 
 **Files:** the playroutine's `restart` record type, `lifetime`, `restart`, `instrument`, codec

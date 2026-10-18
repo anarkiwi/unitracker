@@ -355,9 +355,13 @@ def test_commands_in_different_columns_share_an_event():
 
 @pytest.mark.parametrize(
     "atoms,shown",
-    [("C4.i1!sr:192!tempo:4*4", "!sr and !tempo"), ("C4.i1!run:@c1!funk:4/5*4", "!run and !funk")],
+    [
+        ("C4.i1!sr:192!tempo:4*4", "!sr and !tempo"),
+        ("C4.i1!run:@c1!funk:4/5*4", "!run and !funk"),
+        ("C4.i1*4, D4!sr:192!run:@c1*4", "!sr and !run"),
+    ],
 )
-def test_two_fx_column_commands_are_refused_naming_both(atoms, shown):
+def test_two_commands_in_one_column_are_refused_naming_both(atoms, shown):
     with pytest.raises(songio.SongFormatError, match=f"^sidwizard: the player can't play {shown}"):
         songio.loads(env_song({"p1": atoms}, defs=COL_DEFS))
 

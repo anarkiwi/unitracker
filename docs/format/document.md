@@ -102,8 +102,9 @@ note[.instrument][!command:arg[!command:arg]][*steps]
   An event carries at most two commands, its two slots, then `!pulse:0` and `!filter:0` (see
   [Lifetime](vocabulary.md#lifetime)), which take no slot. The first slot is the instrument column
   and the second the FX column; an event that names an instrument fills the instrument column with
-  it, so its commands are the FX column's. A playroutine whose column holds one command declares it
-  (`exclusive`), and an event with two such commands is refused, naming both.
+  it, so its commands are the FX column's. A playroutine declares the column each command is read
+  into (`column`); a column holds one command, and an event with two in one is refused, naming
+  both.
 - `*3` makes the event last 3 steps; the steps after the first are empty.
 
 ## Canonical form
