@@ -49,6 +49,7 @@ COMMAND_NAMES = (
     "legato",
 )
 BYTE_SHIFT = {"cut": 3}
+KEY_DEFAULTS = {"hold": 1}
 NONE = "none"
 _NOTE = re.compile(r"^(?P<abs>=)?(?P<n>[+-]?\d+)$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
@@ -203,6 +204,35 @@ def byte_form(name: str, spec: dict, field: str) -> dict:
     return {**spec, field: f"({spec['byte']}) << {BYTE_SHIFT[name]}"}
 
 
+def note_byte(spec: dict) -> tuple[dict, dict]:
+    """``(spec, raw)`` of a ``note`` key given as ``{byte: f, none: n, abs: [lo, hi]}``: raw
+    field ``f`` is the note byte, ``n`` no note, ``lo``-``hi`` (default $80-$FF) an absolute note
+    in its low 7 bits, and any other byte a relative one, two's complement in 7 bits when the
+    absolute range reaches $FF, else in 8; ``raw`` is ``f`` from the written note."""
+    if "byte" not in spec:
+        return spec, {}
+    field, none = spec["byte"], spec.get(NONE)
+    lo, hi = spec.get("abs", (0x80, 0xFF))
+    if none is None or set(spec) - {"byte", NONE, "abs"}:
+        raise CodecError("a note byte is {byte, none, abs}")
+    mask = 0x7F if hi == 0xFF else 0xFF
+    absolute = f"{field} >= {lo} and {field} <= {hi} and {field} != {none}"
+    sign = (mask + 1) >> 1
+    return {
+        "value": f"({field} & 0x7F) if {absolute} else (({field} & {mask}) ^ {sign}) - {sign}",
+        "abs": absolute,
+        "omit": f"{field} == {none}",
+    }, {field: f"((note & 0x7F) | 0x80) if note_abs else ((note & {mask}) if has_note else {none})"}
+
+
+def key_default(key: str, kspec: dict) -> dict:
+    """``kspec`` with the ``omit`` a key with a vocabulary default gets when it gives none: left
+    out when its value is the default."""
+    if key not in KEY_DEFAULTS or "omit" in kspec or "value" not in kspec:
+        return kspec
+    return {**kspec, "omit": f"({kspec['value']}) == {KEY_DEFAULTS[key]}"}
+
+
 def optional_codec(optional) -> tuple[dict, dict]:
     """``(keys, raw)`` a shape gets for its record type's optional fields that are shared keys:
     the key is the field, left out when it is :data:`ABSENT`, and reads back as it."""
@@ -218,7 +248,10 @@ class _Shape:
     :func:`route_value`). A key's ``expr`` names the raw field of its expression, a key with
     ``ref`` is the reference to that record type its raw ``field`` holds, and a key with
     ``none`` is written ``none``. The record type's ``optional`` fields give the keys and raw
-    fields of :func:`optional_codec`; a key the shape gives replaces both, a raw field the raw.
+    fields of :func:`optional_codec`; a key the shape gives replaces both, a raw field the raw. A
+    key of :data:`KEY_DEFAULTS` is left out at its default unless it gives ``omit`` (see
+    :func:`key_default`), and reads as the default in ``raw`` when it is left out. A ``note``
+    key's ``byte`` form gives its key and raw field (see :func:`note_byte`).
     """
 
     # pylint: disable=too-few-public-methods
@@ -231,9 +264,11 @@ class _Shape:
         for key, kspec in {**gen_keys, **own}.items():
             if key not in ROW_KEYS:
                 raise CodecError(f"{key!r} is not a shared row key")
-            self.keys[key] = byte_form(
-                key, kspec if isinstance(kspec, dict) else {"value": kspec}, "value"
-            )
+            kspec = kspec if isinstance(kspec, dict) else {"value": kspec}
+            if key == "note":
+                kspec, raw = note_byte(kspec)
+                gen_raw.update(raw)
+            self.keys[key] = key_default(key, byte_form(key, kspec, "value"))
             if ("ref" in self.keys[key]) != ("field" in self.keys[key]):
                 raise CodecError(f"{key}: a reference key has both ref and field")
         self.refs = {k for k, s in self.keys.items() if "ref" in s}
@@ -370,6 +405,8 @@ class RowCodec:
             elif plain:
                 shift = BYTE_SHIFT[key] if "byte" in shape.keys[key] else 0
                 env[env_name(key)] = norm[key] >> shift
+            elif key not in norm and key in KEY_DEFAULTS:
+                env[env_name(key)] = KEY_DEFAULTS[key]
         return env
 
     @staticmethod
@@ -481,10 +518,29 @@ def envelope_names(spec: dict) -> list:
     return sorted({str(v["name"]) for _, v in command_variants(spec) if "nibble" in v})
 
 
+def inline_text(rtype, row: dict) -> str:
+    """The written argument of an inline reference to ``row`` of ``rtype``: its fields in
+    declaration order joined by ``/``."""
+    return "/".join(str(int(row.get(f, rtype.default(f)))) for f in rtype.own)
+
+
+def inline_row(rtype, values) -> dict:
+    """The row of ``rtype`` an inline argument's values write; raises CodecError naming what is
+    wrong."""
+    values = values if isinstance(values, tuple) else (values,)
+    if not is_values(values) or len(values) != len(rtype.own):
+        raise CodecError(f"the argument is {len(rtype.own)} values, {'/'.join(rtype.own)}")
+    if not all(0 <= v <= 0xFF for v in values):
+        raise CodecError("each value is a byte (0-255)")
+    return dict(zip(rtype.own, values))
+
+
 class CommandCodec:
     """A playroutine's command codes as shared names; an envelope command's internal code (see
     :func:`envelope_names`) as its name and byte. A code with no ``name`` has no written form of
-    its own: a document writes it through another record (see ``format.events.instrument``)."""
+    its own: a document writes it through another record (see ``format.events.instrument``). An
+    entry with ``inline`` writes the row its reference names in place (see :func:`inline_text`).
+    """
 
     def __init__(self, spec: dict, rtypes: dict):
         self.entries, self.unnamed = [], {}
@@ -510,6 +566,13 @@ class CommandCodec:
                 return ref
         return self.unnamed.get(code)
 
+    def inline(self, key: int | str) -> str | None:
+        """The record type whose row a command (a code or a name) writes as its argument."""
+        for code, name, ref, var in self.entries:
+            if key in (code, name) and ref is not None and var.get("inline"):
+                return ref
+        return None
+
     def values(self, name: str) -> bool:
         """Whether command ``name`` takes several values that are no record's row."""
         return any(n == name and "args" in var for _, n, _, var in self.entries)
@@ -519,10 +582,6 @@ class CommandCodec:
         ``(type, index)`` for a reference, or ``none``."""
         for ecode, name, ref, var in self.entries:
             if ecode != code or ("when" in var and not evaluate(var["when"], {"arg": arg})):
-                continue
-            if "none" in var:
-                if arg == var["none"]:
-                    return name, NONE
                 continue
             if "args" in var:
                 return name, tuple(evaluate(e, {"arg": arg}) for e in var["args"].values())
@@ -537,9 +596,8 @@ class CommandCodec:
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
     def _arg(self, name, ref, var, value):
-        if value == NONE or "none" in var:
-            none = var.get("none", None if ref is None else self.rtypes[ref].none)
-            return none if value == NONE else None
+        if value == NONE:
+            return None if ref is None else self.rtypes[ref].none
         if "args" in var:
             fits = is_values(value) and len(value) == len(var["args"])
             return evaluate(var["raw"], dict(zip(var["args"], value))) if fits else None

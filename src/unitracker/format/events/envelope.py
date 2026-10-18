@@ -1,6 +1,6 @@
 """Envelope commands: ``!ad:n`` and ``!sr:n`` as the byte a player's nibble small FX writes.
 
-A command code with ``nibble`` (its shift) and ``slot`` (0 the instrument column, 1 the FX column)
+A command code with ``nibble`` (its shift) and ``column`` (its event slot, see ``column.COLUMNS``)
 writes the sounding instrument's byte with that nibble replaced, and the other register again
 from its override, which must leave it unchanged; overrides last until the next note start.
 """
@@ -8,6 +8,7 @@ from its override, which must leave it unchanged; overrides last until the next 
 import functools
 
 from unitracker.format.codec import ENVELOPE, command_code, command_variants, envelope_names
+from unitracker.format.events.column import COLUMNS
 from unitracker.format.events.lifetime import order, starts
 from unitracker.player.vm import event_commands
 
@@ -68,7 +69,8 @@ class Envelope:
         self.native = {}
         for code, var in command_variants(pr.get("commands")):
             if "nibble" in var:
-                self.native[code] = (str(var["name"]), int(var["nibble"]), int(var["slot"]))
+                slot = COLUMNS.index(var["column"])
+                self.native[code] = (str(var["name"]), int(var["nibble"]), slot)
         self.codes = {v: c for c, v in self.native.items()}
         self.names = envelope_names(pr.get("commands"))
 

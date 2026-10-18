@@ -36,10 +36,10 @@ record_types:
     codec:
       - when: "not last and dl >= 0 and dl < 0x80"
         keys:
-          hold: {value: "dl + 1", omit: "dl == 0"}
+          hold: "dl + 1"
           ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
         raw:
-          dl: "(hold - 1) if has_hold else 0"
+          dl: "hold - 1"
           wgh: "ctrl if has_ctrl else -1"
           wgl: "eor if has_eor else -1"
       - when: "last and dl == 0 and wgh < 0 and wgl < 0 and ad < 0 and sr < 0"
@@ -62,7 +62,7 @@ record_types:
         keys:
           hold: {value: "dl + 1", omit: "dl == 0 or dl >= 0x80"}
           ctrl: {value: wgh, omit: "wgh < 0", eor: {value: wgl, omit: "wgl < 0"}}
-          note: {value: "(tr & 0x7F) if tr >= 0x80 else ((tr - 0x80) if tr >= 0x40 else tr)", abs: "tr >= 0x80", omit: "tr < 0"}
+          note: {byte: tr, none: -1}
           freq: {expr: xf}
           pw: {expr: xp}
           cut: {expr: xc}
@@ -70,10 +70,9 @@ record_types:
           route: {value: "re & 0x0F", rel: "-1 if re == 0 else (1 if re & 0x08 else 0)", omit: "re < 0"}
           mode: {value: "fv & 0xF0", omit: "fv < 0"}
         raw:
-          dl: "(hold - 1) if has_hold else 0"
+          dl: "hold - 1"
           wgh: "ctrl if has_ctrl else -1"
           wgl: "eor if has_eor else -1"
-          tr: "(((note & 0x7F) | 0x80) if note_abs else (note & 0x7F)) if has_note else -1"
           af: "0x80 if xf else -1"
           re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
           fv: "mode if has_mode else -1"

@@ -7,6 +7,7 @@ import ast
 import copy
 import re
 
+from unitracker.format.codec import ROW_KEYS, command_variants
 from unitracker.format.records import EXPR, META_KEYS
 from unitracker.player.modulation import function
 
@@ -25,6 +26,10 @@ def expand(pr: dict) -> dict:
     types = out.get("record_types") or {}
     for spec in types.values():
         _record_type(spec)
+    for spec in types.values():
+        if spec.get("codec"):
+            commands = out.get("commands") or {}
+            spec["codec"] = [s for c in spec["codec"] for s in _command_shapes(c, commands, types)]
     if "instrument" not in out:
         ins = [n for n, s in types.items() if (s or {}).get("writes_as", n) == INS]
         if ins:
@@ -56,6 +61,52 @@ def _record_type(spec: dict) -> None:
         if not spec.get("refs"):
             spec["refs"] = {}
         spec["refs"].setdefault(spec["expr"], EXPR)
+
+
+def _bind(text, name: str, expr: str) -> str:
+    """Expression ``text`` with name ``name`` replaced by ``expr``."""
+    return re.sub(rf"(?<![\w.]){name}(?!\w)", _par(str(expr)), str(text))
+
+
+def _command_shapes(shape: dict, commands: dict, types: dict) -> list:
+    """The shapes a codec shape ``{command: c, arg: a}`` stands for: one per ``commands`` entry
+    named a shared row key (not an expression's) whose code is not in its ``skip``, fitting a row
+    whose ``c`` is the entry's code and ``a`` an argument the entry takes but its type's ``none``,
+    and writing the key as the command writes its argument; its ``raw`` reads ``command`` as the
+    code and ``arg`` as the argument."""
+    if "command" not in shape:
+        return [shape]
+    code_x, arg_x = str(shape["command"]), str(shape["arg"])
+    out = []
+    for code, var in command_variants(commands):
+        name, ref = var.get("name"), var.get("ref")
+        if name not in ROW_KEYS or ref == EXPR or {"nibble", "args", "inline"} & var.keys():
+            continue
+        if code in (shape.get("skip") or ()):
+            continue
+        when = [shape.get("when"), f"({code_x}) == {code}", var.get("when")]
+        if ref is not None:
+            none = types[ref].get("none")
+            when.append(None if none is None else f"arg != {none}")
+            key = {"ref": ref, "field": arg_x}
+        elif "byte" in var:
+            key = {"byte": _bind(var["byte"], "arg", arg_x)}
+        else:
+            key = {"value": _bind(var.get("arg", "arg"), "arg", arg_x)}
+        written = _bind(var.get("raw", "arg"), "arg", name)
+        raw = {
+            f: _bind(_bind(e, "command", code), "arg", written)
+            for f, e in (shape.get("raw") or {}).items()
+            if not (ref is not None and f == arg_x)
+        }
+        out.append(
+            {
+                "when": " and ".join(f"({_bind(w, 'arg', arg_x)})" for w in when if w),
+                "keys": {name: key},
+                "raw": raw,
+            }
+        )
+    return out
 
 
 def _registers(regs: dict, cells: dict) -> dict:
@@ -125,7 +176,7 @@ def _hex(bits: int) -> str:
 
 
 def _par(text: str) -> str:
-    return text if text.isidentifier() else f"({text})"
+    return text if re.fullmatch(r"\w+", text) else f"({text})"
 
 
 def _named_tables(mods: dict, functions: dict) -> None:

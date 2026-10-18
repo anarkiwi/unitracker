@@ -18,10 +18,8 @@ commands:
   11: {name: resfilt}
   12: {name: cut, byte: arg}
   13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
-  # E: the swing tempos; the lifter gives a speed-table row l/r as $10000 | l << 8 | r (!funk:6/7).
-  14:
-    - {name: funk, none: 0}
-    - {name: funk, when: "arg >= 0x10000", args: {a: "(arg >> 8) & 0xFF", b: "arg & 0xFF"}, raw: "0x10000 | (a << 8) | b"}
+  # E: the swing tempos, written as the speed-table row's two bytes (!funk:6/7).
+  14: {name: funk, ref: speedtab, inline: true}
   # F: d (bit 7 clear: all voices) gives d ticks per row for d >= 3, and d = 2 plays as 3.
   15:
     - {name: tempo, when: "arg >= 2 and arg < 0x80", arg: "arg if arg >= 3 else 3", raw: arg}
@@ -45,13 +43,12 @@ record_types:
     optional: [ctrl, gate, ad, sr]
     codec:
       - when: "first and not last and hold >= 1 and hold <= 0x3F and ctrl < 0 and gate <= 0 and ((ad < 0 and sr < 0) or (gate == 0 and ad == adparam >> 8 and sr == (adparam & 0xFF)))"
-        keys: {hold: {value: hold, omit: "hold == 1"}}
-        raw: {hold: "hold if has_hold else 1"}
+        keys: {hold: hold}
+        raw: {hold: hold}
       - when: "last and not first and hold == 0 and ad < 0 and sr < 0 and ((ctrl < 0 and gate <= 1) or (ctrl >= 1 and ctrl < 0xFE and gate == 1))"
-  # The speed table: no written form.
+  # The speed table: no written form; !funk writes its rows inline.
   speedtab:
     fields: [l, r]
-    unwritten: [l, r]
   # Wavetable row: w is a delay ($00-$0F), a waveform, a silent waveform ($E0-$EF) or a
   # command ($F0-$FE, argument n); n is a relative note, an absolute one ($80+) or none ($80).
   ctrltab:
@@ -68,30 +65,16 @@ record_types:
         keys:
           wait: {value: w, omit: "w == 0 or w >= 0x10"}
           ctrl: {value: "(w & 0x0F) if w >= 0xE0 else w", omit: "w < 0x10"}
-          note: {value: "(n & 0x7F) if n > 0x80 else ((n - 0x80) if n >= 0x40 else n)", abs: "n > 0x80", omit: "n == 0x80"}
+          note: {byte: n, none: 0x80}
         raw:
           w: "((ctrl | 0xE0) if ctrl < 0x10 else ctrl) if has_ctrl else wait"
-          n: "((note | 0x80) if note_abs else (note & 0x7F)) if has_note else 0x80"
       # A portamento, toneporta or vibrato step ($F1-$F4) is the row's one-firing freq
       # expression, read as a portamento step of speed 0, which leaves the frequency alone.
       - when: "w == 0xF1 and n == 0 and x != 0"
         keys: {freq: {expr: x}}
         raw: {w: 0xF1, n: 0}
-      # Commands with a shared form, run as the pattern command of the same number: $F5/$F6
-      # set the envelope, $F9/$FA start the pulse/filter program or with 0 stop it, $FB sets
-      # $D417 (0 also stops the filter program), $FC the cutoff, $FD the volume (below $10).
-      - when: "w == 0xF5 and n >= 0 and n <= 0xFF"
-        keys: {ad: n}
-        raw: {w: 0xF5, n: ad}
-      - when: "w == 0xF6 and n >= 0 and n <= 0xFF"
-        keys: {sr: n}
-        raw: {w: 0xF6, n: sr}
-      - when: "w == 0xF9 and n != 0"
-        keys: {run: {ref: pulsetab, field: n}}
-        raw: {w: 0xF9}
-      - when: "w == 0xFA and n != 0"
-        keys: {run: {ref: filttab, field: n}}
-        raw: {w: 0xFA}
+      # $FB sets $D417 (0 also stops the filter program); $F9/$FA with 0 stop the pulse/filter
+      # program.
       - when: "w == 0xFB and n != 0"
         keys: {res: "n >> 4", route: "n & 0x0F"}
         raw: {w: 0xFB, n: "((res & 0x0F) << 4) | (route & 0x0F)"}
@@ -104,16 +87,18 @@ record_types:
       - when: "w == 0xFB and n == 0"
         keys: {res: 0, route: 0, filter: {none: true}}
         raw: {w: 0xFB, n: 0}
-      - when: "w == 0xFC and n >= 0 and n <= 0xFF"
-        keys: {cut: {byte: n}}
-        raw: {w: 0xFC, n: cut}
-      - when: "w == 0xFD and n >= 0 and n < 0x10"
-        keys: {vol: n}
-        raw: {w: 0xFD, n: vol}
+      # Any other command is the pattern command of its number, as the commands write it, but
+      # $F7 (a waveform row's ctrl) and $F8 (which stops the player).
+      - when: "w >= 0xF0"
+        command: "w & 0x0F"
+        skip: [7, 8]
+        arg: n
+        raw: {w: "0xF0 | command", n: arg}
     do:
       - if: "row.w >= 0xF0"
         then:
-          - set: {arg: row.n, wc: "row.w & 0x0F"}
+          - set: {arg: row.n, cmdarg: row.n, wc: "row.w & 0x0F"}
+          - run: {record: cmd, index: wc, field: do}
           - run: {record: wavecmd, index: wc, field: do}
           - set: {skip: 1}
           - return: true
@@ -222,7 +207,7 @@ voice:
   cmddata: {width: 8}
   newcommand: {width: 8}
   legato: {width: 1}
-  newcmddata: {width: 17}
+  newcmddata: {width: 8}
   tick: {width: 8}
   tempo: {width: 8}
   gatetimer: {width: 8}
@@ -232,6 +217,7 @@ voice:
   fetchtick: {width: 1}
   hr: {width: 8}
   arg: {width: 8}
+  cmdarg: {width: 8}
   wc: {width: 8}
   n: {width: 8}
   T: {width: 16}
@@ -239,29 +225,19 @@ voice:
   vspd: {width: 16}
 
 records:
-  # Pattern command at tick 0 (gplay.c / player.s mt_tick0_*), argument newcmddata.
+  # Pattern command at tick 0 (gplay.c / player.s mt_tick0_*), argument newcmddata; the ones a
+  # wavetable row also runs are cmd's.
   tick0:
     0: {do: [{set: {command: 0, cmddata: "vibspeed(ii)"}}]}
     1: {do: [{set: {vibtime: 0, command: 1, cmddata: newcmddata}}]}
     2: {do: [{set: {vibtime: 0, command: 2, cmddata: newcmddata}}]}
     3: {do: [{set: {command: 3, cmddata: newcmddata}}]}
     4: {do: [{set: {command: 4, cmddata: newcmddata}}]}
-    5: {do: [{set: {ad: newcmddata}}]}
-    6: {do: [{set: {sr: newcmddata}}]}
-    7: {do: [{set: {wave: newcmddata}}]}
     8: {do: [{set: {wptr: newcmddata, wtime: 0}}]}
-    9: {do: [{set: {pptr: newcmddata, ptime: 0}}]}
-    10: {do: [{set: {fptr: newcmddata, ftime: 0}}]}
-    11:
-      do:
-        - set: {filterctrl: newcmddata}
-        - {if: "newcmddata == 0", then: [{set: {fptr: 0}}]}
-    12: {do: [{set: {filtercutoff: newcmddata}}]}
-    13: {do: [{if: "newcmddata < 0x10", then: [{set: {masterfader: newcmddata}}]}]}
     14:
       do:
         - if: newcmddata
-          then: [{set: {funk0: "((newcmddata >> 8) & 0xFF) - 1", funk1: "(newcmddata & 0xFF) - 1"}}]
+          then: [{set: {funk0: "speedtab[newcmddata].l - 1", funk1: "speedtab[newcmddata].r - 1"}}]
         - for_voices: [{set: {tempo: 0}}]
     16: {do: [{set: {command: 16, cmddata: newcmddata}}]}
     15:
@@ -271,6 +247,20 @@ records:
         - if: "newcmddata >= 0x80"
           then: [{set: {tempo: nt}}]
           else: [{for_voices: [{set: {tempo: nt}}]}]
+  # A pattern command a wavetable row ($F5-$FD but $F8) runs too, argument cmdarg: the event's
+  # newcmddata or the row's n.
+  cmd:
+    5: {do: [{set: {ad: cmdarg}}]}
+    6: {do: [{set: {sr: cmdarg}}]}
+    7: {do: [{set: {wave: cmdarg}}]}
+    9: {do: [{set: {pptr: cmdarg, ptime: 0}}]}
+    10: {do: [{set: {fptr: cmdarg, ftime: 0}}]}
+    11:
+      do:
+        - set: {filterctrl: cmdarg}
+        - {if: "cmdarg == 0", then: [{set: {fptr: 0}}]}
+    12: {do: [{set: {filtercutoff: cmdarg}}]}
+    13: {do: [{if: "cmdarg < 0x10", then: [{set: {masterfader: cmdarg}}]}]}
   # Continuous command on ticks other than 0, argument cmddata.
   tickn:
     0:
@@ -285,25 +275,14 @@ records:
     4: {do: [{call: vibrato, with: {arg: cmddata}}]}
     # A freq command: the modulator drives freq (see modulators).
     16: {do: [{return: true}]}
-  # Command run from a wavetable row ($F0-$FE), argument arg.
+  # A wavetable row's own command ($F0-$F4, $F8, $FE), argument arg.
   wavecmd:
     0: {do: [{set: {state: 1}}]}
     1: {do: [{accumulate: freq, step: "spd(arg)"}]}
     2: {do: [{accumulate: freq, step: "0 - spd(arg)"}]}
     3: {do: [{call: toneporta}]}
     4: {do: [{call: vibrato}]}
-    5: {do: [{set: {ad: arg}}]}
-    6: {do: [{set: {sr: arg}}]}
-    7: {do: [{set: {wave: arg}}]}
     8: {do: [{set: {state: 1}}]}
-    9: {do: [{set: {pptr: arg, ptime: 0}}]}
-    10: {do: [{set: {fptr: arg, ftime: 0}}]}
-    11:
-      do:
-        - set: {filterctrl: arg}
-        - {if: "arg == 0", then: [{set: {fptr: 0}}]}
-    12: {do: [{set: {filtercutoff: arg}}]}
-    13: {do: [{if: "arg < 0x10", then: [{set: {masterfader: arg}}]}]}
     14: {do: [{set: {state: 1}}]}
 
 procs:
@@ -399,7 +378,9 @@ procs:
       then:
         - set: {gatetimer: "restart[ins[ii].restart].hold"}
         - {if: hasnew, then: [{call: new_note_init}]}
+        - set: {cmdarg: newcmddata}
         - run: {record: tick0, index: newcommand, field: do}
+        - run: {record: cmd, index: newcommand, field: do}
         - if: hasnew
           then:
             - set: {hasnew: 0}

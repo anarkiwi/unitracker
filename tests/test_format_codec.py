@@ -237,9 +237,7 @@ COMMAND_ROWS = {
         (16, 0, ("freq", NONE)),
         (17, 0, ("legato", 0)),
         (14, 0, ("funk", NONE)),
-        (14, 0x10609, ("funk", (6, 9))),
-        (14, 0x10000, ("funk", (0, 0))),
-        (14, 6, None),
+        (14, 6, ("funk", ("speedtab", 6))),
         (15, 0, None),
         (17, 1, None),
         (4, 1, None),
@@ -835,15 +833,14 @@ def accepted(player: str) -> dict:
     pr, rtypes, cmds = LIBS[player], TYPES[player], COMMANDS[player]
     values, refs = {}, {}
     for code, name, ref, var in cmds.entries:
+        if ref is not None and cmds.inline(code):
+            refs.setdefault(name, []).append("/".join(["0-255"] * len(rtypes[ref].own)))
+            continue
         if ref is not None:
             refs.setdefault(name, []).append(f"`@{rtypes[ref].written}`")
             continue
-        if "none" in var:
-            continue
         values.setdefault(name, set()).update(readable(cmds, code, name, var))
     cells = {n: cell(v) for n, v in values.items()}
-    for name in {n for _, n, _, var in cmds.entries if "none" in var}:
-        cells[name] += f", `{NONE}`"
     for name in envelope_names(pr.get("commands")):
         cells[name] += ", at most one nibble from the instrument's"
     for name, names in refs.items():

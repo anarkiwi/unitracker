@@ -110,7 +110,7 @@ written form. A legato note restarts nothing, so the command adds nothing there.
 
 ## Envelope commands
 
-A command entry `{name: ad, nibble: s, slot: k}` sets one nibble of an envelope register over
+A command entry `{name: ad, nibble: s, column: c}` sets one nibble of an envelope register over
 the instrument's byte. The document writes each as the byte it writes, `!ad:n` or `!sr:n` in the
 slot of its column, from the voice's instrument (found by walking each voice's plays twice
 through its loop); the reader plays each byte as the nibble command that changes one nibble of

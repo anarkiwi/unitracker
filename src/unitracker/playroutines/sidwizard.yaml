@@ -14,19 +14,18 @@ lifetime:
   pulse: {field: pw, flag: {flags: 0x40}}
   filter: {field: filter, flag: {flags: 0x80}}
 note_offset: 1
-# The FX column holds one command: any below $100 but legato, and !run on a row that names an
-# instrument (on one that names none it plays in the instrument column).
-exclusive: "code != 0x3F and code < 0x100 and not (code == 0x70 and not instrument)"
-# !ad and !sr: small FX $2x/$3x/$5x/$6x set the envelope register's nibble at shift `nibble`, in
-# the FX column (event slot 1) or, from $100, the instrument column (slot 0); see envelope.py.
+# Each command's column: the FX column, or the instrument column ($100 + class for small FX);
+# !run plays in the instrument column on a row that names no instrument, else in the FX column.
+# !ad and !sr: small FX $2x/$3x/$5x/$6x set the envelope register's nibble at shift `nibble` (see
+# envelope.py).
 commands:
-  16: {name: freq, ref: x}
-  32: {name: ad, nibble: 4, slot: 1}
-  48: {name: ad, nibble: 0, slot: 1}
-  80: {name: sr, nibble: 4, slot: 1}
-  96: {name: sr, nibble: 0, slot: 1}
-  112: {name: run, ref: wftab}
-  63: {name: legato, when: "arg == 0"}
+  16: {name: freq, ref: x, column: fx}
+  32: {name: ad, nibble: 4, column: fx}
+  48: {name: ad, nibble: 0, column: fx}
+  80: {name: sr, nibble: 4, column: fx}
+  96: {name: sr, nibble: 0, column: fx}
+  112: {name: run, ref: wftab, column: [instrument, fx]}
+  63: {name: legato, when: "arg == 0", column: instrument}
   # The tempo FX: $11 every voice's swing pair (high nibble, then low), $12 every voice's tempo
   # (the player's FX $10, whose code !freq takes) and $13 this voice's; a tempo 0 plays as 6.
   17:
@@ -34,12 +33,13 @@ commands:
     name: funk
     args: {a: "(arg >> 4) if arg >> 4 else 6", b: "(arg & 0x0F) if arg & 0x0F else 6"}
     raw: "(a << 4) | b"
-  18: {name: tempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg}
-  19: {name: vtempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg}
-  288: {name: ad, nibble: 4, slot: 0}
-  304: {name: ad, nibble: 0, slot: 0}
-  336: {name: sr, nibble: 4, slot: 0}
-  352: {name: sr, nibble: 0, slot: 0}
+    column: fx
+  18: {name: tempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg, column: fx}
+  19: {name: vtempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg, column: fx}
+  288: {name: ad, nibble: 4, column: instrument}
+  304: {name: ad, nibble: 0, column: instrument}
+  336: {name: sr, nibble: 4, column: instrument}
+  352: {name: sr, nibble: 0, column: instrument}
 record_types:
   # An instrument's 16-byte header as fields, its WF/arp, pulse and filter tables as programs.
   ins:
@@ -59,8 +59,8 @@ record_types:
     optional: [ctrl, gate, ad, sr]
     codec:
       - when: "first and not last and hold >= 1 and hold <= 2 and (ctrl < 0 or ctrl == 0x18) and gate == 0 and ad >= 0 and sr >= 0"
-        keys: {hold: {value: hold, omit: "hold == 1"}}
-        raw: {hold: "hold if has_hold else 1"}
+        keys: {hold: hold}
+        raw: {hold: hold}
       - when: "last and hold == 0 and gate < 0 and ad < 0 and sr < 0"
   # WF/arp row: w a waveform ($10+) or a hold count below $10 (the row keeps the waveform); a
   # the arp byte (relative up $00-$7E, none $80, absolute $81-$DF, relative down $E0-$FF); d
@@ -74,24 +74,22 @@ record_types:
     codec:
       - when: "w >= 0x10 and a != 0x7F and d != 0xFF and 0 <= h <= 0x3F"
         keys:
-          hold: {value: "h + 1", omit: "h == 0"}
+          hold: "h + 1"
           ctrl: w
-          note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
+          note: {byte: a, none: 0x80, abs: [0x81, 0xDF]}
           freq: {value: "s8(d)", omit: "d == 0"}
         raw:
           w: ctrl
-          a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
-          h: "hold - 1 if has_hold else 0"
+          h: "hold - 1"
           d: "(freq & 0xFF) if has_freq else 0"
       - when: "w >= 0 and w < 0x10 and h == w and a != 0x7F and d != 0xFF"
         keys:
-          hold: {value: "w + 1", omit: "w == 0"}
-          note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
+          hold: "w + 1"
+          note: {byte: a, none: 0x80, abs: [0x81, 0xDF]}
           freq: {value: "s8(d)", omit: "d == 0"}
         raw:
-          w: "(hold - 1) if has_hold else 0"
-          h: "(hold - 1) if has_hold else 0"
-          a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
+          w: "hold - 1"
+          h: "hold - 1"
           d: "(freq & 0xFF) if has_freq else 0"
   # Pulse row: a $80+ sets the width from (a & $7F, b); otherwise a ticks of a signed b sweep.
   # k is the keyboard-track amount; x the expression a program of that one row is.

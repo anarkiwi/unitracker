@@ -14,7 +14,6 @@ instrument: {type: ins, base: 0}          # the record type .name refers to; ind
                                           # event: {type, column, commands}: see Instrument columns
 restart: {command: 1}                     # event restarts, played by this command (see Hard restart)
 lifetime: {pulse: {field: pw, flag: {flags: 0x40}}}   # !pulse:0 and !filter:0 (see Lifetime)
-exclusive: "code < 0x100"                 # over code and instrument: commands of a one-command column
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
 functions: {name: {args: [a, b], expr: "..."}}   # inlined into expressions
@@ -49,7 +48,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see [Codecs](#codecs)) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field holding a row's modulator expression, a reference to `x` with no `refs` entry; a program of one row that sets only it is written as the expression |
-| `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default; a type whose fields are all unwritten has no written form, and a document naming it is refused (`unknown record type 'speedtab'`) |
+| `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default |
 | any other key | a template: an action list run for a row |
 
 The record type `x` is the format's own: it holds the expressions, and a playroutine
@@ -67,7 +66,7 @@ ctrltab:
   fields: [w, n, next]             # chained by next; none 0
   do:
     - if: "row.w >= 0xF0"
-      then: [{set: {arg: row.n}}, {run: {record: wavecmd, index: "row.w & 0x0F", field: do}}, ...]
+      then: [{set: {cmdarg: row.n}}, {run: {record: cmd, index: "row.w & 0x0F", field: do}}, ...]
     ...
 ```
 
@@ -83,24 +82,41 @@ its mask as `{value, omit}`), `raw` (each raw field from the written keys, with 
 expression's reference or 0, defined) and `keep` (raw fields written under their own names; a kept
 reference is written as a name). An `optional` field `f` that is a shared key gives each shape the
 key `f: {value: f, omit: "f < 0"}` and the raw field `f: "f if has_f else -1"`; a shape that gives
-key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one. A key with `expr` is written as the expression
+key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one.
+A key with a vocabulary default (`hold`: 1) is left out at that value unless it gives its own
+`omit`, and `raw` reads it as the default when it is left out (`hold: "w + 1"` with `w: "hold - 1"`). A key with `expr` is written as the expression
 when that field is set; a key with both `value` and `expr` reads an integer as a value and a string
 as an expression. A `cut` key given as `{byte: b}` is a cutoff the player stores as its top
 byte: its value is `b << 3`, and `raw` reads `cut` as that byte, the written value `>> 3`; a
-written `cut` with any of its low three bits set does not read back. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
+written `cut` with any of its low three bits set does not read back. A `note` key given as `{byte:
+f, none: n, abs: [lo, hi]}` is the note byte raw field `f` holds: `n` is no note, a byte from `lo`
+to `hi` (default `[0x80, 0xFF]`) an absolute note in its low 7 bits, and any other byte a relative
+note, two's complement in 7 bits when the absolute range reaches $FF, else in 8 (SID-Wizard's
+`abs: [0x81, 0xDF]` makes $E0-$FF relative down); it gives `f`'s `raw` too. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
 written as the record's name (`run: pw1`); the reader takes the shape whose `ref` is the type the
 name has. A key given as `{none: true}` is written `none` (`pw: none`) and reads only from `none`.
+A shape `{command: c, arg: a, skip: [codes]}` writes a row that runs a command as that command:
+it stands for one shape per `commands` entry named a shared row key (not one with `ref: x`,
+`nibble`, `args` or `inline`) whose code is not in `skip`, fitting the rows whose `c` is the code
+and `a` an argument the entry takes (for a reference, not its type's `none`), and writing the key
+as the entry writes its argument; its `raw` reads `command` as the code and `arg` as the raw
+argument (`{command: "w & 0x0F", arg: n, raw: {w: "0xF0 | command", n: arg}}`).
 The writer uses the first shape whose `when` holds and refuses a row that would not read back; a
 `map` row no shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or `x` for an
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
 written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!funk:6/7`). An entry `{name, none: n}` writes
-argument `n` as `none` (`!funk:none`) and matches no other argument. An entry `{name: ad,
-nibble: s, slot: k}` is an envelope command: the code sets the nibble at shift `s` of the register
-`name` over the instrument's field `name`, played from event slot `k`, and is written as the byte it
-writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).
+joined by `/`, which `raw` reads by those names (`!funk:6/7`). A `ref` entry with `inline: true`
+writes the referenced row's fields, each a byte, joined by `/` (`!funk:6/7`); the reader allocates
+one row per distinct argument, and the type has no definitions of its own (`unknown record type
+'speedtab'`). A `ref` entry's argument `none` is the type's `none` (`!funk:none`). An entry's `column`
+is the event column its command is read into, `instrument` (event slot 0) or `fx` (slot 1), or a
+list of them of which it takes the first the event leaves free (an event that names an instrument
+fills `instrument`); a column holds one command, and an event with two in one is refused. An entry
+`{name: ad, nibble: s, column: c}` is an envelope command: the code sets the nibble at shift `s` of
+the register `name` over the instrument's field `name`, played from the slot of column `c`, and is
+written as the byte it writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).
 
 Codec expressions may read the song's tables and the
 playroutine's functions. A list row a shape covers is rejected: it has a shared-key form.

@@ -49,10 +49,12 @@ commands:
     setup:
       - set: {newcommand: CODE, newcmddata: arg}
       - {if: hasnew, then: [{call: new_note_init}]}
+      - set: {cmdarg: newcmddata}
       - run: {record: tick0, index: CODE, field: do}
+      - run: {record: cmd, index: CODE, field: do}
     ticks:
       - [{run: {record: tickn, index: command, field: do}}]
-    routing: [newcommand, newcmddata]
+    routing: [newcommand, newcmddata, cmdarg]
     rows:
       plain: {hasnew: 0}
       note: {hasnew: 1}

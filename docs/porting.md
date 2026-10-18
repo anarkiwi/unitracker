@@ -51,7 +51,7 @@ Start from the existing port closest to the target player:
 
 | port | player | read it for |
 |---|---|---|
-| [`goattracker2`](playroutines/goattracker2.md) | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `tickn`, `wavecmd`), one codec shape per command row, the gate-timer lookahead |
+| [`goattracker2`](playroutines/goattracker2.md) | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `cmd`, `tickn`, `wavecmd`), wavetable command rows written as the `commands` they run, the gate-timer lookahead |
 | [`sidwizard`](playroutines/sidwizard.md) | an instrument header plus WF/arp, pulse and filter programs; a pattern row with an instrument column and an FX column | header bytes as instrument keys, two event slots, envelope nibble commands, `lifetime` flags |
 | [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: event`, event restarts (`restart: {command}`), `fixed` init records, a `global` unit |
 
@@ -161,8 +161,9 @@ is not the written name's first letter. `none`, the index meaning "no row", is 0
 instrument an event names unless `instrument` says otherwise, and `note_offset` is 0 unless given.
 A field for which 0 is meaningful goes in `optional`, read as
 -1, "absent", when missing (the `restart` rows, `defmon`'s sidTAB columns); an optional field that is
-a shared key needs no `keys` or `raw` entry of its own. Read a signed byte or word with the builtins
-`s8` and `s16`.
+a shared key needs no `keys` or `raw` entry of its own. A `hold` key needs no `omit` or
+`has_hold` fallback: it is left out at 1 and reads as 1 when left out. Read a signed byte or word
+with the builtins `s8` and `s16`.
 
 **Codec shapes.** Each `codec` entry is one row kind: `when` over the raw fields, the constants and,
 for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back;
@@ -170,10 +171,13 @@ for a program row, its place (`first`, `last`); `keys` from raw fields to shared
 every row kind onto the shared keys ([Shared vocabulary](format/vocabulary.md)), each in its one
 meaning in chip units; a player that stores the 11-bit cutoff as its top byte writes the `cut` key
 as `{byte: f}` and the `cut` command as `{name: cut, byte: arg}`, and its `raw` reads `cut` as that
-byte. The reader accepts a written row only when encoding its raw inverse gives the
+byte; a note byte (bit 7 absolute, the rest a signed relative note, one byte no note) is
+`note: {byte: f, none: 0x80}`, with `abs: [lo, hi]` when fewer bytes are absolute, and needs no
+`raw` entry. The reader accepts a written row only when encoding its raw inverse gives the
 row again, so a shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
 `commands`: code to `{name, ref, when, arg, raw}` (or `byte` for `arg`), `{name, when, args, raw}` for several values,
-`{name, none}` for the argument written `none`, or `{name, nibble, slot}` for an envelope command.
+`{name, ref, inline: true}` for a row written in place, or `{name, nibble, column}` for an envelope command; `column` gives the event column a command is
+read into.
 
 **A document names no player.** No key, command or record type is one player's own. What the
 player cannot play has no shape, so the reader refuses it naming the key or command and the
@@ -285,8 +289,8 @@ The writer and reader resolve the context these forms need by walking each voice
 envelope nibble command as the byte it writes), and the event folds `fold.py`, `instrument.py` (the
 record an event's columns arm) and `restart.py` (a restart run on the steps before its note), and
 `column.py` refuses two commands on one event for a column that holds one. They read the
-playroutine's `lifetime`, `commands` with `nibble`, `instrument: event`, `restart` and
-`exclusive` declarations, so a port declares them rather than codes them; each raises its own error
+playroutine's `lifetime`, `commands` with `nibble` or `column`, `instrument: event` and `restart`
+declarations, so a port declares them rather than codes them; each raises its own error
 naming what has no written form.
 
 **Files:** the playroutine's `restart` record type, `lifetime`, `restart`, `instrument`, codec

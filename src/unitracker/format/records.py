@@ -47,8 +47,7 @@ class RecordType:
     """One ``record_types`` entry of a playroutine (docs/playroutines/schema.md, *Record types*).
 
     Keys other than :data:`META_KEYS` are templates: action lists run for a row,
-    which they read as ``row.<field>``. ``written`` is the record type a document names; a type
-    whose fields are all ``unwritten`` is not ``writable``: a document can't name it.
+    which they read as ``row.<field>``. ``written`` is the record type a document names.
     """
 
     # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -85,7 +84,6 @@ class RecordType:
             raise RecordTypeError(
                 f"{name}: unwritten fields {sorted(self.unwritten)} are not fields"
             )
-        self.writable = not self.fields or not self.fields.keys() <= self.unwritten
         self.templates = {k: v for k, v in spec.items() if k not in META_KEYS}
         for key, actions in self.templates.items():
             if not isinstance(actions, list):
