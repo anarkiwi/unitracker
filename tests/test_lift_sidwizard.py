@@ -238,8 +238,11 @@ def test_chord_fx_runs_the_program_its_note_starts():
         {"note": 32, "instrument": 2, "command": [0x70, 1]},
     )
     w = waves()
-    sidwizard.chord_runs(tracks, phrases, w)
-    got = phrases["a"]
+    ir = {"tracks": tracks, "phrases": phrases, "records": {"wftab": {}}}
+    out = sidwizard.chord_runs(SimpleNamespace(waves=w), ir)
+    got = out["phrases"]["a"]
+    assert phrases["a"][0]["command"] == [0x70, 2]
+    assert out["records"]["wftab"] == w.tables.records["wftab"] and not ir["records"]["wftab"]
     assert got[0]["command"] == got[1]["commands"][0] == [0x70, w.entry(1, 2)]
     assert got[1]["commands"][1] == [0x50, 8]
     assert got[2]["command"] == [0x70, w.entry(2, 1)]
@@ -271,7 +274,7 @@ def test_chord_fx_runs_the_program_its_note_starts():
 def test_chord_runs_reject(rows, match):
     tracks, phrases = chord_song(*rows, plays=2)
     with pytest.raises(LiftError, match=match):
-        sidwizard.chord_runs(tracks, phrases, waves())
+        sidwizard.chord_runs(SimpleNamespace(waves=waves()), {"tracks": tracks, "phrases": phrases})
 
 
 def octave_records():
@@ -287,9 +290,12 @@ def test_octave_shifts_move_into_the_notes_they_play():
         {"note": "off"},
     )
     records = octave_records()
-    sidwizard.fold_octaves(tracks, phrases, records)
-    assert [e.get("note") for e in phrases["a"]] == [18, 19, "off", 32, "off"]
-    assert all("octave" not in r for r in records.values())
+    out = sidwizard.fold_octaves(
+        None, {"tracks": tracks, "phrases": phrases, "records": {"ins": records}}
+    )
+    assert [e.get("note") for e in out["phrases"]["a"]] == [18, 19, "off", 32, "off"]
+    assert all("octave" not in r for r in out["records"]["ins"].values())
+    assert records == octave_records() and phrases["a"][0]["note"] == 30
 
 
 @pytest.mark.parametrize(
@@ -305,7 +311,8 @@ def test_fold_octaves_reject(rows, match):
     tracks[0]["plays"].insert(0, {"phrase": "b"})
     phrases["b"] = [{"note": 40, "instrument": 1}]
     with pytest.raises(LiftError, match=match):
-        sidwizard.fold_octaves(tracks, phrases, octave_records())
+        ir = {"tracks": tracks, "phrases": phrases, "records": {"ins": octave_records()}}
+        sidwizard.fold_octaves(None, ir)
 
 
 def test_track_plays_loop_and_end():
@@ -410,18 +417,20 @@ def test_a_subtune_tempo_the_player_never_applies_a_row_at_is_not_covered():
 
 def test_first_note_must_select_aninstrument_record():
     tracks = [{"plays": [{"phrase": "a"}]}]
-    sidwizard.first_note_selects(tracks, {"a": [{"note": "off"}, {"note": 3, "instrument": 1}]})
+    ir = {"tracks": tracks, "phrases": {"a": [{"note": "off"}, {"note": 3, "instrument": 1}]}}
+    assert sidwizard.first_note_selects(None, ir) is ir
     with pytest.raises(LiftError, match="selects no instrument"):
-        sidwizard.first_note_selects(tracks, {"a": [{"note": 3}]})
+        sidwizard.first_note_selects(None, {"tracks": tracks, "phrases": {"a": [{"note": 3}]}})
 
 
 def test_build_and_header_checks():
-    good = SimpleNamespace(frame_speed=1, sid_init=bytes(25), instruments=[object()])
-    normal = SimpleNamespace(name="normal")
-    sidwizard.check_build(good, normal)
+    good = SimpleNamespace(frame_speed=1, sid_init=bytes(25), instruments=[object()], driver_type=0)
+    sidwizard.SidWizardLift(sidwizard.Decoded(good, None, 0)).check_build()
     bad = SimpleNamespace(frame_speed=2, sid_init=bytes([1] + [0] * 24), instruments=[])
+    lift = sidwizard.SidWizardLift(sidwizard.Decoded(bad, None, 0))
+    lift.features = SimpleNamespace(name="light")
     with pytest.raises(LiftError, match="light player build, multispeed, init-routine"):
-        sidwizard.check_build(bad, SimpleNamespace(name="light"))
+        lift.check_build()
     marked = SimpleNamespace(filter_table=bytes([0xFF]))
     with pytest.raises(LiftError, match="unfiltered"):
         sidwizard.instrument_record(marked, sidwizard.Tables(), 0, sidwizard.Restarts())
@@ -521,7 +530,7 @@ def swm_grid(swm) -> np.ndarray:
 
 def lifted(raw: bytes) -> tuple[dict, str]:
     """The lift of ``raw`` and its canonical text, asserting it round-trips."""
-    text = songio.dumps(sidwizard.lift(raw))
+    text = songio.dumps(sidwizard.SidWizardLift.from_sid(raw).run())
     song = songio.loads(text)
     assert songio.dumps(song) == text
     return song, text
@@ -607,7 +616,7 @@ def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(csillag, 
     theirs = swm_grid(swm)
     assert not np.array_equal(theirs, swm_grid(sw_fx(raw, {})))
     monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
-    ir = sidwizard.lift(raw, expressions=False)
+    ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
     empty = ir["records"]["ins"][len(ir["records"]["ins"])]
     assert empty == {"flags": 0x10, "sr": 0xF0, "restart": empty["restart"]}
     path, entry = [], empty["restart"]
@@ -630,7 +639,7 @@ def looped(records: dict) -> bool:
 )
 def test_table_jumps_loop_their_programs_and_play_the_player(tune, tables, request):
     raw = request.getfixturevalue(tune).read_bytes()
-    ir = sidwizard.lift(raw, expressions=False)
+    ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
     assert all(looped(ir["records"][name]) for name in tables)
     theirs = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(TICKS), dtype=np.uint8)
     assert SongPlayer(ir).mismatch(theirs) is None
@@ -672,10 +681,17 @@ def test_table_jumps_play_the_player(csillag):
         raw = sw_table_byte(raw, instrument, which, 3 * row + 1, base + 3 * target)
     theirs = oracle(raw, WINDOW_TICKS)
     assert not np.array_equal(theirs, oracle(plain, WINDOW_TICKS))
-    ir = sidwizard.lift(raw, expressions=False)
+    ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
     assert all(looped(ir["records"][name]) for name in ("wftab", "pwtab", "flttab"))
     assert SongPlayer(ir).mismatch(theirs) is None
     assert SongPlayer(ir).mismatch(swm_grid(parse_sid_song(raw, 1))) is None
+
+
+def test_a_subtune_needs_three_orderlists(csillag):
+    swm = parse_sid_song(csillag.read_bytes(), 1)
+    swm.sequences = swm.sequences[:2]
+    with pytest.raises(LiftError, match="three orderlists"):
+        sidwizard.SidWizardLift(sidwizard.Decoded(swm, None, 0)).structure()
 
 
 def test_frequency_tables():
