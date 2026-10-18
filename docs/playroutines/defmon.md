@@ -1,17 +1,45 @@
 # defMON (`defmon`)
 
-The defMON `$1000` replay of [`defmon.yaml`](../../src/unitracker/playroutines/defmon.yaml).
+The defMON replay of [`defmon.yaml`](../../src/unitracker/playroutines/defmon.yaml): the `$1000`
+build and the builds of its code (see Builds).
 
 
 ## Lifting
 
 | | |
 |---|---|
-| tune | a defMON `$1000` replay `.sid`, run by pydefmon |
+| tune | a defMON replay `.sid` of a build the lifter locates (see Builds), run by pydefmon |
 | lifted from | the replay's memory after init |
 | step | one tick: the lifter simulates the arranger and pattern counters, so each song step becomes one phrase per voice, all of the same length in ticks, with each event on the tick the replay applies it; the playroutine fetches every tick |
 | notes | `note_offset` 24: defMON index 48 is `C2`; a note is a GATE_N note |
-| constants | `floor` and `dbl`, the result of the replay's `$D41B` probe at init, which tells the SID models apart: they are the SID model of the environment the tune is lifted in, not data of the tune |
+| constants | `floor` and `dbl`, the result of the replay's `$D41B` probe at init, which tells the SID models apart: they are the SID model of the environment the tune is lifted in, not data of the tune; `trabs`, the build's sidTAB note column (see Builds) |
+
+## Builds
+
+The lifter reads the replay's state and tables at the `$1000` build's addresses, wherever a
+build keeps them. It finds each region of the `$1000` build's code wherever it lies: the SID band
+(`$1022`), the ACID step and arranger (`$10A9`), the pattern event (`$117F`), the sidcall cascade
+(`$12DF`), the pitch and pulse steps (`$1405`) and the sidTAB walk (`$16B0`). In a region every
+zero-page and absolute operand but a SID register and a `JMP` or `JSR` target is relocatable and
+stands for its `$1000` build address, so a build relocated as a whole (to `$0400`, `$8800`,
+`$9000`, its zero page too) or in parts (code shortened ahead of a region, data tables moved)
+reads at its own places; each `$1000` build address must have one place. `ANC #imm` matches both
+its encodings, `$0B` and `$2B`.
+
+| region | variant | replay |
+|---|---|---|
+| arranger | counted | a jump row with a count repeats its jump that many times, then plays on |
+| | plain | every jump row jumps |
+| sidTAB walk | absolute (`trabs: 1`) | a note column with bit 7 set is the note `tr & $7F`; else it adds to the note base, wrapped to 7 bits |
+| | relative (`trabs: 0`) | the note column adds to the note base, wrapped to 8 bits |
+
+A multispeed play routine (a wrapper the tune's play address names, its timer set faster than the
+frame) calls the replay at its play entry or at its sub-tick entry, which runs the SID band, the
+ACID step, the cascade and the pitch and pulse steps but not the arranger or the pattern step. A
+tick is one call: the lifter runs the replay's calls, takes as full the calls that step voice 0's
+pattern counter or arm the arranger, and steps the patterns on those only, so the playroutine
+needs no change (a sub-tick has no event). The song's state recurs at a call of the same phase of
+the calls' least period, which must repeat within the song and over the checked window.
 
 The replay's init ($1522) clears `$D417`, `$D418`'s filter bits, the ACID accumulator, step and
 offset `cp`, and each voice's envelope, control register and mask, pitch mode, pulse step,
@@ -160,7 +188,12 @@ offset.
 
 The lifter fails, naming what it meets:
 
-- a tune that is not the `$1000` build (its code differs from the replay's at an address);
+- a tune whose code has no build of a region (naming it), such as a SID band that ORs the gate
+  mask, or a pattern event that steps the event's payload index for an absent field; or whose
+  code places a `$1000` build address at two places (naming it and them), such as a relocation
+  that left an operand at its `$1000` build address;
+- a multi-SID tune, naming its second SID's address;
+- a multispeed play routine whose sub-tick calls do not repeat within the song;
 - a tune whose init leaves a cell the replay's init sets at another value, naming the cell, or
   gives a voice other detune or routing constants;
 - ACID opcodes that are not a matching SBC/ADC pair, or a cutoff output opcode that is neither
