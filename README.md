@@ -10,12 +10,13 @@ expressions in `v` and `φ` (`pw: 16*abs((φ - 32) % 128 - 64) + 512`, `!freq:@x
 notes are named by real pitch. The player has no player-specific knowledge,
 and its register writes are flushed in one canonical order.
 
-Format specification: [docs/format.md](docs/format.md).
-
-Modulation analysis and the proved conversion to expressions (`unitracker-modfit`):
-[docs/modfit.md](docs/modfit.md).
-
-Bringing another playroutine to unitracker: [docs/porting.md](docs/porting.md).
+| doc | content |
+|---|---|
+| [docs/format.md](docs/format.md) | the format specification and the playroutine schema |
+| [docs/playroutines/](docs/playroutines/) | what each playroutine and its lifter support and refuse: [goattracker2](docs/playroutines/goattracker2.md), [sidwizard](docs/playroutines/sidwizard.md), [defmon](docs/playroutines/defmon.md) |
+| [docs/modfit.md](docs/modfit.md) | modulation analysis and the proved conversion to expressions (`unitracker-modfit`) |
+| [docs/optimise.md](docs/optimise.md) | `unitracker-optimise`: passes, guarantee, report |
+| [docs/porting.md](docs/porting.md) | bringing another playroutine to unitracker |
 
 ## Install
 
@@ -29,7 +30,7 @@ pip install -e ".[dev]"
 unitracker-lift TUNE.sid -o song.yaml [--subtune N] [--embed]   # lift a GoatTracker 2, defMON or SID-Wizard .sid
 unitracker-play song.yaml --wav out.wav [--seconds 60] [--model 8580|6581]
 unitracker-play song.yaml --check TUNE.sid                  # compare with the native player from each voice's first note
-unitracker-optimise song.yaml -o smaller.yaml [--report orthogonality.md]  # same output, fewer tokens (docs/optimise.md)
+unitracker-optimise song.yaml -o smaller.yaml [--report report.md]  # same output, fewer tokens
 ```
 
 ```python
@@ -66,7 +67,8 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | why did a modulator not become an expression? | `python tools/occurrences.py TUNE.sid [--unit freq\|pw\|cut]`, `unitracker-modfit exprs` |
 | does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modfit.md](docs/modfit.md)) |
 | tokens per section of a document | `python tools/token_report.py song.yaml` |
-| dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report orthogonality.md` ([docs/orthogonality.md](docs/orthogonality.md)) |
+| dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report report.md` ([docs/optimise.md](docs/optimise.md)) |
+| do the docs' relative links resolve? | `python tools/doc_links.py` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (above) |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `sw_fx`, `sw_table_byte`, `mini_song`, `table`, `hvsc_tune` |
 

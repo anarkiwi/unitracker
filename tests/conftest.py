@@ -172,5 +172,5 @@ class _Optimised(dict):
 @pytest.fixture(scope="session")
 def optimised_tunes(request) -> dict:
     """``{tune: (path, optimiser Result)}``: a reference tune lifted and optimised by the passes
-    of :data:`OPTIMISED` (the full runs are measured in docs/optimise.md)."""
+    of :data:`OPTIMISED`, a subset that keeps the suite's run time bounded."""
     return _Optimised(request)

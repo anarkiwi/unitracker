@@ -1,5 +1,5 @@
-"""Note and duration spellings of phrases, each with its exact inverse, measured with the
-token study's tokenizers (see docs/optimise.md, *Tokenization of notes and phrases*).
+"""Note and duration spellings of phrases, each with its exact inverse, counted with the
+token study's tokenizers.
 """
 
 import copy

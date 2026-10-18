@@ -1,5 +1,5 @@
-"""The per-player command and `ctrl` row key tables in docs/format.md, generated from the
-playroutines' commands and codecs."""
+"""Each docs/playroutines/<name>.md command and `ctrl` row key table, generated from the
+playroutine's commands and codecs."""
 
 import math
 from importlib import resources
@@ -19,15 +19,14 @@ from unitracker.format.codec import (
 from unitracker.format.events import lifetime, restart
 from unitracker.format.records import record_types
 
-DOC = Path(__file__).resolve().parents[1] / "docs" / "format.md"
+DOCS = Path(__file__).resolve().parents[1] / "docs" / "playroutines"
 PLAYERS = sorted(
     p.name.removesuffix(".yaml")
     for p in resources.files("unitracker").joinpath("playroutines").iterdir()
     if p.name.endswith(".yaml")
 )
-HEADER = f"| command | {' | '.join(f'`{p}`' for p in PLAYERS)} |"
-KEYS_HEADER = f"| `ctrl` row key | {' | '.join(f'`{p}`' for p in PLAYERS)} |"
-ABSENT = "—"
+HEADER = "| command | argument |"
+KEYS_HEADER = "| `ctrl` row key | forms |"
 
 
 def spans(values) -> str:
@@ -91,13 +90,12 @@ def accepted(pr: dict) -> dict:
     return cells
 
 
-def table() -> list[str]:
-    """The command table's lines, one row per shared command."""
-    cells = {p: accepted(songio.library(p)) for p in PLAYERS}
-    rows = [HEADER, f"|---|{'---|' * len(PLAYERS)}"]
-    for name in (*COMMAND_NAMES, *lifetime.NAMES):
-        row = [cells[p].get(name, ABSENT) for p in PLAYERS]
-        rows.append(f"| `!{name}` | {' | '.join(row)} |")
+def table(player: str) -> list[str]:
+    """The command table's lines, one row per shared command the player takes."""
+    cells = accepted(songio.library(player))
+    rows = [HEADER, "|---|---|"]
+    for name in (n for n in (*COMMAND_NAMES, *lifetime.NAMES) if n in cells):
+        rows.append(f"| `!{name}` | {cells[name]} |")
     return rows
 
 
@@ -121,31 +119,36 @@ def key_forms(pr: dict, written: str = "ctrl") -> dict:
     return {k: ", ".join(v) for k, v in forms.items()}
 
 
-def key_table() -> list[str]:
-    """The `ctrl` row key table's lines, one row per key some player's `ctrl` program takes."""
-    cells = {p: key_forms(songio.library(p)) for p in PLAYERS}
-    rows = [KEYS_HEADER, f"|---|{'---|' * len(PLAYERS)}"]
-    for key in (k for k in ROW_KEYS if any(k in c for c in cells.values())):
-        rows.append(f"| `{key}` | {' | '.join(cells[p].get(key, ABSENT) for p in PLAYERS)} |")
+def key_table(player: str) -> list[str]:
+    """The `ctrl` row key table's lines, one row per key the player's `ctrl` programs take."""
+    cells = key_forms(songio.library(player))
+    rows = [KEYS_HEADER, "|---|---|"]
+    for key in (k for k in ROW_KEYS if k in cells):
+        rows.append(f"| `{key}` | {cells[key]} |")
     return rows
 
 
-def documented(header: str = HEADER) -> list[str]:
-    """The lines of the table under ``header`` as docs/format.md has them."""
-    lines = DOC.read_text().splitlines()
+def documented(player: str, header: str = HEADER) -> list[str]:
+    """The lines of the table under ``header`` as docs/playroutines/<player>.md has them."""
+    lines = (DOCS / f"{player}.md").read_text().splitlines()
     start = lines.index(header) if header in lines else len(lines)
     end = next((k for k in range(start, len(lines)) if not lines[k].startswith("|")), len(lines))
     return lines[start:end]
 
 
-def test_the_documented_command_table_is_the_playroutines():
-    expected = table()
-    assert documented() == expected, "\n".join(expected)
+@pytest.mark.parametrize("player", PLAYERS)
+def test_the_documented_command_table_is_the_playroutines(player):
+    expected = table(player)
+    assert documented(player) == expected, "\n".join(expected)
 
 
-def test_the_documented_ctrl_key_table_is_the_playroutines():
-    expected = key_table()
-    assert documented(KEYS_HEADER) == expected, "\n".join(expected)
+@pytest.mark.parametrize("player", PLAYERS)
+def test_the_documented_ctrl_key_table_is_the_playroutines(player):
+    expected = key_table(player)
+    assert documented(player, KEYS_HEADER) == expected, "\n".join(expected)
+
+
+def test_a_reference_key_is_written_as_the_program_type():
     assert key_forms(songio.library("goattracker2"))["run"] == "`pw` name, `filter` name"
 
 
