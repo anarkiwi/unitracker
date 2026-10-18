@@ -181,7 +181,7 @@ def test_the_defmon_normalisation_receives_the_structure(rent_a_cop, monkeypatch
     record.__name__ = "unheard_init"
     monkeypatch.setattr(DefmonLift, "normalisations", (record,))
     raw = rent_a_cop.read_bytes()
-    (_, structured), (_, song) = DefmonLift.from_sid(raw, expressions=False).stages()
+    structured, song = [s for _, s in DefmonLift.from_sid(raw, expressions=False).stages()]
     assert seen == [structured] and seen[0] is structured
     assert structured == DefmonLift.from_sid(raw).structure()
     heard, carried = song["records"].pop("vinit"), structured["records"].pop("vinit")
