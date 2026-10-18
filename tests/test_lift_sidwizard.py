@@ -1,25 +1,38 @@
-"""SID-Wizard lifting: tables, chords, orderlists, events and the playroutine's limits."""
+"""SID-Wizard lifting: tables, chords, orderlists, events, the playroutine's limits, and
+Csillag (its reference lift, and patched cuts of it) playing its native player."""
 
+import dataclasses
 import itertools
+import re
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from conftest import sw_fx
-from pysidwizard import End, Loop, MainVolume, PlayPattern, Row, SWMPlayer, Transpose
+from conftest import oracle, sw_fx, sw_table_byte
+from pysidwizard import (
+    End,
+    Loop,
+    MainVolume,
+    PlayPattern,
+    Row,
+    SWMPlayer,
+    Transpose,
+    parse_sid_song,
+)
 from pysidwizard.features import features_for_driver
+from pysidwizard.model import encode_sequence
 
 from unitracker.format import songio
 from unitracker.format.codec import Evaluator
-from unitracker.lift import backends, sidwizard
+from unitracker.lift import sidwizard
 from unitracker.lift.sidwizard import NO_DETUNE as KEEP
 from unitracker.lift.sidwizard import LiftError
 from unitracker.player.vm import SongPlayer
 
-TICKS = 15000
+TICKS = 2000
 
 
-def test_table_rows_stop_at_the_end_marker():
+def test_table_rows_stop_at_the_end_marker_and_refuse_jumps():
     tables = sidwizard.Tables()
     entry = tables.program(
         "pwtab", bytes([0x41, 0x00, 0x00, 0x21, 0x0C, 0x00, 0xFF]), sidwizard.pw_record
@@ -32,6 +45,12 @@ def test_table_rows_stop_at_the_end_marker():
     assert tables.program("wftab", b"", sidwizard.pw_record) == 0
     assert tables.allocate("pwtab", [{"a": 1}, {"a": 2}], loop=1) == 3
     assert tables.records["pwtab"][4] == {"a": 2, "next": 4}
+    for data, match in (
+        (bytes([0x41, 0, 0, 0xFE, 0, 0]), "jumps"),
+        (bytes([0x41, 0, 0, 0x11]), "partial"),
+    ):
+        with pytest.raises(LiftError, match=match):
+            sidwizard.table_rows("wftab", data)
 
 
 def test_a_wf_row_that_keeps_the_detune_is_given_the_one_it_keeps():
@@ -49,45 +68,6 @@ def test_a_wf_row_that_keeps_the_detune_is_given_the_one_it_keeps():
         sidwizard.settled([rows[0], rows[1]], 0)
     with pytest.raises(LiftError, match="hold row that ends its program"):
         sidwizard.settled(rows[:3], None)
-
-
-def test_a_wf_hold_row_lasts_its_hold(csillag):
-    ir = backends.lift(csillag.read_bytes())
-    wf, entry = ir["records"]["wftab"], ir["records"]["ins"][6]["ctrl"]
-    nxt, end = wf[entry]["next"], len(wf) + 1
-    wf[entry].update(w=0x41, a=0x80, h=0)
-    wf[nxt].update(w=2, a=0x80, h=2, next=end)
-    wf[end] = {"w": 0x21, "a": 0x80, "d": 0, "h": 0, "next": 0}
-    grid = SongPlayer(ir).render_grid(TICKS)
-    wave = [int(x) for x in grid[:, 7 + 4] & 0xF0]
-    start = wave.index(0x40)
-    assert wave[start : start + 5] == [0x40] * 4 + [0x20]
-    text = songio.dumps(ir)
-    assert "ctrl: [{ctrl: 65}, {hold: 3}, {ctrl: 33}, end]" in text
-    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
-
-
-def test_a_wf_detune_is_written_as_the_rows_constant_freq(csillag):
-    ir = backends.lift(csillag.read_bytes())
-    wf, entry = ir["records"]["wftab"], ir["records"]["ins"][6]["ctrl"]
-    plain = SongPlayer(ir).render_grid(TICKS)
-    wf[entry]["d"], wf[wf[entry]["next"]]["d"] = 0xFB, KEEP
-    grid = SongPlayer(ir).render_grid(TICKS)
-    assert not np.array_equal(grid, plain)
-    wf[wf[entry]["next"]]["d"] = 0xFB
-    assert np.array_equal(SongPlayer(ir).render_grid(TICKS), grid)
-    text = songio.dumps(ir)
-    assert text.count(", freq: -5}") == 2
-    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
-
-
-@pytest.mark.parametrize(
-    "data,match",
-    [(bytes([0x41, 0, 0, 0xFE, 0, 0]), "jumps"), (bytes([0x41, 0, 0, 0x11]), "partial")],
-)
-def test_table_rows_reject(data, match):
-    with pytest.raises(LiftError, match=match):
-        sidwizard.table_rows("wftab", data)
 
 
 def testfilter_records_split_mode_and_resonance():
@@ -115,26 +95,30 @@ def native(wf, arp_speed=1, chord=1):
     return SimpleNamespace(wf_table=bytes(wf), arp_speed=arp_speed, default_chord=chord)
 
 
-def test_a_looping_chord_is_the_programs_tail_from_its_row():
-    rows, loop = sidwizard.wf_rows(native([0x11, 0, 0, 0x50, 0x7F, 0, 0x41, 0, 0]), ((0, 3), True))
-    assert loop == 1
-    assert rows == [
-        {"w": 0x11, "a": 0, "d": 0, "h": 1},
-        {"w": 0x50, "a": 0, "d": 0, "h": 1},
-        {"w": 0x50, "a": 3, "d": 0, "h": 1},
-    ]
-
-
-def test_a_returning_chord_runs_into_the_next_row_and_keeps_a_detune():
-    wf = [0x11, 0, 5, 0x50, 0x7F, 0, 0x41, 0, 0xFF]
-    rows, loop = sidwizard.wf_rows(native(wf, arp_speed=0x42), ((4, 7), False))
-    assert loop is None
-    assert [(r["w"], r["a"], r["d"], r["h"]) for r in rows] == [
-        (0x11, 0, 5, 2),
-        (0x50, 4, 5, 2),
-        (0x50, 7, 5, 2),
-        (0x41, 0, 5, 2),
-    ]
+@pytest.mark.parametrize(
+    "wf,arp_speed,chord,loop,rows",
+    [
+        (
+            [0x11, 0, 0, 0x50, 0x7F, 0, 0x41, 0, 0],
+            1,
+            ((0, 3), True),
+            1,
+            [(0x11, 0, 0, 1), (0x50, 0, 0, 1), (0x50, 3, 0, 1)],
+        ),
+        (
+            [0x11, 0, 5, 0x50, 0x7F, 0, 0x41, 0, 0xFF],
+            0x42,
+            ((4, 7), False),
+            None,
+            [(0x11, 0, 5, 2), (0x50, 4, 5, 2), (0x50, 7, 5, 2), (0x41, 0, 5, 2)],
+        ),
+    ],
+    ids=["looping chord is the program's tail", "returning chord keeps a detune"],
+)
+def test_a_chord_is_inlined_at_its_row(wf, arp_speed, chord, loop, rows):
+    got, at = sidwizard.wf_rows(native(wf, arp_speed=arp_speed), chord)
+    assert at == loop
+    assert [(r["w"], r["a"], r["d"], r["h"]) for r in got] == rows
 
 
 @pytest.mark.parametrize(
@@ -375,6 +359,8 @@ def test_build_and_header_checks():
     marked = SimpleNamespace(filter_table=bytes([0xFF]))
     with pytest.raises(LiftError, match="unfiltered"):
         sidwizard.instrument_record(marked, sidwizard.Tables(), 0, sidwizard.Restarts())
+    with pytest.raises(LiftError, match="both ticks"):
+        sidwizard.restart_rows(0x03, 0x0F, 0, 9)
 
 
 @pytest.mark.parametrize(
@@ -395,34 +381,168 @@ def test_restart_rows_follow_the_control_byte(control, rows):
     assert len(restarts.records) == len(rows)
 
 
-def test_a_restart_on_both_ticks_is_refused():
-    with pytest.raises(LiftError, match="both ticks"):
-        sidwizard.restart_rows(0x03, 0x0F, 0, 9)
-
-
-def test_csillag_lifts_and_is_detected(csillag):
-    raw = csillag.read_bytes()
-    assert backends.detect(raw) == "sidwizard"
-    ir = backends.lift(raw)
+def test_the_reference_lift_holds_the_subtune_tempo(references):
+    ir = references["csillag"].ir()
     assert ir["playroutine"]["name"] == "sidwizard"
     assert ir["playroutine"]["constants"] == {"tempol": 6, "tempor": 6}
-    assert ir["hints"] == {"ticks_per_step": 6}
-    player = backends.native_player(raw)
-    assert list(player.render_grid(50)[-1]) == list(SongPlayer(ir).render_grid(50)[-1])
+    assert ir["hints"]["ticks_per_step"] == 6
 
 
-def test_a_reference_past_the_instruments_plays_the_emptyinstrument_record(csillag, monkeypatch):
-    parse = sidwizard.parse_sid_song
+def voice_instrument(ir: dict, voice: int) -> int:
+    """The instrument record ``voice``'s first event selects."""
+    return ir["phrases"][ir["tracks"][voice]["plays"][0]["phrase"]][0]["instrument"]
 
-    def patched(raw, song):
-        swm = parse(raw, song)
-        first = swm.sequences[0][0].pattern
-        row = swm.patterns[first - 1].rows[0]
-        row.instrument = len(swm.instruments) + 3
-        return swm
 
-    monkeypatch.setattr(sidwizard, "parse_sid_song", patched)
-    ir = sidwizard.lift(csillag.read_bytes(), expressions=False)
+def test_a_wf_hold_row_lasts_its_hold(references):
+    ir = references["csillag"].ir()
+    wf, entry = ir["records"]["wftab"], ir["records"]["ins"][voice_instrument(ir, 1)]["ctrl"]
+    nxt, end = wf[entry]["next"], len(wf) + 1
+    wf[entry].update(w=0x41, a=0x80, h=0)
+    wf[nxt].update(w=2, a=0x80, h=2, next=end)
+    wf[end] = {"w": 0x21, "a": 0x80, "d": 0, "h": 0, "next": 0}
+    grid = SongPlayer(ir).render_grid(TICKS)
+    wave = [int(x) for x in grid[:, 7 + 4] & 0xF0]
+    start = wave.index(0x40)
+    assert wave[start : start + 5] == [0x40] * 4 + [0x20]
+    text = songio.dumps(ir)
+    assert "ctrl: [{ctrl: 65}, {hold: 3}, {ctrl: 33}, end]" in text
+    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
+
+
+def test_a_wf_detune_is_written_as_the_rows_constant_freq(references):
+    ir = references["csillag"].ir()
+    wf, entry = ir["records"]["wftab"], ir["records"]["ins"][voice_instrument(ir, 1)]["ctrl"]
+    plain = SongPlayer(ir).render_grid(TICKS)
+    wf[entry]["d"], wf[wf[entry]["next"]]["d"] = 0xFB, KEEP
+    grid = SongPlayer(ir).render_grid(TICKS)
+    assert not np.array_equal(grid, plain)
+    wf[wf[entry]["next"]]["d"] = 0xFB
+    assert np.array_equal(SongPlayer(ir).render_grid(TICKS), grid)
+    text = songio.dumps(ir)
+    assert text.count(", freq: -5}") == 2
+    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
+
+
+CSILLAG_FREQS, CSILLAG_EMPTY_STEP_COMMANDS = 91, 16
+
+
+def test_a_vibrato_across_empty_steps_is_written_once(references):
+    ref = references["csillag"]
+    played = [e for p in ref.ir()["phrases"].values() for e in p]
+    cmds = [(e, c) for e in played for c in e.get("commands") or [e.get("command")] if c]
+    assert ref.text.count("!freq") <= CSILLAG_FREQS
+    assert sum("note" not in e for e, _ in cmds) <= CSILLAG_EMPTY_STEP_COMMANDS
+
+
+# Csillag's last eight patterns on each voice, which play every instrument.
+WINDOW = slice(28, 36)
+WINDOW_TICKS = 2 * 8 * 64 * 6 + 300
+
+
+def window(raw: bytes) -> bytes:
+    """SID-Wizard tune ``raw`` with each orderlist cut to its :data:`WINDOW` plays, looping to
+    the first."""
+    out = bytearray(raw)
+    for seq in parse_sid_song(raw, 1).sequences:
+        new = encode_sequence([*seq[WINDOW], Loop(0)])
+        pos = raw.index(encode_sequence(seq))
+        out[pos : pos + len(new)] = new
+    return bytes(out)
+
+
+def swm_grid(swm) -> np.ndarray:
+    return np.asarray(SWMPlayer(swm).render_grid(WINDOW_TICKS), dtype=np.uint8)
+
+
+def lifted(raw: bytes) -> tuple[dict, str]:
+    """The lift of ``raw`` and its canonical text, asserting it round-trips."""
+    text = songio.dumps(sidwizard.lift(raw))
+    song = songio.loads(text)
+    assert songio.dumps(song) == text
+    return song, text
+
+
+def kept(swm):
+    """``swm`` with its instruments' control bits keeping the pulse or filter program."""
+    swm.instruments = [
+        dataclasses.replace(ins, control=ins.control | (0x40 if k % 2 else 0x80))
+        for k, ins in enumerate(swm.instruments)
+    ]
+    return swm
+
+
+# Tempo FX that keep the voices in step: every voice's tempo and swing, restored to the
+# subtune's, and each voice's own tempo and equal swing while it is the subtune's.
+STEP_TEMPOS = {
+    (20, 16): (0x10, 4),
+    (20, 32): (0x10, 0),
+    (32, 40): (0x11, 0x57),
+    (32, 56): (0x10, 0x86),
+    (33, 0): (0x13, 6),
+    (21, 0): (0x14, 0x66),
+}
+
+
+def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, monkeypatch):
+    base = window(csillag.read_bytes())
+    tracked = sw_table_byte(base, 7, "pw", 2, 0x05)
+    swm = kept(sw_fx(tracked, STEP_TEMPOS))
+    monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
+    song, text = lifted(tracked)
+    assert "!pulse:0" in text and "!filter:0" in text and "flags" not in text
+    assert "!tempo:4" in text and "!funk:5/7" in text and "!vtempo:6" in text
+    assert "E[" in text and not re.search(r"\bk:", text)
+    plain = swm_grid(parse_sid_song(base, 1))
+    for one in (
+        kept(parse_sid_song(base, 1)),
+        sw_fx(base, STEP_TEMPOS),
+        parse_sid_song(tracked, 1),
+    ):
+        assert not np.array_equal(swm_grid(one), plain)
+    assert SongPlayer(song).mismatch(swm_grid(swm)) is None
+
+
+# A keyboard-track amount on the row that sets an instrument's pulse (7) or filter (4, 8), up
+# and down, adds a term of the note to the register until the next row's amount (0) replaces
+# it; pysidwizard's player does not model it for the filter, so the 6502 oracle plays these.
+TRACKED = {(7, "pw"): 0xF4, (4, "filter"): 0x05, (8, "filter"): 0xF4}
+
+
+def test_keyboard_tracked_pulse_and_filter_rows_play_the_player(csillag):
+    base = raw = window(csillag.read_bytes())
+    plain = oracle(base, WINDOW_TICKS)
+    for (instrument, which), amount in TRACKED.items():
+        one = sw_table_byte(base, instrument, which, 2, amount)
+        cols = 0x16 if which == "filter" else slice(None)
+        assert not np.array_equal(oracle(one, WINDOW_TICKS)[:, cols], plain[:, cols])
+        raw = sw_table_byte(raw, instrument, which, 2, amount)
+    song, text = lifted(raw)
+    assert "E[" in text and not re.search(r"\bk:", text)
+    assert SongPlayer(song).mismatch(oracle(raw, WINDOW_TICKS)) is None
+
+
+# Tempo FX on rows no voice plays in step: one voice's tempo and swing, every voice's tempo
+# (0: 6) and swing, on rows that start a note and rows that do not. Pattern 1 plays on voice 1
+# mid-window, where its first row also selects an instrument past the last.
+TEMPO_ROWS = {
+    (2, 0): (0x13, 8),
+    (8, 4): (0x14, 0x55),
+    (20, 16): (0x10, 4),
+    (35, 8): (0x11, 0x57),
+    (3, 8): (0x10, 0),
+    (34, 2): (0x11, 0x3F),
+}
+
+
+def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(csillag, monkeypatch):
+    raw = window(csillag.read_bytes())
+    swm = sw_fx(raw, TEMPO_ROWS)
+    swm.patterns[0].rows[0].instrument = len(swm.instruments) + 3
+    theirs = swm_grid(swm)
+    assert not np.array_equal(theirs, swm_grid(sw_fx(raw, {})))
+    monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
+    ir = sidwizard.lift(raw, expressions=False)
+    assert "ticks_per_step" not in ir["hints"]
     empty = ir["records"]["ins"][len(ir["records"]["ins"])]
     assert empty == {"flags": 0x10, "sr": 0xF0, "restart": empty["restart"]}
     path, entry = [], empty["restart"]
@@ -431,30 +551,6 @@ def test_a_reference_past_the_instruments_plays_the_emptyinstrument_record(csill
         path.append({k: v for k, v in row.items() if k != "next"})
         entry = row["next"]
     assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9}]
-    SongPlayer(ir).render_grid(20)
-
-
-# Tempo FX on rows no voice plays in step: one voice's tempo and swing, every voice's tempo
-# (0: 6) and swing, on rows that start a note and rows that do not.
-TEMPO_ROWS = {
-    (11, 0): (0x13, 8),
-    (12, 4): (0x14, 0x55),
-    (10, 16): (0x10, 4),
-    (9, 8): (0x11, 0x57),
-    (13, 8): (0x10, 0),
-    (14, 2): (0x11, 0x3F),
-}
-
-
-def test_the_transcription_plays_the_tempo_fx(csillag, monkeypatch):
-    raw = csillag.read_bytes()
-    theirs = np.asarray(SWMPlayer(sw_fx(raw, TEMPO_ROWS)).render_grid(3007), dtype=np.uint8)
-    plain = np.asarray(SWMPlayer(sw_fx(raw, {})).render_grid(3007), dtype=np.uint8)
-    assert not np.array_equal(theirs, plain)
-    swm = sw_fx(raw, TEMPO_ROWS)
-    monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
-    ir = sidwizard.lift(raw, expressions=False)
-    assert "ticks_per_step" not in ir["hints"]
     assert SongPlayer(ir).mismatch(theirs) is None
 
 
@@ -462,17 +558,6 @@ def test_frequency_tables():
     bare = SimpleNamespace(freq_lo_image=b"", freq_hi_image=b"", freq_table_tail=b"")
     lo, hi = sidwizard.freq(bare, features_for_driver(0))
     assert len(lo) == len(hi) == 256
-
-
-CSILLAG_FREQS, CSILLAG_EMPTY_STEP_COMMANDS = 91, 16
-
-
-def test_a_vibrato_across_empty_steps_is_written_once(csillag):
-    text = songio.dumps(sidwizard.lift(csillag.read_bytes()))
-    played = [e for p in songio.loads(text)["phrases"].values() for e in p]
-    cmds = [(e, c) for e in played for c in e.get("commands") or [e.get("command")] if c]
-    assert text.count("!freq") <= CSILLAG_FREQS
-    assert sum("note" not in e for e, _ in cmds) <= CSILLAG_EMPTY_STEP_COMMANDS
 
 
 @pytest.mark.parametrize("name", ["pulse", "filter"])

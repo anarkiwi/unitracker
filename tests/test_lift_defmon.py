@@ -72,36 +72,28 @@ def body(mem, addr, *data):
     return addr
 
 
-def test_row_fields_every_column():
+@pytest.mark.parametrize(
+    "data,fields",
+    [
+        (
+            [0xFE, 0x41, 0x01, 0x0A, 0xF8, 0x05, 0x83, 0x4C, 0xF8, 0x91, 0x9F, 0x2F, 0x07, 0x10]
+            + [0x81],
+            dict(
+                zip(
+                    "wgh wgl ad sr tr af pw ps re fv cp acid".split(),
+                    (0x41, 0x01, 0x0A, 0xF8, 0x05, 0x83, 0x4C, 0x91, 0x9F, 0x2F, 0x07, 0x8110),
+                )
+            ),
+        ),
+        ([0x00, 0x00], {}),
+        ([0x08, 0x85, 0x40, 0x00], {"tr": 0x85, "re": 0}),
+        ([0x00, 0x48, 0x51, 0x34, 0x12], {"re": 0x51, "acid": 0x1234}),
+    ],
+    ids=["every column", "empty", "transpose and resonance", "resonance and acid"],
+)
+def test_row_fields(data, fields):
     mem = build_mem()
-    addr = body(
-        mem, 0x4000, 0xFE, 0x41, 0x01, 0x0A, 0xF8, 0x05, 0x83, 0x4C,
-        0xF8, 0x91, 0x9F, 0x2F, 0x07, 0x10, 0x81,
-    )  # fmt: skip
-    assert dm.row_fields(mem, addr) == {
-        "wgh": 0x41,
-        "wgl": 0x01,
-        "ad": 0x0A,
-        "sr": 0xF8,
-        "tr": 0x05,
-        "af": 0x83,
-        "pw": 0x4C,
-        "ps": 0x91,
-        "re": 0x9F,
-        "fv": 0x2F,
-        "cp": 0x07,
-        "acid": 0x8110,
-    }
-
-
-def test_row_fields_variants():
-    mem = build_mem()
-    assert not dm.row_fields(mem, body(mem, 0x4100, 0x00, 0x00))
-    assert dm.row_fields(mem, body(mem, 0x4110, 0x08, 0x85, 0x40, 0x00)) == {"tr": 0x85, "re": 0}
-    assert dm.row_fields(mem, body(mem, 0x4120, 0x00, 0x48, 0x51, 0x34, 0x12)) == {
-        "re": 0x51,
-        "acid": 0x1234,
-    }
+    assert dm.row_fields(mem, body(mem, 0x4000, *data)) == fields
 
 
 def test_sidtab_records_follow_rows_and_jumps():
@@ -159,9 +151,6 @@ def test_simulate_step_times_events():
     assert [t for t, *_ in applied[1]] == [1]
     assert [t for t, *_ in applied[2]] == [1, 3, 5, 7]
     assert (length, e) == (9, 0)
-
-
-def test_simulate_step_without_alt():
     mem = build_mem()
     put_pattern(mem, 1, 0x6000, (0x00,))
     with pytest.raises(dm.LiftError, match="ALT"):
@@ -202,9 +191,10 @@ def test_song_steps_loop_and_errors(monkeypatch):
         dm.song_steps(mem, 0)
 
 
-def test_lift_crosseyed(crosseyed):
-    song = dm.lift(crosseyed.read_bytes())
-    assert song["meta"]["source"] == "defmon subtune 0"
+def test_the_reference_lift_holds_the_replay_state(references):
+    ref = references["crosseyed"]
+    assert dm.lift(ref.raw, expressions=False)["meta"]["source"] == "defmon subtune 0"
+    song = ref.ir()
     assert set(song["tables"]) == {name for name, _, _ in dm.TABLES}
     assert set(song["records"]) == {"vinit", "ginit", "sidtab"}
     assert song["playroutine"]["name"] == "defmon"

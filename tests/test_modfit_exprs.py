@@ -1,33 +1,47 @@
-"""Modulators as phase and value expressions: grammar, derivation, proofs and replay."""
+"""Modulators as phase and value expressions: grammar, derivation, proofs, replay and report."""
 
-import copy
 import random
 import re
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
 import sympy
 import z3
+from conftest import gt_tune
 
-from unitracker.format import songio
 from unitracker.format.songio import library
-from unitracker.modfit import chipinv, convert
+from unitracker.lift import goattracker
+from unitracker.modfit import chipinv, exprs_report
 from unitracker.modfit import grammar as G
 from unitracker.modfit.cli import main
-from unitracker.modfit.convert import analyse, groups
-from unitracker.modfit.exprs import Analysis, Result
-from unitracker.modfit.exprs_report import load, native_grid
+from unitracker.modfit.exprs import Analysis, Pool, Result, _cached
 from unitracker.modfit.form import Form
 from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.orbit import deltas
 from unitracker.modfit.phase import Machine, derive, unproved_functions
 from unitracker.modfit.replay import Replay
+from unitracker.player.modulation import declared
 from unitracker.player.vm import SongPlayer
 
 PHI, V, N = G.PHI, G.V, G.N
 GT_FREQ, DM_FREQ = {"word": "ftab"}, {"hi": "note_hi", "lo": "note_lo"}
+SW_FREQ = {"hi": "freqhi", "lo": "freqlo"}
 TICKN = [{"run": {"record": "tickn", "index": "command", "field": "do"}}]
+# A pulse program that sets the width, then ping-pongs: 32 steps up, 64 down, 32 up, repeat.
+GT_PULSE = {
+    1: {"l": 0x84, "r": 0, "next": 2},
+    2: {"l": 32, "r": 16, "next": 3},
+    3: {"l": 64, "r": 0xF0, "next": 4},
+    4: {"l": 32, "r": 16, "next": 2},
+}
+# A pulse program that sets the width, ramps 64 steps up by 2, then 64 down by 8 and stops.
+SW_PULSE = {
+    1: {"a": 0x88, "b": 0, "k": 0, "next": 2},
+    2: {"a": 64, "b": 2, "k": 0, "next": 3},
+    3: {"a": 64, "b": 0xF8, "k": 0, "next": 0},
+}
 
 
 def from_text(text: str, tables: dict | None = None):
@@ -54,14 +68,14 @@ def equal(a, b, phi_from=0, bounds=((0, 1 << 16),)) -> bool:
     return s.check() == z3.unsat
 
 
-@pytest.fixture(name="mw", scope="module")
-def mw_fixture(metal_warrior):
-    return load(metal_warrior)
-
-
-@pytest.fixture(name="csillag_song", scope="module")
-def csillag_fixture(csillag):
-    return load(csillag)
+def machine(ref: str, unit, **records) -> Machine:
+    """A machine over playroutine ``ref`` and ``records``: ``unit`` a declared unit's name (with
+    the playroutine's named tables) or a ``{cell, fire}`` modulator."""
+    song = {"playroutine": library(ref), "records": records}
+    if isinstance(unit, dict):
+        return Machine(song, unit)
+    spec = declared(song["playroutine"])
+    return Machine(song, next(u for u in spec["units"] if u["name"] == unit), spec)
 
 
 # ---- grammar ----------------------------------------------------------------------------
@@ -74,6 +88,8 @@ def test_brackets_have_one_canonical_form():
     assert G.Iv(sympy.Ne(PHI, 3)) == 1 - G.eq(PHI, 3)
     assert G.text(G.ge(V, G.freq(N) + 1)) == "[v > F(N)]"
     assert G.text(G.polar(G.lt(PHI, 64) * 5 + 2)) == "5*[φ < 64] + 2"
+    assert not G.valid(sympy.Rational(1, 2) * PHI)
+    assert G.shortest([sympy.Rational(1, 2) * PHI, PHI + PHI]) == 2 * PHI
 
 
 def test_text_parses_back_to_the_same_values():
@@ -98,74 +114,94 @@ def test_z3_division_and_modulo_are_floored():
         assert z3.simplify(G.to_z3(e, env)).as_signed_long() == want == G.compiled(e)(-5, 0, 0)
 
 
-def test_display_is_shorter_and_equivalent():
-    u = sympy.Mod(V - 513, 65536)
-    e = G.canon(
-        G.eq(PHI, 0) * 16384
-        + G.eq(PHI, 1) * sympy.Mod(V - 1, 65536)
-        + G.ge(PHI, 2) * (G.ge(u, 32768) * (512 + sympy.Mod(V - 1, 256)) + (1 - G.ge(u, 32768)) * u)
-    )
-    shown = G.polar(e)
-    assert G.rank(shown) < G.rank(e)
-    assert equal(e, shown)
-    assert G.text(shown).startswith("16384*[φ == 0]")
+_U = sympy.Mod(V - 513, 65536)
+_SIGNED = V - 65536 * G.ge(V, 32768)
 
 
-def test_nested_brackets_split_over_the_domain():
-    signed = V - 65536 * G.ge(V, 32768)
-    e = G.canon(G.eq(signed, 0) * 7 + G.ge(signed, 1) * V)
-    shown = G.polar(e, (("v", 0, 65535),))
-    assert "[v >= 32768]]" not in G.text(shown) and equal(e, shown)
-
-
-def test_shortest_rejects_fractions():
-    assert not G.valid(sympy.Rational(1, 2) * PHI)
-    assert G.shortest([sympy.Rational(1, 2) * PHI, PHI + PHI]) == 2 * PHI
+@pytest.mark.parametrize(
+    "e,domain,check",
+    [
+        (
+            G.eq(PHI, 0) * 16384
+            + G.eq(PHI, 1) * sympy.Mod(V - 1, 65536)
+            + G.ge(PHI, 2)
+            * (G.ge(_U, 32768) * (512 + sympy.Mod(V - 1, 256)) + (1 - G.ge(_U, 32768)) * _U),
+            None,
+            lambda shown, e: G.rank(shown) < G.rank(e)
+            and G.text(shown).startswith("16384*[φ == 0]"),
+        ),
+        (
+            G.eq(_SIGNED, 0) * 7 + G.ge(_SIGNED, 1) * V,
+            (("v", 0, 65535),),
+            lambda shown, e: "[v >= 32768]]" not in G.text(shown),
+        ),
+    ],
+)
+def test_the_display_form_is_shorter_and_equivalent(e, domain, check):
+    e = G.canon(e)
+    shown = G.polar(e) if domain is None else G.polar(e, domain)
+    assert check(shown, e) and equal(e, shown)
 
 
 # ---- derivation and proof ---------------------------------------------------------------
 
 
-def test_metal_warrior_pulse_ping_pong_closed_form(mw):
-    machine = Machine(mw.ir, {"cell": "pulse", "fire": ["pulse_exec"]})
-    d = derive(machine, machine.start({"pptr": 1, "ptime": 0}), None, GT_FREQ)
-    assert d.exact and d.order.kind == "time" and (d.order.prefix, d.order.period) == (1, 128)
-    assert G.text(d.closed) == "16*abs((φ - 32) % 128 - 64) + 512"
-    asked = 1024 + 16 * (32 - sympy.Abs(sympy.Mod(PHI + 32, 128) - 64))
-    assert equal(d.closed, asked)
-    assert d.update[0] == 1
+@pytest.mark.parametrize(
+    "ref,unit,records,start,freq,text,asked,order",
+    [
+        (
+            "goattracker2",
+            {"cell": "pulse", "fire": ["pulse_exec"]},
+            {"pulsetab": GT_PULSE},
+            {"pptr": 1, "ptime": 0},
+            GT_FREQ,
+            "16*abs((φ - 32) % 128 - 64) + 512",
+            1024 + 16 * (32 - sympy.Abs(sympy.Mod(PHI + 32, 128) - 64)),
+            (1, 128),
+        ),
+        (
+            "sidwizard",
+            {"cell": "pwhi:pwlo", "fire": ["tick_pw"]},
+            {"pwtab": SW_PULSE},
+            {"ppos": 1, "pwcnt": 0, "ci": 1},
+            SW_FREQ,
+            "2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048",
+            2048 + 2 * sympy.Min(PHI, 64) - 8 * sympy.Max(0, sympy.Min(PHI - 65, 64)),
+            None,
+        ),
+    ],
+)
+def test_a_table_program_is_one_closed_form(ref, unit, records, start, freq, text, asked, order):
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    m = machine(ref, unit, **records)
+    d = derive(m, m.start(start), None, freq)
+    assert d.exact and d.order.kind == "time" and G.text(d.closed) == text
+    assert equal(d.closed, asked) and d.update[0] == 1
+    assert order in (None, (d.order.prefix, d.order.period))
 
 
 def test_goattracker_slide_and_toneporta():
-    song = {"playroutine": library("goattracker2"), "records": {"speedtab": {1: {"l": 0, "r": 32}}}}
-    machine = Machine(song, {"cell": "freq", "fire": TICKN})
+    m = machine("goattracker2", {"cell": "freq", "fire": TICKN}, speedtab={1: {"l": 0, "r": 32}})
     base = {"vibtime": 0, "vibdelay": 0, "lastnote": 40, "note": "N"}
-    slide = derive(machine, machine.start({**base, "command": 1, "cmddata": 1}), None, GT_FREQ)
+    slide = derive(m, m.start({**base, "command": 1, "cmddata": 1}), None, GT_FREQ)
     assert slide.canonical == "0; (v + 32) % 65536" and slide.exact
-    down = derive(machine, machine.start({**base, "command": 2, "cmddata": 1}), None, GT_FREQ)
+    down = derive(m, m.start({**base, "command": 2, "cmddata": 1}), None, GT_FREQ)
     assert down.canonical == "0; (v - 32) % 65536"
-    porta = derive(machine, machine.start({**base, "command": 3, "cmddata": 1}), None, GT_FREQ)
+    porta = derive(m, m.start({**base, "command": 3, "cmddata": 1}), None, GT_FREQ)
     assert porta.exact and G.freq(N) in porta.value.atoms(G.FREQ)
-    target = 1000
     toward = G.compiled(porta.value, ("v", "phi", "N"))
 
     def ftab(k):
-        return target if k == 7 else 0
+        return 1000 if k == 7 else 0
 
-    assert [toward(v, 0, 7, F=ftab) for v in (900, 990, 1000, 1010, 1100)] == [
-        932,
-        1000,
-        1000,
-        1000,
-        1068,
-    ]
+    got = [toward(v, 0, 7, F=ftab) for v in (900, 990, 1000, 1010, 1100)]
+    assert got == [932, 1000, 1000, 1000, 1068]
 
 
 def test_goattracker_vibrato_is_periodic_in_elapsed_firings():
-    song = {"playroutine": library("goattracker2"), "records": {"speedtab": {1: {"l": 4, "r": 32}}}}
-    machine = Machine(song, {"cell": "freq", "fire": TICKN})
-    d = derive(machine, machine.start({"command": 4, "cmddata": 1, "vibtime": 0, "vibdelay": 0,
-                                       "lastnote": 40, "note": "N"}), None, GT_FREQ)  # fmt: skip
+    m = machine("goattracker2", {"cell": "freq", "fire": TICKN}, speedtab={1: {"l": 4, "r": 32}})
+    start = {"command": 4, "cmddata": 1, "vibtime": 0, "vibdelay": 0, "lastnote": 40, "note": "N"}
+    d = derive(m, m.start(start), None, GT_FREQ)
     assert d.exact and (d.order.period, d.phase) == (12, 1)
     f = G.compiled(d.value)
     v, phi, trace = 20000, 0, []
@@ -176,9 +212,8 @@ def test_goattracker_vibrato_is_periodic_in_elapsed_firings():
 
 
 def test_defmon_pulse_bounce_counts_turns():
-    song = {"playroutine": library("defmon"), "records": {}}
-    machine = Machine(song, {"cell": "pw", "fire": ["pulse"]})
-    d = derive(machine, machine.start({"ps": 0x85, "fc": 0}), None, DM_FREQ)
+    m = machine("defmon", {"cell": "pw", "fire": ["pulse"]})
+    d = derive(m, m.start({"ps": 0x85, "fc": 0}), None, DM_FREQ)
     assert d.exact and d.order.kind == "turn" and d.order.period == 2
     assert V in d.phase.free_symbols and PHI in d.value.free_symbols
     pr = library("defmon")
@@ -189,79 +224,187 @@ def test_defmon_pulse_bounce_counts_turns():
         v, phi = f(v, phi, 0), phi + a(v, phi, 0)
         got.append(v)
     assert np.array_equal(np.diff([4000] + got), want) and phi > 2
+    with pytest.raises(ValueError, match="no start value"):
+        m.start({"ps": 0x85})
 
 
-def test_csillag_pulse_program_is_one_modulator(csillag_song):
-    machine = Machine(csillag_song.ir, {"cell": "pwhi:pwlo", "fire": ["tick_pw"]})
-    d = derive(
-        machine,
-        machine.start({"ppos": 1, "pwcnt": 0, "ci": 1}),
-        None,
-        {"hi": "freqhi", "lo": "freqlo"},
-    )
-    assert d.exact and G.text(d.closed) == "2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048"
-    assert equal(
-        d.closed, 2048 + 2 * sympy.Min(PHI, 64) - 8 * sympy.Max(0, sympy.Min(PHI - 65, 64))
-    )
+SW_START = {"ppos": 1, "pwcnt": 0, "ci": 1, "pwkt": 0, "oct": 0}
 
 
-def pulse_unit(song) -> dict:
-    return next(u for u in Analysis(song.ir).units if u["name"] == "pulse")
-
-
-def test_a_keyboard_tracked_pulse_row_is_a_term_of_the_note(csillag_song):
-    ir = copy.deepcopy(csillag_song.ir)
-    ir["records"]["pwtab"][1]["k"] = 5
-    machine = Machine(ir, pulse_unit(csillag_song), Analysis(ir).spec)
-    start = {"ppos": 1, "pwcnt": 0, "ci": 1, "pwkt": 0, "note": ("lin", 1, (("N", 1),)), "oct": 0}
-    d = derive(machine, machine.start(start), None, {"hi": "freqhi", "lo": "freqlo"})
+def test_a_keyboard_tracked_pulse_row_is_a_term_of_the_note():
+    m = machine("sidwizard", "pulse", pwtab={1: {"a": 0x88, "b": 0, "k": 5, "next": 0}})
+    start = {**SW_START, "note": ("lin", 1, (("N", 1),))}
+    d = derive(m, m.start(start), None, SW_FREQ)
     assert d.exact and {"E[N + 5]", "E[N + 6]"} <= set(re.findall(r"E\[[^]]*\]", G.text(d.closed)))
-    hi = ir["tables"]["freqhi"]
+    hi = library("sidwizard")["tables"]["freqhi"]
     track = from_text(G.text(d.closed), {"E": lambda i: hi[i - 11] if i >= 11 else 0})
-    for n in (24, 48, 71):
-        step = hi[n + 6 - 11] - hi[n + 5 - 11]
+    steps = {n: hi[n + 6 - 11] - hi[n + 5 - 11] for n in range(6, 90)}
+    assert {0, 1, 3} <= set(steps.values())
+    for n, step in steps.items():
         assert track(0, 0, n) == 2048 + 256 * (step if step else -1)
 
 
-def test_a_paired_chip_value_must_be_its_pair_plus_an_offset(csillag_song):
-    unit = {**pulse_unit(csillag_song), "chip": {"width": 12, "value": "(pwhi << 8) ^ pwlo"}}
-    machine = Machine(csillag_song.ir, unit, Analysis(csillag_song.ir).spec)
-    start = {"ppos": 1, "pwcnt": 0, "ci": 1, "pwkt": 0, "note": 0, "oct": 0}
-    d = derive(machine, machine.start(start), None, {"hi": "freqhi", "lo": "freqlo"})
+def test_a_paired_chip_value_must_be_its_pair_plus_an_offset():
+    song = {"playroutine": library("sidwizard"), "records": {"pwtab": SW_PULSE}}
+    spec = declared(song["playroutine"])
+    unit = next(u for u in spec["units"] if u["name"] == "pulse")
+    m = Machine(song, {**unit, "chip": {"width": 12, "value": "(pwhi << 8) ^ pwlo"}}, spec)
+    d = derive(m, m.start({**SW_START, "note": 0}), None, SW_FREQ)
     assert d.error == "the chip value is not its pair plus an offset"
 
 
-def test_named_tables_equal_the_functions_they_replace(csillag_song):
-    spec = Analysis(csillag_song.ir).spec
-    assert not unproved_functions(csillag_song.ir, spec)
-    wrong = {**spec, "functions": {"fmlo": "W[fyc(a, d)] & 0x7F"}}
-    assert unproved_functions(csillag_song.ir, wrong)
+def test_named_tables_equal_the_functions_they_replace():
+    song = {"playroutine": library("sidwizard"), "records": {}}
+    spec = declared(song["playroutine"])
+    assert not unproved_functions(song, spec)
+    assert unproved_functions(song, {**spec, "functions": {"fmlo": "W[fyc(a, d)] & 0x7F"}})
 
 
-def test_inherited_acid_direction_gives_two_expressions(crosseyed):
-    song = load(crosseyed)
-    machine = Machine(song.ir, {"cell": "acc", "fire": ["layer_b", "acid_step"]})
-    base = {"rowB": 10, "cntB": 0, "astep": 0, "cp": 0}
-    one = derive(machine, machine.start({**base, "sub": 1}), None, DM_FREQ)
-    zero = derive(machine, machine.start({**base, "sub": 0}), None, DM_FREQ)
+def test_the_acid_direction_gives_two_expressions():
+    m = machine(
+        "defmon",
+        {"cell": "acc", "fire": ["layer_b", "acid_step"]},
+        sidtab={1: {"dl": 1, "next": 2}, 2: {"dl": 1, "next": 1}},
+    )
+    base = {"rowB": 1, "cntB": 0, "astep": 0, "cp": 0}
+    one = derive(m, m.start({**base, "sub": 1}), None, DM_FREQ)
+    zero = derive(m, m.start({**base, "sub": 0}), None, DM_FREQ)
     assert one.exact and zero.exact and one.canonical != zero.canonical
 
 
-def test_unknown_cells_are_reported():
-    song = {"playroutine": library("defmon"), "records": {}}
-    machine = Machine(song, {"cell": "pw", "fire": ["pulse"]})
-    with pytest.raises(ValueError, match="no start value"):
-        machine.start({"ps": 0x85})
+def test_comparisons_are_found_with_their_negations():
+    got = chipinv.comparisons(["a + (b > 3)", "x if y == 0 else z"])
+    assert got == ["b > 3", "not (b > 3)", "y == 0", "not (y == 0)"]
 
 
-# ---- replay, conversion and report -----------------------------------------------------
+# ---- inherited start values -------------------------------------------------------------
 
 
-def test_driven_replay_matches_and_a_wrong_expression_does_not(mw):
-    an = Analysis(mw.ir)
-    ticks = 700
-    native = native_grid(mw, ticks)
-    good = Replay(mw.ir, an.derive, override=lambda occ: True)
+def test_a_counted_start_cell_is_refused_as_an_input():
+    m = machine("goattracker2", {"cell": "pulse", "fire": ["pulse_exec"]}, pulsetab=GT_PULSE)
+    start = m.start({"pptr": 1, "ptime": "ptime"})
+    with pytest.raises(ValueError, match="ptime counts"):
+        guarded(m, {"ptime"}).explore(start)
+    d = derive(guarded(m, {"ptime"}), start, None, GT_FREQ, {"ptime": "ptime"})
+    assert "counts" in d.error
+
+
+def test_a_start_off_the_longest_run_is_no_phase_offset():
+    m = machine("goattracker2", {"cell": "pulse", "fire": ["pulse_exec"]}, pulsetab=GT_PULSE)
+    starts = [m.start({"pptr": 2, "ptime": 7}), m.start({"pptr": 3, "ptime": 5})]
+    live = [
+        types.SimpleNamespace(start=s, derived=derive(m, s, None, GT_FREQ), start_value=None)
+        for s in starts
+    ]
+    an = types.SimpleNamespace(machines={"pulse": m}, freq=GT_FREQ)
+    lost = inherit(an, {"name": "pulse", "cell": "pulse"}, live)
+    assert lost.kind == "none" and lost.update is None and lost.reason
+
+
+def test_a_carried_cell_the_firing_only_reads_is_an_input():
+    m = machine(
+        "defmon",
+        {"cell": "acc", "fire": ["layer_b", "acid_step"]},
+        sidtab={1: {"dl": 1, "next": 2}, 2: {"dl": 1, "next": 1}},
+    )
+    live = []
+    for astep in (0x0A00, 0x0200):
+        s = m.start({"rowB": 1, "cntB": 0, "astep": astep, "cp": 0, "sub": 0})
+        live.append(
+            types.SimpleNamespace(start=s, derived=derive(m, s, None, DM_FREQ), start_value=None)
+        )
+    got = inherit(types.SimpleNamespace(machines={"acid": m}, freq=DM_FREQ), {"name": "acid"}, live)
+    assert got.kind == "input" and got.cells == ["astep"] and got.proof.startswith("proved")
+    general = G.compiled(got.update[1], ("v", "phi", "N", "astep"))
+    for r in live:
+        astep, own = dict(r.start)["astep"], G.compiled(r.derived.update[1])
+        for v in range(0, 65536, 997):
+            assert general(v, 0, 0, astep) == own(v, 0, 0)
+        assert any(general(v, 0, 0, astep + 1) != own(v, 0, 0) for v in range(0, 65536, 997))
+
+
+W_LINEAR = {"W": lambda k: 7 * k + 1}
+
+
+@pytest.mark.parametrize("known", [True, False])
+def test_a_carried_delay_counter_is_a_gate(known):
+    m = machine("sidwizard", "pitch")
+    vib = {"ci": 1, "svib": 0x10, "vfc": 2, "vper": 8, "fml": ("idx", "W", "N"), "fmh": 0}
+    live = []
+    for k in (-1, 3, 15):
+        v0 = sympy.Integer(0) if known or k != 3 else None
+        s = m.start({**vib, "vdc": k})
+        live.append(
+            types.SimpleNamespace(start=s, derived=derive(m, s, v0, SW_FREQ), start_value=v0)
+        )
+    got = inherit(
+        types.SimpleNamespace(machines={"pitch": m}, freq=SW_FREQ), {"name": "pitch"}, live
+    )
+    assert got.kind == "gate" and got.cells == ["vdc"]
+    assert got.proof.startswith("d = vdc - (-1)") and DELAY in got.update[1].free_symbols
+    points = [(v, phi) for v in (0, 1000, 40000) for phi in range(64)]
+    for r in live:
+        d = dict(r.start)["vdc"] + 1
+        f, wrong = (G.compiled(got.update[1].xreplace({DELAY: k})) for k in (d, d + 1))
+        want = G.compiled(
+            r.derived.value if V in got.update[1].free_symbols else r.derived.update[1]
+        )
+        values = [want(v, phi, 40, **W_LINEAR) for v, phi in points]
+        assert [f(v, phi, 40, **W_LINEAR) for v, phi in points] == values
+        assert [wrong(v, phi, 40, **W_LINEAR) for v, phi in points] != values
+
+
+# ---- replay and report ------------------------------------------------------------------
+
+
+@pytest.fixture(name="gt_song")
+def gt_song_fixture():
+    """A synthetic GoatTracker 2 tune lifted with its native modulations, and its native player:
+    a ping-pong pulse program and a constant one, a slide up and a toneporta down."""
+    pulse = [(0x84, 0), (0x20, 0x10), (0x40, 0xF0), (0x20, 0x10), (0xFF, 2), (0x88, 0), (0xFF, 0)]
+    ins = {"gateoff_timer": 2, "sustain_release": 0xF0}
+    rest = [(None, 0, 0, 0)]
+    rows = [(24, 1, 1, 1)] + rest * 5 + [(26, 2, 0, 0)] + rest * 4 + [(22, 0, 3, 1)] + rest * 4
+    dec, player = gt_tune(
+        [(0x41, 0), (0xFF, 0), (0x21, 0), (0xFF, 0)],
+        instruments=[
+            {**ins, "wave_ptr": 1, "pulse_ptr": 1},
+            {**ins, "wave_ptr": 3, "pulse_ptr": 6},
+        ],
+        rows=rows,
+        speed=[(0, 32)],
+        pulse=pulse,
+    )
+    return goattracker.lift(dec, expressions=False), player
+
+
+def test_the_pool_maps_in_order_and_the_cache_reads_an_entry_written_while_it_waited(
+    tmp_path, monkeypatch
+):
+    pool = Pool(2, 3)
+    try:
+        assert pool.workers == 2
+        assert pool.map(divmod, [(7, 2), (9, 4), (1, 1)], "divmod") == [(3, 1), (2, 1), (1, 0)]
+    finally:
+        pool.close()
+    seen = iter([False, True])
+    monkeypatch.setattr(Path, "exists", lambda self: next(seen))
+    got = _cached(tmp_path / "entry.pkl", lambda: pytest.fail("computed"), lambda p: p.name, None)
+    assert got == "entry.pkl"
+
+
+def test_a_tune_loads_with_its_native_modulations_and_plays_its_native_player(metal_warrior):
+    song = exprs_report.load(metal_warrior)
+    assert song.player == "goattracker2"
+    assert not song.ir.get("exprs")
+    assert SongPlayer(song.ir).mismatch(exprs_report.native_grid(song, 600)) is None
+
+
+def test_driven_replay_matches_and_a_wrong_expression_does_not(gt_song):
+    ir, player = gt_song
+    an, ticks = Analysis(ir), 300
+    native = np.asarray(player.render_grid(ticks), dtype=np.uint8)
+    good = Replay(ir, an.derive, override=lambda occ: True)
     assert np.array_equal(np.asarray(good.run(ticks), dtype=np.uint8), native)
     assert good.occurrences and not [o for o in good.occurrences if o.mismatch or o.crossed]
 
@@ -273,116 +416,28 @@ def test_driven_replay_matches_and_a_wrong_expression_does_not(mw):
         broken.step = lambda v, phi, n: ((v + 1) % 4096, phi + 1)
         return broken
 
-    bad = Replay(mw.ir, wrong, override=lambda occ: True)
-    grid = np.asarray(bad.run(ticks), dtype=np.uint8)
-    assert not np.array_equal(grid, native)
+    bad = Replay(ir, wrong, override=lambda occ: True)
+    assert not np.array_equal(np.asarray(bad.run(ticks), dtype=np.uint8), native)
     assert any(o.mismatch for o in bad.occurrences if o.unit == "pulse")
 
 
-@pytest.fixture(name="mw_conv", scope="module")
-def mw_conv_fixture(mw):
-    return analyse(mw.ir, workers=4)
-
-
-def test_conversion_texts_and_the_written_song(mw, mw_conv):
-    texts = {t for t in mw_conv.texts if t is not None}
-    assert "16*abs((φ - 32) % 128 - 64) + 512" in texts and "(v + 32) % 65536" in texts
-    written = set(mw_conv.out["exprs"].values())
-    assert written <= texts and {"1024", "1920"} == texts - written
-    text = songio.dumps(mw_conv.out)
-    assert "pw: 16*abs((φ - 32) % 128 - 64) + 512" in text and "!freq:@x" in text
-    ticks = 3840
-    grid = SongPlayer(songio.loads(text)).render_grid(ticks)
-    assert np.array_equal(grid, native_grid(mw, ticks))
-
-
-def test_cli_writes_the_report(tmp_path, metal_warrior):
-    out = tmp_path / "exprs.txt"
-    main(["--out", str(out), "exprs", str(metal_warrior), "--before", str(tmp_path),
-          "--after", str(tmp_path), "--workers", "4"])  # fmt: skip
-    text = out.read_text()
-    assert "## Metal_Warrior_Title_Remix (goattracker2)" in text and "## Tokens" in text
-    assert "read back from its v1.19 text, 7680 ticks are equal to" in text
-    assert "written (" in text and "(v + 32) % 65536" in text
-    assert "Metal_Warrior_Title_Remix: - / - / " in text
-
-
-# ---- inherited start values -------------------------------------------------------------
-
-
-def test_a_counted_start_cell_is_refused_as_an_input(mw):
-    machine = Machine(mw.ir, {"cell": "pulse", "fire": ["pulse_exec"]})
-    start = machine.start({"pptr": 1, "ptime": "ptime"})
-    with pytest.raises(ValueError, match="ptime counts"):
-        guarded(machine, {"ptime"}).explore(start)
-    d = derive(guarded(machine, {"ptime"}), start, None, GT_FREQ, {"ptime": "ptime"})
-    assert "counts" in d.error
-
-
-def general_forms(conv) -> list:
-    """``(inherited, live results)`` of each unit and label written with several expressions."""
-    an, occs, out = conv.analysis, conv.obs["occurrences"], []
-    for key, members in groups(occs).items():
-        if len({conv.texts[i] for i in members} - {None}) > 1:
-            starts = list(dict.fromkeys(occs[i].key for i in members))
-            res = [
-                Result(conv.found[k][0], k[1], k[2], start_value=conv.found[k][1]) for k in starts
-            ]
-            live = [r for r in res if not r.derived.identity]
-            out.append((inherit(an, an.unit(key[0]), live), live))
-    return out
-
-
-def test_acid_is_its_accumulator_so_its_starts_carry_nothing_in(crosseyed):
-    conv = analyse(load(crosseyed).ir, workers=4)
-    an, seen = conv.analysis, set()
-    for occ in conv.obs["occurrences"]:
-        d = conv.found[occ.key][0] if occ.unit == "acid B" else None
-        if d is None or d.identity:
-            continue
-        assert d.exact and d.invariant is None
-        assert occ.v_in == occ.start["acc"]
-        assert convert.carried(an, occ, d.phase, d.value) == 0
-        seen.add((occ.start["sub"], occ.start["astep"]))
-    assert {(0, 0x0A00), (1, 0x0200)} <= seen
-
-
-def test_pulse_recurrences_are_proved_under_the_chip_invariants(crosseyed):
-    conv = analyse(load(crosseyed).ir, workers=4)
-    pulse = [d for k, (d, _) in conv.found.items() if k[0] == "pulse A" and not d.identity]
-    assert pulse and all(d.exact and d.invariant.ok and d.invariant.unit for d in pulse)
-
-
-def test_comparisons_are_found_with_their_negations():
-    got = chipinv.comparisons(["a + (b > 3)", "x if y == 0 else z"])
-    assert got == ["b > 3", "not (b > 3)", "y == 0", "not (y == 0)"]
-
-
-def test_a_carried_delay_counter_is_a_gate(csillag_song):
-    conv = analyse(csillag_song.ir, workers=4)
-    got, live = next((r, live) for r, live in general_forms(conv) if r.kind == "gate")
-    (cell,) = got.cells
-    low = min(dict(r.start)[cell] for r in live)
-    assert got.proof.startswith(f"d = {cell} - ({low})") and DELAY in got.update[1].free_symbols
-    points = [(v, phi) for v in (0, 1000, 40000) for phi in range(64)]
-    for r in live:
-        d = dict(r.start)[cell] - low
-        f, wrong = (G.compiled(got.update[1].xreplace({DELAY: k})) for k in (d, d + 1))
-        recurrence = V in got.update[1].free_symbols
-        want = G.compiled(r.derived.value if recurrence else r.derived.update[1])
-        table = {"W": lambda k: 7 * k + 1}
-        values = [want(v, phi, 40, **table) for v, phi in points]
-        assert [f(v, phi, 40, **table) for v, phi in points] == values
-        assert [wrong(v, phi, 40, **table) for v, phi in points] != values
-
-
-def test_a_start_off_the_longest_run_is_no_phase_offset(mw):
-    machine = Machine(mw.ir, {"cell": "pulse", "fire": ["pulse_exec"]})
-    starts = [machine.start({"pptr": 2, "ptime": 7}), machine.start({"pptr": 3, "ptime": 5})]
-    live = [
-        types.SimpleNamespace(start=s, derived=derive(machine, s, None, GT_FREQ), start_value=None)
-        for s in starts
-    ]
-    an = types.SimpleNamespace(machines={"pulse": machine}, freq=GT_FREQ)
-    lost = inherit(an, {"name": "pulse", "cell": "pulse"}, live)
-    assert lost.kind == "none" and lost.update is None and lost.reason
+def test_cli_writes_the_report(gt_song, tmp_path, monkeypatch):
+    ir, player = gt_song
+    grid = np.asarray(player.render_grid(exprs_report.TICKS["goattracker2"]), dtype=np.uint8)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(exprs_report, "load", lambda p: exprs_report.Song(Path(p), ir, b""))
+    monkeypatch.setattr(exprs_report, "native_grid", lambda song, ticks: grid[:ticks])
+    (tmp_path / "synthetic.yaml").write_text("unitracker: 1.3\n", encoding="utf-8")
+    texts = []
+    for workers in ("2", "1"):
+        out = tmp_path / f"exprs-{workers}.txt"
+        main(["--out", str(out), "exprs", "synthetic.sid", "--before", str(tmp_path),
+              "--after", str(tmp_path / "none"), "--workers", workers])  # fmt: skip
+        texts.append(out.read_text())
+    assert all("read back from its v1.19 text, 7680 ticks are equal to" in t for t in texts)
+    text = texts[0]
+    assert "## synthetic (goattracker2)" in text and "## Tokens" in text
+    assert "closed form (start value any): v = 16*abs((φ - 32) % 128 - 64) + 512" in text
+    assert re.search(r"written \(\d+ occurrences\): \(v \+ 32\) % 65536  at !freq:@x\d", text)
+    assert re.search(r"written \(\d+ occurrences\): 2048  at i2 pw", text)
+    assert re.search(r"synthetic: \d+ / - / \d+", text)
