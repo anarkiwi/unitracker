@@ -601,19 +601,20 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 cmd[1], hit = new, True
         return hit
 
+    def _instances(self, voice: int):
+        """``(instance, event)`` of each step a voice plays over the window, in order."""
+        plays = self.ir["tracks"][voice]["plays"]
+        for count, pos in enumerate(self.obs["plays"][voice]):
+            for step, event in enumerate(_steps(self.ir["phrases"][plays[pos]["phrase"]])):
+                yield (voice, count, step), event
+
     @functools.cached_property
     def _heads(self) -> dict:
         """``{instance: head}``: the instance whose event names the instrument each instance
         plays, None for none (``lifetime.selected``)."""
         out = {}
-        for voice, counts in enumerate(self.obs["plays"]):
-            plays = self.ir["tracks"][voice]["plays"]
-            steps = (
-                ((voice, count, step), event)
-                for count, pos in enumerate(counts)
-                for step, event in enumerate(_steps(self.ir["phrases"][plays[pos]["phrase"]]))
-            )
-            out.update((key, head) for key, _, head in selected(steps))
+        for voice in range(len(self.obs["plays"])):
+            out.update((key, head) for key, _, head in selected(self._instances(voice)))
         return out
 
     def select(self, where: tuple, chosen: list) -> None:
@@ -717,11 +718,38 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 and [legato_code, 0] not in cmds
             ):
                 cmds.insert(0, [legato_code, 0])
-            index = self.x(text or IDENTITY)
-            if index > 0xFF:
-                raise ConversionError(f"!freq names expression {index}: an argument is a byte")
-            cmds.append([code, index])
+            cmds.append([code, self._byte_x(text or IDENTITY)])
             _set_cmds(ev, cmds)
+        self._unfired()
+
+    def _byte_x(self, text: str) -> int:
+        """The index of an expression text an event's command names, which is a byte."""
+        index = self.x(text)
+        if index > 0xFF:
+            raise ConversionError(f"!freq names expression {index}: an argument is a byte")
+        return index
+
+    def _unfired(self) -> None:
+        """Each native modulator command of an event its unit never fires on, as the identity.
+
+        The window plays every instance, and a firing belongs to the event of the hook that
+        started it; an event's command that no firing follows plays nothing of its unit, which
+        is the identity its expression command writes.
+        """
+        for unit, spec in self.units.items():
+            code = unit_command(self.pr, spec)
+            if code is None:
+                continue
+            native = set(spec["commands"])
+            for voice in range(len(self.obs["plays"])):
+                for instance, event in self._instances(voice):
+                    if (unit, instance) in self.obs["events"] or not any(
+                        int(c[0]) in native for c in _cmds(event)
+                    ):
+                        continue
+                    ev = self.edit(instance)
+                    cmds = [c for c in _cmds(ev) if int(c[0]) not in native]
+                    _set_cmds(ev, cmds + [[code, self._byte_x(IDENTITY)]])
 
     # -- phrases and tracks --
     def phrases(self) -> None:

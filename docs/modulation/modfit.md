@@ -113,7 +113,9 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
    Otherwise the event's `commands` codes are replaced by the `!freq` command naming the text,
    preceded by `!legato` when the start's `legato` cell is set on a note; with an `x` that
    reads the site's field, commandless steps the occurrence spans get it too, and a start that
-   does not modulate gets `v` where that field's record holds a text. Changed events
+   does not modulate gets `v` where that field's record holds a text. An event whose
+   `commands` code no firing of its unit follows (the unit's firings skipped while its command
+   is set) plays nothing of the unit, and gets `v`. Changed events
    go into phrase variants (`p3~1`); a track's loop is unrolled where its passes differ.
    `retire` fields are cleared in every row of their record.
 5. **Verify.** The rewritten song's register grid must equal the native song's over the whole
