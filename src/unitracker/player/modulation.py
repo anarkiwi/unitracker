@@ -109,9 +109,11 @@ def units(playroutine: dict) -> list:
 
 def function(item) -> dict:
     """The function a ``fire`` entry names: ``{proc}``, ``{type, template}`` or ``{record, field}``
-    (see the schema's modulator declarations)."""
+    (see the schema's modulator declarations); an entry that is no proc name or ``run`` is one."""
     if isinstance(item, str):
         return {"proc": item}
+    if "run" not in item:
+        return item
     run = item["run"]
     if "template" in run:
         return {"type": run["record"], "template": run["template"]}
@@ -194,7 +196,8 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
         for scope in "vg":
             table = self.ns.get(f"D_{scope}_{record}_{name}")
             for k, (fn, row) in (table or {}).items():
-                if ref.get("index") in (None, k):
+                index = ref.get("index")
+                if index is None or k in (index if isinstance(index, list) else [index]):
                     out.append((table, k, fn, row))
         return out
 
@@ -243,14 +246,18 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
     def wrap_hook(self, unit: dict, hook: dict) -> None:
         """A start hook: a restart when the hook writes ``written`` or changes ``key``.
 
-        A written ``pointer`` restarts only when the program it selects sets the unit's fields.
+        A written ``pointer`` restarts only when the program it selects sets the unit's fields; a
+        hook with none of the three restarts on every call, before it runs.
         """
         state = {}
         watch = list(hook.get("written") or []) + list(hook.get("pointer") or [])
+        always = not (watch or hook.get("key"))
 
         def before(args):
             voice = self.voice(args)
             state["pre"] = self.cells.snapshot(voice)
+            if always:
+                self.restart(unit, voice, (hook["at"], None, state["pre"]))
             state["key"] = tuple(self.cells.get(c, voice) for c in hook.get("key") or [])
             state["counts"] = [self.writes.get(self.token(voice, c), 0) for c in watch]
 
@@ -264,6 +271,8 @@ class Modulation:  # pylint: disable=too-many-instance-attributes
             key = tuple(self.cells.get(c, voice) for c in hook.get("key") or [])
             moved = written & set(hook.get("pointer") or [])
             self.applied(unit, voice)
+            if always:
+                return
             if written - moved or key != state["key"] or (moved and self.relevant(unit, voice)):
                 row = args[1] if len(args) > 1 else None
                 self.restart(unit, voice, (hook["at"], row, state["pre"]))

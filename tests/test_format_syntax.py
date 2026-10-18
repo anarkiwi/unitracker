@@ -79,6 +79,8 @@ ARITHMETIC = [
     ("1 < 2 <= 2", 1),
     ("3 == 4 or 2 != 2", 0),
     ("5 if 1 > 0 else 6", 5),
+    ("s8(0x7F) + s8(0x80) + s8(0xFF)", -2),
+    ("s16(0x7FFF) + s16(0x8000) + s16(0xFFFF)", -2),
     (12, 12),
     (True, 1),
 ]
@@ -112,3 +114,8 @@ def test_expression_errors(resolver, texts, match):
     for text in texts:
         with pytest.raises(ExprError, match=match):
             resolver.compile(text)
+
+
+def test_a_function_cannot_shadow_a_builtin():
+    with pytest.raises(ExprError, match="builtins"):
+        Names({"s8": {"args": ["a"], "expr": "a"}})

@@ -75,7 +75,7 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
             actions = [{"call": at["proc"]}]
         else:
             index = row if "type" in at else at.get("index")
-            if index is None:
+            if not isinstance(index, int):
                 return {}
             actions = [{"run": {**run_of(at), "index": int(index)}}]
         state = {k: v for k, v in pre.items() if isinstance(v, int) and k not in machine.parts}

@@ -7,6 +7,7 @@ plus the bits a constant part can set. Carries spread upwards, masks and shifts 
 import ast
 import functools
 
+from unitracker.format.expr import with_builtins
 from unitracker.format.records import record_types
 from unitracker.player.vm import PSEUDO, acc_mode
 
@@ -326,7 +327,7 @@ class Flow:
             k: ALL if min(v, default=0) < 0 else (1 << max(v, default=0).bit_length()) - 1
             for k, v in (pr.get("tables") or {}).items()
         }
-        self.functions = pr.get("functions") or {}
+        self.functions = with_builtins(pr.get("functions"))
         self.rtypes = record_types(pr)
 
     # values -----------------------------------------------------------------

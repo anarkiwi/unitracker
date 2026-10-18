@@ -8,6 +8,8 @@ import ast
 
 import z3
 
+from unitracker.format.expr import with_builtins
+from unitracker.format.records import field_defaults
 from unitracker.modfit.flow import flow_of, parse
 from unitracker.player.vm import acc_mode
 
@@ -545,7 +547,7 @@ class Form(Algebra):
         self.pr, self.data = pr, data or {}
         self.scratch = {k for k, w in width.items() if w is None}
         self.consts = dict(pr.get("constants") or {})
-        self.functions = pr.get("functions") or {}
+        self.functions = with_builtins(pr.get("functions"))
         self.procs = pr.get("procs") or {}
         self.translation = Translation(self.rng)
         self.feasibility = {}
@@ -877,8 +879,7 @@ class Rows(dict):
 
 def defaults(rtype: dict) -> dict:
     """``{field: default}`` of a record type."""
-    fields = rtype.get("fields") or []
-    return dict(fields) if isinstance(fields, dict) else dict.fromkeys(fields, 0)
+    return field_defaults(rtype)
 
 
 class Programs(Form):

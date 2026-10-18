@@ -156,8 +156,10 @@ Declare each native table as a record type ([Record types](playroutines/schema.m
 
 `writes_as` names the record type the table is written as (`ins`, `ctrl`, `pw`, `filter`, `restart`;
 the table in [Definitions](format/document.md#definitions)), and `prefix` its name prefix when that
-is not the written name's first letter. A field for which 0 is meaningful defaults to -1, "absent"
-(the `restart` rows, `defmon`'s sidTAB columns).
+is not the written name's first letter. A field for which 0 is meaningful goes in `optional`, read as
+-1, "absent", when missing (the `restart` rows, `defmon`'s sidTAB columns); an optional field that is
+a shared key needs no `keys` or `raw` entry of its own. Read a signed byte or word with the builtins
+`s8` and `s16`.
 
 **Codec shapes.** Each `codec` entry is one row kind: `when` over the raw fields, the constants and,
 for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back;
@@ -206,8 +208,8 @@ unit keys are in [Modulator declarations](playroutines/schema.md#modulator-decla
 | key | what it transcribes |
 |---|---|
 | `cell`, `scope` | the cell the replay modulates (`hi:lo[:k]` for a pair); `global` for one cell the voices share |
-| `fire` | one firing, as proc names and `run` actions: `v` is read before the first entry runs and the value stored after the last |
-| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` or `{type: t, template: f}`) writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields` |
+| `fire` | one firing, as proc names, `run` actions and functions: `v` is read before the first entry runs and the value stored after the last |
+| `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` with `i` a row or a list of rows, or `{type: t, template: f}`) writing a `written` cell, changing the `key` cells, or writing a `pointer` to a program that sets one of `program.fields`; with none of these, every call of the function is a start. Never add a proc only to label a firing or a start: name the function the player already runs |
 | `x` | the expression a start selects; 0 leaves the playroutine's own firing |
 | `label` | the cells grouping occurrences, usually the program pointer |
 | `site`, `retire`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` (the `commands` entry named `key` with `ref: x`) replaces |

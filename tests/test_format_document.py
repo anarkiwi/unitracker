@@ -316,7 +316,11 @@ def _unwritable_program(lib: dict) -> dict:
     target = rtypes[native] if rtypes[native].chain else rtypes[rtypes["ins"].refs["ctrl"][0][0]]
     codec, blank = songio.codecs(lib, {})[target.name], {f: target.default(f) for f in target.own}
     row = next(
-        r for f in target.own for v in range(1, 256) if codec.encode(r := {**blank, f: v}) is None
+        r
+        for f in target.own
+        if f not in target.refs
+        for v in range(1, 256)
+        if codec.encode(r := {**blank, f: v}) is None
     )
     records = {target.name: {1: {**row, target.chain: 1 if target.none is None else target.none}}}
     return records | ({"ins": {1: {"ctrl": 1}}} if native == "ins" else {})

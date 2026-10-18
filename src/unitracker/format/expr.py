@@ -95,13 +95,28 @@ class _Bind(ast.NodeTransformer):
         return self.bound.get(node.id, node)
 
 
+BUILTINS = {
+    "s8": {"args": ["x"], "expr": "(x - 0x100) if x & 0x80 else x"},
+    "s16": {"args": ["x"], "expr": "(x - 0x10000) if x & 0x8000 else x"},
+}
+
+
+def with_builtins(functions) -> dict:
+    """A playroutine's ``functions`` and the format's :data:`BUILTINS`: ``s8(x)`` reads byte ``x``
+    and ``s16(x)`` word ``x`` as two's complement."""
+    shadowed = sorted(BUILTINS.keys() & (functions or {}).keys())
+    if shadowed:
+        raise ExprError(f"functions {shadowed} are builtins")
+    return {**BUILTINS, **(functions or {})}
+
+
 class Resolver:
     """Maps the names an expression uses to Python source for the generated code."""
 
     def __init__(self, functions=None):
         self.functions = {
             name: (list(spec.get("args", [])), parse(spec["expr"]))
-            for name, spec in (functions or {}).items()
+            for name, spec in with_builtins(functions).items()
         }
 
     def name(self, name: str) -> str:

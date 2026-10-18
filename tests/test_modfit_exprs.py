@@ -443,11 +443,11 @@ def test_cli_writes_the_report(gt_song, tmp_path, monkeypatch):
     assert re.search(r"synthetic: \d+ / - / \d+", text)
 
 
-def test_a_fire_proc_that_runs_playroutine_records_dispatches_as_its_run():
+def test_a_fired_record_function_runs_at_the_index_of_its_call():
     song = {"playroutine": library("goattracker2"), "records": {}}
     spec = declared(song["playroutine"])
     unit = next(u for u in spec["units"] if u["name"] == "wave")
-    assert unit["fire"] == ["wstep"]
+    assert unit["fire"] == [{"record": "wavecmd", "field": "do", "index": [1, 2, 3, 4]}]
     run = {"run": {"record": "wavecmd", "index": "wc", "field": "do"}}
     wave, ran = Machine(song, unit, spec), Machine(song, {**unit, "fire": [run]}, spec)
     assert (wave.actions, wave.control, wave.real) == (ran.actions, ran.control, ran.real)

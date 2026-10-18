@@ -8,6 +8,7 @@ import functools
 
 import z3
 
+from unitracker.format.expr import with_builtins
 from unitracker.modfit import playroutine, resolve
 from unitracker.modfit.fit import Fitter, src
 from unitracker.modfit.flow import NESTED, Writes, action_lists, cells_of, direct_writes, names
@@ -39,7 +40,7 @@ class Slicer:
     def __init__(self, pr: dict, writes: Writes, procs: dict):
         self.pr, self.writes, self.procs = pr, writes, procs
         self.cells = set(cells_of(pr)) | set(PSEUDO)
-        self.functions = pr.get("functions") or {}
+        self.functions = with_builtins(pr.get("functions"))
         self.memo = {}
 
     def reads(self, text) -> set:
