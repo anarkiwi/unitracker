@@ -32,6 +32,8 @@ from unitracker.format import songio
 from unitracker.lift import backends
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
+os.environ.setdefault("UNITRACKER_WORKERS", "4")
+os.environ.setdefault("UNITRACKER_CACHE", str(CACHE / "modfit"))
 
 
 def hvsc_tune(name: str, tune: str, doc: str):

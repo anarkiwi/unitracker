@@ -15,6 +15,7 @@ jobs:
       OMP_NUM_THREADS: "2"
       MKL_NUM_THREADS: "2"
       OPENBLAS_NUM_THREADS: "2"
+      COVERAGE_CORE: sysmon
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -24,7 +25,8 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .tunecache
-          key: tunecache-${{ hashFiles('tests/conftest.py') }}
+          key: tunecache-${{ hashFiles('tests/conftest.py', 'src/unitracker/modfit/**') }}
+          restore-keys: tunecache-
       - run: pip install -e ".[dev]"
       - run: black --check src tests
       - run: pylint src

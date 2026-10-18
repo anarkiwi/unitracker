@@ -215,11 +215,16 @@ def _cached(path: Path | None, compute, load_fn, save_fn):
     return out
 
 
+def default_workers() -> int:
+    """``UNITRACKER_WORKERS`` from the environment, else the host's cores."""
+    return int(os.environ.get("UNITRACKER_WORKERS", 0)) or len(os.sched_getaffinity(0))
+
+
 class Pool:
     """A process pool over the host's cores with two BLAS threads per worker, or in-process."""
 
     def __init__(self, workers: int, items: int):
-        self.workers = max(1, min(workers or len(os.sched_getaffinity(0)), items))
+        self.workers = max(1, min(workers or default_workers(), items))
         self.pool = None
         if self.workers > 1:
             for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):

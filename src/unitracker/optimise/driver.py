@@ -1,12 +1,12 @@
 """The driver: screens each pass's candidates in parallel and keeps proved, smaller runs."""
 
 import multiprocessing
-import os
 from dataclasses import dataclass, field
 
 from tqdm import tqdm
 
 from unitracker.format import songio
+from unitracker.modfit.exprs import default_workers
 from unitracker.optimise.describe import describe
 from unitracker.optimise.edits import EDITS
 from unitracker.optimise.model import ERRORS
@@ -101,7 +101,7 @@ class Optimiser:
 
     def __init__(self, ir: dict, passes=None, workers: int | None = None):
         self.passes = list(passes or PASSES)
-        self.workers = workers if workers is not None else os.cpu_count() or 1
+        self.workers = workers if workers is not None else default_workers()
         self.ref = Trace(ir)
         self.source = self.base = ir
         try:

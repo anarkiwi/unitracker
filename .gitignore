@@ -10,3 +10,4 @@ out/
 .tunecache/
 *.wav
 .cache/
+.testlogs/

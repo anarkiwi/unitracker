@@ -10,6 +10,7 @@ import copy
 import dataclasses
 import importlib.util
 import json
+import os
 import pickle
 from pathlib import Path
 
@@ -26,7 +27,7 @@ from unitracker.player import reach
 from unitracker.player.modulation import declared
 from unitracker.player.vm import SongPlayer, first_mismatch, fold_empty
 
-CACHE = Path("out/modfit/cache")
+CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
 IDENTITY = "v"
 _HERE = Path(__file__).resolve().parent
 SOURCES = [

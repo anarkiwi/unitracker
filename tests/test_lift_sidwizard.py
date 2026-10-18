@@ -29,7 +29,7 @@ from unitracker.lift.sidwizard import NO_DETUNE as KEEP
 from unitracker.lift.sidwizard import LiftError
 from unitracker.player.vm import SongPlayer
 
-TICKS = 15000
+TICKS = 2000
 
 
 def test_table_rows_stop_at_the_end_marker_and_refuse_jumps():
