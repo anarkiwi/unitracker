@@ -165,10 +165,12 @@ def test_a_decoded_sidwizard_module_lifts_and_plays_as_given(csillag):
 
 def test_the_defmon_passes_run_in_order_and_convert_last(rent_a_cop, monkeypatch):
     monkeypatch.setattr(DefmonLift, "convert", lambda _lift, song: {**song, "exprs": {}})
-    assert DefmonLift.passes() == ("structure", "unheard_init", "convert")
+    monkeypatch.setattr(DefmonLift, "canonical", lambda _lift, song: {**song, "voices": 3})
+    assert DefmonLift.passes() == ("structure", "unheard_init", "convert", "canonical")
     stages = list(DefmonLift.from_sid(rent_a_cop.read_bytes()).stages())
     assert tuple(name for name, _ in stages) == DefmonLift.passes()
-    assert stages[-1][1] == {**stages[-2][1], "exprs": {}}
+    assert stages[-2][1] == {**stages[-3][1], "exprs": {}}
+    assert stages[-1][1] == {**stages[-2][1], "voices": 3}
 
 
 def test_the_defmon_normalisation_receives_the_structure(rent_a_cop, monkeypatch):
