@@ -384,9 +384,9 @@ SW_INS = """      ins:
         i2: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(64, φ)'}
 """
 GT_INS = """      x:
-        x1: '1024 + 16*min(3, φ)'
+        x1: 1024 + 16*min(3, φ)
       pw:
-        pw1: '2048 + 16*min(3, φ)'
+        pw1: 2048 + 16*min(3, φ)
       ins:
         i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '1024 + 16*min(3, φ)',
           restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]}
@@ -580,9 +580,14 @@ def test_a_command_that_also_stops_the_filter_program_is_written_with_the_stop()
 
 
 def test_a_loop_whose_passes_play_an_envelope_byte_differently_is_written_out():
-    ir = songio.loads(env_song(SPLIT_PHRASES, SPLIT, 1))
+    written = env_song(SPLIT_PHRASES, SPLIT, 1)
+    ir = songio.loads(written)
+    assert songio.dumps(ir).endswith("    play: [p3, p3, p3]\n  - {loop: 1}\n")
+    for trk in ir["tracks"]:
+        trk["plays"] = [{**p, "phrase": p["phrase"].split("/")[0]} for p in trk["plays"]]
     text = songio.dumps(ir)
-    assert text.endswith("    play: [p3, p3, p3]\n  - play: [p2, p2, p2]\n  - {loop: 2}\n")
+    tail = "  - def:\n      phrase:\n        p4: [C4!ad:52*4]\n    play: [p4, p4, p4]\n"
+    assert text.endswith(f"    play: [p3, p3, p3]\n{tail}  - {{loop: 2}}\n")
     assert songio.dumps(songio.loads(text)) == text
     assert np.array_equal(grid(songio.loads(text), 400), grid(ir, 400))
 
@@ -596,15 +601,15 @@ GT_FREQ = FREQ_X + "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0
 @pytest.mark.parametrize(
     "native,written",
     [
-        ([[16, 1], [16, 1], [16, 1]], "C4.i1!freq:x1*3, D4.i1*3"),
-        ([[16, 1], [], []], "C4.i1!freq:x1, -!freq:none*2, D4.i1*3"),
-        ([[16, 1], [6, 3], [16, 1]], "C4.i1!freq:x1, -!sr:3*2, D4.i1*3"),
-        ([[16, 1], [6, 3], []], "C4.i1!freq:x1, -!sr:3, -!freq:none, D4.i1*3"),
-        ([[16, 1], [16, 2], []], "C4.i1!freq:x1, -!freq:x2, -!freq:none, D4.i1*3"),
+        ([[16, 1], [16, 1], [16, 1]], "C4.i1!freq:x1*3, D4*3"),
+        ([[16, 1], [], []], "C4.i1!freq:x1, -!freq:none*2, D4*3"),
+        ([[16, 1], [6, 3], [16, 1]], "C4.i1!freq:x1, -!sr:3*2, D4*3"),
+        ([[16, 1], [6, 3], []], "C4.i1!freq:x1, -!sr:3, -!freq:none, D4*3"),
+        ([[16, 1], [16, 2], []], "C4.i1!freq:x1, -!freq:x2, -!freq:none, D4*3"),
     ],
 )
 def test_goattracker_writes_a_freq_once_and_none_where_the_native_one_ends(native, written):
-    ir = songio.loads(song("goattracker2", GT_FREQ, {"p1": "C4.i1*3, D4.i1*3"}))
+    ir = songio.loads(song("goattracker2", GT_FREQ, {"p1": "C4.i1*3, D4*3"}))
     events = [{"note": 48, "instrument": 1}, {}, {}, {"note": 50, "instrument": 1, "steps": 3}]
     for event, cmd in zip(events, native):
         event.update({"command": cmd} if cmd else {})
@@ -621,15 +626,15 @@ def test_goattracker_writes_a_freq_once_and_none_where_the_native_one_ends(nativ
             "goattracker2",
             GT_FREQ,
             "C4.i1!freq:x1, -!freq:x1",
-            "!freq repeats the !freq its phrase runs",
+            "!freq sets what the voice already has",
         ),
         (
             "goattracker2",
             GT_FREQ,
             "C4.i1!freq:x1, -!sr:3, -!freq:x1",
-            "!freq repeats the !freq its",
+            "!freq sets what the voice already has",
         ),
-        ("sidwizard", SW_INS + FREQ_X, "C4.i1!freq:x1, -!freq:x1", "!freq repeats the !freq its"),
+        ("sidwizard", SW_INS + FREQ_X, "C4.i1!freq:x1, -!freq:x1", "!freq sets what the voice"),
         ("sidwizard", SW_INS, "C4.i1, -!freq:none", "the player can't express !freq:none"),
     ],
 )
@@ -642,7 +647,7 @@ def test_a_freq_continues_over_steps_and_into_the_next_phrase_until_a_note():
     text = song(
         "goattracker2",
         GT_FREQ,
-        {"p1": "C4.i1*2, D4.i1!freq:x1*2", "p2": "-*2, E4.i1*2"},
+        {"p1": "C4.i1*2, D4!freq:x1*2", "p2": "-!freq:x1*2, E4.i1*2"},
         "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n",
     )
     ir = songio.loads(text)

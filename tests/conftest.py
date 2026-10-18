@@ -29,6 +29,7 @@ from pysidwizard.player import INST_WF_TABLE_POS
 
 from unitracker import optimise
 from unitracker.format import songio
+from unitracker.format.yamlstyle import dump
 from unitracker.lift import backends
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
@@ -64,6 +65,12 @@ csillag = hvsc_tune(
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
     "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
 )
+
+
+def doc_text(doc: dict) -> str:
+    """Document ``doc`` (as :func:`unitracker.format.yamlstyle.parse` reads one) as YAML,
+    each scalar spelled as the writer spells it."""
+    return dump(doc)
 
 
 def table(*rows) -> Table:

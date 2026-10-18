@@ -9,7 +9,8 @@ from importlib import resources
 
 import numpy as np
 import pytest
-import yaml
+
+from conftest import doc_text
 
 from unitracker.format import songio
 from unitracker.format.codec import (
@@ -179,7 +180,8 @@ RESTARTS = {
         (FIRST, {"hold": 2, "ctrl": 0x18, **HR}, True),
         (FIRST, {**HR, "ad": 0x2F}, True),
         (LAST, {"ctrl": 9}, True),
-        (ONLY, {"gate": 1}, True),
+        (LAST, {"gate": 1}, True),
+        (ONLY, {"gate": 1}, False),
         (ONLY, {}, False),
         (LAST, {"ctrl": 9, "gate": 0}, False),
         (FIRST, {"hold": 3, **HR}, False),
@@ -416,7 +418,7 @@ def test_keys_outside_every_shape_or_that_no_shape_combines_are_refused(player, 
     key = next(k for k in ROW_KEYS if k not in c.keys)
     with pytest.raises(CodecError, match=f"^unknown key {key} in {c.rtype.written}$"):
         c.decode({key: 0})
-    shapes = [{*s.keys, *s.keep} for s in c.shapes]
+    shapes = [set(s.keys) for s in c.shapes]
     values = {k: v for _, _, _, shared in sample(player, name) for k, v in shared.items()}
     for pair in itertools.combinations(sorted(values), 2):
         if not any(set(pair) <= s for s in shapes):
@@ -444,7 +446,8 @@ def test_expressions_none_and_references_go_only_where_a_shape_holds_them(player
                 CodecError, match=f"{key} (holds no expression|is only none) here|bad {key}"
             ):
                 c.decode({key: ("x", 1)})
-        for place, k, _, shared in (r for r in sample(player, name) if c.shapes[r[1]] in exprs):
+        firsts = (r for r in sample(player, name) if r[0]["first"] and c.shapes[r[1]] in exprs)
+        for place, k, _, shared in firsts:
             row = {**as_written(shared), key: ("x", 1)}
             assert c.decode(row, place)[c.shapes[k].keys[key]["expr"]] == 1
         if exprs and not any("value" in s.keys[key] for s in exprs):
@@ -501,12 +504,15 @@ def test_defmon_programs_end_on_a_freeze():
         "unitracker": songio.VERSION,
         "playroutine": {"ref": "defmon"},
         "song": [
-            {"def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3}, "end"]}}, "play": ["~"] * 3},
+            {
+                "def": {"ctrl": {"c1": [{"ctrl": 65}, {"hold": 3, "gate": 0}, "end"]}},
+                "play": [None] * 3,
+            },
             "end",
         ],
     }
     with pytest.raises(songio.SongFormatError, match="can't end a program"):
-        songio.loads(yaml.safe_dump(doc))
+        songio.loads(doc_text(doc))
 
 
 @pytest.mark.parametrize("player", PLAYERS)
@@ -570,7 +576,7 @@ def test_command_names_the_player_cannot_say_are_refused(player):
     "spec,match",
     [
         ({"keys": {"wave": 1}}, "not a shared row key"),
-        ({"keep": ["ctrl"]}, "collide with shared keys"),
+        ({"keep": ["ctrl"]}, "unknown key keep in a codec shape"),
         ({"keys": {"run": {"ref": "pulsetab"}}}, "both ref and field"),
         ({"raw": {"w": {"range": [0, 3]}}}, "a raw field is an expression"),
         ({1: {"name": "mod"}}, "not a shared command name"),
@@ -682,7 +688,7 @@ def defmon_doc(vinit, ginit=None):
         "playroutine": {"ref": "defmon"},
         "song": [song, {"loop": 0}],
     }
-    return songio.loads(yaml.safe_dump(doc))
+    return songio.loads(doc_text(doc))
 
 
 def nfreq(note):
@@ -785,7 +791,7 @@ def test_sidwizard_chords_are_ctrl_programs_started_by_run():
 def atom_doc(player: str, atom: str) -> str:
     return (
         f"unitracker: {songio.VERSION}\nplayroutine: {{ref: {player}}}\nsong:\n  - def:\n"
-        f"      phrase:\n        p1: ['{atom}']\n    play: [p1, p1, p1]\n  - {{loop: 0}}\n"
+        f"      phrase:\n        p1: [{atom}]\n    play: [p1, p1, p1]\n  - {{loop: 0}}\n"
     )
 
 

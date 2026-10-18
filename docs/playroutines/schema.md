@@ -48,6 +48,7 @@ modulators: {freq: ..., notes: [...], units: [...]}   # see Modulator declaratio
 | `codec` | shapes writing rows as shared keys (see [Codecs](#codecs)) |
 | `end` | raw fields set on a program's last row when it is followed by `end` |
 | `expr` | the field holding a row's modulator expression, a reference to `x` with no `refs` entry; a program of one row that sets only it is written as the expression |
+| `adds` | `{key: k}`: a row whose only key is `key`, or none, sets nothing and lasts `key + k` ticks: rows of it one after another are written as one row as long as one row lasts (then the rest), a program's last row before `end` is none of them, and an expression `v` on a first row of only `key` and the expression's key, in a program whose other rows set none of that key, is left out; the reader refuses each of these. Default: none |
 | `uniform` | `[field, ...]`: fields every row of the song that sets them sets to one value, as a player that keeps one copy plays them; the reader and the writer refuse rows that set one to two |
 | `unwritten` | `[field, ...]`: raw fields with no written form; the reader refuses them as unknown keys (`unknown key speed in ins`) and the writer refuses a row in which one differs from its default |
 | any other key | a template: an action list run for a row |
@@ -80,8 +81,7 @@ to leave it out, for `note` whether it is absolute, for `route` its relation to 
 (1 adds it, -1 removes it, default 0), the raw field holding the key's expression, and for `ctrl`
 its mask as `{value, omit}`), `raw` (each raw field from the written keys, with `has_<key>`,
 `note_abs`, `route_rel`, for a mask `has_eor` and `eor`, and each expression key's raw field, the
-expression's reference or 0, defined) and `keep` (raw fields written under their own names; a kept
-reference is written as a name). An `optional` field `f` that is a shared key gives each shape the
+expression's reference or 0, defined); a shape has no other key. An `optional` field `f` that is a shared key gives each shape the
 key `f: {value: f, omit: "f < 0"}` and the raw field `f: "f if has_f else -1"`; a shape that gives
 key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the generated one.
 A key with a vocabulary default (`hold`: 1) is left out at that value unless it gives its own
@@ -108,8 +108,8 @@ gives the row again. A command entry has a `name`, an optional `ref` (a record t
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
 written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `freq` entry's `lasts: step` says the
-native command ends on a step that carries no command (see [Lifetime of
+joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `freq` entry's `lasts: step` declares that the native
+`!freq` ends on a step without a command (see [Lifetime of
 `!freq`](../format/vocabulary.md#lifetime-of-freq)). An entry's `also` (`name:arg`) is
 another command whose native effect the code has too: the event writes it beside the command,
 and the reader reads the two as the one code and refuses the command without it
@@ -239,7 +239,7 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
 | `label` | the cells that group a unit's occurrences for the lifter (default: the site's `index`) |
 | `relative` | cells a start reads as `N` plus their offset from the note |
-| `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: `{field: value}`, each an expression over the row's raw fields, the fields the expression replaces in every row of the program it writes; a field it does not name keeps its value, as a row's length; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
+| `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: `{field: value}`, each an expression over the row's raw fields, the fields the expression replaces in every row of the program it writes; a field it does not name keeps its value, as a row's length; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing). A start reads a chained type's site on the program's first row, so a codec shape holding the site field's expression fits a later row only without one, unless the site is a `row` site |
 | `init` | `{record, index, field, clear, x}`: the playroutine's init starts the unit, its first firing the one the init runs (from the firing's last function when the init enters it there); the lifter writes that start's expression in `record[index].field` (a fixed record), clearing `clear`, and the start selects `x` (default `record[index].field`) |
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the document does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |
 | `commands` | the native command codes the lifter replaces by the command named `key` that references `x` (`!freq`) |

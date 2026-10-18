@@ -226,7 +226,7 @@ def test_the_reference_lift_holds_the_tunes_constants(references):
     assert song["clock"] == gt.PAL_CLOCK
     assert not song["playroutine"].get("constants") and song["tempo"] == 12
     assert (song["records"]["restart"][1]["ad"], song["records"]["restart"][1]["sr"]) == (15, 0)
-    assert [len(t["plays"]) for t in song["tracks"]] == [6, 6, 6]
+    assert [len(t["plays"]) for t in song["tracks"]] == [5, 5, 6]
     assert len(song["tables"]["ftab"]) == 128
     assert song["records"]["ins"][1]["sr"] == 0x88
 
@@ -306,7 +306,7 @@ WAVETABLE_TUNES = {
         },
         ("ins", "i1", "ctrl"),
         [FIRST, {"freq": "v + 16"}, {"freq": "v + 16"}, ...]
-        + [{"freq": "v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2"}]
+        + [{"freq": "v - (F((N + 1) % 128) - F(N)) % 65536 // 2"}]
         + [{"freq": "v + 32"}, {"ctrl": 65}, {"loop": 6}],
     ),
     "an unheard waveform pause is a waveform row": (
@@ -320,7 +320,7 @@ WAVETABLE_TUNES = {
     "a volume from 16 is an empty row": (
         {"wave": [(0x41, 0), (0xFD, 0x10), (0xFD, 0xFF), (0x21, 0x80), (0xFF, 4)]},
         ("ins", "i1", "ctrl"),
-        [FIRST, {}, {}, {"ctrl": 33}, {"loop": 3}],
+        [FIRST, {"wait": 1}, {"ctrl": 33}, {"loop": 2}],
     ),
     "program stops name the program kind": (
         {
@@ -418,8 +418,8 @@ VIBRATO = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "vibrato_
 NOTES = [(24, 1, 0, 0)] + [REST] * 7 + [(31, 1, 0, 0), REST, (36, 1, 0, 0)] + [REST] * 5
 RESUMED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 0, 1, 1)] + [REST] * 3 + [(31, 1, 0, 0)]
 CHANGED = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 2, 0, 0)] + [REST] * 3 + [(36, 2, 0, 0)]
-RESUMED_ATOMS = ["C2.i1*4", "-!freq:x1", "-!freq:x2*3", "G2.i1*8"]
-CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1*4", "C3.i2*8"]
+RESUMED_ATOMS = ["C2.i1*4", "-!freq:x1", "-!freq:x2*3", "G2*8"]
+CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1*4", "C3*8"]
 
 
 # Each case: instrument 1's vibrato delay, the rows, a second instrument, a fragment of each
@@ -427,10 +427,10 @@ CHANGED_ATOMS = ["C2.i1*4", "-.i2!freq:x1*4", "C3.i2*8"]
 @pytest.mark.parametrize(
     "delay,rows,second,freqs,atoms",
     [
-        (1, NOTES, None, {"i1": "((φ - 2) % 8 >= 4)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
-        (3, NOTES, None, {"i1": "(φ >= 2)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
-        (40, NOTES, None, {"i1": "(φ >= 38)"}, ["C2.i1*8", "G2.i1*2", "C3.i1*6"]),
-        (0, TWO_NOTES, None, {"i1": None}, ["C2.i1*8", "G2.i1*8"]),
+        (1, NOTES, None, {"i1": "((φ - 2) % 8 >= 4)"}, ["C2.i1*8", "G2*2", "C3*6"]),
+        (3, NOTES, None, {"i1": "(φ >= 2)"}, ["C2.i1*8", "G2*2", "C3*6"]),
+        (40, NOTES, None, {"i1": "(φ >= 38)"}, ["C2.i1*8", "G2*2", "C3*6"]),
+        (0, TWO_NOTES, None, {"i1": None}, ["C2.i1*8", "G2*8"]),
         (3, RESUMED + [REST] * 7, None, {}, RESUMED_ATOMS),
         (
             3,

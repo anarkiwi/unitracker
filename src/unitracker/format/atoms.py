@@ -9,7 +9,7 @@ _NOTE_INDEX = {name: i for i, name in enumerate(NOTE_NAMES)}
 _NUMBER = r"(?:0|[1-9]\d*)"
 _ARG = rf"[A-Za-z_]\w*|{_NUMBER}(?:/{_NUMBER})*"
 _ATOM = re.compile(
-    r"^(?P<note>-|off|on|(?P<pc>[A-G]#?)(?P<oct>-?(?:0|[1-9]\d*)))"
+    r"^(?P<note>-|off|on|(?P<pc>[A-G]#?)(?P<oct>0|-?[1-9]\d*))"
     r"(?:\.(?P<ins>[A-Za-z_]\w*))?"
     rf"(?P<cmds>(?:![a-z][a-z0-9]*(?::(?:{_ARG}))?)*)"
     r"(?:\*(?P<steps>[2-9]|[1-9]\d+))?$"

@@ -187,6 +187,9 @@ _FORMS = {
 }
 
 
+_ANYWHERE = {"first": 1, "last": 0}
+
+
 def row_place(k: int, count: int, ends: bool) -> dict:
     """The position of row ``k`` of a program of ``count`` rows that ends or loops."""
     return {"first": int(k == 0), "last": int(ends and k == count - 1)}
@@ -247,7 +250,7 @@ def optional_codec(optional) -> tuple[dict, dict]:
 
 
 class _Shape:
-    """One way to write a row: forward keys, inverse raw fields, fields kept as they are.
+    """One way to write a row: forward keys and inverse raw fields.
 
     A ``route`` key's ``rel`` gives its relation to the program's voice (see
     :func:`route_value`). A key's ``expr`` names the raw field of its expression, a key with
@@ -262,6 +265,8 @@ class _Shape:
     # pylint: disable=too-few-public-methods
 
     def __init__(self, spec: dict, optional=()):
+        for key in sorted(set(spec) - {"when", "keys", "raw"}):
+            raise CodecError(f"unknown key {key} in a codec shape")
         self.when = spec.get("when")
         own = spec.get("keys") or {}
         gen_keys, gen_raw = optional_codec(f for f in optional if f not in own)
@@ -281,10 +286,6 @@ class _Shape:
         bad = sorted(f for f, expr in self.raw.items() if isinstance(expr, dict))
         if bad:
             raise CodecError(f"raw {bad}: a raw field is an expression")
-        self.keep = list(spec.get("keep") or [])
-        clash = set(self.keep) & set(ROW_KEYS)
-        if clash:
-            raise CodecError(f"kept fields {sorted(clash)} collide with shared keys")
 
 
 def is_values(value) -> bool:
@@ -315,6 +316,22 @@ def first_tick(rtype, place) -> bool:
     return rtype.name == RESTART and bool(place and place.get("last"))
 
 
+def _unfit_key(key: str, value, kspec: dict) -> str | None:
+    """Why written key ``key`` can't hold ``value`` as key spec ``kspec`` writes it, or None."""
+    if isinstance(value, bool) or not isinstance(value, (int, tuple, str)):
+        return f"{key} can't be {value!r}"
+    if bool(kspec.get("none")) != (value == NONE):
+        return f"{key} is only {NONE} here" if kspec.get("none") else f"{key} can't be {NONE} here"
+    if "ref" in kspec:
+        ok = isinstance(value, tuple) and value[0] == kspec["ref"]
+        return None if ok else f"{key} names no {kspec['ref']} here"
+    if (is_expr(value) and "expr" not in kspec) or (isinstance(value, str) and value != NONE):
+        return f"{key} holds no expression here"
+    if key == "ctrl" and isinstance(value, tuple) and "eor" not in kspec:
+        return "ctrl holds no mask here"
+    return None
+
+
 class RowCodec:
     """A record type's shapes, with the playroutine's note offset.
 
@@ -325,7 +342,7 @@ class RowCodec:
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
         self.rtype = rtype
         self.shapes = [_Shape(s, rtype.optional) for s in spec]
-        self.keys = frozenset(k for s in self.shapes for k in (*s.keys, *s.keep))
+        self.keys = frozenset(k for s in self.shapes for k in s.keys)
         self.offset = offset
         self.ev = evaluator or _PLAIN
 
@@ -387,16 +404,13 @@ class RowCodec:
                 out[key] = (int(self.ev(kspec["rel"], row)) if "rel" in kspec else 0, value)
             else:
                 out[key] = value
-        for field in shape.keep:
-            if row[field] != self.rtype.default(field):
-                out[field] = row[field]
         return out
 
     def encode(self, row: dict, place: dict | None = None) -> dict | None:
         """Shared keys for a raw row, notes as ``(absolute, number)``; None if no shape fits.
 
         ``place`` gives a program row's position to the shapes' ``when``: ``first`` and
-        ``last`` (the row before ``end``) are 1 or 0.
+        ``last`` (the row before ``end``) are 1 or 0; a row of no known position is a first row.
         """
         full = self._full(row)
         for shape in self.shapes:
@@ -408,7 +422,8 @@ class RowCodec:
         return None
 
     def _fits(self, shape, full: dict, place) -> bool:
-        return shape.when is None or bool(self.ev(shape.when, {**full, **(place or {})}))
+        place = _ANYWHERE if place is None else place
+        return shape.when is None or bool(self.ev(shape.when, {**full, **place}))
 
     def _env(self, shape, norm) -> dict:
         env = {}
@@ -435,25 +450,17 @@ class RowCodec:
     @staticmethod
     def _unfit(shape, norm) -> str | None:
         """Why a written row's keys can't take ``shape``, or None."""
-        extra = set(norm) - set(shape.keys) - set(shape.keep)
+        extra = set(norm) - set(shape.keys)
         if extra:
             return f"keys {sorted(extra)}"
-        for key, value in norm.items():
-            kspec = shape.keys.get(key, {})
-            if bool(kspec.get("none")) != (value == NONE):
-                return (
-                    f"{key} is only {NONE} here"
-                    if kspec.get("none")
-                    else f"{key} can't be {NONE} here"
-                )
-            if "ref" in kspec:
-                if not (isinstance(value, tuple) and value[0] == kspec["ref"]):
-                    return f"{key} names no {kspec['ref']} here"
-            elif is_expr(value) and "expr" not in kspec:
-                return f"{key} holds no expression here"
-            elif key == "ctrl" and isinstance(value, tuple) and "eor" not in kspec:
-                return "ctrl holds no mask here"
-        return None
+        return next(
+            (
+                problem
+                for key, value in norm.items()
+                if (problem := _unfit_key(key, value, shape.keys.get(key, {}))) is not None
+            ),
+            None,
+        )
 
     def _try(self, shape, norm, place) -> tuple[dict | None, str]:
         unfit = self._unfit(shape, norm)
@@ -461,8 +468,7 @@ class RowCodec:
             return None, unfit
         exprs = {shape.keys[k]["expr"]: v[1] for k, v in norm.items() if is_expr(v)}
         env = {**exprs, **self._env(shape, {k: v for k, v in norm.items() if k not in shape.refs})}
-        raw = {f: int(norm[f]) if f in norm else self.rtype.default(f) for f in shape.keep}
-        raw.update({f: self.ev(expr, env) for f, expr in shape.raw.items()})
+        raw = {f: self.ev(expr, env) for f, expr in shape.raw.items()}
         raw.update(exprs)
         raw.update({shape.keys[k]["field"]: v[1] for k, v in norm.items() if k in shape.refs})
         full = self._full(raw)

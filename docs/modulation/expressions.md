@@ -22,9 +22,14 @@ cutoff) by an integer expression evaluated at each of the unit's firings.
 Anything else is rejected on reading, naming the text (`... is outside the grammar`,
 `... calls no grammar function`, `(...) is not one comparison`, `unknown table 'T'`).
 
-The lifter writes each expression in one form: a comparison in parentheses, and no `% m` over its
-sums and products that the cell's wrap to its width repeats (`v + 32`, not `(v + 32) % 65536`,
-for a 16-bit cell), its constant term then the nearest to 0.
+The lifter writes each expression with no `% m` over its sums and products that the cell's wrap to
+its width repeats (`v + 32`, not `(v + 32) % 65536`, for a 16-bit cell), its constant term then
+the nearest to 0. The writer prints every expression in one form: a sum's constant terms folded
+into its last term and its like terms merged, a product's integers into its leading coefficient,
+terms and factors in one order (integers, then `v`, `φ` and `N`, then the rest by their text), a
+comparison and only what the grammar needs in parentheses, and integers in decimal. `32 + v`,
+`v+32`, `v - -32` and `((v + 32))` are all written `v + 32`, and equal expressions share one
+definition.
 
 ## Evaluation
 

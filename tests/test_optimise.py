@@ -55,15 +55,15 @@ SCALE = "[C4.i1*2, D4*2, E4*2, F4*2]"
 C1 = "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
 RUN = "[C4.i1!run:c1*2, D4!run:c1*2, E4!run:c1*2, F4!run:c1*2]"
 RUN_TWICE = RUN[:-1] + ", " + RUN[1:].replace("4", "5").replace(".i1", "")
-LATE = "freq: '(φ >= 38)*(F(N + 1) - F(N))'"
+LATE = "freq: (φ >= 38)*(F(N + 1) - F(N))"
 I2_UNHEARD = ins_line("i2", f"ad: 9, {LATE}, ctrl: [{A}, end]")
 I2_HEARD = ins_line("i2", f"ad: 10, ctrl: [{A}, end]")
 TWO = "[C4.i1*2, D4.i2*2, E4.i1*2, F4.i2*2]"
 AS_I2 = "[C4.i1*2, D4*2, E4.i2*2, F4.i1*2]"
 TWO_RUNS = "[C4.i1!run:c1*2, D4!run:c2*2, E4!run:c1*2, F4!run:c2*2]"
 FREQS = "[C4.i1!freq:x1*2, D4!freq:x2*2, E4!freq:x1*2, F4!freq:x2*2]"
-PART = ", ".join(["C4.i1", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5", "F5", "G5"])
-HEARD_PART = "-*4, C4.i1*4, D4*4"
+PART = ", ".join(["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5", "F5", "G5"])
+HEARD_PART = "-*4, C4*4, D4*4"
 LONG = "C5, D5, E5, F5, G5, A5, B5, C6, B5, A5, G5, F5"
 LONG_I1 = LONG.replace("C5", "C5.i1", 1)
 PULSED = ctrl(f"ad: 9, pw: {PULSE}")
@@ -96,7 +96,7 @@ FIRES = {
         "instruments",
         doc(f"{I1}\n{I2_HEARD}", AS_I2),
         ["unhoist"],
-        lambda t: "i2" not in t and "E4.i1!ad:10*2" in t,
+        lambda t: "i2" not in t and "E4!ad:10*2" in t,
     ),
     "merge programs": (
         "programs",
@@ -118,13 +118,13 @@ FIRES = {
     ),
     "merge expressions": (
         "expressions",
-        doc(I1, FREQS, exprs("(v + 16 + 16) % 65536")),
+        doc(I1, FREQS, exprs("v + 32")),
         ["merge"],
         lambda t: "x2" not in t,
     ),
     "alias": (
         "phrases",
-        doc(I1, SCALE, extra=row("p3", "[C4.i1*2, D4.i1*2, E4*2, F4*2]")),
+        doc(I1, SCALE, extra=row("p3", "[C4*2, D4*2, E4*2, F4*2]")),
         ["alias"],
         lambda t: "p3" not in t,
     ),
@@ -137,8 +137,8 @@ FIRES = {
     "share": ("phrases", shared(I1), ["share"], lambda t: t.count("C6") == 1),
     "commands": (
         "commands",
-        doc(I1, "[C4.i1*2, D4.i1*2, E4!ad:9*2, F4*2]"),
-        ["drop_command", "drop_instrument", "drop_instrument"],
+        doc(I1, "[C4*2, D4*2, E4!ad:9*2, F4*2]"),
+        ["drop_command"],
         lambda t: "!ad" not in t,
     ),
     "fields": (
@@ -162,10 +162,14 @@ REFUSES = {
     "merge expressions": ("expressions", doc(I1, FREQS, exprs("(v + 33) % 65536")), ["merge"]),
     "alias": (
         "phrases",
-        doc(I1, SCALE, extra=row("p3", "[C4.i1*2, D4.i1*2, G4*2, F4*2]")),
+        doc(I1, SCALE, extra=row("p3", "[C4*2, D4*2, G4*2, F4*2]")),
         ["alias"],
     ),
-    "factor": ("phrases", doc(PULSED, f"[{', '.join([HEARD_PART] * 4)}]", steps=48), ["factor"]),
+    "factor": (
+        "phrases",
+        doc(PULSED, f"[{', '.join([HEARD_PART] * 4)}]", steps=48),
+        ["factor"],
+    ),
     "share": ("phrases", shared(PULSED), ["share"]),
     "commands": (
         "commands",
@@ -293,7 +297,7 @@ def test_an_embedded_playroutine_is_optimised_embedded():
 
 def test_cli_optimises_and_reports(tmp_path, capsys):
     song = tmp_path / "song.yaml"
-    song.write_text(doc(I1, "[C4.i1*2, D4.i1*2, E4!ad:9*2, F4*2]"), encoding="utf-8")
+    song.write_text(doc(I1, "[C4*2, D4*2, E4!ad:9*2, F4*2]"), encoding="utf-8")
     out, report = tmp_path / "small.yaml", tmp_path / "orth.md"
     args = ["-o", str(out), "--report", str(report), "--passes", "commands", "--workers", "1"]
     assert cli.optimise_main([str(song), *args]) == 0

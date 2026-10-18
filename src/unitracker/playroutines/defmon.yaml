@@ -78,8 +78,9 @@ record_types:
           af: "0x80 if xf else -1"
           re: "-1 if not has_route else (0 if route_rel < 0 else ((res & 0x0F) << 4) | (route & 0x0F))"
           fv: "mode if has_mode else -1"
-    # A frozen row ends a program.
+    # A frozen row ends a program; a row that sets nothing lasts its hold.
     end: {dl: 0x80}
+    adds: {hold: 0}
     fields: [dl, next, xf, xp, xc]
     optional: [wgh, wgl, ad, sr, tr, af, pw, ps, re, fv, cp, acid]
     refs: {xf: x, xp: x, xc: x}

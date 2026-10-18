@@ -1,6 +1,7 @@
 """The YAML style of a written document: block structure, flow leaves, plain atoms."""
 
 import re
+from collections.abc import Hashable
 
 import yaml
 
@@ -43,7 +44,18 @@ def _decimal(loader, node):
 
 
 class Signed(int):
-    """An integer written with its sign (``+0``, ``-3``): a relative value where one is."""
+    """An integer written with its sign (``+0``, ``-3``): a relative value where one is; ``text``
+    is its spelling."""
+
+    text = ""
+
+
+class Quoted(str):
+    """A scalar written in quotes; ``style`` is the quote, and ``flow`` whether it is in a flow
+    collection."""
+
+    style = "'"
+    flow = True
 
 
 _INTEGER = re.compile(r"^[-+]?(?:0|[1-9][0-9]*)$")
@@ -56,7 +68,20 @@ def _integer(_, node):
         raise yaml.constructor.ConstructorError(
             None, None, f"{node.value!r} is not a decimal integer", node.start_mark
         )
-    return (Signed if node.value[0] in "+-" else int)(node.value)
+    if node.value[0] not in "+-":
+        return int(node.value)
+    out = Signed(node.value)
+    out.text = node.value
+    return out
+
+
+def _string(loader, node):
+    value = loader.construct_yaml_str(node)
+    if node.style not in ("'", '"'):
+        return value
+    out = Quoted(value)
+    out.style = node.style
+    return out
 
 
 def _boolean(_, node):
@@ -73,17 +98,42 @@ def _boolean(_, node):
 
 class Loader(yaml.SafeLoader):  # pylint: disable=too-many-ancestors
     """Safe loading with each decimal number's text kept, integers only in decimal (a signed
-    one :class:`Signed`), ``off`` and ``on`` as atoms, and booleans spelled ``true`` and
-    ``false``."""
+    one :class:`Signed`), ``off`` and ``on`` as atoms, booleans spelled ``true`` and ``false``,
+    a quoted scalar :class:`Quoted`, and each key of a mapping once."""
+
+    def construct_mapping(self, node, deep=False):
+        keys = [self.construct_object(k, deep=deep) for k, _ in node.value]
+        for k, key in enumerate(keys):
+            if isinstance(key, Hashable) and key in keys[:k]:
+                raise yaml.constructor.ConstructorError(
+                    None, None, f"key {key!r} appears twice", node.value[k][0].start_mark
+                )
+        out = super().construct_mapping(node, deep)
+        _flows([*out, *out.values()], node.flow_style)
+        return out
+
+    def construct_sequence(self, node, deep=False):
+        out = super().construct_sequence(node, deep)
+        _flows(out, node.flow_style)
+        return out
+
+
+def _flows(values, flow: bool) -> None:
+    """Mark each :class:`Quoted` of ``values`` as in a flow collection or not."""
+    for value in values:
+        if isinstance(value, Quoted):
+            value.flow = bool(flow)
 
 
 Loader.add_constructor("tag:yaml.org,2002:float", _decimal)
 Loader.add_constructor("tag:yaml.org,2002:int", _integer)
 Loader.add_constructor("tag:yaml.org,2002:bool", _boolean)
+Loader.add_constructor("tag:yaml.org,2002:str", _string)
 for _dumper in (yaml.SafeDumper, Dumper):
     _dumper.add_representer(
         Signed, lambda d, x: d.represent_scalar("tag:yaml.org,2002:int", str(int(x)))
     )
+    _dumper.add_representer(Quoted, lambda d, x: d.represent_str(str(x)))
     _dumper.add_representer(
         Decimal, lambda d, x: d.represent_scalar("tag:yaml.org,2002:float", x.text)
     )
@@ -114,3 +164,22 @@ Dumper.add_representer(Flow, lambda d, x: d.represent_sequence("tag:yaml.org,200
 Dumper.add_representer(FlowMap, lambda d, x: d.represent_mapping("tag:yaml.org,2002:map", x, True))
 Dumper.add_representer(Atom, _atom)
 Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.org,2002:null", "~"))
+
+
+def _plain(value):
+    """``value`` with each string that reads back as itself, or as the value it spells, plain."""
+    if isinstance(value, dict):
+        return {_plain(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, str) and not isinstance(value, Atom):
+        read = yaml.load(f"k: {value}", Loader=Loader)["k"]
+        if read == value or getattr(read, "text", None) == value:
+            return Atom(value)
+    return value
+
+
+def dump(doc) -> str:
+    """Parsed document ``doc`` (as :func:`parse` reads one) as YAML, each string plain where it
+    reads back so."""
+    return yaml.dump(_plain(doc), Dumper=Dumper, sort_keys=False, allow_unicode=True)

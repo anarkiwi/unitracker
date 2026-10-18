@@ -59,6 +59,36 @@ class _Voice:
         return item
 
 
+def minimal_loop(seq: list, loop: int) -> tuple[int, int]:
+    """``(start, period)`` of the earliest start and shortest period of the sequence that plays
+    ``seq`` and then repeats ``seq[loop:]``."""
+    cycle = seq[loop:]
+    size = len(cycle)
+    period = next(
+        p
+        for p in range(1, size + 1)
+        if size % p == 0 and all(cycle[i] == cycle[i - p] for i in range(p, size))
+    )
+    start = loop
+    while start and seq[start - 1] == seq[start - 1 + period]:
+        start -= 1
+    return start, period
+
+
+def folded(track: dict, key) -> dict:
+    """``track`` with its loop at its earliest start and of its shortest period, one play per
+    phrase play, its plays compared by ``key(play)``."""
+    if track.get("loop") is None:
+        return track
+    plays = [p for p in track["plays"] for _ in range(int(p.get("repeat", 1)))]
+    loop = sum(int(p.get("repeat", 1)) for p in track["plays"][: track["loop"]])
+    start, period = minimal_loop([key(p) for p in plays], loop)
+    cycle = plays[loop:]
+    kept = plays[:start] + [cycle[(k - loop) % len(cycle)] for k in range(start, start + period)]
+    plays = [{f: v for f, v in p.items() if f != "repeat"} for p in kept]
+    return {**track, "plays": plays, "loop": start}
+
+
 def to_rows(tracks, lengths) -> tuple[list[list], int | None]:
     """Rows of per-voice entries (``(phrase, transpose)``, ``END`` or None), and the loop row.
 
@@ -130,6 +160,21 @@ def from_rows(rows, loop, lengths, voices: int) -> list[dict]:
     if loop is None and _only_ends(rows[-1]):
         raise TimelineError("the song's last row only ends voices; the song's end ends them")
     return [_track(items[v], loop, starts, t_end, done[v]) for v in range(voices)]
+
+
+def loop_problem(rows: list, loop: int | None, tracks: list, lengths: dict) -> str | None:
+    """Why song ``rows`` looping to row ``loop`` (the rows of ``tracks``) loops otherwise than
+    from its earliest repeat with its shortest loop, or None."""
+    if loop is None:
+        return None
+    named = [folded(t, lambda p: (p["phrase"], p.get("transpose", 0))) for t in tracks]
+    out, start = to_rows(named, lengths)
+    if (len(rows), loop) == (len(out), start):
+        return None
+    return (
+        f"the song loops to row {loop} after row {len(rows) - 1}, and repeats from row {start}"
+        f" every {len(out) - start} rows: write that loop"
+    )
 
 
 def _track(items, loop, starts, t_end, ended) -> dict:

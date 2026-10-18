@@ -6,8 +6,7 @@ import re
 
 import numpy as np
 import pytest
-import yaml
-from conftest import mini_song
+from conftest import doc_text, mini_song
 
 from unitracker.format import songio
 from unitracker.format import timeline as tl
@@ -218,7 +217,10 @@ def test_writer_errors(change, match):
         (edit(("loop",), 0), "unknown key loop in document"),
         (edit(("playroutine",), "mini"), "mapping"),
         (edit(("playroutine",), {"ref": "nope"}), "no playroutine"),
-        (edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}), "no library"),
+        (
+            edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}),
+            "unknown table",
+        ),
         (edit(("playroutine", "record_types", "prog", "max"), 3), "more than 3"),
         (edit(DEF + ("prog", "w1"), [[10]]), "rows then end"),
         (edit(DEF + ("prog", "w1"), [[10], {"loop": 7}]), "bad program end"),
@@ -229,8 +231,9 @@ def test_writer_errors(change, match):
         (edit(DEF + ("ins", "i1"), {"a": [[1], "end"]}), "cannot hold a program"),
         (edit(DEF + ("ins", "i1"), {"p": "i2"}), "not a prog"),
         (edit(DEF + ("ins", "i1"), {"p": "nothing"}), "unknown name 'nothing'"),
-        (edit(DEF + ("ins", "1x"), {}), "bad name"),
-        (edit(DEF + ("ins", "w1"), {}), "defined twice"),
+        (edit(DEF + ("ins", "1x"), {}), "name '1x' is not i and a number"),
+        (edit(DEF + ("ins", "w1"), {}), "name 'w1' is not i and a number"),
+        (edit(DEF + ("ins", "i01"), {}), "name 'i01' is not i and a number"),
         (edit(DEF + ("phrase", "p2"), ["-!ad:w1"]), "can't express"),
         (edit(DEF + ("phrase", "p2"), ["-!run:zz"]), "unknown name 'zz' in"),
         (edit(DEF + ("phrase", "p2"), ["-!run:w1!run:w1!run:w1"]), "more than 2 commands"),
@@ -241,13 +244,13 @@ def test_reader_errors(change, match):
     doc = parse(songio.dumps(song(), embed=True))
     change(doc)
     with pytest.raises(SongFormatError, match=match):
-        songio.loads(yaml.safe_dump(doc, sort_keys=False))
+        songio.loads(doc_text(doc))
 
 
 def test_reader_reads_a_program_ending_on_its_stop_row():
     doc = parse(songio.dumps(song(), embed=True))
     doc["song"][0]["def"]["stopped"] = {"t1": [[5], [200], "end"]}
-    assert songio.loads(yaml.safe_dump(doc))["records"]["stopped"] == {
+    assert songio.loads(doc_text(doc))["records"]["stopped"] == {
         0: {"v": 5, "next": 1},
         1: {"v": 200, "next": 0},
     }
@@ -287,14 +290,14 @@ def _unknown(pr: str):
 @pytest.mark.parametrize("pr", LIBRARY)
 def test_the_reader_refuses_any_key_outside_the_format(pr):
     base = parse(list_song(pr))
-    songio.loads(yaml.safe_dump(base, sort_keys=False))
+    songio.loads(doc_text(base))
     cases = _unknown(pr)
     assert len(cases) > 10
     for path, value, message in cases:
         doc = copy.deepcopy(base)
         edit(path, value)(doc)
         with pytest.raises(SongFormatError, match=re.escape(message)):
-            songio.loads(yaml.safe_dump(doc, sort_keys=False))
+            songio.loads(doc_text(doc))
 
 
 def _unwritable_program(lib: dict) -> dict:
@@ -337,7 +340,7 @@ def test_a_pulse_program_name_is_not_a_phrase_name():
     out = songio.dumps(songio.loads(text))
     assert "pw1: 2048" in out and "p1: [off!run:pw1]" in out
     assert songio.dumps(songio.loads(out)) == out
-    with pytest.raises(SongFormatError, match="name 'p1' defined twice"):
+    with pytest.raises(SongFormatError, match="name 'p1' is not pw and a number"):
         songio.loads(text.replace("pw1", "p1"))
 
 

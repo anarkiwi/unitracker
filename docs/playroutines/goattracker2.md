@@ -11,7 +11,7 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 |---|---|
 | tune | a packed GoatTracker 2 `.sid`, decompiled by pygoattracker |
 | lifted from | the decompiled song, and the build's hard-restart preset `adparam` as the restart programs' `ad` and `sr` |
-| tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo |
+| tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo. A document's `tempo` takes 2-129, as `!tempo` does: 3-127 starts the tempo cell, and 2, 128 and 129 the funk pair, both that tempo |
 | clock | NTSC when the header's clock flags say so, else PAL |
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
 | notes | `note_offset` 0 |
@@ -39,7 +39,8 @@ expressions, and `!tempo` and `!vtempo` write a swing's row inline.
 ## Events
 
 `.i3` names the instrument. An event carries one command and `!legato`: `!legato` is in the
-instrument column, every other command in the FX column.
+instrument column, every other command in the FX column (`!filter:none!resfilt:0/0` is one
+command, $B00, see [Filter](#filter)).
 
 ## Commands
 
@@ -165,12 +166,11 @@ start them where the composer put them; the playroutine declares no `lifetime`, 
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!filter:none!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
-- `!freq` is command 16, `lasts: step`: the native command ends on a step without a command,
-  where the instrument's `freq` resumes, and a step with another command (`!ad`, `!vol`, ...)
-  continues it. The writer writes that step `!freq:none` (command 16 with 0, which plays as a step
-  without a command), and the reader repeats the running `!freq` on each step without one; the
-  same `!freq` on the next step continues the occurrence (`φ` keeps counting). A note's steps
-  without a command run the instrument's `freq` expression.
+- `!freq` is command 16 with `lasts: step` (see [Lifetime of
+  `!freq`](../format/vocabulary.md#lifetime-of-freq)); `!freq:none` is command 16 with 0, which
+  plays as a step without a command, and the same `!freq` on the next step continues the
+  occurrence (`φ` keeps counting). A note's steps without a command run the instrument's `freq`
+  expression.
 - Commands 1-4 and the instrument vibrato are the `command` unit's own firings: the lifter writes
   the commands' modulations as `!freq`, and the instrument vibrato as the instrument's `freq`,
   its delay a term in `φ` (`(φ >= 38)` for a delay of 40), when it starts with the note; a

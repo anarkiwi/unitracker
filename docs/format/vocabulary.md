@@ -1,7 +1,8 @@
 # Shared vocabulary
 
-Program rows and commands use one vocabulary in every song, in chip units. No key, command or
-record type is one player's own.
+Program rows and commands use one vocabulary in every song, in chip units. No key or command is
+one player's own, and a record type is a player's own only as the fixed record of its state after
+init (defMON's `vinit` and `ginit`), which is written in the shared keys.
 
 | row key | meaning |
 |---|---|
@@ -50,7 +51,9 @@ is rejected on reading, naming the key or command and the player (`defmon: the p
 !tempo:6`); the writer refuses to write a value that would not read back. A key, command or record
 type outside the playroutine's codec shapes, record types and the shared command names is refused
 with one message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in
-'-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`).
+'-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`), and so is a
+constant, table or `meta` key the playroutine and the document don't have (`unknown key adparam in
+playroutine.constants`, `unknown key foo in meta`).
 
 ## Timing
 
@@ -126,10 +129,32 @@ A legato note restarts nothing, so the command adds nothing there.
 
 A `!freq:x` lasts until a note starts the instrument (a legato note does not) or another `!freq`
 replaces it; steps between, empty or with other commands, continue it, and a phrase writes the
-`!freq` it runs once (`!freq:x1` on a step after the same phrase's `!freq:x1` is refused).
-`!freq:none` returns the frequency to the instrument's `freq` before a note does, where the player
-can: a playroutine whose native command ends on a step that carries no command declares `lasts:
-step`, and the writer writes `!freq:none` on each such step after a `!freq`.
+`!freq` it runs once (`!freq:x1` on a step after the same phrase's `!freq:x1` is refused, see
+[Running values](#running-values)). `!freq:none` returns the frequency to the instrument's `freq`
+before a note does, where the player can, and only where a `!freq` runs: the reader refuses it on
+a note that starts the instrument, after another `!freq:none`, and where no `!freq` runs.
+
+A playroutine whose native `!freq` ends on a step that carries no command declares `lasts: step`
+on its `freq` entry. There the writer writes `!freq:none` on each step without a command after a
+`!freq`, and the reader repeats the running `!freq` on each step without one, which the phrase
+must have written (the reader refuses a step that continues the `!freq` of the phrase before). A
+step's command is what drives its frequency in such a player: a command that changes nothing is
+left out only where the step keeps another or the voice has no frequency to drive, and on an
+instrument without `freq` a `!freq` of `v`, which holds the frequency, is `!freq:none`.
+
+## Running values
+
+The writer and the reader walk each voice's plays (see [Walking the plays](#walking-the-plays))
+knowing what its commands have set. A command that sets what the voice already has changes
+nothing: the writer leaves it out, and the reader refuses it (`!tempo:16` after the phrase's
+`!tempo:16`, `C4.i1!ad:1` where `i1` has `ad: 1`). A phrase knows what its own commands set and
+what a note that starts an instrument the phrase names sets: the instrument's `ad` and `sr`, and,
+but in a player whose `!freq` lasts until a step without a command, its `freq`. It does not know
+a value something else may set: a key of a program row of the song (a control program's `ad`
+row), the song's tempo, volume or filter where another voice sets them too, and a voice's own
+registers and programs once a note starts the instrument. A program command restarts its
+program and a swing its alternation, so only stopping a program (`none`) can change nothing of
+theirs; for `!freq` see [Lifetime of `!freq`](#lifetime-of-freq).
 
 ## Envelope commands
 
