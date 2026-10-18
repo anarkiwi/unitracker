@@ -552,3 +552,14 @@ def test_the_restart_preset_is_one_per_song():
     ir["records"]["restart"][3]["sr"] = 1
     with pytest.raises(songio.SongFormatError, match="restart rows set sr to different values"):
         songio.dumps(ir)
+
+
+@pytest.mark.parametrize("player,defs", [("goattracker2", GT_INS), ("sidwizard", SW_INS)])
+@pytest.mark.parametrize("atom", ["off!legato", "-!legato", "on!legato"])
+def test_legato_needs_a_note(player, defs, atom):
+    with pytest.raises(songio.SongFormatError, match="!legato needs a note"):
+        songio.loads(song(player, defs, {"p1": f"C4.i1*4, {atom}*4"}))
+    ir = songio.loads(song(player, defs, {"p1": "C4.i1*4, D4!legato*4"}))
+    ir["phrases"]["p1"][1].pop("note")
+    with pytest.raises(songio.SongFormatError, match="!legato needs a note: '-!legato\\*4'"):
+        songio.dumps(ir)

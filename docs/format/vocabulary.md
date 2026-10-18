@@ -37,7 +37,7 @@ A command means one thing in every player; it applies on the step that carries i
 | `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
 | `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
 | `!mark:n` | a mark that changes no sound: the player reads the byte and plays nothing |
-| `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
+| `!legato` | the event's note does not retrigger; it needs a note (see [Legato](../modulation/expressions.md#legato)) |
 
 A playroutine takes the commands its `commands` and `lifetime` declare, over the
 arguments its codec accepts; each playroutine's file

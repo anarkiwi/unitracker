@@ -134,6 +134,12 @@ def _uniform(pr: dict, rtypes: dict, records: dict) -> None:
             )
 
 
+def _legato_note(kind: int, names, atom) -> None:
+    """Refuse ``!legato`` on an event of note ``kind`` that is no note."""
+    if "legato" in names and kind != 1:
+        raise SongFormatError(f"!legato needs a note: {atom!r}")
+
+
 def _player(pr, call, *args):
     """``call(*args)``, its lifetime, envelope and column errors the player's."""
     try:
@@ -404,7 +410,9 @@ class _Writer:
             commands = [self.command(c, a) for c, a in zip(cmds[::2], cmds[1::2])]
             commands = column.ordered([c for c in commands if c is not None], self.slotted)
             commands += lifetime.names(keep)
-            out.append(Atom(format_atom(kind, note - self.offset, steps, name, commands)))
+            text = format_atom(kind, note - self.offset, steps, name, commands)
+            _legato_note(kind, [c.split(":")[0] for c in commands], text)
+            out.append(Atom(text))
         return Flow(out)
 
     def command(self, cmd: int, raw: int) -> str | None:
@@ -850,6 +858,7 @@ class _Reader:
             raise SongFormatError(
                 f"!pw and !filter follow the other commands, in that order: {atom!r}"
             )
+        _legato_note(parsed["kind"], names, atom)
         if names != column.ordered(names, self.slotted):
             order = "!" + ", !".join(column.ordered(names))
             raise SongFormatError(f"an event's commands are written in the order {order}: {atom!r}")
