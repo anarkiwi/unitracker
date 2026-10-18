@@ -4,12 +4,12 @@
         [--terms] [--profile OUT.prof] [--top N] [--stall SECONDS]
 
 The tune is lifted without expressions, its occurrences observed and every distinct start
-derived one at a time without caches; each start's seconds, unit and key print as it
-completes, slowest last. ``--start`` derives only that start index; ``--terms`` first prints
-its control states, phase order, value recurrence and closed-form candidates with their sizes.
-``--stall`` dumps every
-thread's stack each time a start runs that many seconds; ``--profile`` writes cProfile stats
-over the derivations and prints the top functions.
+derived one at a time without caches; each start's seconds, control states and z3 solver
+checks print as it completes, slowest last. ``--start`` derives only that start index;
+``--terms`` first prints its control states with the firings they hold, phase order, value
+recurrence and closed-form candidates with their sizes. ``--stall`` dumps every thread's stack
+each time a start runs that many seconds; ``--profile`` writes cProfile stats over the
+derivations and prints the top functions.
 """
 
 import argparse
@@ -25,6 +25,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 import sympy
+import z3
 
 from unitracker.modfit import convert as C
 from unitracker.modfit import grammar as G
@@ -68,21 +69,58 @@ def starts(source: str, subtune) -> tuple:
 
 def terms(an, key: tuple) -> None:
     """Print a start's graph size, phase order, value recurrence and closed-form candidates."""
-    name, start, _ = key
-    m = an.machines[name]
+    m, start = an.machines[key[0]], key[1]
     graph = m.explore(start)
-    _, values, edges = P.minimal(graph, P.Lift(m.form, m.cell, an.freq))
+    _, raw, edges, lengths = P.minimal(graph, P.Lift(m.form, m.cell, an.freq))
     lo, hi, r, k = (dict(start)[c] for c in P.DOMAIN) if m.chip else m.domain(start)
-    values = [G.shortest([x, G.on_domain(x, r, k, lo, hi)]) for x in values]
-    o = P.order(edges)
-    print(f"  {len(graph.nodes)} states, {len(values)} classes", flush=True)
-    if o is None:
-        return
-    print(f"  order {o.kind}: prefix {o.prefix}, period {o.period}")
-    for e in P.value_forms(values, o, m.mask):
+    values = [G.shortest([x, G.on_domain(x, r, k, lo, hi)]) for x in raw]
+    o = P.order(edges, lengths, raw)
+    print(f"  {len(graph.nodes)} states of {sum(graph.lengths)} firings, {len(values)} classes")
+    if o is not None:
+        forms(values, o, m.mask)
+
+
+def forms(values: list, o, mask: int) -> None:
+    """Print a phase order's runs and its value and closed-form candidates."""
+    runs = " ".join(f"{c}x{n}" for c, n in o.runs)
+    print(f"  order {o.kind}: prefix {o.prefix}, period {o.period}, runs {runs}", flush=True)
+    for e in P.value_forms(values, o, mask):
         print(f"  value  ops={sympy.count_ops(e)}: {G.text(e)}")
-    for e in P.closed_forms(values, o, m.mask, None):
-        print(f"  closed ops={sympy.count_ops(e)}: {G.text(e)}")
+    for e in P.closed_forms(values, o, mask, None):
+        print(f"  closed ops={sympy.count_ops(e)}: {G.text(e) if G.valid(e) else e}")
+
+
+class Checks:
+    """A count of z3 solver checks while installed."""
+
+    def __init__(self):
+        self.count, self.check = 0, z3.Solver.check
+
+    def __enter__(self):
+        def counted(solver, *args):
+            self.count += 1
+            return self.check(solver, *args)
+
+        z3.Solver.check = counted
+        return self
+
+    def __exit__(self, *exc):
+        z3.Solver.check = self.check
+
+
+def timed(an, key: tuple, prof, stall) -> tuple:
+    """``(seconds, control states, z3 checks)`` of one start's derivation."""
+    if stall:
+        faulthandler.dump_traceback_later(stall, repeat=True, file=sys.stderr)
+    t = time.perf_counter()
+    if prof:
+        prof.enable()
+    with Checks() as checks:
+        d, _ = an.derived(key)
+    if prof:
+        prof.disable()
+    faulthandler.cancel_dump_traceback_later()
+    return time.perf_counter() - t, d.states, checks.count
 
 
 def main(argv=None) -> int:
@@ -106,20 +144,17 @@ def main(argv=None) -> int:
         print(f"[{i}] {keys[i][0]} x{counts[keys[i]]}: {keys[i][1]!r} v0={keys[i][2]!r}")
         if args.terms:
             terms(an, keys[i])
-        if args.stall:
-            faulthandler.dump_traceback_later(args.stall, repeat=True, file=sys.stderr)
-        t = time.perf_counter()
-        if prof:
-            prof.enable()
-        an.derived(keys[i])
-        if prof:
-            prof.disable()
-        faulthandler.cancel_dump_traceback_later()
-        times.append((time.perf_counter() - t, i))
-        print(f"[{i}] {times[-1][0]:.2f}s", flush=True)
-    for dt, i in sorted(times)[-10:]:
-        print(f"{dt:8.2f}s  [{i}] {keys[i][0]}")
-    print(f"total {sum(dt for dt, _ in times):.1f}s over {len(times)} starts")
+        times.append((*timed(an, keys[i], prof, args.stall), i))
+        print(
+            f"[{i}] {times[-1][0]:.2f}s, {times[-1][1]} states, {times[-1][2]} checks", flush=True
+        )
+    for dt, states, n, i in sorted(times)[-10:]:
+        print(f"{dt:8.2f}s  [{i}] {keys[i][0]}: {states} states, {n} checks")
+    print(
+        f"total {sum(t[0] for t in times):.1f}s, {sum(t[2] for t in times)} checks over "
+        f"{len(times)} starts; most states {max((t[1] for t in times), default=0)}, "
+        f"most checks {max((t[2] for t in times), default=0)}"
+    )
     if prof:
         prof.dump_stats(args.profile)
         for order in ("cumulative", "tottime"):

@@ -20,6 +20,7 @@ from unitracker.modfit.exprs import Analysis, Pool, Result, _cached
 from unitracker.modfit.form import Form
 from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.orbit import deltas
+from unitracker.modfit import phase as P
 from unitracker.modfit.phase import Machine, derive, unproved_functions
 from unitracker.modfit.replay import Replay
 from unitracker.player.modulation import declared
@@ -224,6 +225,155 @@ def test_a_table_program_is_one_closed_form(ref, unit, records, start, freq, tex
     assert d.exact and d.order.kind == "time" and G.text(d.closed) == text
     assert equal(d.closed, asked) and d.update[0] == 1
     assert order in (None, (d.order.prefix, d.order.period))
+
+
+def _checked(fn):
+    """``(fn(), z3 solver checks it ran)`` with the display caches cold."""
+    G.forced.cache_clear()
+    G.display.cache_clear()
+    check, count = z3.Solver.check, [0]
+
+    def counted(solver, *args):
+        count[0] += 1
+        return check(solver, *args)
+
+    z3.Solver.check = counted
+    try:
+        return fn(), count[0]
+    finally:
+        z3.Solver.check = check
+
+
+@pytest.mark.parametrize(
+    "ref,unit,table,start,freq,rows,texts",
+    [
+        (
+            "goattracker2",
+            {"cell": "pulse", "fire": ["pulse_exec"]},
+            "pulsetab",
+            {"pptr": 1, "ptime": 0},
+            GT_FREQ,
+            lambda k: {
+                **GT_PULSE,
+                2: {**GT_PULSE[2], "l": k},
+                3: {**GT_PULSE[3], "l": 2 * k},
+                4: {**GT_PULSE[4], "l": k},
+            },
+            {
+                4: "16*abs((φ - 4) % 16 - 8) + 960",
+                32: "16*abs((φ - 32) % 128 - 64) + 512",
+                60: "16*abs((φ - 60) % 240 - 120) + 64",
+            },
+        ),
+        (
+            "sidwizard",
+            "pulse",
+            "pwtab",
+            {**{"ppos": 1, "pwcnt": 0, "ci": 1, "pwkt": 0, "oct": 0}, "note": 0},
+            SW_FREQ,
+            lambda k: {**SW_PULSE, 2: {**SW_PULSE[2], "a": k}, 3: {**SW_PULSE[3], "a": k}},
+            {
+                4: "2*min(4, φ) - 8*min(4, max(0, φ - 5)) + 2048",
+                64: "2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048",
+                120: "2*min(120, φ) - 8*min(120, max(0, φ - 121)) + 2048",
+            },
+        ),
+    ],
+)
+def test_a_row_is_one_state_whatever_its_length(ref, unit, table, start, freq, rows, texts):
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    got = {}
+    for k, text in texts.items():
+        m = machine(ref, unit, **{table: rows(k)})
+        d, checks = _checked(lambda m=m: derive(m, m.start(start), None, freq))
+        assert d.exact and G.text(d.closed) == text
+        got[k] = (d.states, checks)
+    assert len(set(got.values())) == 1, got
+
+
+def test_a_row_counts_only_inside_its_cells_width():
+    m = machine("sidwizard", "pulse", pwtab=SW_PULSE)
+    assert m.count("pwcnt", 254, 1) == "_pwcnt254+1" and m.form.ranges["_pwcnt254+1"] == (0, 0)
+    assert m.count("pwcnt", 255, 1) is None and m.count("pwcnt", 0, -1) is None
+
+
+def test_a_turn_order_moves_at_each_firing_of_a_row():
+    g = G.ge(V, 7)
+    values = [V + 1, V + 2, V + 3]
+    rows = P.order(
+        [{0: g, 1: 1 - g}, {2: sympy.Integer(1)}, {2: sympy.Integer(1)}], [1, 3, 2], values
+    )
+    assert (rows.kind, rows.prefix, rows.period, rows.at) == ("turn", 4, 1, {0: 0, 1: 1, 2: 4})
+    assert rows.runs == [(0, 1), (1, 3), (2, 1)] and rows.advance == [1 - g, 1, 1]
+    stop = P.order([{0: g, 1: 1 - g}, {1: sympy.Integer(1)}], [1, 1], values)
+    assert (stop.prefix, stop.period, stop.advance) == (1, 1, [1 - g, 0])
+    assert P.order([{1: g, 2: 1 - g}, {1: g}, {2: g}], [1, 1, 1], values) is None
+
+
+def _expanded(sizes: list, tokens: list, loop: int, length: int) -> list:
+    """The first ``length`` tokens of the sequence repeating ``tokens[i]`` ``sizes[i]`` times,
+    the entries from ``loop`` on forever."""
+    head = [t for t, n in zip(tokens[:loop], sizes[:loop]) for _ in range(n)]
+    cyc = [t for t, n in zip(tokens[loop:], sizes[loop:]) for _ in range(n)]
+    return (head + cyc * length)[:length]
+
+
+def test_the_shortest_lasso_of_runs_is_that_of_their_positions():
+    rng = random.Random(3)
+    for _ in range(300):
+        m = rng.randrange(1, 7)
+        tokens = [rng.choice("abc") for _ in range(m)]
+        sizes = [rng.randrange(1, 5) for _ in range(m)]
+        loop = rng.randrange(m)
+        prefix, period = P.shortest_lasso(tokens, sizes, loop)
+        total = sum(sizes)
+        seq = _expanded(sizes, tokens, loop, 4 * total)
+        want_q = next(
+            q
+            for q in range(1, total + 1)
+            if all(seq[i] == seq[i + q] for i in range(total, 2 * total))
+        )
+        want_p = next(
+            p
+            for p in range(total + 1)
+            if all(seq[i] == seq[i + want_q] for i in range(p, 2 * total))
+        )
+        assert (prefix, period) == (want_p, want_q), (tokens, sizes, loop)
+
+
+def test_a_run_of_positions_synthesises_as_its_positions_one_by_one():
+    rng = random.Random(4)
+    mask = 4095
+    for _ in range(20):
+        m = rng.randrange(1, 6)
+        values = [
+            rng.choice(
+                [
+                    sympy.Integer(rng.randrange(0, 4096)),
+                    sympy.Mod(V + rng.choice((-8, 0, 2, 16)), 4096),
+                ]
+            )
+            for _ in range(m)
+        ]
+        sizes = [rng.randrange(1, 6) for _ in range(m)]
+        prefix = sum(sizes[: rng.randrange(m)])
+        runs = list(enumerate(sizes))
+        period = sum(sizes) - prefix
+        whole = P.Order("time", runs, prefix, period, [sympy.Integer(1)] * m, {})
+        flat_values = [values[c] for c, n in runs for _ in range(n)]
+        flat = P.Order(
+            "time",
+            [(i, 1) for i in range(len(flat_values))],
+            prefix,
+            period,
+            [sympy.Integer(1)] * len(flat_values),
+            {},
+        )
+        for v0 in (None, sympy.Integer(100), G.freq(N)):
+            assert P.closed_forms(values, whole, mask, v0) == P.closed_forms(
+                flat_values, flat, mask, v0
+            )
+        assert P.value_forms(values, whole, mask) == P.value_forms(flat_values, flat, mask)
 
 
 def test_goattracker_slide_and_toneporta():

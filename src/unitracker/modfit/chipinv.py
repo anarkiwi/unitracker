@@ -58,8 +58,12 @@ class Checker:
     def __init__(self, machine, graph):
         self.m, self.f = machine, machine.form
         self.hidden = machine.hidden
-        self.nodes = [{c: v for c, v in node if not c.startswith("_")} for node in graph.nodes]
-        self.paths = [self.f.paths(machine.real, (), st) for st in self.nodes]
+        rows = [machine.row(graph, i) for i in range(len(graph.nodes))]
+        self.nodes = [{c: v for c, v in st.items() if not c.startswith("_")} for st, _, _ in rows]
+        self.rows = [(n, count) for n, (_, _, count) in zip(graph.lengths, rows)]
+        self.paths = [
+            self.f.paths(machine.real, known, st) for st, (_, known, _) in zip(self.nodes, rows)
+        ]
         self.entered = {j for row in graph.cases for _, _, j in row}
 
     def value(self, state: dict):
@@ -131,21 +135,26 @@ def houdini(chk: Checker, glob: list, own: list) -> list:
         keep = nxt
 
 
-def recurrence(chk: Checker, inv: list, cls: list, seq: list, value, prover) -> str | None:
+def recurrence(chk: Checker, inv: list, cls: list, at: dict, value, prover) -> str | None:
     # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     """None when every firing from a state the graph enters and ``inv`` holds in gives
-    ``value`` of its chip value at its class's phase, else the first counterexample; the start's
-    first firing is the start constant's."""
+    ``value`` of its chip value at its position, else the first counterexample; the start's
+    first firing is the start constant's. A row's firings are one claim over its count ``j``
+    at ``φ = φ0 + j``."""
     for i, state in enumerate(chk.nodes):
-        if cls[i] not in seq or i not in chk.entered:
+        if cls[i] not in at or i not in chk.entered:
             continue
-        phi = seq.index(cls[i])
+        phi, (n, count) = at[cls[i]], chk.rows[i]
         pre, x = chk.holds(state, inv), chk.value(state)
         for conds, final in chk.paths[i]:
             y = chk.value({**state, **final})
 
-            def claim(smt, x=x, y=y, phi=phi):
-                env = prover.env(smt, z3.BitVecVal(phi, G.BITS))
+            def claim(smt, x=x, y=y, phi=phi, n=n, count=count):
+                # pylint: disable=too-many-arguments,too-many-positional-arguments
+                p = prover.phase(smt, phi, n)
+                if count is not None:
+                    smt.solver.add(smt.term(count) == p - phi)
+                env = prover.env(smt, p)
                 return G.to_z3(value, {**env, "v": smt.term(x)}) == smt.term(y)
 
             why = chk.query(pre, conds, claim)
@@ -154,12 +163,12 @@ def recurrence(chk: Checker, inv: list, cls: list, seq: list, value, prover) -> 
     return None
 
 
-def prove(machine, graph, domain, cls: list, seq: list, value, prover) -> Proof:
+def prove(machine, graph, domain, cls: list, at: dict, value, prover) -> Proof:
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     """The invariants of a chip unit's start and the recurrence ``value`` proved under them."""
     chk = Checker(machine, graph)
     glob, own = candidates(machine, domain)
     glob = [t for t in glob if inductive(machine.form.pr, t)]
     unit = houdini(chk, glob, own)
-    why = recurrence(chk, glob + unit, cls, seq, value, prover)
+    why = recurrence(chk, glob + unit, cls, at, value, prover)
     return Proof(tuple(glob), tuple(unit), why is None, why or "")
