@@ -319,8 +319,8 @@ def first_tick(rtype, place) -> bool:
 class RowCodec:
     """A record type's shapes, with the playroutine's note offset.
 
-    On a restart's first-tick row a ``ctrl`` implies ``gate: 1``: the row is written without it
-    and read with it (see :func:`first_tick`).
+    On a restart's first-tick row a ``ctrl`` implies ``gate: 1``: the row is written without it,
+    read with it, and refused with a ``gate`` (see :func:`first_tick`).
     """
 
     def __init__(self, rtype, spec: list, offset: int, evaluator=None):
@@ -490,10 +490,10 @@ class RowCodec:
         for key in sorted(set(written) - self.keys):
             raise CodecError(f"unknown key {key} in {self.rtype.written}")
         if first_tick(self.rtype, place) and "ctrl" in written:
-            if written.get("gate", 1) != 1:
+            if "gate" in written:
                 raise CodecError(
                     f"{self.rtype.written}: the player can't express row {written!r}"
-                    " (a ctrl on the note's first tick sets the gate on)"
+                    " (a ctrl on the note's first tick sets the gate on; the row has no gate)"
                 )
             written = {**written, "gate": 1}
         norm = self.normalize(written)

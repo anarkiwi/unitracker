@@ -62,7 +62,7 @@ returns to, which two rows precede; so both keys stay.
 
 `ctrl` and `gate` each hold until a row sets them; a note, `off` and `on` set the gate as the
 player does. A row's `ctrl` leaves the gate as it is, but on a restart's first-tick row, where a
-`ctrl` sets the gate on: the row is written without `gate: 1`, and `gate: 0` there is refused.
+`ctrl` sets the gate on: the row has no `gate`, and the reader refuses one beside the `ctrl`.
 The mask `^n` holds until a row sets `gate` or another mask; a row that sets `gate` without a mask
 sets it to 0.
 

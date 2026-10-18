@@ -2,6 +2,7 @@
 
 import pytest
 
+from unitracker.format import songio
 from unitracker.format.codec import CodecError, RowCodec, note_text
 from unitracker.format.records import RecordType
 
@@ -67,3 +68,14 @@ def test_a_note_byte_gives_its_none_and_nothing_else(note):
 def test_a_relative_note_past_the_byte_does_not_read_back():
     with pytest.raises(CodecError, match="can't express"):
         codec({"n": 0x80}, {"keys": {"note": SEVEN}}).decode({"note": 70})
+
+
+@pytest.mark.parametrize("player", ["goattracker2", "sidwizard"])
+@pytest.mark.parametrize("gate", [0, 1])
+def test_a_ctrl_on_the_first_tick_row_is_written_without_a_gate(player, gate):
+    restart = songio.codecs(songio.library(player), None)["restart"]
+    place = {"first": 0, "last": 1}
+    raw = restart.decode({"ctrl": 9}, place)
+    assert raw["gate"] == 1 and restart.encode(raw, place) == {"ctrl": 9}
+    with pytest.raises(CodecError, match="sets the gate on; the row has no gate"):
+        restart.decode({"ctrl": 9, "gate": gate}, place)
