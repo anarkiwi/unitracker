@@ -5,7 +5,7 @@ record type is one player's own.
 
 | row key | meaning |
 |---|---|
-| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, `v^n` both (see [The gate](#the-gate)) |
+| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, which holds until a row of the player that plays it changes it, `v^n` both (see [The gate](#the-gate)) |
 | `gate` | the gate, 0 off or 1 on (see [The gate](#the-gate)) |
 | `note` | `+n` / `-n` relative to the event note, or a note name (`G#5`) for an absolute note; omitted: no change |
 | `wait` | ticks before the row applies (see [Timing](#timing)) |
@@ -63,8 +63,7 @@ returns to, which two rows precede; so both keys stay.
 `ctrl` and `gate` each hold until a row sets them; a note, `off` and `on` set the gate as the
 player does. A row's `ctrl` leaves the gate as it is, but on a restart's first-tick row, where a
 `ctrl` sets the gate on: the row has no `gate`, and the reader refuses one beside the `ctrl`.
-The mask `^n` holds until a row sets `gate` or another mask; a row that sets `gate` without a mask
-sets it to 0.
+A playroutine whose rows take a mask says which rows change it.
 
 ## Chords
 

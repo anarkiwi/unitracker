@@ -76,7 +76,9 @@ The player takes no shared command: each is refused by name (`defmon: the player
 sidTAB rows are maps of the columns present, applied in the replay's bitmap-walk order: `dl` is
 `hold` (a frozen row ends its program), `wgh` is `ctrl` (the waveform nibble, written with bit 0
 set: the replay's gate is `wgl`'s bit 0), `wgl` is `gate` and the mask of its other bits
-(`{ctrl: 81^4, gate: 1}` is `wgh` $50, `wgl` $05; a `wgl` row always writes `gate`), `tr` is `note`, `fv` is `mode` (bits 4-7), `re` is `res` and `route`, and the
+(`{ctrl: 81^4, gate: 1}` is `wgh` $50, `wgl` $05; a `wgl` row always writes `gate`, so the mask
+`^n` holds until a row sets `gate` or another mask, and a row that sets `gate` without a mask sets
+it to 0), `tr` is `note`, `fv` is `mode` (bits 4-7), `re` is `res` and `route`, and the
 row's pitch, pulse and ACID modulators are `freq`, `pw` and `cut` (see Modulators). A step is one
 tick, so `hold` counts both.
 
