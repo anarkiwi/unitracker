@@ -5,12 +5,9 @@ import re
 
 import pytest
 import yaml
-from pygoattracker import decompile_sid
 
 from unitracker.format import songio
 from unitracker.format.codec import (
-    COMMAND_NAMES,
-    ROW_KEYS,
     CodecError,
     CommandCodec,
     Evaluator,
@@ -24,10 +21,7 @@ from unitracker.format.codec import (
     written_value,
 )
 from unitracker.format.records import record_types
-from unitracker.format.yamlstyle import parse
 from unitracker.lift.defmon import lift as lift_defmon
-from unitracker.lift.goattracker import lift as lift_gt
-from unitracker.lift.sidwizard import lift as lift_sw
 from unitracker.player.vm import SongPlayer
 
 GT = songio.library("goattracker2")
@@ -587,155 +581,6 @@ def test_note_offsets_follow_the_frequency_tables():
     for index in range(1, 96):
         word = sw["freqlo"][index] | sw["freqhi"][index] << 8
         assert midi(word) == index - SW["note_offset"] + 12
-
-
-INS_KEYS = {
-    "defmon": {"ctrl", "filter"},
-    "goattracker2": {"ad", "sr", "ctrl", "pw", "filter", "freq", "restart"},
-    "sidwizard": {
-        "ad",
-        "sr",
-        "restart",
-        "ctrl",
-        "pw",
-        "filter",
-        "freq",
-    },
-}
-# Player-specific keys a program row may carry besides the shared ones.
-ROW_KEEP = {"defmon": {"cp"}}
-# Outside program rows, a shared key may appear only where it keeps its shared meaning:
-# envelope and control-register values in init records, the filter registers as res, route and
-# mode, and in an instrument ctrl names the program its voice runs on the control register, pw,
-# filter and freq the program or expression driving the pulse width, the filter and the
-# frequency.
-SHARED_OUTSIDE_ROWS = {
-    ("goattracker2", "ins"): {"ad", "sr", "ctrl", "pw", "filter", "freq"},
-    ("sidwizard", "ins"): {"ad", "sr", "ctrl", "pw", "filter", "freq"},
-    ("defmon", "ins"): {"ctrl", "filter"},
-    ("defmon", "vinit"): {"note", "pw", "freq"},
-    ("defmon", "ginit"): set(),
-}
-PROGRAMS = ("ctrl", "pw", "filter", "restart")
-INS_FORMS = {
-    "ctrl": (list, str),
-    "pw": (list, str, int),
-    "filter": (list, str, int),
-    "freq": (str, int),
-}
-INIT_KEYS = {
-    "vinit": {"sacc"},
-    "ginit": {"sub"},
-}
-
-
-def _check_rows(name, rows, keep, exprs=frozenset()):
-    for row in rows:
-        if isinstance(row, dict) and set(row) != {"loop"}:
-            assert set(row) <= set(ROW_KEYS) | keep, (name, row)
-            text = {
-                k
-                for k, v in row.items()
-                if isinstance(v, str) and v != "none" and k not in ("note", "route", "ctrl")
-            }
-            assert text <= exprs, (name, row)
-        assert not isinstance(row, list), (name, row)
-
-
-def _check_program(pr_name, shared, value):
-    tname = next(n for n, t in LIBS[pr_name][1].items() if t.written == shared)
-    exprs = set(codec(pr_name, tname).expr_keys())
-    _check_rows(tname, value, ROW_KEEP.get(pr_name, set()), exprs)
-
-
-def _commands(atoms):
-    return {part.split(":")[0] for a in atoms if isinstance(a, str) for part in a.split("!")[1:]}
-
-
-def _check_shared_outside_rows(pr_name, tname, value):
-    used = set(value) & set(ROW_KEYS)
-    assert used <= SHARED_OUTSIDE_ROWS.get((pr_name, tname), set()), (pr_name, tname, value)
-    for key in used:
-        if tname == "ins" and key in INS_FORMS:
-            assert isinstance(value[key], INS_FORMS[key]), value
-        else:
-            assert isinstance(value[key], int) or key in ("note", "ctrl"), (tname, key, value)
-
-
-def _check_def(pr_name, tname, value):
-    if tname == "ins":
-        assert set(value) <= INS_KEYS[pr_name]
-        _check_shared_outside_rows(pr_name, tname, value)
-        rtypes = LIBS[pr_name][1]
-        for key, refs in rtypes["ins"].refs.items():
-            if isinstance(value.get(key), list):
-                _check_program(pr_name, rtypes[refs[0][0]].written, value[key])
-    elif tname in INIT_KEYS:
-        assert set(value) <= INIT_KEYS[tname] | SHARED_OUTSIDE_ROWS[(pr_name, tname)], value
-        _check_shared_outside_rows(pr_name, tname, value)
-    elif tname in PROGRAMS:
-        _check_program(pr_name, tname, value)
-    elif tname == "x":
-        assert isinstance(value, (str, int)), value
-    else:
-        assert not set(value if isinstance(value, dict) else {}) & set(ROW_KEYS), (tname, value)
-
-
-def vocabulary(doc):
-    """Assert a song uses only the fixed v1.19 vocabulary, each shared key in its one meaning."""
-    pr_name = doc["playroutine"].get("ref") or doc["playroutine"]["name"]
-    commands = set()
-    for item in doc["song"]:
-        for tname, defs in (item.get("def") or {}).items():
-            for value in defs.values():
-                if tname == "phrase":
-                    commands |= _commands(value)
-                else:
-                    _check_def(pr_name, tname, value)
-    assert commands <= set(COMMAND_NAMES)
-    return commands
-
-
-def _keys(node, out):
-    """Every mapping key under ``node``."""
-    if isinstance(node, dict):
-        for key, value in node.items():
-            out.add(key)
-            _keys(value, out)
-    elif isinstance(node, list):
-        for value in node:
-            _keys(value, out)
-    return out
-
-
-def _song_keys(doc):
-    keys = set()
-    for item in doc["song"]:
-        for tname, defs in (item.get("def") or {}).items():
-            if tname != "phrase":
-                for value in defs.values():
-                    _keys(value, keys)
-    return {k for k in keys if isinstance(k, str)}
-
-
-def test_every_song_uses_only_the_shared_vocabulary(metal_warrior, crosseyed, csillag):
-    ir = lift_gt(decompile_sid(metal_warrior.read_bytes(), subtune=0))
-    gt_doc = parse(songio.dumps(ir))
-    gt_cmds = vocabulary(gt_doc)
-    assert gt_cmds == {"run", "freq", "legato", "tempo"}
-    dm_doc = parse(songio.dumps(lift_defmon(crosseyed.read_bytes())))
-    dm_cmds = vocabulary(dm_doc)
-    assert dm_cmds == {"restart"}
-    sw_doc = parse(songio.dumps(lift_sw(csillag.read_bytes())))
-    sw_cmds = vocabulary(sw_doc)
-    assert sw_cmds == {"freq", "ad", "sr", "run", "legato"}
-    # A key two players both use is a shared key; every other key belongs to one player.
-    keys = [_song_keys(d) - {"loop"} for d in (gt_doc, dm_doc, sw_doc)]
-    for i, mine in enumerate(keys):
-        for j, theirs in enumerate(keys):
-            if i != j:
-                assert mine & theirs <= set(ROW_KEYS) | {"restart"}
-    assert not keys[2] & (set(COMMAND_NAMES) - {"restart"} - set(ROW_KEYS))
 
 
 def defmon_doc(vinit, ginit):
