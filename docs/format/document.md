@@ -104,7 +104,12 @@ note[.instrument][!command[:arg]...][*steps]
 - `note` is a note name such as `C2`, `A#3`, `C10` or `B-1`, `-` for no note, `off` (gate off) or
   `on` (gate on). Names are real pitch: `C2` is 65.4 Hz in every song, whatever index the
   player's frequency table gives it (`note_offset`).
-- `.i3` names the instrument.
+- `.i3` names the instrument. A note that names the instrument its phrase last named plays it
+  without the name, and is written without it: but where the instrument keeps a program by a
+  lifetime flag (naming it restarts the program, see [Lifetime](vocabulary.md#lifetime)), where a
+  command of the note is read into another column when it names one, and in a player whose events
+  arm programs through their instrument (see [Instrument columns](vocabulary.md#instrument-columns)).
+  The reader refuses the name where it changes nothing.
 - `!run:c1` is a command with an argument: a number, the name of the record or expression a
   command references (names are a prefix and digits, so they read as names), `none`, or values
   joined by `/` for a command of several values (`!tempo:6/7`). A command that takes no argument is

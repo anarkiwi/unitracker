@@ -601,15 +601,15 @@ GT_FREQ = FREQ_X + "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0
 @pytest.mark.parametrize(
     "native,written",
     [
-        ([[16, 1], [16, 1], [16, 1]], "C4.i1!freq:x1*3, D4.i1*3"),
-        ([[16, 1], [], []], "C4.i1!freq:x1, -!freq:none*2, D4.i1*3"),
-        ([[16, 1], [6, 3], [16, 1]], "C4.i1!freq:x1, -!sr:3*2, D4.i1*3"),
-        ([[16, 1], [6, 3], []], "C4.i1!freq:x1, -!sr:3, -!freq:none, D4.i1*3"),
-        ([[16, 1], [16, 2], []], "C4.i1!freq:x1, -!freq:x2, -!freq:none, D4.i1*3"),
+        ([[16, 1], [16, 1], [16, 1]], "C4.i1!freq:x1*3, D4*3"),
+        ([[16, 1], [], []], "C4.i1!freq:x1, -!freq:none*2, D4*3"),
+        ([[16, 1], [6, 3], [16, 1]], "C4.i1!freq:x1, -!sr:3*2, D4*3"),
+        ([[16, 1], [6, 3], []], "C4.i1!freq:x1, -!sr:3, -!freq:none, D4*3"),
+        ([[16, 1], [16, 2], []], "C4.i1!freq:x1, -!freq:x2, -!freq:none, D4*3"),
     ],
 )
 def test_goattracker_writes_a_freq_once_and_none_where_the_native_one_ends(native, written):
-    ir = songio.loads(song("goattracker2", GT_FREQ, {"p1": "C4.i1*3, D4.i1*3"}))
+    ir = songio.loads(song("goattracker2", GT_FREQ, {"p1": "C4.i1*3, D4*3"}))
     events = [{"note": 48, "instrument": 1}, {}, {}, {"note": 50, "instrument": 1, "steps": 3}]
     for event, cmd in zip(events, native):
         event.update({"command": cmd} if cmd else {})
@@ -647,7 +647,7 @@ def test_a_freq_continues_over_steps_and_into_the_next_phrase_until_a_note():
     text = song(
         "goattracker2",
         GT_FREQ,
-        {"p1": "C4.i1*2, D4.i1!freq:x1*2", "p2": "-*2, E4.i1*2"},
+        {"p1": "C4.i1*2, D4!freq:x1*2", "p2": "-*2, E4.i1*2"},
         "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n",
     )
     ir = songio.loads(text)

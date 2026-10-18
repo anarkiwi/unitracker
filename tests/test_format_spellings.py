@@ -1,10 +1,12 @@
 """One spelling per meaning: forms that play as another are refused by the reader, and the
 writer writes each meaning one way."""
 
+import numpy as np
 import pytest
 
 from unitracker.format import songio, timeline
 from unitracker.format.codec import CodecError, row_place
+from unitracker.player.vm import SongPlayer
 
 FIRST, LATER = row_place(0, 2, True), row_place(1, 2, True)
 
@@ -115,3 +117,49 @@ def test_the_writer_folds_each_voices_loop():
         trk["plays"] = trk["plays"] * 3
         trk["loop"] = 2
     assert songio.dumps(ir) == want
+
+
+# -- 3: a note names its instrument where naming it changes what it plays --
+
+SW_DEFS = """      ctrl:
+        c1: [{ctrl: 33, note: +0}, end]
+      ins:
+        i1: {ctrl: [{ctrl: 65, note: +0}, end], pw: [{pw: 2048}, end]}
+"""
+
+
+@pytest.mark.parametrize(
+    "pr,defs",
+    [("goattracker2", GT_DEFS), ("sidwizard", SW_DEFS)],
+)
+def test_a_note_naming_the_instrument_its_phrase_plays_is_refused_and_written_without(pr, defs):
+    named = doc(pr, defs, {"p1": "C4.i1*4, D4.i1*4"})
+    refused(named, "names the instrument the phrase plays")
+    plain = canonical(doc(pr, defs, {"p1": "C4.i1*4, D4*4"}))
+    ir = songio.loads(plain)
+    ir["phrases"]["p1"][1]["instrument"] = ir["phrases"]["p1"][0]["instrument"]
+    assert songio.dumps(ir) == plain
+
+
+@pytest.mark.parametrize(
+    "pr,defs,atoms",
+    [
+        ("sidwizard", SW_DEFS, "C4.i1*4, D4!pw*4, E4.i1*4"),
+        ("sidwizard", SW_DEFS, "C4.i1*4, D4.i1!run:c1*4"),
+        ("defmon", "      ctrl:\n        c1: [{ctrl: 65, gate: 1}, end]\n      ins:\n"
+         "        i1: {ctrl: c1}\n", "C4.i1*4, D4.i1*4"),
+    ],
+)  # fmt: skip
+def test_a_note_names_its_instrument_where_naming_it_plays_otherwise(pr, defs, atoms):
+    text = doc(pr, defs, {"p1": atoms})
+    assert atoms in canonical(text)
+
+
+def test_a_lifetime_flag_no_note_reads_is_no_reason_to_name_the_instrument():
+    plain = canonical(doc("sidwizard", SW_DEFS, {"p1": "C4.i1*4, D4*4"}))
+    ir = songio.loads(plain)
+    ir["records"]["ins"][1]["flags"] = ir["records"]["ins"][1].get("flags", 16) | 0x40
+    ir["phrases"]["p1"][1]["instrument"] = 1
+    assert songio.dumps(ir) == plain
+    grid = SongPlayer(ir).render_grid(200)
+    assert np.array_equal(SongPlayer(songio.loads(plain)).render_grid(200), grid)

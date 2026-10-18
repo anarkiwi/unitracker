@@ -133,7 +133,8 @@ class Lifetime:
                 for cmd in self.flagged:
                     yield name, k, ins, cmd
 
-    def _keeps(self, row: dict, cmd: str) -> bool:
+    def keeps(self, row: dict, cmd: str) -> bool:
+        """Whether instrument ``row`` keeps the program of lifetime command ``cmd``."""
         field, mask = self.flagged[cmd]
         return bool(int(row.get(field, self.rtype.default(field))) & mask)
 
@@ -142,16 +143,21 @@ class Lifetime:
         instrument rows without the flag bits they replace."""
         seen = {}
         for name, k, ins, cmd in self._flagged(tracks, phrases, rows):
-            seen.setdefault((name, cmd, k), set()).add(self._keeps(rows[ins], cmd))
+            seen.setdefault((name, cmd, k), set()).add(self.keeps(rows[ins], cmd))
         marks = {}
         for (name, cmd, k), keep in _one(seen, _MIXED).items():
             marks[(name, k)] = marks.get((name, k), 0) | bit(cmd) * keep
+        return marks, self.unflagged(rows)
+
+    def unflagged(self, rows: dict, keep=()) -> dict:
+        """Instrument ``rows`` with the flag bits at their defaults, but for the indices of
+        ``keep``."""
         out = {index: dict(row) for index, row in rows.items()}
-        for row in out.values():
+        for index, row in out.items():
             for field, mask in self.flagged.values():
-                if field in row:
+                if field in row and index not in keep:
                     row[field] = int(row[field]) & ~mask | self.rtype.default(field) & mask
-        return marks, out
+        return out
 
     @staticmethod
     def _check(mask: int, selects: bool) -> None:
@@ -182,7 +188,7 @@ class Lifetime:
 
     def _set(self, row: dict, cmd: str, keep: bool) -> None:
         """Set or clear the flag bit of ``cmd`` in instrument ``row``."""
-        if keep != self._keeps(row, cmd):
+        if keep != self.keeps(row, cmd):
             field, mask = self.flagged[cmd]
             row[field] = int(row.get(field, self.rtype.default(field))) ^ mask
 

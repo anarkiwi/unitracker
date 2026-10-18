@@ -28,7 +28,7 @@ from unitracker.format.codec import (
     row_place,
     written_value,
 )
-from unitracker.format.events import column, envelope, fold, freq, instrument, lifetime
+from unitracker.format.events import column, envelope, fold, freq, instrument, lifetime, naming
 from unitracker.format.header import (  # pylint: disable=unused-import
     DEFAULTS,
     SongFormatError,
@@ -121,6 +121,7 @@ def _player(pr, call, *args):
         envelope.EnvelopeError,
         column.ColumnError,
         freq.FreqError,
+        naming.NamingError,
     ) as exc:
         raise SongFormatError(f"{pr['name']}: {exc}") from exc
 
@@ -161,9 +162,13 @@ class _Writer:
             if u.get("site") and self.rtypes[u["site"]["record"]].expr is not None
         }
         _player(self.pr, column.check, self.pr, ir["phrases"])
+        native = (self.pr.get("instrument") or {}).get("type")
+        names = naming.Naming(self.pr, self.rtypes)
+        phrases, rows = names.write(ir["tracks"], ir["phrases"], self.records.get(native, {}))
+        ir = {**ir, "phrases": phrases}
+        self.records.update({native: rows} if native in self.records else {})
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         self.ir = _player(self.pr, freq.Freq(self.pr, self.xcanon).write, self.ir)
-        native = (self.pr.get("instrument") or {}).get("type")
         written = lifetime.Lifetime(self.pr, self.rtypes).written
         self.kept, rows = _player(
             self.pr, written, self.ir["tracks"], self.ir["phrases"], self.records.get(native, {})
@@ -851,6 +856,8 @@ class _Reader:
             raise SongFormatError(str(exc)) from exc
         _refuse(timeline.loop_problem(rows, loop, tracks, lengths))
         _player(self.pr, self.lifetime.read, tracks, events, self.records, self.names)
+        names = naming.Naming(self.pr, self.rtypes)
+        _player(self.pr, names.check, events, self.records.get(self.lifetime.ins_type) or {})
         ir = {
             "unitracker": IR_VERSION,
             "meta": dict(doc.get("meta") or {}),
