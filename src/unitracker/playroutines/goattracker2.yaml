@@ -1,10 +1,6 @@
 # GoatTracker 2 playroutine (player.s, buffered writes) as a unitracker playroutine.
 # The lifter fills in the build constants.
-name: goattracker2
 constants: {adparam: 0x0F00, deftempo: 5}
-defaults:
-  clock: {cycles_per_tick: 19656, clock_hz: 985248}
-  voices: 3
 tables:
   ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 instrument: {type: ins, base: 0}
@@ -14,7 +10,6 @@ lifetime:
   pulse: {field: pw}
   filter: {field: filter}
 note_offset: 0
-onset: onset
 commands:
   5: {name: ad}
   6: {name: sr}

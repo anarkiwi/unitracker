@@ -22,7 +22,7 @@ from unitracker.format.events.instrument import written_as
 from unitracker.format.records import META_KEYS
 from unitracker.format.refs import view
 from unitracker.optimise import programs_of
-from unitracker.player.vm import PSEUDO
+from unitracker.player.vm import ONSET, PSEUDO
 
 VOCABULARY = "vocabulary redundancy"
 KEY = "non-orthogonal key"
@@ -321,7 +321,7 @@ def _modulator_reads(pr: dict):
     """The expressions and cell names the ghost and the modulator machinery read."""
     yield from (str(t) for t in (pr.get("ghost") or {}).get("global", {}).values())
     yield from (str(t) for t in (pr.get("ghost") or {}).get("voice", {}).values())
-    yield from [str(pr["onset"])] if pr.get("onset") else []
+    yield from [ONSET] if ONSET in (pr.get("voice") or {}) else []
     mods = pr.get("modulators") or {}
     yield from mods.get("notes") or []
     yield from [mods["transpose"]] if mods.get("transpose") else []

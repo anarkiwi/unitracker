@@ -173,13 +173,12 @@ def test_flush_is_full_first_then_changes_only_in_canonical_order(tmp_path):
 
 def test_starts_record_the_tick_each_voice_s_onset_cell_first_reads_one():
     playroutine = {
-        "voice": {"started": {"width": 1}},
-        "onset": "started",
+        "voice": {"onset": {"width": 1}},
         "tick": [
             {
                 "for_voices": [
                     {"fetch": True},
-                    {"if": "ev_kind == 1", "then": [{"set": {"started": 1}}]},
+                    {"if": "ev_kind == 1", "then": [{"set": {"onset": 1}}]},
                 ]
             }
         ],

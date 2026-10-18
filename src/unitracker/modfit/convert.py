@@ -25,7 +25,7 @@ from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
 from unitracker.player import reach
 from unitracker.player.modulation import declared
-from unitracker.player.vm import SongPlayer, first_mismatch, fold_empty
+from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
 
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
 IDENTITY = "v"
@@ -600,9 +600,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             event = self._step_event(where)
             native = [c for c in _cmds(event) if int(c[0]) in spec.get("commands", ())]
             started = occ.instance == instance
-            onward = (
-                falls_back(spec) and not _cmds(event) and occ.start.get(self.pr.get("onset"), 1)
-            )
+            onward = falls_back(spec) and not _cmds(event) and occ.start.get(ONSET, 1)
             if not (native or (text is not None and (started or onward))):
                 continue
             ev = self.edit(instance)
