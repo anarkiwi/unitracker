@@ -263,7 +263,10 @@ def test_song_steps_loop_and_errors(monkeypatch):
 
 def test_the_reference_lift_holds_the_replay_state(references):
     ref = references["crosseyed"]
-    assert dm.lift(ref.raw, expressions=False)["meta"]["source"] == "defmon subtune 0"
+    assert (
+        dm.DefmonLift.from_sid(ref.raw, expressions=False).run()["meta"]["source"]
+        == "defmon subtune 0"
+    )
     song = ref.ir()
     assert set(song["tables"]) == {name for name, _, _ in dm.TABLES}
     assert set(song["records"]) == {"vinit", "ginit", "sidtab"}
@@ -273,19 +276,19 @@ def test_the_reference_lift_holds_the_replay_state(references):
 
 
 def flipped(song, tick=None):
-    """A replay grid of ``song`` over its window, register 0 changed at ``tick``."""
+    """A lift whose replay grid is ``song``'s over its window, register 0 changed at ``tick``."""
     grid = SongPlayer(song).render_grid(window(song))
     if tick is not None:
         grid[tick, 0] ^= 1
-    return grid
+    return SimpleNamespace(grid=lambda ticks: grid[:ticks])
 
 
 def test_an_unheard_init_note_is_dropped_and_a_heard_frequency_refused():
     ir = defmon_doc({"pw": 0x100, "note": "C3"})
-    assert dm.unheard_init(ir, flipped(ir))["records"]["vinit"][0] == {"pw": 0x100, "sacc": 0}
+    assert dm.unheard_init(flipped(ir), ir)["records"]["vinit"][0] == {"pw": 0x100, "sacc": 0}
     ir["phrases"]["p1"] = [{"note": 60, "steps": 4}]
     with pytest.raises(dm.LiftError, match="the init's frequency registers are heard: tick 3"):
-        dm.unheard_init(ir, flipped(ir, 3))
+        dm.unheard_init(flipped(ir, 3), ir)
 
 
 @pytest.mark.parametrize(
@@ -297,7 +300,7 @@ def test_a_build_plays_its_replay(request, tune, variants, period):
     raw = request.getfixturevalue(tune).read_bytes()
     rep = dm.Replay(DefmonPlayer(raw)._mem, DefmonPlayer(raw))  # pylint: disable=protected-access
     assert rep.variants == variants and rep.period(64) == period
-    song = dm.lift(raw, expressions=False)
+    song = dm.DefmonLift.from_sid(raw, expressions=False).run()
     assert song["playroutine"]["constants"]["trabs"] == int("absolute" in variants)
     native = np.asarray(DefmonPlayer(raw).render_grid(500), dtype=np.uint8)
     assert SongPlayer(song).mismatch(native) is None
@@ -329,4 +332,4 @@ def test_builds_not_covered_are_named(tune, message):
     if path is None:
         pytest.skip("HVSC tune unavailable")
     with pytest.raises(dm.LiftError, match=message):
-        dm.lift(Path(path).read_bytes(), expressions=False)
+        dm.DefmonLift.from_sid(Path(path).read_bytes(), expressions=False).run()

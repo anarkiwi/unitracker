@@ -1,14 +1,16 @@
-"""The lift framework's passes, through the GoatTracker 2 lifter on synthetic tunes and the
-SID-Wizard lifter on Csillag and patched cuts of it."""
+"""The lift framework's passes, through the GoatTracker 2 lifter on synthetic tunes, the
+SID-Wizard lifter on Csillag and patched cuts of it, and the defMON lifter on its builds."""
 
 import struct
 
 import numpy as np
 import pytest
 from conftest import gt_tune, sw_fx
+from pydefmon import DefmonPlayer
 from pysidwizard import SWMPlayer, parse_sid_song
 
-from unitracker.lift import backends, base
+from unitracker.lift import backends, base, defmon
+from unitracker.lift.defmon import DefmonLift
 from unitracker.lift.goattracker import GoatTrackerLift
 from unitracker.lift.sidwizard import Decoded, SidWizardLift
 from unitracker.player.vm import SongPlayer
@@ -159,3 +161,50 @@ def test_a_decoded_sidwizard_module_lifts_and_plays_as_given(csillag):
     assert not np.array_equal(ours, backends.native_player(raw).render_grid(400))
     theirs = SWMPlayer(parse_sid_song(raw, 1)).render_grid(400)
     assert np.array_equal(backends.native_player(raw).render_grid(400), theirs)
+
+
+def test_the_defmon_passes_run_in_order_and_convert_last(rent_a_cop, monkeypatch):
+    monkeypatch.setattr(DefmonLift, "convert", lambda _lift, song: {**song, "exprs": {}})
+    assert DefmonLift.passes() == ("structure", "unheard_init", "convert")
+    stages = list(DefmonLift.from_sid(rent_a_cop.read_bytes()).stages())
+    assert tuple(name for name, _ in stages) == DefmonLift.passes()
+    assert stages[-1][1] == {**stages[-2][1], "exprs": {}}
+
+
+def test_the_defmon_normalisation_receives_the_structure(rent_a_cop, monkeypatch):
+    seen = []
+
+    def record(lift, song):
+        seen.append(song)
+        return defmon.unheard_init(lift, song)
+
+    record.__name__ = "unheard_init"
+    monkeypatch.setattr(DefmonLift, "normalisations", (record,))
+    raw = rent_a_cop.read_bytes()
+    (_, structured), (_, song) = DefmonLift.from_sid(raw, expressions=False).stages()
+    assert seen == [structured] and seen[0] is structured
+    assert structured == DefmonLift.from_sid(raw).structure()
+    heard, carried = song["records"].pop("vinit"), structured["records"].pop("vinit")
+    assert heard.keys() == carried.keys() and song == structured
+    assert all(heard[v].items() <= carried[v].items() for v in carried)
+
+
+def test_a_defmon_lift_without_expressions_skips_convert(rent_a_cop, monkeypatch):
+    def refused(_lift, _song):
+        raise AssertionError("converted")
+
+    monkeypatch.setattr(DefmonLift, "convert", refused)
+    raw = rent_a_cop.read_bytes()
+    lift = DefmonLift.from_sid(raw, expressions=False)
+    assert lift.run() == list(lift.stages())[-1][1] == backends.lift(raw, expressions=False)
+    grid = backends.native_player(raw).render_grid(200)
+    assert np.array_equal(lift.native().render_grid(200), grid)
+    assert np.array_equal(DefmonPlayer(raw).render_grid(200), grid)
+
+
+def test_a_defmon_replay_grid_keeps_the_song_steps_period(persei):
+    lift = DefmonLift.from_sid(persei.read_bytes(), expressions=False)
+    with pytest.raises(base.LiftError, match="sub-tick calls do not repeat"):
+        lift.grid(64)
+    lift.structure()
+    assert lift.replay.cycle == 2 and lift.grid(64).shape == (64, 25)

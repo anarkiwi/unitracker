@@ -810,7 +810,7 @@ def test_the_transcription_plays_the_replays_offset(references):
     raw = patched(ref.raw, {16: {"cp": 0xD0}, 13: {"cp": 0x05}})
     native = np.asarray(DefmonPlayer(raw).render_grid(len(ref.native)), dtype=np.uint8)
     assert not np.array_equal(ref.native[:, 0x16], native[:, 0x16])
-    ir = defmon.lift(raw, expressions=False)
+    ir = defmon.DefmonLift.from_sid(raw, expressions=False).run()
     assert {r.get("cp") for r in ir["records"]["sidtab"].values()} == {None, 5, 0xD0}
     assert SongPlayer(ir).mismatch(native) is None
 
