@@ -115,8 +115,8 @@ The ACID step's direction is an opcode the module carries through init (`$10B8`,
 the step runs from init: init clears the step, so under SBC `r` falls by one each tick until a
 layer-B row sets the step (setting the cutoff keeps the direction), saturating to the floor, and
 under ADC it holds. The init's start of the ACID unit writes that as `ginit`'s `cut`, at floor 2
-`(v % 32768 + 65535)*(v % 32768 >= 1) + ((v - 1) % 256 + 512)*(v % 32768 < 1)`: `r - 1` with the
-carry, and at 0 the floor with the low byte $FF and no carry. The direction under ADC plays as the
+`(v % 32768 + 65535)*(v % 32768 >= 1) + 767*(v % 32768 < 1)`: `r - 1` with the carry, and at 0
+the floor with the low byte $FF and no carry ($2FF). The direction under ADC plays as the
 playroutine's own and writes nothing. The playroutine's raw `ginit` field `sub` is what the
 expression replaces, and has no written form.
 

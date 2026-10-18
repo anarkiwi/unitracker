@@ -6,7 +6,7 @@
 ``record`` converts each tune in process without caches and keeps each ``grammar.polar`` input,
 domain and written form; ``compare`` shows every recorded input with the current code and
 prints each form that differs, before and after, with whether the two terms are equal over
-their domain, then the ``display`` and ``polar`` calls per input.
+their domain and their tokens, then the ``display`` and ``polar`` calls per input.
 """
 
 import argparse
@@ -87,7 +87,7 @@ def compare(paths: list) -> int:
     rows = [r for p in paths for r in pickle.loads(Path(p).read_bytes())]
     unique = list(dict.fromkeys((e, d) for _, e, d, _ in rows))
     before = {(e, d): s for _, e, d, s in rows}
-    changed, most = 0, (0, 0)
+    changed, longer, most = 0, 0, (0, 0)
     for e, d in tqdm(unique, desc="forms", unit="form"):
         with Calls() as calls:
             shown = G.polar(e, d)
@@ -96,8 +96,13 @@ def compare(paths: list) -> int:
             changed += 1
             old = G.parse(before[e, d], e.free_symbols)
             print(f"before: {before[e, d]}\nafter:  {G.text(shown)}")
-            print(f"equal over {d}: {equal(old, shown, d)}")
-    print(f"{changed} of {len(unique)} forms differ; most display calls {most[0]}")
+            gain = (G.tokens(before[e, d]), G.tokens(G.text(shown)))
+            longer += gain[1] >= gain[0]
+            print(f"equal over {d}: {equal(old, shown, d)}; tokens {gain[0]} -> {gain[1]}")
+    print(
+        f"{changed} of {len(unique)} forms differ, {longer} of them not in fewer tokens; "
+        f"most display calls {most[0]}"
+    )
     return changed
 
 

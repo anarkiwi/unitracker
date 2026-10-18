@@ -146,7 +146,7 @@ def test_a_closed_form_is_proved_as_its_text_reads():
     start = m.start({"fptr": 1, "ftime": 0})
     d = derive(m, start, None, GT_FREQ)
     text = G.text(d.closed)
-    assert d.exact and text.endswith(TURN_CYCLE)
+    assert d.exact and TURN_CYCLE in text
     domain = tuple(dict(start)[c] for c in P.DOMAIN)
     prover = P.Prover(m, GT_FREQ, None, domain, m.atom(dict(start)))
     assert prover.closed(G.parse(text), d.value, None) is None
@@ -224,7 +224,7 @@ def _enumerated(e, context=(), domain=()):
     """``display`` by every combination of its four forms per bracket, each cofactor shown
     again under every choice of the brackets before it."""
     # pylint: disable=protected-access
-    e = G.products(e, context, domain)
+    e = G._case(e, context, domain)
     flat = G.denest(e, domain) if not context else e
     forms = [_enumerated(flat, context, domain)] if flat != e else []
     brackets = sorted(e.atoms(G.Iv), key=sympy.default_sort_key)
@@ -234,11 +234,17 @@ def _enumerated(e, context=(), domain=()):
     no, yes = context + ((b, 0),), context + ((b, 1),)
     rest = G.products(e.subs(b, 0), context, domain)
     full = G.products(e.subs(b, 1), context, domain)
-    whole, y = G.products(full, yes, domain), G.products(rest, no, domain)
+    whole = G._case(full, yes, domain)
+    y = G._case(rest, no, domain)
     forms += [
         e,
-        G._plus(G._times(b, G.canon(whole - rest)), _enumerated(rest, context, domain)),
-        G._plus(G._times(G._complement(b), G.canon(y - full)), _enumerated(full, context, domain)),
+        G._plus(
+            G._times(b, G._case(whole - rest, yes, domain)), _enumerated(rest, context, domain)
+        ),
+        G._plus(
+            G._times(G._complement(b), G._case(y - full, no, domain)),
+            _enumerated(full, context, domain),
+        ),
     ]
     if y != 0:
         forms.append(
@@ -290,6 +296,40 @@ def _value(table: dict):
 )
 def test_the_display_form_is_the_enumerated_shortest(e, domain):
     assert G.text(G.polar(e, domain)) == G.text(_enumerated(e, (), domain))
+
+
+def test_a_remainder_under_its_guard_folds_to_a_constant():
+    r = sympy.Mod(V, 32768)
+    e = G.canon((r + 65535) * G.ge(r, 1) + (sympy.Mod(V - 1, 256) + 512) * G.lt(r, 1))
+    shown = G.polar(e, (("v", 0, 131071),))
+    assert G.text(shown) == "-64768*(v % 32768 < 1) + v % 32768 + 65535"
+    assert equal(shown, e, bounds=((0, 131072),))
+
+
+_FN = G.freq(N)
+
+
+@pytest.mark.parametrize(
+    "e,context,domain,want",
+    [
+        (sympy.Mod(PHI + 3, 8), ((G.ge(PHI, 5), 0),), (), PHI + 3),
+        (sympy.floor(PHI / 4), ((G.ge(PHI, 4), 1), (G.ge(PHI, 8), 0)), (), 1),
+        (sympy.Abs(PHI - 10), ((G.ge(PHI, 5), 0),), (), 10 - PHI),
+        (sympy.Abs(PHI - 3), ((G.ge(PHI, 5), 1),), (), PHI - 3),
+        (sympy.Min(30, sympy.Max(0, PHI - 1)), ((G.ge(PHI, 32), 1),), (), 30),
+        (sympy.Max(V, 40), ((G.ge(sympy.Mod(V + 3, 65536), 50), 1),), (("v", 0, 100),), V),
+        (G.eq(PHI, 7) * V, ((G.ge(PHI, 5), 0),), (), 0),
+        (G.ge(PHI, 2) * V, ((G.ge(PHI, 5), 1),), (), V),
+        (sympy.Min(PHI, 1), ((G.eq(PHI, 0), 0),), (), 1),
+        (V * G.eq(_FN, sympy.Mod(V + _FN, 65536)), ((G.eq(_FN, sympy.Mod(V + _FN, 65536)), 1),),
+         (("v", 0, 65535),), 0),
+        (sympy.Mod(V - 1, 100), ((G.ge(sympy.Mod(V, 32768), 1), 0),), (), sympy.Mod(V - 1, 100)),
+        (sympy.Mod(V - 1, 256), ((G.ge(sympy.Mod(V, 32768), 1), 0),), (), 255),
+        (sympy.Mod(V, 4), ((G.ge(V, 5), 1),), (), sympy.Mod(V, 4)),
+    ],
+)  # fmt: skip
+def test_a_case_is_folded_over_the_interval_its_facts_bound(e, context, domain, want):
+    assert G._folded(e, context, domain) == want  # pylint: disable=protected-access
 
 
 def test_a_long_prefix_of_set_rows_displays_in_calls_linear_in_its_brackets(monkeypatch):

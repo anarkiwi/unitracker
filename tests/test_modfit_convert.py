@@ -160,7 +160,7 @@ def test_a_sidwizard_pulse_expression_reads_the_keyboard_track_table():
         "sidwizard",
         "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], "
         "pw: '2048 + 256*(E[N + 6] - E[N + 5])'}",
-        "[C2.i1*8, C6*8]",
+        "[C2.i1*8, C6.i1*8]",
     )
     _, pulse, _ = voice0(tracked, 120)
     step = [SW["freqhi"][n + 6 - 11] - SW["freqhi"][n + 5 - 11] for n in (24, 72)]
@@ -177,13 +177,32 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "song,old,new,kept",
     [
-        (GT_SONG, "", "", ["pw: '16*min(3, φ) + 1024'", "!freq:x2!legato"]),
+        (GT_SONG, "", "", ["pw: '1024 + 16*min(3, φ)'", "!freq:x2!legato"]),
         (GT_SONG, "pw: '1024 + 16*min(3, φ)'", "pw: 2048", ["pw: 2048"]),
+        (
+            GT_SONG,
+            INS + ",",
+            INS + ", filter: [{cut: '1024', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
+            ["cut: 1024", "cut: 512"],
+        ),
+        (
+            GT_SONG,
+            INS + ",",
+            INS + ", filter: [{cut: '0', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
+            ["cut: 0"],
+        ),
         (
             GT_SONG,
             INS + ",",
             INS + ", filter: [{cut: '1027', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
             ["cut: '1027'"],
+        ),
+        (
+            SW_SONG,
+            SW_INS,
+            SW_INS
+            + ", filter: [{cut: '1024', res: 0, mode: 16}, {cut: 512, res: 3, mode: 32}, end]",
+            ["cut: 1024", "cut: 512"],
         ),
     ],
 )
@@ -193,7 +212,7 @@ def test_constant_and_text_expressions_read_back_as_written(song, old, new, kept
     assert all(k in text for k in kept) and songio.dumps(songio.loads(text)) == text
 
 
-MANY = "".join(f"        x{k}: {k}\n" for k in range(3, 303))
+MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
 
 
 @pytest.mark.parametrize(
@@ -207,7 +226,7 @@ MANY = "".join(f"        x{k}: {k}\n" for k in range(3, 303))
         ),
         ([("x1: (v + 300) % 65536", "x1: v / 2")], "outside the grammar"),
         ([("x1: (v + 300) % 65536", "x1: W[N]")], "unknown table 'W'"),
-        ([("x1: (v + 300) % 65536", "x1: (0 < v < 9)")], "not one comparison"),
+        ([("x1: (v + 300) % 65536", "x1: '(0 < v < 9)'")], "not one comparison"),
         ([("x1: (v + 300) % 65536", "x1: '[v > 9]*v'")], r"a comparison is written \(a op b\)"),
         ([("x1: (v + 300) % 65536", "x1: sqrt(v)")], "calls no grammar function"),
         ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
@@ -227,7 +246,7 @@ MANY = "".join(f"        x{k}: {k}\n" for k in range(3, 303))
         (
             [
                 ("      x:\n", "      x:\n" + MANY),
-                ("-!freq:x1, -", "-!freq:x3, -!freq:x301"),
+                ("-!freq:x1, -", "-!freq:y1, -!freq:y299"),
             ],
             "argument is a byte",
         ),
@@ -265,7 +284,7 @@ def test_a_selected_expression_must_exist():
         SongPlayer(song)
 
 
-CSILLAG_GATE = "(2*W[N + 33] - W[N + 33]*abs((φ + 3) % 8 - 4))*(φ >= 15)"
+CSILLAG_GATE = "(-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33])*(φ >= 15)"
 ACID_STEP = "v % 32768 + 2048)*(v % 32768 < 30208)"
 
 
@@ -371,7 +390,7 @@ def test_a_sweep_that_turns_at_a_row_boundary_plays_as_written():
     want = regs(ir, 200)
     out = convert.convert(ir, cache=None, workers=1)
     [text] = out["exprs"].values()
-    assert text.endswith("8*(φ >= 32)*((-(φ % 2) + 2*(φ // 2) - 17) % 256)")
+    assert "*((-(φ % 2) + 2*(φ // 2) - 17) % 256) - 96)*(φ >= 32)" in text
     written = songio.dumps(out)
     assert np.array_equal(regs(songio.loads(written), 200), want)
     misread = written.replace("+ 2*(φ // 2)", "- 2*(φ // 2)")
@@ -427,7 +446,7 @@ def test_a_record_with_two_expressions_is_cloned_into_a_phrase_variant():
 
 
 def test_an_instrument_with_two_expressions_is_cloned_and_its_event_names_the_clone():
-    ir = sw_ir("[C4.i1*4, D4*4]")
+    ir = sw_ir("[C4.i1*4, D4.i1*4]")
     start = {"svib": 0, "pnfx": 0, "ci": 1}
     occs = [occurrence("pitch", (0, 0, 0), start, 0), occurrence("pitch", (0, 0, 4), start, 1)]
     out = convert.Rewrite(ir, obs_of(occs), ["v + 1", "v + 2"]).run()
@@ -742,7 +761,7 @@ def test_an_offset_outside_the_acid_program_fails_naming_its_row():
         songio.dumps(convert.convert(ir, cache=None, workers=1))
 
 
-SUB = "((v - 1) % 256 + 512)*(v % 32768 < 1) + (v % 32768 + 65535)*(v % 32768 >= 1)"
+SUB = "(v % 32768 + 65535)*(v % 32768 >= 1) + 767*(v % 32768 < 1)"
 
 
 @pytest.mark.parametrize("sub", [1, 0])
