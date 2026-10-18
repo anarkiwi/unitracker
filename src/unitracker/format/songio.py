@@ -748,7 +748,9 @@ class _Reader:
             raise SongFormatError(f"unknown record type {written!r}")
         tname = rtype.name
         if rtype.fixed:
-            self.pending.append((rtype, int(name), self._proto(rtype, value)))
+            if isinstance(name, bool) or not isinstance(name, int):
+                raise SongFormatError(f"{written}: a fixed row is named by its index, not {name!r}")
+            self.pending.append((rtype, name, self._proto(rtype, value)))
             return
         if not isinstance(name, str) or not _ONE.match(name):
             raise SongFormatError(f"{written}: bad name {name!r}")
@@ -836,21 +838,29 @@ class _Reader:
             raise SongFormatError(f"the song ends with end or {{loop: k}}, not {term!r}")
         phrases, rows = {}, []
         for r, item in enumerate(song):
-            if not isinstance(item, dict) or "play" not in item:
+            if not isinstance(item, dict) or not isinstance(item.get("play"), list):
                 raise SongFormatError(f"song row {r} needs a play list")
-            for tname, entries in (item.get("def") or {}).items():
-                for name, value in (entries or {}).items():
-                    _refuse_quoted(name, "a name")
-                    if tname == PHRASE:
-                        if name in phrases or name in self.names:
-                            raise SongFormatError(f"name {name!r} defined twice")
-                        phrases[name] = value
-                    else:
-                        self._define(tname, name, value)
+            self._row_defs(r, item.get("def") or {}, phrases)
             rows.append([self._entry(e) for e in item["play"]])
         self._resolve()
         _uniform(self.pr, self.rtypes, self.records)
         return phrases, rows, loop
+
+    def _row_defs(self, r: int, defs, phrases: dict) -> None:
+        """Define song row ``r``'s records, and its phrases into ``phrases``."""
+        if not isinstance(defs, dict) or not all(isinstance(e, dict) for e in defs.values()):
+            raise SongFormatError(f"song row {r}: def maps each record type to its names")
+        for tname, entries in defs.items():
+            for name, value in entries.items():
+                _refuse_quoted(name, "a name")
+                if tname != PHRASE:
+                    self._define(tname, name, value)
+                    continue
+                if name in phrases or name in self.names:
+                    raise SongFormatError(f"name {name!r} defined twice")
+                if not isinstance(value, list):
+                    raise SongFormatError(f"phrase {name}: a phrase is a list of atoms")
+                phrases[name] = value
 
     def read(self) -> dict:
         """The internal representation."""

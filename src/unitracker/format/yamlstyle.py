@@ -164,3 +164,22 @@ Dumper.add_representer(Flow, lambda d, x: d.represent_sequence("tag:yaml.org,200
 Dumper.add_representer(FlowMap, lambda d, x: d.represent_mapping("tag:yaml.org,2002:map", x, True))
 Dumper.add_representer(Atom, _atom)
 Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.org,2002:null", "~"))
+
+
+def _plain(value):
+    """``value`` with each string that reads back as itself, or as the value it spells, plain."""
+    if isinstance(value, dict):
+        return {_plain(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, str) and not isinstance(value, Atom):
+        read = yaml.load(f"k: {value}", Loader=Loader)["k"]
+        if read == value or getattr(read, "text", None) == value:
+            return Atom(value)
+    return value
+
+
+def dump(doc) -> str:
+    """Parsed document ``doc`` (as :func:`parse` reads one) as YAML, each string plain where it
+    reads back so."""
+    return yaml.dump(_plain(doc), Dumper=Dumper, sort_keys=False, allow_unicode=True)

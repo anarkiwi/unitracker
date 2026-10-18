@@ -4,23 +4,29 @@ against the unedited song with what the reader and writer make of the edit.
     python tools/perturb.py DOC.yaml --sid TUNE.sid 'old=>new' ... [--ticks N]
     python tools/perturb.py DOC.yaml --same 'old=>new;;old=>new' 'old=>new;;...' [--ticks N]
     python tools/perturb.py DOC.yaml --probe 'old=>new;;...' 're:pattern=>repl' ... [--ticks N]
+    python tools/perturb.py DOC.yaml --fuzz
 
 Each edit set is ``;;``-separated edits, each replacing the first occurrence of ``old`` by
 ``new`` (``re:`` edits substitute a regular expression everywhere). With ``--sid`` each edit set
 prints the first mismatch of its replay against the tune's native player, or the error reading
 it; with ``--same`` the two edit sets print whether their replays are identical; with
 ``--probe`` each edit set prints whether the reader refuses it, or accepts it and the writer
-keeps or rewrites it, and whether it plays as the unedited song.
+keeps or rewrites it, and whether it plays as the unedited song; with ``--fuzz`` each value of the
+document replaced by each of a few others prints any error the reader raises but its own.
 """
 
 import argparse
+import copy
 import difflib
 import re
 from pathlib import Path
 
+from tqdm import tqdm
+
 import numpy as np
 
 from unitracker.format import songio
+from unitracker.format.yamlstyle import dump, parse
 from unitracker.lift import backends
 from unitracker.player.vm import SongPlayer, first_mismatch
 
@@ -90,6 +96,44 @@ def _problem(text: str) -> str:
     return ""
 
 
+ODD = ("x", [1], -1, 99999, True, None, {"a": 1}, "v + 1")
+
+
+def _paths(node, path=()):
+    """Each path into parsed document ``node``, leaves first."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _paths(v, (*path, k))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _paths(v, (*path, i))
+    if path:
+        yield path
+
+
+def fuzz(text: str, odd=ODD, progress: bool = False) -> list[str]:
+    """One line per error other than ``SongFormatError`` the reader raises for ``text`` with one
+    value replaced by one of ``odd``."""
+    base, out, seen = parse(text), [], set()
+    edits = [(p, v) for p in _paths(base) if p[0] != "unitracker" for v in odd]
+    for path, value in tqdm(edits, desc="fuzz", unit="doc", disable=not progress):
+        doc = copy.deepcopy(base)
+        node = doc
+        for step in path[:-1]:
+            node = node[step]
+        node[path[-1]] = value
+        try:
+            songio.loads(dump(doc))
+        except songio.SongFormatError:
+            continue
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            kind = (type(exc).__name__, str(exc)[:60])
+            if kind not in seen:
+                seen.add(kind)
+                out.append(f"{'.'.join(map(str, path))} = {value!r} -> {type(exc).__name__}: {exc}")
+    return out
+
+
 def against_native(text: str, sid: Path, edits: list, ticks: int) -> list[str]:
     """One line per edit: its replay's first mismatch against the native player."""
     native = np.asarray(
@@ -118,11 +162,12 @@ def main(argv=None) -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("doc", type=Path)
-    parser.add_argument("edits", nargs="+")
+    parser.add_argument("edits", nargs="*")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--sid", type=Path)
     mode.add_argument("--same", action="store_true")
     mode.add_argument("--probe", action="store_true")
+    mode.add_argument("--fuzz", action="store_true")
     parser.add_argument("--ticks", type=int, default=3007)
     args = parser.parse_args(argv)
     text = args.doc.read_text()
@@ -130,6 +175,8 @@ def main(argv=None) -> int:
         if len(args.edits) != 2:
             parser.error("--same compares two edit sets")
         print(same(text, *args.edits, args.ticks))
+    elif args.fuzz:
+        print("\n".join(fuzz(text, progress=True)) or "the reader raises only SongFormatError")
     elif args.probe:
         base = grid(text, args.ticks)
         for edit in args.edits:

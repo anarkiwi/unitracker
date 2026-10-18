@@ -23,6 +23,8 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | both grids side by side over a tick range | `tools/grid_diff.py song.yaml TUNE.sid --from T --to T` |
 | round trip, native grid and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | whether an edit to a written song plays the native grid, or plays as another edit | `tools/perturb.py song.yaml --sid TUNE.sid 'old=>new' ...`, `--same 'a=>b' 'c=>d'` |
+| whether the reader refuses an edit, or the writer keeps or rewrites it, and whether it plays as the song | `tools/perturb.py song.yaml --probe 'old=>new' ...` |
+| whether the reader raises anything but its own error for a document with one value changed | `tools/perturb.py song.yaml --fuzz` |
 | a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
 | proofs, closed forms, command composition, keyword signatures | `unitracker-modfit {exprs,command,keywords,fit,poly,generic,sweeps,orbit}` ([modfit.md](modulation/modfit.md)) |
 | redundancy the lifter writes | `unitracker-optimise song.yaml -o OUT --report report.md` ([Report](optimise.md#report)) |

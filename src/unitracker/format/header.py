@@ -1,5 +1,6 @@
 """A document's header: its playroutine entry, environment and initial tempo."""
 
+import copy
 import functools
 from importlib import resources
 
@@ -27,9 +28,14 @@ def _library_text(name: str) -> str:
     return path.read_text()
 
 
+@functools.cache
+def _library(name: str) -> dict:
+    return expand({"name": name, **yaml.safe_load(_library_text(name))})
+
+
 def library(name: str) -> dict:
     """The library definition of playroutine ``name``, named by its file."""
-    return expand({"name": name, **yaml.safe_load(_library_text(name))})
+    return copy.deepcopy(_library(name))
 
 
 def defaults(pr: dict) -> dict:
@@ -47,24 +53,48 @@ def read_playroutine(spec) -> tuple[dict, dict]:
     if not isinstance(spec, dict):
         raise SongFormatError("playroutine must be a mapping")
     if "ref" not in spec:
+        if not isinstance(spec.get("name"), str):
+            raise SongFormatError("an embedded playroutine has a name")
         pr = expand(spec)
         return pr, {k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()}
     for key in sorted(set(spec) - set(REF_KEYS)):
         raise SongFormatError(f"unknown key {key} in playroutine")
+    if not isinstance(spec["ref"], str):
+        raise SongFormatError(f"no playroutine {spec['ref']!r} in the library")
     pr = library(spec["ref"])
-    for key in sorted(set(spec.get("constants") or {}) - set(pr.get("constants") or {})):
+    constants = _mapping(spec.get("constants"), "playroutine.constants")
+    for key in sorted(set(constants) - set(pr.get("constants") or {})):
         raise SongFormatError(f"unknown key {key} in playroutine.constants")
-    pr["constants"] = {**(pr.get("constants") or {}), **(spec.get("constants") or {})}
+    pr["constants"] = {**(pr.get("constants") or {}), **_ints(constants, "a constant")}
     tables = {k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()}
-    for name, diff in (spec.get("tables") or {}).items():
+    for name, diff in _mapping(spec.get("tables"), "playroutine.tables").items():
         if name not in tables:
             raise SongFormatError(f"unknown table {name!r} in playroutine.tables")
         if isinstance(diff, list):
-            tables[name] = [int(x) for x in diff]
-        else:
-            for i, v in diff.items():
-                tables[name][int(i)] = int(v)
+            tables[name] = list(_ints(dict(enumerate(diff)), f"an entry of {name!r}").values())
+            continue
+        for i, v in _ints(_mapping(diff, f"table {name!r}"), f"an entry of {name!r}").items():
+            if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < len(tables[name]):
+                raise SongFormatError(f"table {name!r} has no entry {i!r}")
+            tables[name][i] = v
     return pr, tables
+
+
+def _mapping(value, what: str) -> dict:
+    """``value``, a mapping where ``what`` is one (none: empty)."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise SongFormatError(f"{what} is a mapping")
+    return value
+
+
+def _ints(values: dict, what: str) -> dict:
+    """``values``, each an integer of ``what``."""
+    for v in values.values():
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise SongFormatError(f"{what} is an integer, not {v!r}")
+    return {k: int(v) for k, v in values.items()}
 
 
 def meta(doc: dict) -> dict:
