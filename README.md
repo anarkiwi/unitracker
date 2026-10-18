@@ -74,6 +74,8 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | do the docs' relative links resolve? | `python tools/doc_links.py` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (above) |
 | lift (and `--check`) a tune list in parallel, results by cause | `python tools/lift_tally.py TUNES.csv --player SidWizard [--check 3007] [--registers 2,3]` |
+| a random lifted sample, balanced over the three players | `python tools/sample_tunes.py $HVSC tunes.csv OUTDIR [--count N --seed S]` (from the survey's `find` csv; `sample.csv` records each attempt) |
+| how the written vocabulary is used over a corpus of documents (events, commands, row keys, expression operators) | `python tools/vocab_census.py out/sample128/*.yaml [--json OUT.json]` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `sw_fx`, `sw_table_byte`, `mini_song`, `table`, `hvsc_tune` |
 
 ## Layout
