@@ -41,6 +41,9 @@ def moves(words):
     return [int(d) for d in np.diff(words) if d]
 
 
+TEMPO = ("\nsong:", "\ntempo: 7\nsong:")
+
+
 def doc(playroutine, defs, phrase, extra="", silent=False):
     """A v1.20 document playing phrase ``p1`` on every voice, or on voice 0 alone (``silent``)."""
     rest = "\n        p2: [off*8]" if silent else ""
@@ -61,7 +64,7 @@ song:
 def gt_ir(phrase: str, ins: str = INS + "}"):
     """A one-voice goattracker2 song, the other voices silent."""
     defs = f"      ins:\n        i1: {ins}"
-    return songio.loads(doc("goattracker2, constants: {deftempo: 6}", defs, phrase, silent=True))
+    return songio.loads(doc("goattracker2", defs, phrase, silent=True).replace(*TEMPO))
 
 
 def sw_ir(phrase: str):
@@ -71,7 +74,7 @@ def sw_ir(phrase: str):
 
 
 GT_SONG = doc(
-    "goattracker2, constants: {deftempo: 6}",
+    "goattracker2",
     """      ins:
         i1: """
     + INS
@@ -80,7 +83,7 @@ GT_SONG = doc(
         x1: (v + 300) % 65536
         x2: 0""",
     "[C4.i1, -!freq:x1, -!freq:x1, D4!legato!freq:x2, -]",
-)
+).replace(*TEMPO)
 SW_INS = "freq: '[φ >= 2]*W[N + 25]'"
 SW_SONG = doc(
     "sidwizard",
@@ -110,15 +113,17 @@ DM_AF = doc(
 # ---- expressions in documents ------------------------------------------------------------
 
 
-def test_funk_arguments_share_their_speed_table_rows():
-    text = doc("goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!funk:6/9, -!funk:6/9]")
-    song = songio.loads(text.replace("-!funk:6/9]", "-!funk:6/9, -!funk:3/4]"))
+def test_swing_arguments_share_their_speed_table_rows():
+    text = doc(
+        "goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!tempo:6/9, -!tempo:6/9]"
+    )
+    song = songio.loads(text.replace("-!tempo:6/9]", "-!tempo:6/9, -!vtempo:3/4, -!tempo:7]"))
     assert song["records"]["speedtab"] == {1: {"l": 6, "r": 9}, 2: {"l": 3, "r": 4}}
     cmds = [e.get("command") or e["commands"][-1] for e in song["phrases"]["p1"]]
-    assert cmds == [[14, 1], [14, 1], [14, 2]]
-    assert "-!funk:3/4]" in songio.dumps(song)
-    with pytest.raises(songio.SongFormatError, match="can't express !funk:none"):
-        songio.loads(text.replace("-!funk:6/9]", "-!funk:none]"))
+    assert cmds == [[14, 1], [14, 1], [18, 2], [15, 7]]
+    assert "-!vtempo:3/4, -!tempo:7]" in songio.dumps(song)
+    with pytest.raises(songio.SongFormatError, match="can't express !tempo:none"):
+        songio.loads(text.replace("-!tempo:6/9]", "-!tempo:none]"))
 
 
 def test_goattracker_freq_command_pulse_expression_and_legato():
@@ -216,12 +221,12 @@ MANY = "".join(f"        y{k}: {k}\n" for k in range(300))
         ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
         ([("-!freq:x1, -!freq:x1,", "-!freq:x9, -!freq:x1,")], "unknown name 'x9'"),
         (
-            [("-!freq:x1, -!freq:x1,", "-!funk:6, -!freq:x1,")],
-            r"!funk: the argument is 2 values",
+            [("-!freq:x1, -!freq:x1,", "-!tempo:6/9/7, -!freq:x1,")],
+            r"!tempo: the argument is 2 values",
         ),
         (
-            [("-!freq:x1, -!freq:x1,", "-!funk:6/256, -!freq:x1,")],
-            r"!funk: each value is a byte",
+            [("-!freq:x1, -!freq:x1,", "-!tempo:6/256, -!freq:x1,")],
+            r"!tempo: each value is a byte",
         ),
         (
             [("-!freq:x1, -!freq:x1,", "-!run:6/9, -!freq:x1,")],

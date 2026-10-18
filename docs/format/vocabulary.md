@@ -29,8 +29,8 @@ record type is one player's own.
 | `!resfilt:n` | set `$D417` whole, `n = 16*res + route` |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
-| `!tempo:n`, `!vtempo:n` | n ticks per step, for all voices / this voice, from the step that carries the command |
-| `!funk:a/b`, `!funk:none` | swing tempo, for all voices: the steps alternate `a` and `b` ticks; `none` swings on the pair already set |
+| `!tempo:n`, `!tempo:a/b` | every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks |
+| `!vtempo:n`, `!vtempo:a/b` | this voice's tempo |
 | `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
 | `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
 | `!mark:n` | a timing mark that changes no sound |

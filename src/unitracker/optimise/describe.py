@@ -134,5 +134,5 @@ def describe(ir: dict, edit: tuple) -> tuple:
 def writer(ir: dict):
     """The canonical writer of ``ir`` with its names given, and ``rows`` the rows it writes."""
     out = songio._Writer(ir)  # pylint: disable=protected-access
-    out.rows = out.song()[1]
+    out.rows = out.song()[0]
     return out

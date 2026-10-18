@@ -8,7 +8,8 @@ The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame,
 | | |
 |---|---|
 | tune | a SID-Wizard 1.x export, normal build, decoded by pysidwizard |
-| lifted from | the decoded module; the subtune's tempo pair is the constants `tempol` and `tempor` |
+| lifted from | the decoded module |
+| tempo | the subtune's tempo pair: one tempo when both bytes have bit 7 set (the first byte), each byte 0 written as 6 |
 | step | one pattern row; the playroutine runs each voice's tempo counter, reads a row at TICK_0, applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking the voices in the player's reverse order |
 | notes | `note_offset` 1: SID-Wizard index 49 is `C4` |
 | first note | each voice's first note must select an instrument |
@@ -44,9 +45,8 @@ instrument-column form (`!ad` or `!sr` in the first slot of an event that names 
 | `!filter` | no argument |
 | `!ad` | 0-255, at most one nibble from the instrument's |
 | `!sr` | 0-255, at most one nibble from the instrument's |
-| `!tempo` | 3-127 |
-| `!vtempo` | 3-127 |
-| `!funk` | 3-15/3-15 |
+| `!tempo` | 3-127, 3-15/3-15 |
+| `!vtempo` | 3-127, 3-15/3-15 |
 | `!freq` | `x` name, `none` |
 | `!legato` | no argument |
 
@@ -63,11 +63,11 @@ Every other command is refused by name.
   small FX that changes one nibble of the instrument's byte (the attack or sustain nibble when the
   byte is the instrument's). An FX-column one alone on a row that starts no note is written in the
   first slot, which plays the same.
-- The tempo FX apply on the row's TICK_2 with its other FX: $10 (`!tempo`, playroutine code $12,
-  as $10 is `!freq`) sets every voice's tempo pair to its value, $13 (`!vtempo`) this voice's,
-  and $11 (`!funk:a/b`) every voice's to its nibbles. Each rewinds the swing to its first tempo,
-  and each voice counts its current row against the new pair from its next tick. A tempo of 0
-  plays as 6.
+- The tempo FX apply on the row's TICK_2 with its other FX: $10 (`!tempo:n`, playroutine code
+  $12, as $10 is `!freq`) sets every voice's tempo pair to its value, $13 (`!vtempo:n`) this
+  voice's, $11 (`!tempo:a/b`) every voice's to its nibbles and $14 (`!vtempo:a/b`) this voice's.
+  Each rewinds the swing to its first tempo, and each voice counts its current row against the new
+  pair from its next tick. A tempo of 0 plays as 6.
 - `!legato` is instrument column $3F.
 - `!freq` is playroutine code $10, which no native FX has: it runs the expression it names.
 
@@ -157,9 +157,8 @@ The lifter fails, naming what it meets:
 - an envelope small FX on a voice with no instrument, one that writes the other register with
   another byte (after a row that selects an instrument without a note), an FX-column one alone
   on a note that names no instrument, and a play of a phrase that differs on its loop's passes;
-- a tempo of 1 or 2, which never applies a row, and a swing for one voice ($14) unless both its
-  tempos are equal (which is `!vtempo`); the lifter names the pattern and row of each row it
-  refuses;
+- a tempo of 1 or 2, which never applies a row, in a tempo FX or the subtune's tempo; the lifter
+  names the pattern and row of each row it refuses;
 - a keyboard-tracked cutoff past $FF, whose carry into `$D416` no cutoff value states; a filter
   third byte of $80-$8F, which sets the routing;
 - a voice's first note that selects no instrument;

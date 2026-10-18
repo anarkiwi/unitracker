@@ -283,7 +283,7 @@ def events():
             Row(note=40, instrument=1, fx=0x13, fx_value=0x88),
             {"note": 40, "instrument": 1, "command": [0x13, 0x88]},
         ),
-        (Row(fx=0x14, fx_value=0x55), {"command": [0x13, 5]}),
+        (Row(fx=0x14, fx_value=0x35), {"command": [0x14, 0x35]}),
     ],
 )
 def test_row_events(row, event):
@@ -297,7 +297,7 @@ def test_row_events(row, event):
         (Row(fx=0x09, fx_value=1), "big FX"),
         (Row(note=0x79), "note-column"),
         (Row(instrument=0x52, note=0x68, fx=0x54), "three effects"),
-        (Row(fx=0x14, fx_value=0x35), r"tempo FX \$14 \$35 is not covered"),
+        (Row(fx=0x14, fx_value=0x25), r"tempo FX \$14 \$25 is not covered"),
         (Row(fx=0x10, fx_value=2), r"tempo FX \$10 \$02"),
         (Row(fx=0x13, fx_value=0x81), r"tempo FX \$13 \$81"),
         (Row(fx=0x11, fx_value=0x72), r"tempo FX \$11 \$72"),
@@ -321,25 +321,16 @@ def test_phrases_fold_emptytable_rows():
 
 
 @pytest.mark.parametrize(
-    "pair,commands,hints",
-    [
-        ((0x86, 0x83), [], {"ticks_per_step": 6}),
-        ((5, 7), [], {}),
-        ((0, 6), [[0x12, 6], [0x13, 0x86], [0x11, 0x60]], {"ticks_per_step": 6}),
-        ((6, 6), [[0x12, 4]], {}),
-        ((6, 6), [[0x11, 0x67]], {}),
-        ((6, 6), [[0x20, 4], [0x70, 2]], {"ticks_per_step": 6}),
-    ],
+    "pair,tempo",
+    [((0x86, 0x83), 6), ((5, 7), [5, 7]), ((0, 6), 6), ((6, 0x86), 6), ((0x84, 9), [4, 9])],
 )
-def test_the_tempo_hint_holds_one_tempo(pair, commands, hints):
-    swm = SimpleNamespace(subtune_tempos=[pair])
-    phrases = {"p01": [{"commands": commands}]}
-    constants, got = sidwizard.tempo(swm, phrases)
-    assert got == hints
-    assert constants == {
-        "tempol": pair[0] & 0x7F,
-        "tempor": (pair[1] if pair[1] < 0x80 else pair[0]) & 0x7F,
-    }
+def test_the_subtune_tempo_is_the_initial_tempo(pair, tempo):
+    assert sidwizard.tempo(SimpleNamespace(subtune_tempos=[pair])) == tempo
+
+
+def test_a_subtune_tempo_the_player_never_applies_a_row_at_is_not_covered():
+    with pytest.raises(LiftError, match=r"subtune's tempo \$02 \$06"):
+        sidwizard.tempo(SimpleNamespace(subtune_tempos=[(2, 6)]))
 
 
 def test_first_note_must_select_aninstrument_record():
@@ -384,8 +375,7 @@ def test_restart_rows_follow_the_control_byte(control, rows):
 def test_the_reference_lift_holds_the_subtune_tempo(references):
     ir = references["csillag"].ir()
     assert ir["playroutine"]["name"] == "sidwizard"
-    assert ir["playroutine"]["constants"] == {"tempol": 6, "tempor": 6}
-    assert ir["hints"]["ticks_per_step"] == 6
+    assert not ir["playroutine"].get("constants") and ir["tempo"] == 6
 
 
 def voice_instrument(ir: dict, voice: int) -> int:
@@ -490,7 +480,7 @@ def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, mon
     monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
     song, text = lifted(tracked)
     assert "!pw" in text and "!filter" in text and "flags" not in text
-    assert "!tempo:4" in text and "!funk:5/7" in text and "!vtempo:6" in text
+    assert "!tempo:4" in text and "!tempo:5/7" in text and "!vtempo:6" in text
     assert "E[" in text and not re.search(r"\bk:", text)
     plain = swm_grid(parse_sid_song(base, 1))
     for one in (
@@ -527,6 +517,7 @@ def test_keyboard_tracked_pulse_and_filter_rows_play_the_player(csillag):
 TEMPO_ROWS = {
     (2, 0): (0x13, 8),
     (8, 4): (0x14, 0x55),
+    (8, 12): (0x14, 0x35),
     (20, 16): (0x10, 4),
     (35, 8): (0x11, 0x57),
     (3, 8): (0x10, 0),
@@ -542,7 +533,6 @@ def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(csillag, 
     assert not np.array_equal(theirs, swm_grid(sw_fx(raw, {})))
     monkeypatch.setattr(sidwizard, "parse_sid_song", lambda *_: swm)
     ir = sidwizard.lift(raw, expressions=False)
-    assert "ticks_per_step" not in ir["hints"]
     empty = ir["records"]["ins"][len(ir["records"]["ins"])]
     assert empty == {"flags": 0x10, "sr": 0xF0, "restart": empty["restart"]}
     path, entry = [], empty["restart"]

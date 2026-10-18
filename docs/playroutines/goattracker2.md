@@ -8,9 +8,9 @@ The GoatTracker 2 playroutine (`player.s`, buffered writes) of
 | | |
 |---|---|
 | tune | a packed GoatTracker 2 `.sid`, decompiled by pygoattracker |
-| lifted from | the decompiled song and the build's constants: `adparam`, and `deftempo` (when the build carries none: instrument 63's `ad` minus 1 if that `ad` is 2 or more and the instrument has no wavetable, else 5) |
+| lifted from | the decompiled song and the build's constant `adparam` |
+| tempo | the build's default tempo byte `d` plus 1 (when the build carries none, `d` is instrument 63's `ad` minus 1 if that `ad` is 2 or more and the instrument has no wavetable, else 5); `d` 0 is the swing `[9, 6]`, on the player's initial funk pair, and `d` 1 is not covered |
 | clock | NTSC when the header's clock flags say so, else PAL |
-| hints | `ticks_per_step` when the song runs at one global tempo: no `!funk` or `!vtempo`, every `!tempo` naming one tempo, set on a first step unless it is the default |
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
 | notes | `note_offset` 0 |
 | onset | the tick a wavetable row first sets the voice's frequency: on its first note's first tick the voice still sounds the frequency it had before the note |
@@ -26,7 +26,7 @@ The GoatTracker 2 playroutine (`player.s`, buffered writes) of
 | `restart` | the instrument's gate timer and first wave | instruments with one gate timer and first wave share a restart program |
 
 The speed table has no written form: its vibrato and slide speeds are terms of the `freq`
-expressions, and `!funk` writes its rows inline.
+expressions, and `!tempo` and `!vtempo` write a swing's row inline.
 
 ## Events
 
@@ -46,19 +46,21 @@ other; otherwise the slots are only an order.
 | `!resfilt` | 0-255 |
 | `!vol` | 0-15 |
 | `!cut` | 0-2040 step 8 |
-| `!tempo` | 3-127 |
-| `!vtempo` | 3-127 |
-| `!funk` | 0-255/0-255 |
+| `!tempo` | 3-127, 2-129/2-129 |
+| `!vtempo` | 3-127, 2-129/2-129 |
 | `!freq` | `x` name, `none` |
 | `!mark` | 16-255 |
 | `!legato` | no argument |
 
 Every other command is refused by name.
 
-- Command $F plays a tempo of 2 as 3, so `!tempo` and `!vtempo` start at 3. The default tempo is
-  `deftempo` + 1 ticks per row, the player's own count.
-- `!funk:a/b` is command $E, its argument the speed-table row's two bytes; `!funk:none` swings on
-  the pair already set.
+- `!tempo:n` and `!vtempo:n` are command $F; it plays a tempo of 2 as 3, so they start at 3.
+- `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each. `!vtempo:a/b` is playroutine command 18: the player keeps one swing
+  pair, and command $F's $80/$81 swing one voice on it, so 18 sets the pair, as every voice that
+  swings plays it, and swings this voice. The lifter writes $E00 and $F00/$F01/$F80/$F81, which
+  swing on the pair already set, as the commands that name the pair they meet ($x1 reversed,
+  starting on its second tempo), once a replay proves the song unchanged; a command that meets
+  pairs no one of which plays the song is not covered.
 - `!vol` is command $D below $10; from $10 it is `!mark`.
 - `!run:none`, `!pw:none` and `!filter:none` are commands 8, 9 and 10 with argument 0, which stop
   the control, pulse and filter programs.

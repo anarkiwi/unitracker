@@ -12,7 +12,7 @@ from importlib import resources
 
 import yaml
 
-from unitracker.format import hints, refkeys, timeline, xexpr
+from unitracker.format import refkeys, tempo, timeline, xexpr
 from unitracker.format.atoms import format_atom, parse_atom, runs
 from unitracker.format.codec import (
     COMMAND_NAMES,
@@ -42,7 +42,7 @@ from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compil
 VERSION = "1.20"
 WIDTH = 100
 PHRASE = "phrase"
-DOC_KEYS = ("unitracker", "playroutine", "meta", "hints", "clock", "voices", "song")
+DOC_KEYS = ("unitracker", "playroutine", "meta", "clock", "voices", "tempo", "song")
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
 DEFAULTS = {"clock": {"cycles_per_tick": 19656, "clock_hz": 985248}, "voices": 3}
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -66,7 +66,7 @@ def library(name: str) -> dict:
 
 
 def song_rows(doc: dict) -> list:
-    """The rows of a written document's ``song``, without the ``end`` or ``{loop: k}`` after them."""
+    """The rows of a written document's ``song``, without its ``end`` or ``{loop: k}``."""
     return doc["song"][:-1]
 
 
@@ -391,7 +391,12 @@ class _Writer:
             raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
         if isinstance(value, tuple) and self.commands.inline(name):
             rtype = self.rtypes[value[0]]
-            return f"{name}:{inline_text(rtype, self._row(rtype, value[1]))}"
+            row = {f: int(self._row(rtype, value[1]).get(f, rtype.default(f))) for f in rtype.own}
+            try:
+                self.commands.check_inline(name, row)
+            except CodecError as exc:
+                raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+            return f"{name}:{inline_text(rtype, row)}"
         if isinstance(value, tuple) and not self.commands.values(name):
             return f"{name}:{self.names[self.key(*value)]}"
         return command_text(name, value)[1:]
@@ -468,7 +473,7 @@ class _Writer:
         return defs
 
     def song(self):
-        """``(hints, song rows, loop)`` with definitions placed at first use."""
+        """``(song rows, loop)`` with definitions placed at first use."""
         rows, loop = timeline.to_rows(
             self.ir["tracks"],
             {n: len(compile_phrase(ev)) for n, ev in (self.ir["phrases"] or {}).items()},
@@ -484,9 +489,7 @@ class _Writer:
             item = {"def": item_defs} if item_defs else {}
             item["play"] = Flow(self._entry(e, alias, pnames) for e in row)
             out.append(item)
-        reason, found = hints.written(self.ir.get("hints"), {len(compiled[b]) for b in phrase_row})
-        _refuse(reason)
-        return found, out, loop
+        return out, loop
 
     @staticmethod
     def _entry(entry, alias, pnames):
@@ -526,12 +529,18 @@ class _Writer:
         return {**pr, "tables": diff} if diff else pr
 
     def environment(self) -> dict:
-        """``clock`` and ``voices`` where they differ from the defaults."""
+        """``clock``, ``voices`` and ``tempo`` where they differ from the defaults."""
         base = defaults(self.pr)
         env = {}
         for key in ("clock", "voices"):
             if key in self.ir and self.ir[key] != base[key]:
                 env[key] = FlowMap(self.ir[key]) if isinstance(self.ir[key], dict) else self.ir[key]
+        value = self.ir.get(tempo.NAME)
+        if value is not None:
+            _refuse(tempo.problem(self.pr, value))
+            value = tempo.written(*tempo.pair(value))
+            if value != tempo.default(self.pr):
+                env[tempo.NAME] = Flow(value) if isinstance(value, list) else value
         return env
 
 
@@ -557,9 +566,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
         "playroutine": writer.playroutine_entry(embed),
         "meta": FlowMap({k: meta[k] for k in ("title", "author", "released") if k in meta}),
     }
-    found, rows, loop = writer.song()
-    if found:
-        doc["hints"] = FlowMap(found)
+    rows, loop = writer.song()
     doc.update(writer.environment())
     doc["song"] = [*rows, Atom(timeline.END) if loop is None else FlowMap(loop=loop)]
     doc = respell(doc) if respell else doc
@@ -841,7 +848,7 @@ class _Reader:
             raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
         if cmd == restart.NAME and self.folds.held(cmd) and isinstance(arg, str):
             return [restart.CODE, self.lookup(arg, restart.NAME)]
-        if self.commands.inline(cmd) and arg not in (NONE, None):
+        if self.commands.inline(cmd) and isinstance(arg, tuple):
             arg = self._inline(cmd, arg, atom)
         elif isinstance(arg, str) and arg != NONE:
             if arg not in self.names:
@@ -860,6 +867,10 @@ class _Reader:
             row = inline_row(rtype, values)
         except CodecError as exc:
             raise SongFormatError(f"!{cmd}: {exc} in {atom!r}") from exc
+        try:
+            self.commands.check_inline(cmd, row)
+        except CodecError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
         rows = self.records[rtype.name]
         index = next((i for i, r in rows.items() if r == row), None)
         if index is None:
@@ -912,9 +923,9 @@ class _Reader:
         ir = {
             "unitracker": IR_VERSION,
             "meta": dict(doc.get("meta") or {}),
-            "hints": dict(doc.get("hints") or {}),
             "clock": dict(doc.get("clock") or self.defaults["clock"]),
             "voices": voices,
+            **({tempo.NAME: self._tempo()} if self.pr.get(tempo.NAME) or tempo.NAME in doc else {}),
             "tables": self.tables,
             "playroutine": self.pr,
             "records": {k: v for k, v in self.records.items() if v and not self.folds.held(k)},
@@ -925,6 +936,12 @@ class _Reader:
         ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).read, ir, self.records)
         _player(self.pr, column.check, self.pr, ir["phrases"])
         return ir
+
+    def _tempo(self):
+        """The document's initial tempo, else the playroutine's default."""
+        value = self.doc.get(tempo.NAME, tempo.default(self.pr))
+        _refuse(None if value is None else tempo.problem(self.pr, value))
+        return value
 
     @staticmethod
     def _entry(entry):
@@ -946,7 +963,6 @@ def loads(text: str) -> dict:
         raise SongFormatError(f"not a unitracker v{VERSION} document")
     for key in sorted(set(doc) - set(DOC_KEYS)):
         raise SongFormatError(f"unknown key {key} in document")
-    _refuse(hints.problem(doc.get("hints")))
     return _Reader(doc).read()
 
 

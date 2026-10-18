@@ -313,8 +313,8 @@ native package and returns the internal representation:
 |---|---|
 | `unitracker` | `"ir"` |
 | `meta` | `songio.song_meta(header, "<name> subtune N")` |
-| `hints` | `ticks_per_step` where the lifter derives one |
 | `clock`, `voices` | from the PSID header and the build |
+| `tempo` | the initial tempo as written, `n` or `[a, b]`, for a playroutine that declares `tempo` |
 | `tables` | the module's tables the playroutine reads (the frequency table) |
 | `records` | `{record type: {index: {field: value}}}`, under the playroutine's own type names |
 | `tracks` | per voice `{"plays": [{"phrase": name, "transpose": t, "repeat": n}], "loop": k}` |
@@ -331,7 +331,7 @@ imply, so the lifter resolves what the native data leaves implicit:
 
 | what | example |
 |---|---|
-| the build | constants (`adparam`, `deftempo`, `defmon`'s `floor` and `dbl`); `check_build` refuses builds and features the playroutine does not cover |
+| the build | constants (`adparam`, `defmon`'s `floor` and `dbl`) and the initial tempo; `check_build` refuses builds and features the playroutine does not cover |
 | carried modulator values | a slide's start frequency, a delay counter, an ACID direction: `convert` writes each as a constant of its start's expression |
 | instrument context | the voice's instrument at each note: SID-Wizard's octave shift into the notes, its envelope bytes, a first note that selects no instrument |
 | module state through init | `defmon`'s `vinit` and `ginit`; a cell the replay's init sets is refused, naming it |

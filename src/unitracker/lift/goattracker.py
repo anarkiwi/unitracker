@@ -1,17 +1,21 @@
 """Lift a GoatTracker 2 tune (pygoattracker's decompiled .sid) to a unitracker song."""
 
+from collections import Counter
+
 import numpy as np
+from tqdm import tqdm
 from pygoattracker import constants as C
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
 from unitracker.format.songio import library, song_meta
 from unitracker.modfit.convert import convert, window
-from unitracker.player.vm import SongPlayer, fold_empty
+from unitracker.player.vm import SongPlayer, event_commands, fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
-# The playroutine's legato command: the note does not retrigger, as a toneporta's.
-LEGATO = 17
+# The playroutine's legato command: the note does not retrigger, as a toneporta's; its swing of
+# one voice on a named pair.
+LEGATO, VOICE_SWING = 17, 18
 
 
 class LiftError(ValueError):
@@ -232,29 +236,104 @@ def _phrases(song, tracks) -> dict:
     return out
 
 
-def ticks_per_step(phrases, tracks, deftempo):
-    """Ticks per row when the whole song runs at one global tempo, else None.
+def initial_tempo(deftempo: int, pr: dict):
+    """The written initial tempo of default tempo byte ``deftempo``: ``deftempo + 1`` ticks, or
+    for 0 the swing on the player's initial funk pair; a swing from its second tempo (1) is not
+    covered."""
+    if deftempo >= 2:
+        return deftempo + 1
+    if deftempo == 1:
+        raise LiftError("a default tempo of 1, a swing from its second tempo, is not covered")
+    return [int(pr["global"][f"funk{k}"]["init"]) + 1 for k in (0, 1)]
 
-    That holds without funk tempo or per-voice tempo, with every tempo command naming
-    the same tempo, and with one on a first row unless it equals the default tempo.
-    """
-    tempos, first = set(), False
-    starts = {t["plays"][0]["phrase"] for t in tracks}
-    for name, events in phrases.items():
-        for k, event in enumerate(events):
-            cmd, arg = event.get("command") or (0, 0)
-            if cmd == C.CMD_FUNKTEMPO or (cmd == C.CMD_SETTEMPO and arg >= 0x80):
-                return None
-            if cmd == C.CMD_SETTEMPO:
-                tempo = arg & 0x7F
-                tempos.add(tempo - 1 if tempo >= 3 else tempo)
-                first = first or (k == 0 and name in starts)
-    if not tempos:
-        tempos, first = {deftempo}, True
-    if len(tempos) != 1 or not (first or tempos == {deftempo}):
-        return None
-    tempo = tempos.pop()
-    return tempo + 1 if tempo >= 2 else None
+
+# The commands that swing on the stored funk pair: E00 and $F00/$F01 every voice, $F80/$F81 this
+# voice, each as the command that names its pair ((l, r) reversed for $x1) as a speed-table row.
+STORED = {
+    (C.CMD_FUNKTEMPO, 0): (C.CMD_FUNKTEMPO, False),
+    (C.CMD_SETTEMPO, 0): (C.CMD_FUNKTEMPO, False),
+    (C.CMD_SETTEMPO, 1): (C.CMD_FUNKTEMPO, True),
+    (C.CMD_SETTEMPO, 0x80): (VOICE_SWING, False),
+    (C.CMD_SETTEMPO, 0x81): (VOICE_SWING, True),
+}
+
+
+def stored_pairs(ir: dict, ticks: int) -> dict:
+    """``{(phrase, event, command index): Counter of (l, r)}``: the funk pair stored each time a
+    command of :data:`STORED` is read, over ``ticks`` ticks."""
+    player = SongPlayer(ir)
+    fetch, starts = player.namespace["_fetch"], {}
+    for name, events in ir["phrases"].items():
+        steps = np.cumsum([0] + [int(e.get("steps", 1)) for e in events[:-1]])
+        starts[name] = {int(s): k for k, s in enumerate(steps)}
+    voice_of = {id(cells): v for v, cells in enumerate(player.voice_cells)}
+    seen = {}
+
+    def observed(cells):
+        cursor = cells[-1]
+        if not cursor.ended:
+            name = ir["tracks"][voice_of[id(cells)]]["plays"][cursor.index]["phrase"]
+            k = starts[name].get(cursor.step)
+            for j, cmd in enumerate(
+                event_commands(ir["phrases"][name][k]) if k is not None else ()
+            ):
+                if tuple(cmd) in STORED:
+                    pair = tuple((player.cell(f"funk{i}") + 1) & 0xFF for i in (0, 1))
+                    seen.setdefault((name, k, j), Counter())[pair] += 1
+        fetch(cells)
+
+    player.namespace["_fetch"] = observed
+    for _ in tqdm(range(ticks), desc="stored swing", unit="tick", leave=False):
+        player.play_frame()
+    return seen
+
+
+def _named(event: dict, j: int, pair: tuple, speed: dict) -> None:
+    """Rewrite command ``j`` of ``event``, a :data:`STORED` swing, as the command naming
+    ``pair``, its speed-table row found in ``speed`` or added to it."""
+    cmds = [list(c) for c in event_commands(event)]
+    code, reverse = STORED[tuple(cmds[j])]
+    left, right = pair[::-1] if reverse else pair
+    row = {"l": left, "r": right}
+    index = next((i for i, r in speed.items() if r == row), max(speed, default=0) + 1)
+    speed[index] = row
+    cmds[j] = [code, index]
+    event.pop("command", None)
+    event.update({"command": cmds[0]} if len(cmds) == 1 else {"commands": cmds})
+
+
+def explicit_swing(ir: dict) -> dict:
+    """``ir`` with each command that swings on the stored funk pair (:data:`STORED`) naming the
+    pair it meets most, once a replay to the song's recurrence and one period more proves it
+    unheard (a pair another voice replaces on the same tick is not heard); else LiftError."""
+    users = [
+        (name, k, j)
+        for name, events in ir["phrases"].items()
+        for k, event in enumerate(events)
+        for j, cmd in enumerate(event_commands(event))
+        if tuple(cmd) in STORED
+    ]
+    if not users:
+        return ir
+    ticks = window(ir)
+    seen = stored_pairs(ir, ticks)
+    phrases = {name: [dict(e) for e in events] for name, events in ir["phrases"].items()}
+    speed = dict(ir["records"]["speedtab"])
+    initial = tuple(int(ir["playroutine"]["global"][f"funk{i}"]["init"]) + 1 for i in (0, 1))
+    met = set()
+    for name, k, j in users:
+        pairs = seen.get((name, k, j), Counter({initial: 1}))
+        met.update(pairs)
+        _named(phrases[name][k], j, pairs.most_common(1)[0][0], speed)
+    out = {**ir, "phrases": phrases, "records": {**ir["records"], "speedtab": speed}}
+    diff = np.argwhere(SongPlayer(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
+    if len(diff):
+        tick, reg = (int(x) for x in diff[0])
+        raise LiftError(
+            f"a swing on the stored pair meets the pairs {sorted(met)}; named, it plays"
+            f" differently at tick {tick}, register {reg}"
+        )
+    return out
 
 
 def wave_rows(records: dict, phrases: dict) -> list:
@@ -353,19 +432,15 @@ def lift(dec, expressions: bool = True) -> dict:
     if build.adparam is not None:
         adparam = build.adparam << 8 | build.srparam
     deftempo = build.deftempo if build.deftempo is not None else _default_tempo(song)
-    playroutine["constants"] = {"adparam": adparam, "deftempo": deftempo}
+    playroutine["constants"] = {"adparam": adparam}
     freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
     instruments, restarts = instrument_records(song.instruments, adparam)
     tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
     phrases = _phrases(song, tracks)
     header = dec.header
-    hints = {}
-    tps = ticks_per_step(phrases, tracks, deftempo)
-    if tps is not None:
-        hints["ticks_per_step"] = tps
     ir = {
         "unitracker": "ir",
-        "hints": hints,
+        "tempo": initial_tempo(deftempo, playroutine),
         "meta": song_meta(header, f"goattracker2 subtune {dec.subtune}"),
         "clock": NTSC_CLOCK if (header.flags >> 2) & 3 == 2 else PAL_CLOCK,
         "voices": 3,
@@ -384,5 +459,5 @@ def lift(dec, expressions: bool = True) -> dict:
         "phrases": phrases,
         "playroutine": playroutine,
     }
-    ir = unpause(ir)
+    ir = explicit_swing(unpause(ir))
     return convert(ir) if expressions else ir

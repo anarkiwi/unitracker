@@ -7,8 +7,8 @@ Top-level keys, in this order:
 | `unitracker` | `1.20`; readers reject any other version |
 | `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see [Embedding](#embedding)) |
 | `meta` | `title`, `author`, `released` |
-| `hints` | reading aids the player ignores, each a positive integer and both optional: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
 | `clock`, `voices` | only where they differ from the playroutine's `defaults` |
+| `tempo` | the initial tempo, only where it differs from the playroutine's `defaults`: `n` ticks per step, or `[a, b]`, a swing whose steps alternate `a` and `b` ticks (two different tempos); a playroutine without a tempo refuses it |
 | `song` | the timeline: rows, then `end` or `{loop: k}`, as a program ends |
 
 `playroutine.constants` lists only the constants that differ from the library's.
@@ -98,7 +98,7 @@ note[.instrument][!command[:arg]...][*steps]
 - `.i3` names the instrument.
 - `!run:c1` is a command with an argument: a number, the name of the record or expression a
   command references (names are a prefix and digits, so they read as names), `none`, or values
-  joined by `/` for a command of several values (`!funk:6/7`). A command that takes no argument is
+  joined by `/` for a command of several values (`!tempo:6/7`). A command that takes no argument is
   written without one (`!legato`). A command's argument is a byte: `!freq:x7` names one of the
   first 255 expressions. An event carries at most two commands, its two slots, then `!pw`
   and `!filter` (see [Lifetime](vocabulary.md#lifetime)), which take no slot. The first slot is

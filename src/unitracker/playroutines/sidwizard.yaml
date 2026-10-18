@@ -1,9 +1,12 @@
 # SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame, as a
 # unitracker playroutine: a transcription of pysidwizard's SWMPlayer. One step is one
 # pattern row; the playroutine counts each voice's tempo, reads a row at TICK_0, applies it
-# at TICK_2 and writes the hard-restart ADSR on the ticks between. The lifter fills in the
-# subtune's tempo pair.
-constants: {tempol: 6, tempor: 6}
+# at TICK_2 and writes the hard-restart ADSR on the ticks between.
+defaults: {tempo: 6}
+# A tempo is each voice's pair of row lengths tl, tr: 3-127 ticks (a byte 0 plays 6).
+tempo:
+  cells: {tl: a, tr: b}
+  when: "3 <= a <= 127 and 3 <= b <= 127"
 tables:
   freqlo: [7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
   freqhi: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255, 7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
@@ -27,10 +30,17 @@ commands:
   112: {name: run, ref: wftab, column: [instrument, fx]}
   63: {name: legato, when: "arg == 0", column: instrument}
   # The tempo FX: $11 every voice's swing pair (high nibble, then low), $12 every voice's tempo
-  # (the player's FX $10, whose code !freq takes) and $13 this voice's; a tempo 0 plays as 6.
+  # (the player's FX $10, whose code !freq takes), $13 this voice's tempo and $14 its swing pair;
+  # a tempo 0 plays as 6.
   17:
     when: "arg < 0x100 and ((arg >> 4) == 0 or (arg >> 4) >= 3) and ((arg & 0x0F) == 0 or (arg & 0x0F) >= 3)"
-    name: funk
+    name: tempo
+    args: {a: "(arg >> 4) if arg >> 4 else 6", b: "(arg & 0x0F) if arg & 0x0F else 6"}
+    raw: "(a << 4) | b"
+    column: fx
+  20:
+    when: "arg < 0x100 and ((arg >> 4) == 0 or (arg >> 4) >= 3) and ((arg & 0x0F) == 0 or (arg & 0x0F) >= 3)"
+    name: vtempo
     args: {a: "(arg >> 4) if arg >> 4 else 6", b: "(arg & 0x0F) if arg & 0x0F else 6"}
     raw: "(a << 4) | b"
     column: fx
@@ -364,6 +374,7 @@ procs:
         - for_voices: [{set: {tl: ntl, tr: ntr, tog: 0}}]
         - return: true
     - {if: "xfc == 19", then: [{set: {tl: "xfv & 0x7F", tr: "xfv & 0x7F", tog: 0}}, {return: true}]}
+    - {if: "xfc == 20", then: [{set: {tl: "xfv >> 4", tr: "xfv & 0x0F", tog: 0}}, {return: true}]}
     - {if: "xfc == 1", then: [{set: {svib: 0x81, fx: 0}}, {call: slide_speed}]}
     - {if: "xfc == 2", then: [{set: {svib: 0x82, fx: 0}}, {call: slide_speed}]}
     - if: "xfc == 3"
@@ -578,7 +589,7 @@ procs:
     - for_voices: [{call: write_regs}]
 init:
   - for_voices:
-      - set: {vi: nv, tl: tempol, tr: tempor}
+      - set: {vi: nv}
       - set: {nv: "nv + 1"}
   - call: frame
 tick:

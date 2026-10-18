@@ -54,8 +54,8 @@ The playroutine declares [Instrument columns](../format/vocabulary.md#instrument
 |---|---|
 | `!restart` | `restart` name |
 
-Every other command is refused by name (`defmon: the player can't express !tempo:6`): timing is
-the timeline's, and the volume is fixed at 15.
+Every other command is refused by name (`defmon: the player can't express !tempo:6`), and so is
+a document's `tempo`: timing is the timeline's, and the volume is fixed at 15.
 
 ## Control programs
 

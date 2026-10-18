@@ -46,7 +46,6 @@ COMMAND_NAMES = (
     "cut",
     "tempo",
     "vtempo",
-    "funk",
     "freq",
     "mark",
     "restart",
@@ -291,7 +290,7 @@ class _Shape:
 
 
 def is_values(value) -> bool:
-    """True for a command argument of several values, ``(a, b)`` for ``!funk:a/b``."""
+    """True for a command argument of several values, ``(a, b)`` for ``!tempo:a/b``."""
     return isinstance(value, tuple) and all(
         isinstance(v, int) and not isinstance(v, bool) for v in value
     )
@@ -606,6 +605,15 @@ class CommandCodec:
                 return ref
         return None
 
+    def check_inline(self, name: str, row: dict) -> None:
+        """Raise unless the inline command ``name``'s ``when`` holds for the row it writes."""
+        for _, ename, ref, var in self.entries:
+            if ename == name and ref is not None and var.get("inline"):
+                if "when" in var and not evaluate(var["when"], row):
+                    text = "/".join(str(v) for v in row.values())
+                    raise CodecError(f"the player can't express !{name}:{text}")
+                return
+
     def values(self, name: str) -> bool:
         """Whether command ``name`` takes several values that are no record's row."""
         return any(n == name and "args" in var for _, n, _, var in self.entries)
@@ -614,7 +622,9 @@ class CommandCodec:
         """``(name, value)``: value is an int, a tuple of ints for an entry with ``args``,
         ``(type, index)`` for a reference, ``none``, or None for a command of :data:`ARGLESS`."""
         for ecode, name, ref, var in self.entries:
-            if ecode != code or ("when" in var and not evaluate(var["when"], {"arg": arg})):
+            if ecode != code or (
+                "when" in var and not var.get("inline") and not evaluate(var["when"], {"arg": arg})
+            ):
                 continue
             if name in ARGLESS:
                 return name, None
@@ -641,9 +651,9 @@ class CommandCodec:
     def _arg(self, name, ref, var, value):
         if (name in ARGLESS) != (value is None):
             return None
-        if value is None:
-            return evaluate(var.get("raw", 0), {})
-        if value == NONE:
+        if value is None or value == NONE:
+            if value is None:
+                return evaluate(var.get("raw", 0), {})
             return None if ref is None else self.rtypes[ref].none
         if "args" in var:
             fits = is_values(value) and len(value) == len(var["args"])

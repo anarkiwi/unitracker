@@ -22,9 +22,9 @@ The start of Cadaver's *Metal Warrior Title Remix* (GoatTracker 2):
 
 ```yaml
 unitracker: 1.20
-playroutine: {ref: goattracker2, constants: {deftempo: 11}}
+playroutine: {ref: goattracker2}
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
-hints: {ticks_per_step: 16, phrase_steps: 48}
+tempo: 12
 song:
   - def:
       restart:

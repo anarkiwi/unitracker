@@ -13,6 +13,7 @@ import sys
 from tqdm import tqdm
 
 from unitracker.format import songio
+from unitracker.format import tempo as ir_tempo
 from unitracker.format.songio import song_rows
 from unitracker.format.atoms import parse_atom
 from unitracker.format.yamlstyle import Atom, Flow, FlowMap
@@ -299,13 +300,12 @@ def mnemonics(doc: dict, text: str) -> str:
 
 
 def tempo(doc: dict, ir: dict) -> dict:
-    """The tempo in beats per minute of four steps, beside ``ticks_per_step``."""
-    hints = dict(doc.get("hints") or {})
+    """The initial tempo in beats per minute of four steps (a swing pair's mean), as ``bpm``."""
+    ticks = ir_tempo.pair(ir.get(ir_tempo.NAME) or ir_tempo.default(ir["playroutine"]) or 1)
     clock = ir.get("clock") or {}
-    if "ticks_per_step" in hints and clock:
+    if clock:
         rate = clock["clock_hz"] / clock["cycles_per_tick"]
-        hints["bpm"] = round(60 * rate / (4 * hints["ticks_per_step"]))
-    doc["hints"] = FlowMap(hints)
+        doc["bpm"] = round(60 * rate / (2 * sum(ticks)))
     return doc
 
 

@@ -63,8 +63,7 @@ The check (`proof.mismatch`) is exact, not sampled:
 
 What is checked is the candidate's written text read back (`songio.loads(songio.dumps(...))`), so
 the canonical writer's own rewriting ([Canonical form](format/document.md#canonical-form)) is inside
-the check. A candidate is written without its `phrase_steps` hint, which the writer derives again
-from its phrases. A song that cannot be written with its playroutine by `ref` is written embedded
+the check. A song that cannot be written with its playroutine by `ref` is written embedded
 ([Embedding](format/document.md#embedding)).
 
 ### Resuming from the input

@@ -107,7 +107,7 @@ SECOND = (
 def song():
     pulse = ins_line("i1", f"ad: 9, ctrl: [{{ctrl: 65, note: +0}}, end], pw: {PULSE}")
     text = doc(f"{pulse}\n{I2}", PHRASE, X, steps=24, extra=SECOND)
-    return songio.loads(text.replace("\nsong:", "\nhints: {ticks_per_step: 6}\nsong:"))
+    return songio.loads(text.replace("\nsong:", "\ntempo: 6\nsong:"))
 
 
 @pytest.fixture(scope="module", name="written")

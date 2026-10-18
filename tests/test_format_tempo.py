@@ -1,0 +1,82 @@
+"""The initial tempo: the document's ``tempo`` key, the cells it starts and its refusals."""
+
+import numpy as np
+import pytest
+
+from unitracker.format import songio, tempo
+from unitracker.player.vm import SongError, SongPlayer
+
+
+def tempo_song(player: str, value=None, ins="{sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}") -> str:
+    initial = "" if value is None else f"tempo: {value}\n"
+    return (
+        f"unitracker: {songio.VERSION}\nplayroutine: {{ref: {player}}}\n{initial}song:\n"
+        f"  - def:\n      ins:\n        i1: {ins}\n"
+        "      phrase:\n        p1: [C4.i1, D4, E4, F4, G4, A4, B4, C5]\n"
+        "    play: [p1, p1, p1]\n  - {loop: 0}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "player,value,cells",
+    [
+        ("goattracker2", None, {"tempo": 5, "funk0": 8, "funk1": 5}),
+        ("goattracker2", 12, {"tempo": 11, "funk0": 8, "funk1": 5}),
+        ("goattracker2", "[6, 9]", {"tempo": 0, "funk0": 5, "funk1": 8}),
+        ("sidwizard", None, {"tl": 6, "tr": 6}),
+        ("sidwizard", "[4, 7]", {"tl": 4, "tr": 7}),
+    ],
+)
+def test_the_tempo_starts_the_cells_the_playroutine_declares(player, value, cells):
+    ir = songio.loads(tempo_song(player, value))
+    text = songio.dumps(ir)
+    assert songio.dumps(songio.loads(text)) == text
+    assert (f"tempo: {value}\n" in text) == (value is not None)
+    played = SongPlayer(ir)
+    voice = {n: played.cell(n, 0) for n in cells if n in played.codegen.vindex}
+    glob = {n: played.cell(n) for n in cells if n in played.codegen.gindex}
+    assert {**voice, **glob} == cells
+
+
+@pytest.mark.parametrize("value,ticks", [("[6, 9]", 15), ("[4, 9]", 13), (7, 14)])
+def test_a_swing_alternates_its_two_step_lengths(value, ticks):
+    grid = SongPlayer(songio.loads(tempo_song("goattracker2", value))).render_grid(120)
+    steps = np.diff([t for t in range(1, 120) if grid[t, 0] != grid[t - 1, 0]])
+    assert set(steps) == {ticks}
+
+
+@pytest.mark.parametrize(
+    "player,value,match",
+    [
+        ("goattracker2", 2, "goattracker2: the player can't express tempo 2"),
+        ("goattracker2", "[1, 6]", r"can't express tempo \[1, 6\]"),
+        ("goattracker2", "[6, 6]", "two different tempos"),
+        ("goattracker2", "[6, 7, 8]", "two different tempos"),
+        ("goattracker2", "fast", "two different tempos"),
+        ("sidwizard", 2, "sidwizard: the player can't express tempo 2"),
+    ],
+)
+def test_the_reader_refuses_a_tempo_the_player_cannot_play(player, value, match):
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.loads(tempo_song(player, value))
+    with pytest.raises(songio.SongFormatError, match="defmon: the player has no tempo"):
+        songio.loads(tempo_song("defmon", 6, "{ctrl: [{ctrl: 65, gate: 1}, end]}"))
+
+
+def test_the_writer_refuses_a_tempo_the_player_cannot_play():
+    ir = songio.loads(tempo_song("goattracker2"))
+    with pytest.raises(songio.SongFormatError, match="two different tempos"):
+        songio.dumps({**ir, "tempo": [6, 6]})
+    with pytest.raises(songio.SongFormatError, match="can't express tempo 200"):
+        songio.dumps({**ir, "tempo": 200})
+
+
+def test_a_tempo_cell_must_be_a_cell_and_its_expressions_must_read():
+    pr = songio.library("sidwizard")
+    assert tempo.cells(pr, [3, 4]) == {"tl": 3, "tr": 4} and tempo.written(5, 5) == 5
+    bad = {**pr, "tempo": {"cells": {"nope": "a"}}}
+    ir = songio.loads(tempo_song("sidwizard"))
+    with pytest.raises(SongError, match="unknown cell 'nope'"):
+        SongPlayer({**ir, "playroutine": bad})
+    assert "unknown table" in tempo.problem({**pr, "tempo": {"when": "t[0]"}}, 6)
+    assert tempo.cells({}, 6) == {} and tempo.pair(True) is None

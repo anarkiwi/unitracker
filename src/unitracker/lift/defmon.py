@@ -386,7 +386,6 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     playroutine["constants"] = model_constants(mem)
     ir = {
         "unitracker": "ir",
-        "hints": {"ticks_per_step": 1},
         "meta": song_meta(header, f"defmon subtune {subtune}"),
         "clock": {
             "cycles_per_tick": int(player.cycles_per_frame),

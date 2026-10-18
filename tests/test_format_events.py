@@ -358,7 +358,7 @@ def test_commands_in_different_columns_share_an_event():
     "atoms,shown",
     [
         ("C4.i1!sr:192!tempo:4*4", "!sr and !tempo"),
-        ("C4.i1!run:c1!funk:4/5*4", "!run and !funk"),
+        ("C4.i1!run:c1!tempo:4/5*4", "!run and !tempo"),
         ("C4.i1*4, D4!sr:192!run:c1*4", "!sr and !run"),
     ],
 )
