@@ -692,25 +692,24 @@ def nfreq(note):
 @pytest.mark.parametrize("freq", [3, -5, 0])
 def test_defmon_init_keys_mean_what_they_mean_in_rows(freq):
     ir = defmon_doc({"pw": 0x0567, "note": "C3", **({"freq": freq} if freq else {})}, {"sub": 1})
-    voice, word = ir["records"]["vinit"][0], nfreq(60) + freq
-    assert (voice["pw"], voice["tbase"], voice["flo"] | voice["fhi"] << 8) == (0x0567, 60, word)
+    voice = ir["records"]["vinit"][0]
+    assert (voice["pw"], voice["tbase"], voice["sacc"]) == (0x0567, 60, freq & 0xFFFF)
     assert ir["records"]["ginit"][0] == {"sub": 1}
-    grid = SongPlayer(ir).render_grid(2)
-    assert list(grid[0][0:4]) == [word & 0xFF, word >> 8, 0x67, 0x05]
+    assert list(SongPlayer(ir).render_grid(2)[0][2:4]) == [0x67, 0x05]
     text = songio.dumps(ir)
     assert f"0: {{note: C3, pw: 1383{f', freq: {freq}' if freq else ''}}}" in text
     assert songio.dumps(songio.loads(text)) == text
 
 
-def test_defmon_init_frequency_is_an_offset_that_wraps():
+def test_defmon_init_frequency_is_the_pitch_units_start_value():
     ir = defmon_doc({})
     voice = ir["records"]["vinit"][0]
-    assert voice["flo"] | voice["fhi"] << 8 == nfreq(0)
-    voice.update(flo=0xFF, fhi=0xFF, tbase=0)
-    assert f"freq: {0xFFFF - nfreq(0) - 0x10000}" in songio.dumps(ir)
-    voice.update(flo=0, fhi=0, tbase=100)
+    voice.update(sacc=0xFFFF)
     text = songio.dumps(ir)
-    assert f"freq: -{nfreq(100)}" in text and songio.dumps(songio.loads(text)) == text
+    assert "0: {freq: -1}" in text and songio.dumps(songio.loads(text)) == text
+    player = SongPlayer(ir)
+    player.render_grid(1)
+    assert player.cell("sacc", 0) == 0xFFFF
 
 
 def test_defmon_init_cells_without_a_written_form_are_refused():

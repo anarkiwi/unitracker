@@ -1,8 +1,10 @@
 """Lifting the defMON replay: build check, state, sidTAB rows and song timing."""
 
 import pytest
+from test_format_codec import defmon_doc
 
 from unitracker.lift import defmon as dm
+from unitracker.player.vm import SongPlayer
 
 
 def build_mem():
@@ -32,7 +34,7 @@ def test_voice_init():
     mem[0x1023 + 0x31], mem[0x1025 + 0x31], mem[0x12ED + 0x62] = 0x40, 0x08, 60
     recs = dm.voice_init(mem)
     assert recs[1]["pw"] == 0x0840 and recs[2]["tbase"] == 60
-    assert set(recs[0]) == {"pw", "flo", "fhi", "sacc", "tbase"}
+    assert set(recs[0]) == {"pw", "sacc", "tbase"}
     for cell, addr in (("note", 0x137F), ("cntB", 0x1373)):
         mem[addr] ^= 1
         with pytest.raises(dm.LiftError, match=f"init leaves voice 0's {cell} at"):
@@ -200,3 +202,24 @@ def test_the_reference_lift_holds_the_replay_state(references):
     assert song["playroutine"]["name"] == "defmon"
     assert song["clock"]["cycles_per_tick"] == 19656
     assert [t["loop"] for t in song["tracks"]] == [1, 1, 1]
+
+
+class _Native:  # pylint: disable=too-few-public-methods
+    """A native player standing in for the replay: the grid of a song, one register changed."""
+
+    def __init__(self, song, tick=None):
+        self.song, self.tick = song, tick
+
+    def render_grid(self, ticks):
+        grid = SongPlayer(self.song).render_grid(ticks)
+        if self.tick is not None:
+            grid[self.tick, 0] ^= 1
+        return grid
+
+
+def test_an_unheard_init_note_is_dropped_and_a_heard_frequency_refused():
+    ir = defmon_doc({"pw": 0x100, "note": "C3"})
+    assert dm.unheard_init(ir, _Native(ir))["records"]["vinit"][0] == {"pw": 0x100, "sacc": 0}
+    ir["phrases"]["p1"] = [{"note": 60, "steps": 4}]
+    with pytest.raises(dm.LiftError, match="the init's frequency registers are heard: tick 3"):
+        dm.unheard_init(ir, _Native(ir, 3))

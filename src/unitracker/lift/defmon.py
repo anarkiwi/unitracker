@@ -5,11 +5,13 @@ pydefmon's DefmonPlayer and tables and state are read from that memory. Song tim
 comes from simulating the replay's arranger and pattern counters.
 """
 
+import numpy as np
 import yaml
 from pysidtracker import SidImage
 
 from unitracker.format.songio import library, song_meta
-from unitracker.modfit.convert import convert
+from unitracker.modfit.convert import convert, window
+from unitracker.player.vm import SongPlayer, first_mismatch
 
 PAL_HZ = 985248
 NTSC_HZ = 1022727
@@ -107,7 +109,10 @@ VOICE_STATE = (
     ("rowB", 0x1382, None),
     ("cntB", 0x1373, None),
 )
-# The voice cells the replay's init ($1522) sets, with their values; the module carries the rest.
+# The voice cells the replay's init ($1522) sets, with their values; the module carries the rest,
+# of which the frequency registers sound only before the first pitch step, and are dropped once a
+# replay proves them unheard.
+VOICE_UNHEARD = ("flo", "fhi")
 VOICE_SET = {
     **dict.fromkeys(("sr", "ad", "ctrl", "wgl", "af", "ps", "note", "rowA", "rowB"), 0),
     "cntA": 0xFF,
@@ -149,8 +154,38 @@ def voice_init(mem) -> dict:
             rec[cell] = mem[lo + off] if hi is None else _word(mem, lo + off, hi + off)
             if rec[cell] != VOICE_SET.get(cell, rec[cell]):
                 raise LiftError(f"init leaves voice {v}'s {cell} at ${rec[cell]:02X}")
-        out[v] = {cell: value for cell, value in rec.items() if cell not in VOICE_SET}
+        out[v] = {
+            cell: value
+            for cell, value in rec.items()
+            if cell not in VOICE_SET and cell not in VOICE_UNHEARD
+        }
     return out
+
+
+def unheard_init(ir: dict, native) -> dict:
+    """``ir`` without the ``vinit`` notes its replay does not hear, once a replay to the song's
+    recurrence and one period more proves it plays ``native``'s grid (the module's frequency
+    registers, which the playroutine does not carry, unheard)."""
+    ticks = window(ir)
+    theirs = np.asarray(native.render_grid(ticks), dtype=np.uint8)
+
+    def mismatch(song):
+        player = SongPlayer(song)
+        return first_mismatch(player.render_grid(ticks), theirs, player.starts)
+
+    found = mismatch(ir)
+    if found is not None:
+        raise LiftError(
+            f"the init's frequency registers are heard: tick {found[0]}, register {found[1]}"
+        )
+    voices = ir["records"]["vinit"]
+    for v in sorted(voices):
+        if voices[v].get("tbase"):
+            rest = {k: x for k, x in voices[v].items() if k != "tbase"}
+            trial = {**ir, "records": {**ir["records"], "vinit": {**voices, v: rest}}}
+            if mismatch(trial) is None:
+                voices = trial["records"]["vinit"]
+    return {**ir, "records": {**ir["records"], "vinit": voices}}
 
 
 def global_init(mem) -> dict:
@@ -402,4 +437,5 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
         "tracks": tracks,
         "phrases": phrases,
     }
+    ir = unheard_init(ir, DefmonPlayer(raw, subtune=subtune))
     return convert(ir) if expressions else ir
