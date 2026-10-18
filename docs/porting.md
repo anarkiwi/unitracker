@@ -310,7 +310,7 @@ envelope nibbles, restarts, one-command columns) beside the existing players'. *
 ## 6. The lifter
 
 `src/unitracker/lift/<name>.py` subclasses `unitracker.lift.base.Lift`, as
-`goattracker.GoatTrackerLift` does (defMON and SID-Wizard are to follow), and raises
+`goattracker.GoatTrackerLift` and `sidwizard.SidWizardLift` do (defMON is to follow), and raises
 `base.LiftError`. The base runs the passes ([Lifting](playroutines/lifting.md)); the subclass
 supplies the player:
 

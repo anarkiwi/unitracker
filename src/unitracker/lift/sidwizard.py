@@ -1,9 +1,11 @@
 """Lift a SID-Wizard 1.x tune (pysidwizard's decoded .sid) to a unitracker song."""
 
-from functools import cache
+import copy
+from functools import cache, cached_property
+from typing import NamedTuple
 
 from pysidtracker import SidImage
-from pysidwizard import End, Loop, PlayPattern, parse_sid_song
+from pysidwizard import End, Loop, PlayPattern, SWMPlayer, parse_sid_song
 from pysidwizard.constants import INST_WF_TABLE_POS, TABLE_END
 from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
@@ -12,7 +14,7 @@ from unitracker.format.codec import CodecError, CommandCodec
 from unitracker.format.records import chained, record_types
 from unitracker.format.songio import library, song_meta
 from unitracker.format.tempo import written
-from unitracker.modfit.convert import convert
+from unitracker.lift.base import Lift, LiftError
 from unitracker.player.vm import fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
@@ -45,10 +47,6 @@ HR_TIMER, HR_STACCATO, HR_FIRSTCTRL, FLAGS = 0x03, 0x04, 0x08, 0xF0
 STACCATO = 0x18
 # The player's empty instrument: its control byte and first waveform.
 EMPTY_CONTROL, EMPTY_FIRST = 0x1A, 0x09
-
-
-class LiftError(ValueError):
-    """The tune uses something the sidwizard playroutine does not cover."""
 
 
 class Tables:
@@ -435,19 +433,21 @@ def track(sequence, patterns: int) -> dict:
     return {"plays": plays, "loop": None}
 
 
-def first_note_selects(tracks, phrases) -> None:
-    """Each voice's first pitched note selects an instrument.
+def first_note_selects(_lift, ir: dict) -> dict:
+    """``ir``, once each voice's first pitched note selects an instrument.
 
     A note that selects none on a voice that has never had one has no instrument state
     to play.
     """
-    for voice, trk in enumerate(tracks):
+    phrases = ir["phrases"]
+    for voice, trk in enumerate(ir["tracks"]):
         for play in trk["plays"]:
             notes = [e for e in phrases[play["phrase"]] if isinstance(e.get("note"), int)]
             if notes:
                 if "instrument" not in notes[0]:
                     raise LiftError(f"voice {voice}'s first note selects no instrument")
                 break
+    return ir
 
 
 def _commands(event: dict) -> list:
@@ -483,8 +483,9 @@ def _chord_targets(event: dict, ins: int, glide: bool, waves: Waves) -> dict:
     return out
 
 
-def chord_runs(tracks, phrases, waves: Waves) -> None:
-    """Each chord FX as ``!run`` of the WF program its note starts.
+def chord_runs(lift, ir: dict) -> dict:
+    """``ir`` with each chord FX as ``!run`` of the WF program its note starts, allocated in
+    ``lift.waves``.
 
     A chord FX selects the chord a $7F row plays until the voice's next note, so on a note
     that starts the instrument it starts that instrument's program with the chord inlined.
@@ -492,17 +493,19 @@ def chord_runs(tracks, phrases, waves: Waves) -> None:
     orderlist twice through its loop. The playroutine plays ``!run`` in the instrument
     column on a row that names no instrument, else in the FX column.
     """
-    runs = {}
-    for trk in tracks:
+    phrases, runs = copy.deepcopy(ir["phrases"]), {}
+    for trk in ir["tracks"]:
         ins, glide = 0, False
         for name, k, event in _voice_events(trk, phrases):
             ins = event.get("instrument", ins)
-            for j, target in _chord_targets(event, ins, glide, waves).items():
+            for j, target in _chord_targets(event, ins, glide, lift.waves).items():
                 if runs.setdefault((name, k, j), target) != target:
                     raise LiftError("a chord FX's note plays different instruments")
             glide = _gliding(event, glide)
     for (name, k, j), target in runs.items():
         _commands(phrases[name][k])[j][:] = [CHORD_FX, target]
+    wftab = dict(lift.waves.tables.records["wftab"])
+    return {**ir, "phrases": phrases, "records": {**ir["records"], "wftab": wftab}}
 
 
 def _voice_events(trk: dict, phrases: dict):
@@ -513,16 +516,16 @@ def _voice_events(trk: dict, phrases: dict):
             yield play["phrase"], k, event
 
 
-def fold_octaves(tracks, phrases, records: dict) -> None:
-    """Each instrument's octave shift moved into the notes it plays.
+def fold_octaves(_lift, ir: dict) -> dict:
+    """``ir`` with each instrument's octave shift moved into the notes it plays.
 
     The player adds the selected instrument's shift to every note, so each note becomes its
     sounding pitch and every shift 0. A row that selects an instrument of another shift
     without a note retunes the sounding note, and a phrase note played under instruments of
     different shifts has no one pitch: neither is covered.
     """
-    shifts = {}
-    for trk in tracks:
+    phrases, records, shifts = copy.deepcopy(ir["phrases"]), ir["records"]["ins"], {}
+    for trk in ir["tracks"]:
         octave, sounding = 0, False
         for name, k, event in _voice_events(trk, phrases):
             note = isinstance(event.get("note"), int)
@@ -539,21 +542,8 @@ def fold_octaves(tracks, phrases, records: dict) -> None:
         event["note"] += octave
         if event["note"] < 1:
             raise LiftError(f"a note shifted by {octave} semitones sounds below C0")
-    for rec in records.values():
-        rec.pop("octave", None)
-
-
-def check_build(swm, features) -> None:
-    """Raise for builds and tunes the sidwizard playroutine does not cover yet."""
-    unsupported = {
-        f"the {features.name} player build": features.name != "normal",
-        "multispeed": swm.frame_speed != 1,
-        "init-routine voice-register writes": any(swm.sid_init[:21]),
-        "no instruments": not swm.instruments,
-    }
-    missing = [name for name, used in unsupported.items() if used]
-    if missing:
-        raise LiftError("not covered by the sidwizard playroutine yet: " + ", ".join(missing))
+    ins = {num: {k: v for k, v in rec.items() if k != "octave"} for num, rec in records.items()}
+    return {**ir, "phrases": phrases, "records": {**ir["records"], "ins": ins}}
 
 
 class Instruments:
@@ -606,50 +596,82 @@ def freq(swm, features) -> tuple[bytes, bytes]:
     return freq_tables(features, swm.freq_table_tail)
 
 
-def lift(raw: bytes, subtune: int = 0, expressions: bool = True) -> dict:
-    """A unitracker song dict for SID-Wizard tune ``raw``.
+class Decoded(NamedTuple):
+    """A SID-Wizard tune's subtune: its pysidwizard module, PSID header and 0-based number."""
 
-    With ``expressions`` its modulations are written as the format's expressions.
-    """
-    # pylint: disable=too-many-locals
-    swm = parse_sid_song(raw, subtune + 1)
-    features = features_for_driver(swm.driver_type)
-    check_build(swm, features)
-    lo, hi = freq(swm, features)
-    tables = Tables()
-    instruments = Instruments(swm, tables)
-    events = Events(instruments.index)
-    tracks = [track(seq, len(swm.patterns)) for seq in swm.sequences[:3]]
-    if len(tracks) != 3:
-        raise LiftError("a subtune needs three orderlists")
-    phrases = {
-        name: events.phrase(swm.patterns[int(name[1:], 16) - 1], int(name[1:], 16))
-        for name in sorted({p["phrase"] for t in tracks for p in t["plays"]})
-    }
-    first_note_selects(tracks, phrases)
-    chord_runs(tracks, phrases, instruments.waves)
-    fold_octaves(tracks, phrases, instruments.records)
-    playroutine = library("sidwizard")
-    ir = {
-        "unitracker": "ir",
-        "tempo": tempo(swm),
-        "meta": song_meta(SidImage.from_bytes(raw).header, f"sidwizard subtune {subtune}"),
-        "clock": PAL_CLOCK,
-        "voices": 3,
-        "tables": {
-            "freqlo": list(lo),
-            "freqhi": list(hi),
-            "exptab": list(playroutine["tables"]["exptab"]),
-        },
-        "records": {
-            "ins": instruments.records,
-            "wftab": tables.records["wftab"],
-            "pwtab": tables.records["pwtab"],
-            "flttab": tables.records["flttab"],
-            "restart": instruments.restarts.records,
-        },
-        "tracks": tracks,
-        "phrases": phrases,
-        "playroutine": playroutine,
-    }
-    return convert(ir) if expressions else ir
+    swm: object
+    header: object
+    subtune: int
+
+
+class SidWizardLift(Lift):
+    """A SID-Wizard 1.x tune, ``tune`` a :class:`Decoded`."""
+
+    playroutine = "sidwizard"
+    normalisations = (first_note_selects, chord_runs, fold_octaves)
+
+    def __init__(self, tune: Decoded, expressions: bool = True):
+        super().__init__(tune, expressions)
+        self.waves: Waves | None = None
+
+    @staticmethod
+    def decode(raw: bytes, subtune: int) -> Decoded:
+        return Decoded(parse_sid_song(raw, subtune + 1), SidImage.from_bytes(raw).header, subtune)
+
+    def native(self):
+        return SWMPlayer(self.tune.swm)
+
+    @cached_property
+    def features(self):
+        """The player build the tune was exported for."""
+        return features_for_driver(self.tune.swm.driver_type)
+
+    def check_build(self) -> None:
+        swm, features = self.tune.swm, self.features
+        unsupported = {
+            f"the {features.name} player build": features.name != "normal",
+            "multispeed": swm.frame_speed != 1,
+            "init-routine voice-register writes": any(swm.sid_init[:21]),
+            "no instruments": not swm.instruments,
+        }
+        missing = [name for name, used in unsupported.items() if used]
+        if missing:
+            raise LiftError(
+                f"not covered by the {self.playroutine} playroutine yet: " + ", ".join(missing)
+            )
+
+    def structure(self) -> dict:
+        swm = self.tune.swm
+        lo, hi = freq(swm, self.features)
+        tables = Tables()
+        instruments = Instruments(swm, tables)
+        self.waves = instruments.waves
+        events = Events(instruments.index)
+        tracks = [track(seq, len(swm.patterns)) for seq in swm.sequences[:3]]
+        if len(tracks) != 3:
+            raise LiftError("a subtune needs three orderlists")
+        phrases = {
+            name: events.phrase(swm.patterns[int(name[1:], 16) - 1], int(name[1:], 16))
+            for name in sorted({p["phrase"] for t in tracks for p in t["plays"]})
+        }
+        playroutine = library(self.playroutine)
+        return {
+            "unitracker": "ir",
+            "tempo": tempo(swm),
+            "meta": song_meta(self.tune.header, f"{self.playroutine} subtune {self.tune.subtune}"),
+            "clock": PAL_CLOCK,
+            "voices": 3,
+            "tables": {
+                "freqlo": list(lo),
+                "freqhi": list(hi),
+                "exptab": list(playroutine["tables"]["exptab"]),
+            },
+            "records": {
+                "ins": instruments.records,
+                **{name: dict(rows) for name, rows in tables.records.items()},
+                "restart": instruments.restarts.records,
+            },
+            "tracks": tracks,
+            "phrases": phrases,
+            "playroutine": playroutine,
+        }

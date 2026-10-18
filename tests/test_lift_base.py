@@ -1,13 +1,16 @@
-"""The lift framework's passes, through the GoatTracker 2 lifter on synthetic tunes."""
+"""The lift framework's passes, through the GoatTracker 2 lifter on synthetic tunes and the
+SID-Wizard lifter on Csillag and patched cuts of it."""
 
 import struct
 
 import numpy as np
 import pytest
-from conftest import gt_tune
+from conftest import gt_tune, sw_fx
+from pysidwizard import SWMPlayer, parse_sid_song
 
-from unitracker.lift import base
+from unitracker.lift import backends, base
 from unitracker.lift.goattracker import GoatTrackerLift
+from unitracker.lift.sidwizard import Decoded, SidWizardLift
 from unitracker.player.vm import SongPlayer
 
 REST = (None, 0, 0, 0)
@@ -93,3 +96,64 @@ def test_from_sid_decodes_the_start_song_unless_given_one(monkeypatch):
     assert GoatTrackerLift.from_sid(psid(3)).tune == (psid(3), 2)
     lift = GoatTrackerLift.from_sid(psid(3), 0, expressions=False)
     assert lift.tune == (psid(3), 0) and not lift.expressions
+
+
+SW_NORMALISATIONS = ("first_note_selects", "chord_runs", "fold_octaves")
+
+
+def test_the_sidwizard_passes_run_in_order_and_convert_last(csillag, monkeypatch):
+    monkeypatch.setattr(SidWizardLift, "convert", lambda _lift, song: {**song, "exprs": {}})
+    assert SidWizardLift.passes() == ("structure", *SW_NORMALISATIONS, "convert")
+    stages = list(SidWizardLift.from_sid(csillag.read_bytes()).stages())
+    assert tuple(name for name, _ in stages) == SidWizardLift.passes()
+    assert stages[-1][1] == {**stages[-2][1], "exprs": {}}
+
+
+def test_each_sidwizard_normalisation_receives_the_song_before_it(csillag):
+    seen = []
+
+    def recording(normalise):
+        def record(lift, song):
+            seen.append(song)
+            return normalise(lift, song)
+
+        record.__name__ = normalise.__name__
+        return record
+
+    recorded = type(
+        "Recorded",
+        (SidWizardLift,),
+        {"normalisations": tuple(map(recording, SidWizardLift.normalisations))},
+    )
+    lift = recorded.from_sid(csillag.read_bytes(), expressions=False)
+    stages = list(lift.stages())
+    assert [name for name, _ in stages] == ["structure", *SW_NORMALISATIONS]
+    assert all(got is song for got, (_, song) in zip(seen, stages))
+    first, chorded, folded = (song for _, song in stages[1:])
+    assert chorded["phrases"] != first["phrases"] and folded["phrases"] != chorded["phrases"]
+    assert chorded["records"]["wftab"] != first["records"]["wftab"]
+    assert any("octave" in rec for rec in chorded["records"]["ins"].values())
+    assert not any("octave" in rec for rec in folded["records"]["ins"].values())
+    assert stages[0][1] == SidWizardLift.from_sid(csillag.read_bytes()).structure()
+
+
+def test_a_sidwizard_lift_without_expressions_skips_convert(csillag, monkeypatch):
+    def refused(_lift, _song):
+        raise AssertionError("converted")
+
+    monkeypatch.setattr(SidWizardLift, "convert", refused)
+    raw = csillag.read_bytes()
+    lift = SidWizardLift.from_sid(raw, expressions=False)
+    assert lift.run() == list(lift.stages())[-1][1] == backends.lift(raw, expressions=False)
+
+
+def test_a_decoded_sidwizard_module_lifts_and_plays_as_given(csillag):
+    raw = csillag.read_bytes()
+    swm = sw_fx(raw, {(9, 8): (0x10, 4)})
+    lift = SidWizardLift(Decoded(swm, base.SidImage.from_bytes(raw).header, 0), expressions=False)
+    assert lift.run()["phrases"]["p09"][1] == {"note": "off", "command": [0x12, 4], "steps": 24}
+    ours = lift.native().render_grid(400)
+    assert np.array_equal(ours, SWMPlayer(swm).render_grid(400))
+    assert not np.array_equal(ours, backends.native_player(raw).render_grid(400))
+    theirs = SWMPlayer(parse_sid_song(raw, 1)).render_grid(400)
+    assert np.array_equal(backends.native_player(raw).render_grid(400), theirs)

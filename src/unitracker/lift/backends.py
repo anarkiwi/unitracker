@@ -42,7 +42,7 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     if backend == "sidwizard":
         from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
 
-        return sidwizard.lift(raw, subtune, expressions)
+        return sidwizard.SidWizardLift.from_sid(raw, subtune, expressions).run()
     from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
 
     return goattracker.GoatTrackerLift.from_sid(raw, subtune, expressions).run()
@@ -58,9 +58,9 @@ def native_player(raw: bytes, subtune=None):
 
         return DefmonPlayer(raw, subtune=subtune)
     if backend == "sidwizard":
-        from pysidwizard import SWMPlayer, parse_sid_song  # pylint: disable=import-outside-toplevel
+        from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
 
-        return SWMPlayer(parse_sid_song(raw, subtune + 1))
+        return sidwizard.SidWizardLift.from_sid(raw, subtune).native()
     from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
 
     return goattracker.GoatTrackerLift.from_sid(raw, subtune).native()
