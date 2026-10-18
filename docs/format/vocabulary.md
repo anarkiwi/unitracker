@@ -37,15 +37,17 @@ record type is one player's own.
 | `!pulse:0`, `!filter:0` | the note does not restart the instrument's pulse / filter program (see [Lifetime](#lifetime)) |
 
 A playroutine takes the commands its `commands`, `restart` and `lifetime` declare, over the
-arguments its codec accepts; each playroutine's file lists them. A shared key means the same
-wherever it appears: in program rows, in fixed records, and in instruments, where `ctrl` names the
-program run on the control register, `pw` and `filter` the pulse and filter programs, and `restart`
-the hard restart. A row or command a player can't express is rejected on reading, naming the key or
-command and the player (`defmon: the player can't express !tempo:6`); the writer refuses to write a
-value that would not read back. A key, command or record type outside the playroutine's codec
-shapes, record types and the shared command names is refused with one message naming it and where it
-appeared (`unknown key k in pw`, `unknown command !mod in '-!mod:1'`, `unknown record type
-'speedtab'`, `unknown key registers in document`).
+arguments its codec accepts; each playroutine's file
+([goattracker2](../playroutines/goattracker2.md#commands),
+[sidwizard](../playroutines/sidwizard.md#commands), [defmon](../playroutines/defmon.md#commands))
+lists them. A shared key means the same wherever it appears: in program rows, in fixed records, and
+in instruments, where `ctrl` names the program run on the control register, `pw` and `filter` the
+pulse and filter programs, and `restart` the hard restart. A row or command a player can't express
+is rejected on reading, naming the key or command and the player (`defmon: the player can't express
+!tempo:6`); the writer refuses to write a value that would not read back. A key, command or record
+type outside the playroutine's codec shapes, record types and the shared command names is refused
+with one message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in
+'-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`).
 
 ## Chords
 

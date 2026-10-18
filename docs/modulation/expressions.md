@@ -41,9 +41,12 @@ firing.
 
 ## Units
 
-A unit drives one shared key, `freq` (a voice's frequency), `pw` (a voice's pulse width) or
-`cut` (the filter cutoff). Its value `v` is its `chip` map's value, else its cell's (see Modulator
-declarations); each playroutine's file gives its units.
+A unit drives one shared key, `freq` (a voice's frequency), `pw` (a voice's pulse width) or `cut`
+(the filter cutoff). Its value `v` is its `chip` map's value, else its cell's (see [Modulator
+declarations](../playroutines/schema.md#modulator-declarations)); each playroutine's file gives its
+units ([goattracker2](../playroutines/goattracker2.md#modulators),
+[sidwizard](../playroutines/sidwizard.md#modulators),
+[defmon](../playroutines/defmon.md#modulators)).
 
 ## Where expressions go
 
