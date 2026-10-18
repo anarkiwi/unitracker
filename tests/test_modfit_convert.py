@@ -177,7 +177,7 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
 @pytest.mark.parametrize(
     "song,old,new,kept",
     [
-        (GT_SONG, "", "", ["pw: '1024 + 16*min(3, φ)'", "!freq:x2!legato"]),
+        (GT_SONG, "", "", ["pw: '16*min(3, φ) + 1024'", "!freq:x2!legato"]),
         (GT_SONG, "pw: '1024 + 16*min(3, φ)'", "pw: 2048", ["pw: 2048"]),
         (
             GT_SONG,
@@ -265,7 +265,7 @@ def test_a_selected_expression_must_exist():
         SongPlayer(song)
 
 
-CSILLAG_GATE = "(-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33])*(φ >= 15)"
+CSILLAG_GATE = "(2*W[N + 33] - W[N + 33]*abs((φ + 3) % 8 - 4))*(φ >= 15)"
 ACID_STEP = "v % 32768 + 2048)*(v % 32768 < 30208)"
 
 

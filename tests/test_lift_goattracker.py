@@ -306,7 +306,7 @@ WAVETABLE_TUNES = {
         },
         ("ins", "i1", "ctrl"),
         [FIRST, {"freq": "v + 16"}, {"freq": "v + 16"}, ...]
-        + [{"freq": "v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2"}]
+        + [{"freq": "v - (F((N + 1) % 128) - F(N)) % 65536 // 2"}]
         + [{"freq": "v + 32"}, {"ctrl": 65}, {"loop": 6}],
     ),
     "an unheard waveform pause is a waveform row": (

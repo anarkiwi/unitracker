@@ -118,7 +118,7 @@ FIRES = {
     ),
     "merge expressions": (
         "expressions",
-        doc(I1, FREQS, exprs("(v + 16 + 16) % 65536")),
+        doc(I1, FREQS, exprs("v + 32")),
         ["merge"],
         lambda t: "x2" not in t,
     ),

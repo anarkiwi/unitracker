@@ -1,10 +1,12 @@
 """One spelling per meaning: forms that play as another are refused by the reader, and the
 writer writes each meaning one way."""
 
+import itertools
+
 import numpy as np
 import pytest
 
-from unitracker.format import idle, songio, timeline
+from unitracker.format import idle, songio, timeline, xexpr
 from unitracker.format.codec import CodecError, row_place
 from unitracker.player.vm import SongPlayer
 
@@ -388,3 +390,47 @@ def test_a_constant_is_written_as_the_value_where_the_value_plays_it(pr, ins):
     assert "cut: 1024" in text
     if pr == "goattracker2":
         assert "cut: '1027'" in canonical(doc(pr, defs.replace("CUT", "'1027'"), {"p1": "C4.i1*8"}))
+
+
+# -- 7: one text per expression --
+
+
+@pytest.mark.parametrize(
+    "text,written",
+    [
+        ("v+32", "v + 32"),
+        ("32 + v", "v + 32"),
+        ("v - -32", "v + 32"),
+        ("((v + 32))", "v + 32"),
+        ("v + 3 + 5", "v + 8"),
+        ("2*(v + 3)", "2*v + 6"),
+        ("3*v*2 - v", "5*v"),
+        ("max(φ, 0)", "max(0, φ)"),
+        ("-v % 3", "-v % 3"),
+        ("-(v % 3)", "-(v % 3)"),
+        ("v - (φ % 4)", "v - φ % 4"),
+        ("(v - 1) % 256", "(v - 1) % 256"),
+        ("v*(φ >= 1)*2", "2*v*(φ >= 1)"),
+        (
+            "v - ((-F(N) + F((N + 1) % 128)) % 65536) // 2",
+            "v - (F((N + 1) % 128) - F(N)) % 65536 // 2",
+        ),
+        ("(N - 3)*φ % (4*v + 1)", "φ*(N - 3) % (4*v + 1)"),
+        ("0*φ + v", "v"),
+    ],
+)
+def test_an_expression_is_written_in_one_form(text, written):
+    assert xexpr.canonical(text) == written and xexpr.canonical(written) == written
+    tables = {"_F": lambda k: (37 * k) % 65536, "_T": {}}
+    for v, phi, n in itertools.product((-70001, -5, 0, 7, 65535, 99999), (0, 1, 13), (0, 24, 127)):
+        assert xexpr.compile_expr(text, tables)(v, phi, n) == xexpr.compile_expr(written, tables)(
+            v, phi, n
+        )
+
+
+def test_equal_expressions_are_one_definition():
+    phrases = {"p1": "C4.i1!freq:x1*4, D4!freq:x2*4, E4!freq:x3*4"}
+    defs = GT_FREQ.replace("        x2: v\n", "        x2: 300 + v\n        x3: v - -300\n")
+    text = canonical(doc("goattracker2", defs, phrases))
+    assert "x1: v + 300" in text and "x2" not in text
+    assert "C4.i1!freq:x1*4, D4!freq:x1*4, E4!freq:x1*4" in text

@@ -171,7 +171,7 @@ class _Writer:
         self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
         self.slotted = envelope_names(self.pr.get("commands"))
-        self.exprs = {int(k): str(v) for k, v in (ir.get("exprs") or {}).items()}
+        self.exprs = {int(k): xexpr.canonical(str(v)) for k, v in (ir.get("exprs") or {}).items()}
         canon = {}
         self.xcanon = {i: canon.setdefault(t, i) for i, t in sorted(self.exprs.items())}
         self.first_row = {}
