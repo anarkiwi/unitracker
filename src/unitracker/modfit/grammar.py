@@ -12,6 +12,8 @@ import operator
 import sympy
 import z3
 
+from unitracker.modfit import interval as I
+
 V = sympy.Symbol("v", integer=True)
 PHI = sympy.Symbol("φ", integer=True, nonnegative=True)
 N = sympy.Symbol("N", integer=True, nonnegative=True)
@@ -238,7 +240,7 @@ def display(e, context: tuple = (), domain: tuple = ()):
     of ``e`` and ``domain``. Each of a bracket's cofactors ``Y`` and ``X + Y`` is shown once
     (see :func:`_cofactors`), so the calls grow with the brackets, not with their combinations.
     """
-    e = products(e, context, domain)
+    e = _case(e, context, domain)
     if not context:
         flat = denest(e, domain)
         if flat != e:
@@ -255,14 +257,14 @@ def _split(e, context: tuple, domain: tuple):
     b = brackets[0]
     no, yes = _within(context, b, 0, domain), _within(context, b, 1, domain)
     rest, full = products(e.subs(b, 0), context, domain), products(e.subs(b, 1), context, domain)
-    whole, y = products(full, yes, domain), products(rest, no, domain)
+    whole, y = _case(full, yes, domain), _case(rest, no, domain)
     shown_rest, shown_full = _cofactors(rest, full, context, domain)
-    yes, no = _relevant(yes, whole, domain), _relevant(no, y, domain)
     forms = [
         e,
-        _plus(_times(b, canon(whole - rest)), shown_rest),
-        _plus(_times(_complement(b), canon(y - full)), shown_full),
+        _plus(_times(b, _case(whole - rest, yes, domain)), shown_rest),
+        _plus(_times(_complement(b), _case(y - full, no, domain)), shown_full),
     ]
+    yes, no = _relevant(yes, whole, domain), _relevant(no, y, domain)
     if y != 0:
         forms.append(
             _plus(
@@ -340,6 +342,65 @@ def _holds(line, p: int) -> int:
     """The value of a bracket ``line`` at ``p``."""
     _, kind, c = line
     return int(p == c if kind == "eq" else p >= c)
+
+
+def _case(e, context: tuple, domain: tuple):
+    """``e`` where ``context`` holds: :func:`products`, then :func:`_folded`."""
+    return _folded(products(e, context, domain), context, domain)
+
+
+def _folded(e, context: tuple, domain: tuple):
+    """``e`` where ``context`` holds, folded over each interval ``context`` bounds (see
+    :func:`interval.bounds`, :func:`_fold`)."""
+    for x, (lo, hi) in I.bounds(context, domain).items():
+        e = _fold(e, x, lo, hi) if lo <= hi else e
+    return canon(e)
+
+
+def _fold(e, x, lo, hi):
+    """``e`` with each ``%``, ``//``, ``min``, ``max``, ``abs`` and bracket of a linear function of
+    ``x`` (for ``x = u % m``, also each remainder by a divisor of ``m`` of a linear function of
+    ``u``) that is one value or linear piece for ``lo <= x <= hi`` written as that, and ``x`` as
+    ``lo`` when ``lo == hi``. A linear function is monotone: the interval's ends decide."""
+    t = sympy.Dummy(integer=True)
+
+    def linear(y):
+        y = sympy.expand(y)
+        return (
+            y if y.free_symbols <= {t} and y.is_polynomial(t) and sympy.degree(y, t) < 2 else None
+        )
+
+    def span(y) -> tuple:
+        ends = [y.subs(t, p) for p in (lo, hi)] if y.has(t) else [y, y]
+        return min(ends), max(ends)
+
+    def congruent(y, k):
+        if linear(y) is not None or not I.remainder(x) or x.args[1] % k:
+            return linear(y)
+        u = sympy.expand(x.args[0])
+        c = u.coeff(sym := sorted(u.free_symbols, key=sympy.default_sort_key)[0])
+        a = sympy.expand(y).coeff(sym) / c if c.is_Integer and c != 0 else None
+        rest = linear(y - a * u) if a is not None and a.is_Integer else None
+        return None if rest is None else a * t + rest
+
+    def piece(n):
+        if I.remainder(n):
+            y, k = congruent(n.args[0], n.args[1]), n.args[1]
+            q = {sympy.floor(s / k) for s in span(y)} if y is not None else ()
+            return y - k * q.pop() if len(q) == 1 else n
+        if isinstance(n, (sympy.Min, sympy.Max)):
+            sign = 1 if isinstance(n, sympy.Min) else -1
+            for d in n.args:
+                gaps = [linear(sign * (o - d)) for o in n.args if o != d]
+                if all(g is not None and span(g)[0] >= 0 for g in gaps):
+                    return d
+            return n
+        y = linear(n.args[0].lhs if isinstance(n, Iv) else n.args[0])
+        return n if y is None else I.settled(n, y, *span(y))
+
+    kinds = (sympy.Mod, sympy.floor, sympy.Abs, sympy.Min, sympy.Max, Iv)
+    e = e.subs(x, t).replace(lambda n: isinstance(n, kinds), piece)
+    return e.subs(t, lo if lo == hi else x)
 
 
 def _cofactors(rest, full, context: tuple, domain: tuple) -> tuple:
@@ -696,9 +757,12 @@ def tokens(s: str) -> int:
 
 @functools.lru_cache(maxsize=None)
 def rank(e) -> tuple:
-    """The order of equivalent forms: fewest tokens, then characters, then text."""
+    """The order of equivalent forms: fewest tokens, then brackets, then operations, then
+    characters, then text."""
     s = text(e)
-    return tokens(s), len(s), s
+    nodes = list(ast.walk(ast.parse(s, mode="eval")))
+    ops = sum(isinstance(n, (ast.BinOp, ast.UnaryOp, ast.Compare, ast.Call)) for n in nodes)
+    return tokens(s), sum(isinstance(n, ast.Compare) for n in nodes), ops, len(s), s
 
 
 def valid(e) -> bool:

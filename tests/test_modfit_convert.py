@@ -266,7 +266,7 @@ def test_a_selected_expression_must_exist():
 
 
 CSILLAG_GATE = "(2*W[N + 33] - W[N + 33]*abs((φ + 3) % 8 - 4))*(φ >= 15)"
-ACID_STEP = "v % 32768 + 2048)*(v % 32768 < 30208)"
+ACID_STEP = "v % 32768 - 2048)*(v % 32768 >= 30208)"
 
 
 @pytest.mark.parametrize(
@@ -371,7 +371,7 @@ def test_a_sweep_that_turns_at_a_row_boundary_plays_as_written():
     want = regs(ir, 200)
     out = convert.convert(ir, cache=None, workers=1)
     [text] = out["exprs"].values()
-    assert text.endswith("8*(φ >= 32)*((-(φ % 2) + 2*(φ // 2) - 17) % 256)")
+    assert "*((-(φ % 2) + 2*(φ // 2) - 17) % 256) - 96)*(φ >= 32)" in text
     written = songio.dumps(out)
     assert np.array_equal(regs(songio.loads(written), 200), want)
     misread = written.replace("+ 2*(φ // 2)", "- 2*(φ // 2)")
@@ -732,7 +732,7 @@ def test_an_acid_sweep_without_an_offset_reads_the_accumulator_and_its_low_byte_
     cuts = [G.parse(x) for x in back["exprs"].values() if "v" in x]
     assert len(cuts) == 2
     assert all({int(m.args[1]) for m in e.atoms(sympy.Mod)} == {256, 32768} for e in cuts)
-    assert sorted(sympy.count_ops(e) for e in cuts) == [12, 23]
+    assert sorted(sympy.count_ops(e) for e in cuts) == [11, 23]
 
 
 def test_an_offset_outside_the_acid_program_fails_naming_its_row():
@@ -742,7 +742,7 @@ def test_an_offset_outside_the_acid_program_fails_naming_its_row():
         songio.dumps(convert.convert(ir, cache=None, workers=1))
 
 
-SUB = "((v - 1) % 256 + 512)*(v % 32768 < 1) + (v % 32768 + 65535)*(v % 32768 >= 1)"
+SUB = "(v % 32768 + 65535)*(v % 32768 >= 1) + 767*(v % 32768 < 1)"
 
 
 @pytest.mark.parametrize("sub", [1, 0])
