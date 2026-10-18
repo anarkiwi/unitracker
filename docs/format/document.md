@@ -40,7 +40,9 @@ when something is first used in that row. An entry is:
 | `~` | the voice is still playing its phrase |
 
 A row starts at the earliest end of the voices' current phrases. Every voice whose phrase ends
-there must have an entry, and every other voice must be `~`; readers reject anything else.
+there must have an entry, and every other voice must be `~`; readers reject anything else. `end`
+stops every voice still playing, so a song that ends has no last row of `end` and `~` entries
+only, and readers reject one.
 Repeats are written out as rows. When the voices' loops have different lengths, the rows run
 until all of them are back in the same state together, and `{loop: k}` names the row where that
 state first occurred.

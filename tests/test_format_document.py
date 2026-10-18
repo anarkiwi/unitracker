@@ -533,7 +533,12 @@ def column(rows, voice):
         (
             {"a": 2, "b": 5},
             [{"plays": [play("a")], "loop": None}, {"plays": [play("b")], "loop": None}],
-            lambda rows, loop: loop is None and rows[-1] == [None, END],
+            lambda rows, loop: (rows, loop) == ([[("a", 0), ("b", 0)]], None),
+        ),
+        (
+            {"a": 2, "b": 5},
+            [{"plays": [play("a")], "loop": None}, {"plays": [play("b"), play("a")], "loop": None}],
+            lambda rows, loop: rows[1:] == [[END, None], [None, ("a", 0)]],
         ),
     ],
 )
@@ -555,6 +560,8 @@ def test_timeline_round_trip(lengths, tracks, check):
         ([[("z", 0), ("a", 0)]], 0, "unknown phrase"),
         ([[("a", 0), ("a", 0)]], 5, "outside"),
         ([[END, ("a", 0)]], 0, "never starts"),
+        ([[("a", 0), ("a", 0)], [END, END]], None, "last row only ends voices"),
+        ([[("a", 0), ("b", 0)], [END, None]], None, "last row only ends voices"),
     ],
 )
 def test_timeline_errors(rows, loop, match):
@@ -569,3 +576,15 @@ def test_unaligned_loops_beyond_the_row_limit(monkeypatch):
             [{"plays": [play("a")], "loop": 0}, {"plays": [play("b")], "loop": 0}],
             {"a": 2, "b": 3},
         )
+
+
+def test_a_song_that_ends_is_written_with_its_end_alone():
+    head = (
+        f"unitracker: {songio.VERSION}\nplayroutine: {{ref: goattracker2}}\nsong:\n"
+        "  - def:\n      ins:\n        i1: {ctrl: [{ctrl: 65, note: +0}, end]}\n"
+        "      phrase:\n        p1: [C4.i1, D4]\n    play: [p1, p1, p1]\n"
+    )
+    text = songio.dumps(songio.loads(head + "  - end\n"))
+    assert text.endswith("    play: [p1, p1, p1]\n  - end\n")
+    with pytest.raises(songio.SongFormatError, match="last row only ends voices"):
+        songio.loads(head + "  - play: [end, end, end]\n  - end\n")
