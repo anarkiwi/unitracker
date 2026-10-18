@@ -637,6 +637,14 @@ class CommandCodec:
                     raise CodecError(f"the player can't express !{name}:{text}")
                 return
 
+    def also(self, code: int, arg: int) -> str | None:
+        """The command (``name:arg``) an event writes beside command ``code`` with ``arg``, whose
+        native effect it also has; None for none."""
+        for ecode, _, _, var in self.entries:
+            if ecode == code and "also" in var and evaluate(var.get("when", 1), {"arg": arg}):
+                return str(var["also"])
+        return None
+
     def values(self, name: str) -> bool:
         """Whether command ``name`` takes several values that are no record's row."""
         return any(n == name and "args" in var for _, n, _, var in self.entries)

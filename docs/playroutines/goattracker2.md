@@ -118,7 +118,8 @@ A control mask (`ctrl: ^n`) is refused.
 
 `res` and `route` are one byte, which a filter parameter row, `!resfilt:r/m` (command $B) and a
 wavetable $FB row set whole; from the command or the wavetable row, the byte 0 also stops the
-filter program (`!resfilt:0/0`, `{res: 0, route: 0, filter: none}`). A pattern command or wavetable row that sets the cutoff, `res`/`route`
+filter program, and is written so: `!filter:none!resfilt:0/0` (one command $B00; `!resfilt:0/0`
+alone is refused) and `{res: 0, route: 0, filter: none}`. A pattern command or wavetable row that sets the cutoff, `res`/`route`
 or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step writes
 `$D416`-`$D418` before the channels run, so the playroutine latches them there (`fcutreg`,
 `fctrlreg`, `fmodereg`).
@@ -149,7 +150,7 @@ start them where the composer put them; the playroutine declares no `lifetime`, 
 | `command` | `freq` | `freq` | the offset from the frequency of the note (with the wavetable's arpeggio) | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, the instrument's `freq` |
 | `wave` | `freq` | `freq` | as `command` | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
-| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
+| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!filter:none!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
 - A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence (`φ`
   keeps counting); a different one, or a step with another or no command, starts the next. A step

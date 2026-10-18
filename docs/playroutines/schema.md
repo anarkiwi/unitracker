@@ -108,7 +108,10 @@ gives the row again. A command entry has a `name`, an optional `ref` (a record t
 expression), and for a plain argument optional `when`, `arg` (raw to written) and `raw` (written to
 raw), checked the same way, or for `cut` `byte` in place of `arg` (`{name: cut, byte: arg}`: the
 written value is `arg << 3`, and `raw` reads `arg` as the written value `>> 3`); `args` (`{a: expr, b: expr}`) writes the argument as several values
-joined by `/`, which `raw` reads by those names (`!tempo:5/7`). A `ref` entry with `inline: true`
+joined by `/`, which `raw` reads by those names (`!tempo:5/7`). An entry's `also` (`name:arg`) is
+another command whose native effect the code has too: the event writes it beside the command,
+and the reader reads the two as the one code and refuses the command without it
+(`!filter:none!resfilt:0/0`). A `ref` entry with `inline: true`
 writes the referenced row's fields, each a byte, joined by `/` (`!tempo:6/7`), its `when` over
 the row's fields; the reader allocates one row per distinct argument, and the type has no
 definitions of its own (`unknown record type 'speedtab'`). A program `ref` entry's argument `none`

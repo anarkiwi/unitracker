@@ -407,7 +407,9 @@ class _Writer:
             name = None
             if ins:
                 name = self.names[(self.ins_type, ins - self.ins_base)]
-            commands = [self.command(c, a) for c, a in zip(cmds[::2], cmds[1::2])]
+            pairs = list(zip(cmds[::2], cmds[1::2]))
+            commands = [self.command(c, a) for c, a in pairs]
+            commands += [also for c, a in pairs if (also := self.commands.also(c, a)) is not None]
             commands = column.ordered([c for c in commands if c is not None], self.slotted)
             commands += lifetime.names(keep)
             text = format_atom(kind, note - self.offset, steps, name, commands)
@@ -862,9 +864,9 @@ class _Reader:
         if names != column.ordered(names, self.slotted):
             order = "!" + ", !".join(column.ordered(names))
             raise SongFormatError(f"an event's commands are written in the order {order}: {atom!r}")
-        if len(written) > MAX_COMMANDS:
+        commands = self._companions(written, [self.command(c, a, atom) for c, a in written], atom)
+        if len(commands) > MAX_COMMANDS:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
-        commands = [self.command(cmd, arg, atom) for cmd, arg in written]
         keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"])
         event.update({"keep": keep} if keep else {})
         if len(commands) == 1:
@@ -874,6 +876,23 @@ class _Reader:
         if parsed["steps"] > 1:
             event["steps"] = parsed["steps"]
         return event
+
+    def _companions(self, written: list, commands: list, atom) -> list:
+        """``commands`` (decoded from ``written``) without the commands written beside another
+        whose native effect they are (``also``); raises for one written without its companion."""
+        drop = set()
+        for (name, arg), (code, raw) in zip(written, commands):
+            also = self.commands.also(code, raw)
+            if also is None:
+                continue
+            companion = parse_atom(f"-!{also}")["commands"][0]
+            if companion not in written:
+                text = command_text(name, arg)
+                raise SongFormatError(
+                    f"{self.pr['name']}: {text} also does !{also}: write both in {atom!r}"
+                )
+            drop.add(written.index(companion))
+        return [c for k, c in enumerate(commands) if k not in drop]
 
     def _unfolded(self, events: list, phrase: str) -> list:
         """A phrase's events with its restarts and instruments unfolded (see ``events.fold``)."""

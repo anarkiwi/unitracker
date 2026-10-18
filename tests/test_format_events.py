@@ -563,3 +563,18 @@ def test_legato_needs_a_note(player, defs, atom):
     ir["phrases"]["p1"][1].pop("note")
     with pytest.raises(songio.SongFormatError, match="!legato needs a note: '-!legato\\*4'"):
         songio.dumps(ir)
+
+
+# -- also: a command whose native effect is two commands' --
+
+
+def test_a_command_that_also_stops_the_filter_program_is_written_with_the_stop():
+    text = song("goattracker2", GT_INS, {"p1": "C4.i1*2, -!filter:none!resfilt:0/0*2"})
+    ir = songio.loads(text)
+    assert commands(ir)[1] == [11, 0] and songio.dumps(ir) == songio.dumps(songio.loads(text))
+    assert "-!filter:none!resfilt:0/0*2" in songio.dumps(ir)
+    assert commands(songio.loads(text.replace("!resfilt:0/0", "")))[1] == [10, 0]
+    with pytest.raises(songio.SongFormatError, match="can't play !run and !resfilt on one"):
+        songio.loads(text.replace("0/0", "0/1"))
+    with pytest.raises(songio.SongFormatError, match="!resfilt:0/0 also does !filter:none"):
+        songio.loads(text.replace("!filter:none", ""))
