@@ -12,11 +12,10 @@ from importlib import resources
 
 import yaml
 
-from unitracker.format import refkeys, tempo, timeline, xexpr
+from unitracker.format import eventcmds, refkeys, tempo, timeline, xexpr
 from unitracker.format.atoms import format_atom, parse_atom, runs
 from unitracker.format.codec import (
     COMMAND_NAMES,
-    NONE,
     ROW_KEYS,
     CodecError,
     CommandCodec,
@@ -24,7 +23,6 @@ from unitracker.format.codec import (
     RowCodec,
     command_text,
     envelope_names,
-    inline_row,
     inline_text,
     is_expr,
     note_text,
@@ -39,7 +37,7 @@ from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.xexpr import ExpressionError, text_of
 from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, Signed, parse
 from unitracker.player.modulation import declared
-from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, MAX_COMMANDS, compile_phrase
+from unitracker.player.vm import EVENT_COLUMNS, IR_VERSION, compile_phrase
 
 VERSION = "1.20"
 WIDTH = 100
@@ -132,12 +130,6 @@ def _uniform(pr: dict, rtypes: dict, records: dict) -> None:
                 f"{pr['name']}: the {rtype.written} rows set {field} to different values;"
                 " the player has one"
             )
-
-
-def _legato_note(kind: int, names, atom) -> None:
-    """Refuse ``!legato`` on an event of note ``kind`` that is no note."""
-    if "legato" in names and kind != 1:
-        raise SongFormatError(f"!legato needs a note: {atom!r}")
 
 
 def _player(pr, call, *args):
@@ -419,7 +411,7 @@ class _Writer:
             commands = column.ordered([c for c in commands if c is not None], self.slotted)
             commands += lifetime.names(keep)
             text = format_atom(kind, note - self.offset, steps, name, commands)
-            _legato_note(kind, [c.split(":")[0] for c in commands], text)
+            eventcmds.legato_note(kind, [c.split(":")[0] for c in commands], text, SongFormatError)
             out.append(Atom(text))
         return Flow(out)
 
@@ -628,7 +620,6 @@ class _Reader:
         self.rtypes = record_types(self.pr)
         self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
-        self.slotted = envelope_names(self.pr.get("commands"))
         self.exprs = {}
         self.named_tables = set((declared(self.pr).get("tables") or {}))
         self.next_index = {name: rt.first for name, rt in self.rtypes.items()}
@@ -639,6 +630,7 @@ class _Reader:
         self.written = {rt.written: rt for rt in self.rtypes.values() if rt.name not in inline}
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
+        self.event_commands = eventcmds.EventCommands(self, SongFormatError)
 
     def _playroutine(self, spec) -> dict:
         if not isinstance(spec, dict):
@@ -863,20 +855,7 @@ class _Reader:
             event["note"] = "off" if parsed["kind"] == 2 else "on"
         if parsed["ins"] is not None:
             event["instrument"] = self.lookup(parsed["ins"], self.ins_type) + self.ins_base
-        written = [c for c in parsed["commands"] if not lifetime.is_lifetime(*c)]
-        kept = [c for c in parsed["commands"] if lifetime.is_lifetime(*c)]
-        names = [c for c, _ in written]
-        if parsed["commands"] != written + sorted(kept, key=lambda c: lifetime.NAMES.index(c[0])):
-            raise SongFormatError(
-                f"!pw and !filter follow the other commands, in that order: {atom!r}"
-            )
-        _legato_note(parsed["kind"], names, atom)
-        if names != column.ordered(names, self.slotted):
-            order = "!" + ", !".join(column.ordered(names))
-            raise SongFormatError(f"an event's commands are written in the order {order}: {atom!r}")
-        commands = self._companions(written, [self.command(c, a, atom) for c, a in written], atom)
-        if len(commands) > MAX_COMMANDS:
-            raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
+        commands = self.event_commands.decode(parsed, atom)
         keep = _player(self.pr, self.lifetime.mask, parsed["commands"], parsed["kind"])
         event.update({"keep": keep} if keep else {})
         if len(commands) == 1:
@@ -887,74 +866,12 @@ class _Reader:
             event["steps"] = parsed["steps"]
         return event
 
-    def _companions(self, written: list, commands: list, atom) -> list:
-        """``commands`` (decoded from ``written``) without the commands written beside another
-        whose native effect they are (``also``); raises for one written without its companion."""
-        drop = set()
-        for (name, arg), (code, raw) in zip(written, commands):
-            also = self.commands.also(code, raw)
-            if also is None:
-                continue
-            companion = parse_atom(f"-!{also}")["commands"][0]
-            if companion not in written:
-                text = command_text(name, arg)
-                raise SongFormatError(
-                    f"{self.pr['name']}: {text} also does !{also}: write both in {atom!r}"
-                )
-            drop.add(written.index(companion))
-        return [c for k, c in enumerate(commands) if k not in drop]
-
     def _unfolded(self, events: list, phrase: str) -> list:
         """A phrase's events with its restarts and instruments unfolded (see ``events.fold``)."""
         try:
             return self.folds.unfold(events, self._alloc)
         except fold.FoldError as exc:
             raise SongFormatError(f"{self.pr['name']}: phrase {phrase}: {exc}") from exc
-
-    def command(self, cmd, arg, atom) -> list[int]:
-        """``[code, arg]`` for one written command of ``atom``."""
-        if cmd not in COMMAND_NAMES:
-            raise SongFormatError(f"unknown command !{cmd} in {atom!r}")
-        single = tempo.one(cmd, arg)
-        if single is not None:
-            raise SongFormatError(
-                f"!{cmd}:{single}/{single} is written !{cmd}:{single} in {atom!r}"
-            )
-        if self.commands.inline(cmd) and isinstance(arg, tuple):
-            arg = self._inline(cmd, arg, atom)
-        elif isinstance(arg, str) and arg != NONE:
-            if arg not in self.names:
-                raise SongFormatError(f"unknown name {arg!r} in {atom!r}")
-            arg = self.names[arg]
-        try:
-            return list(self.commands.decode(cmd, arg))
-        except CodecError as exc:
-            problem = SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}")
-        if cmd in tempo.COMMANDS and self.commands.inline(cmd) and isinstance(arg, int):
-            try:
-                return list(self.commands.decode(cmd, self._inline(cmd, (arg, arg), atom)))
-            except (CodecError, SongFormatError):
-                pass
-        raise problem
-
-    def _inline(self, cmd: str, values, atom) -> tuple:
-        """``(type, index)`` of the row an inline argument writes: an equal row already read, else
-        one allocated for it."""
-        rtype = self.rtypes[self.commands.inline(cmd)]
-        try:
-            row = inline_row(rtype, values)
-        except CodecError as exc:
-            raise SongFormatError(f"!{cmd}: {exc} in {atom!r}") from exc
-        try:
-            self.commands.check_inline(cmd, row)
-        except CodecError as exc:
-            raise SongFormatError(f"{self.pr['name']}: {exc} in {atom!r}") from exc
-        rows = self.records[rtype.name]
-        index = next((i for i, r in rows.items() if r == row), None)
-        if index is None:
-            index = self._alloc(rtype, 1)
-            rows[index] = row
-        return rtype.name, index
 
     def _collect(self, song):
         """Define every record and phrase; ``(phrase atoms, play rows, loop row or None)``."""

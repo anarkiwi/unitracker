@@ -23,6 +23,8 @@ class _Voice:
     """The ``!freq`` a voice runs: its expression, or None for the instrument's; and the one the
     phrase it plays started, which it writes once."""
 
+    # pylint: disable=too-few-public-methods
+
     def __init__(self):
         self.x = self.own = None
 
