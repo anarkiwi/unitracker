@@ -1,0 +1,124 @@
+# Document
+
+Top-level keys, in this order:
+
+| key | content |
+|---|---|
+| `unitracker` | `1.19`; readers reject any other version |
+| `playroutine` | `{ref: name, constants: {...}, tables: {...}}`, or the full definition (see [Embedding](#embedding)) |
+| `meta` | `title`, `author`, `released` |
+| `hints` | reading aids the player ignores, each a positive integer and both optional: `ticks_per_step`, the ticks per step as the lifter derived it, and `phrase_steps`, the common phrase length in steps when every phrase has one (the writer derives it and refuses a stated value that disagrees); readers reject any other key |
+| `clock`, `voices` | only where they differ from the playroutine's `defaults` |
+| `song` | the timeline: a list of rows |
+| `loop` | the row the song loops to, or `~` to end |
+
+`playroutine.constants` lists only the constants that differ from the library's.
+`playroutine.tables` patches the library's tables: `{index: value}` for the entries that
+differ, or a full list when the length differs.
+
+The patch holds only entries the song can read. The writer plays the song, recording every
+table index read, until its complete state (all cells, cursors and registers) recurs. Playback
+is deterministic, so no later tick reads anything new, and an entry never read cannot change the
+output; the library default stands in for it. If the state does not recur within a bound, the
+patch is written whole.
+
+## Embedding
+
+`unitracker-lift --embed` writes the playroutine in full instead of `ref`, with its `tables`
+complete, so the file plays without the library.
+
+## Timeline
+
+Each row is `{def: {...}, play: [entry per voice]}`; `def` is present only when something is
+first used in that row. An entry is:
+
+| entry | meaning |
+|---|---|
+| `p3` | the voice starts phrase `p3` |
+| `p3+5`, `p3-2` | the voice starts phrase `p3` transposed by that many semitones |
+| `end` | the voice stops |
+| `~` | the voice is still playing its phrase |
+
+A row starts at the earliest end of the voices' current phrases. Every voice whose phrase ends
+there must have an entry, and every other voice must be `~`; readers reject anything else.
+Repeats are written out as rows. When the voices' loops have different lengths, the rows run
+until all of them are back in the same state together, and `loop` is the row where that state
+first occurred.
+
+## Definitions
+
+`def` maps a record type, `x`, or `phrase` to `{name: value}`. Names are the record type's
+prefix and a number, given in first-use order (`i1`, `i2`, ..., `c1`, ...; expressions `x1`,
+...; phrases `p1`, ...). The prefixes are distinct, so a name says what it is. The reader
+allocates each type's indices in definition order from the type's `first` index, so a name
+stands for whatever index the playroutine needs.
+
+Every playroutine writes its records under these record types (its `record_types` entry names
+the type each native table is written as, `writes_as`):
+
+| record type | prefix | holds |
+|---|---|---|
+| `ins` | `i` | an instrument |
+| `ctrl` | `c` | a control program: waveform, notes, and any other key a row of the player can set |
+| `pw` | `pw` | a pulse program |
+| `filter` | `f` | a filter program |
+| `restart` | `r` | a hard restart (see [Hard restart](vocabulary.md#hard-restart)) |
+| `x` | `x` | a modulator expression (see [Modulators](../modulation/expressions.md)) |
+
+- **Rows** use the shared row keys (see [Shared vocabulary](vocabulary.md)) wherever the
+  playroutine's codec can express them: `{ctrl: 129, note: =68}`. A row no codec shape covers is
+  written in the type's `form`: a `list` row holds the fields in declaration order, with trailing
+  defaults left out (`[4, 32]`); a `map` row holds the fields that differ from their defaults.
+- **Programs** are the rows of a chained type, in the order they run, followed by `end` or
+  `{loop: k}` (k is a row of the same program). A program is cut from the player's chained
+  tables at every entry point. A tail two programs share is written in both, which is exact
+  because rows are deterministic. A program that is one expression is written as that
+  expression: `pw: 16*abs((φ - 32) % 128 - 64) + 512`.
+- **References.** A field that references another record holds a name. A program that only one
+  instrument uses is written inline in that instrument instead
+  (`ctrl: [{ctrl: 9, note: +0}, {ctrl: 65, note: +0}, end]`).
+- **Expressions** (`x`) are the modulator expressions an event command names (`!freq:@x1`):
+  `x: {x1: (v + 32) % 65536}`. An expression no command names is written where it is used.
+- **Fixed** record types (`fixed`, such as an initial voice state) keep their indices and are
+  defined in the first row: `vinit: {0: {note: =36, pw: 256, freq: 2227}, ...}`. They use the
+  shared keys with their row meaning wherever one fits, and an omitted field is 0.
+
+## Events
+
+A phrase is a list of event atoms:
+
+```
+note[.instrument][!command:arg[!command:arg]][*steps]
+```
+
+- `note` is a note name such as `C2`, `A#3` or `C10`, `-` for no note, `off` (gate off) or `on`
+  (gate on). Names are real pitch: `C2` is 65.4 Hz in every song, whatever index the player's
+  frequency table gives it (`note_offset`).
+- `.i3` names the instrument.
+- `!run:@c1` is a named command with an argument: a number, `@name` for a command that references a
+  record or an expression, `none`, or values joined by `/` for a command of several values
+  (`!funk:6/7`). A command's argument is a byte: `!freq:@x` names one of the first 255 expressions.
+  An event carries at most two commands, its two slots, then `!pulse:0` and `!filter:0` (see
+  [Lifetime](vocabulary.md#lifetime)), which take no slot. The first slot is the instrument column
+  and the second the FX column; an event that names an instrument fills the instrument column with
+  it, so its commands are the FX column's. A playroutine whose column holds one command declares it
+  (`exclusive`), and an event with two such commands is refused, naming both.
+- `*3` makes the event last 3 steps; the steps after the first are empty.
+
+## Canonical form
+
+The writer produces one text per song:
+
+- names are given in first-use order, each a record type's prefix and a number;
+- records and rows the song never reaches are dropped;
+- identical phrases, and phrases that are equal up to a transpose, are merged, and the transpose
+  moves into the play entry;
+- equal expression texts share one definition;
+- runs of empty steps become `*steps`;
+- a playroutine's event restarts are written on their notes (see [Hard
+  restart](vocabulary.md#hard-restart));
+- a phrase whose envelope bytes differ between the places it plays is split into one phrase per
+  place (see [Envelope commands](vocabulary.md#envelope-commands)), the inverse of the merge;
+- no-op commands are dropped.
+
+Writing what the reader returns gives the same bytes.

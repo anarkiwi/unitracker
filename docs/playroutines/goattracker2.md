@@ -1,8 +1,7 @@
 # GoatTracker 2 (`goattracker2`)
 
 The GoatTracker 2 playroutine (`player.s`, buffered writes) of
-[`goattracker2.yaml`](../../src/unitracker/playroutines/goattracker2.yaml). Terms and section
-names in *italics* are [format.md](../format.md)'s.
+[`goattracker2.yaml`](../../src/unitracker/playroutines/goattracker2.yaml).
 
 ## Lifting
 
@@ -174,4 +173,4 @@ The lifter fails, naming what it meets:
 - a wavetable step row whose runs need different expressions (a vibrato step met on different
   phases), or whose other effects (a vibrato's phase, a toneporta's arrival) the song hears;
 - a modulation start whose expression is not proved, or expressions that do not play the native
-  register grid (see [modfit.md](../modfit.md)).
+  register grid (see [modfit.md](../modulation/modfit.md)).

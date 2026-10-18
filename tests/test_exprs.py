@@ -1,4 +1,4 @@
-"""v1.19 expressions: each key and command drives its cell as docs/format.md says."""
+"""Expressions: each key and command drives its cell as docs/modulation/expressions.md says."""
 
 import numpy as np
 import pytest

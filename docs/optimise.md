@@ -62,9 +62,9 @@ The check (`proof.mismatch`) is exact, not sampled:
    `reach.MAX_TICKS` is unproved and never kept.
 
 What is checked is the candidate's written text read back (`songio.loads(songio.dumps(...))`), so
-the canonical writer's own rewriting ([format.md](format.md), *Canonical form*) is inside the
-check. A song that cannot be written with its playroutine by `ref` is written embedded
-([format.md](format.md), *Embedding*).
+the canonical writer's own rewriting ([Canonical form](format/document.md#canonical-form)) is inside
+the check. A song that cannot be written with its playroutine by `ref` is written embedded
+([Embedding](format/document.md#embedding)).
 
 ## The driver
 

@@ -1,8 +1,7 @@
 # SID-Wizard (`sidwizard`)
 
 The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame, of
-[`sidwizard.yaml`](../../src/unitracker/playroutines/sidwizard.yaml). Terms and section names in
-*italics* are [format.md](../format.md)'s.
+[`sidwizard.yaml`](../../src/unitracker/playroutines/sidwizard.yaml).
 
 ## Lifting
 
@@ -58,12 +57,12 @@ Every other command is refused by name.
   instrument column on an event that names no instrument and in the FX column otherwise: the
   player times the two differently on a note's hard-restart ticks.
 - `!ad` and `!sr` are the envelope small FX ($2x attack, $3x decay, $5x sustain, $6x release;
-  playroutine codes $12x-$16x from the instrument column), each setting one nibble's override,
-  which clears the other nibble's of that register and lasts until the voice's next note start
-  (see *Envelope commands*). The reader plays each byte as the small FX that changes one nibble
-  of the instrument's byte (the attack or sustain nibble when the byte is the instrument's). An
-  FX-column one alone on a row that starts no note is written in the first slot, which plays the
-  same.
+  playroutine codes $12x-$16x from the instrument column), each setting one nibble's override, which
+  clears the other nibble's of that register and lasts until the voice's next note start (see
+  [Envelope commands](../format/vocabulary.md#envelope-commands)). The reader plays each byte as the
+  small FX that changes one nibble of the instrument's byte (the attack or sustain nibble when the
+  byte is the instrument's). An FX-column one alone on a row that starts no note is written in the
+  first slot, which plays the same.
 - The tempo FX apply on the row's TICK_2 with its other FX: $10 (`!tempo`, playroutine code $12,
   as $10 is `!freq`) sets every voice's tempo pair to its value, $13 (`!vtempo`) this voice's,
   and $11 (`!funk:a/b`) every voice's to its nibbles. Each rewinds the swing to its first tempo,
