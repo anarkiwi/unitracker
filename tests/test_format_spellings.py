@@ -11,7 +11,10 @@ from unitracker.player.vm import SongPlayer
 FIRST, LATER = row_place(0, 2, True), row_place(1, 2, True)
 
 
-def doc(pr: str, defs: str, phrases: dict, rows: str = "    play: [p1, p1, p1]\n", end="end"):
+ONCE = "    play: [p1, p1, p1]\n"
+
+
+def doc(pr: str, defs: str, phrases: dict, rows: str = ONCE, end="end"):
     """A document of playroutine ``pr``: ``defs`` and ``phrases`` defined in its first row."""
     phrase = "".join(f"        {name}: [{atoms}]\n" for name, atoms in phrases.items())
     return (
@@ -163,3 +166,55 @@ def test_a_lifetime_flag_no_note_reads_is_no_reason_to_name_the_instrument():
     assert songio.dumps(ir) == plain
     grid = SongPlayer(ir).render_grid(200)
     assert np.array_equal(SongPlayer(songio.loads(plain)).render_grid(200), grid)
+
+
+# -- 4: where a !freq runs from, and !freq:none only where one runs --
+
+GT_FREQ = """      x:
+        x1: v + 300
+        x2: v
+      ins:
+        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}
+        i2: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], freq: v + 3}
+"""
+THEN = "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n"
+
+
+@pytest.mark.parametrize(
+    "phrases,match",
+    [
+        ({"p1": "C4.i1!freq:x1, D4!freq:none*3"}, "sets what the voice already has"),
+        ({"p1": "C4.i1, -!freq:none*3"}, "sets what the voice already has"),
+        ({"p1": "C4.i1!freq:x1, -!freq:none, -!freq:none*2"}, "sets what the voice already has"),
+        ({"p1": "C4.i1, -!freq:x2*3"}, "sets what the voice already has"),
+        ({"p1": "C4.i1!freq:x1, -!freq:x2*3"}, "is written !freq:none"),
+        ({"p1": "C4.i1!freq:x1*4", "p2": "-*2, D4*2"}, "continues the !freq of the phrase before"),
+    ],
+)
+def test_the_reader_refuses_a_freq_none_where_none_runs_and_a_freq_it_does_not_write(
+    phrases, match
+):
+    refused(doc("goattracker2", GT_FREQ, phrases, THEN if "p2" in phrases else ONCE), match)
+
+
+@pytest.mark.parametrize(
+    "phrases",
+    [
+        {"p1": "C4.i1!freq:x1, -!freq:none*3"},
+        {"p1": "C4.i2!freq:x1, -!freq:x2*3"},
+        {"p1": "C4.i1!freq:x1*4", "p2": "-!freq:x1*2, D4*2"},
+    ],
+)
+def test_a_freq_written_where_it_runs_from_is_kept(phrases):
+    text = canonical(doc("goattracker2", GT_FREQ, phrases, THEN if "p2" in phrases else ONCE))
+    assert all(f"{n}: [{a}]" in text for n, a in phrases.items())
+
+
+def test_the_writer_writes_a_held_freq_as_none_and_none_only_where_a_freq_runs():
+    text = canonical(doc("goattracker2", GT_FREQ, {"p1": "C4.i1!freq:x1, -!freq:none, D4*2"}))
+    ir = songio.loads(text)
+    events = ir["phrases"]["p1"]
+    ir["exprs"][len(ir["exprs"]) + 1] = "v"
+    events[1]["command"] = [16, len(ir["exprs"])]
+    events[2]["command"] = [16, 0]
+    assert songio.dumps(ir) == text

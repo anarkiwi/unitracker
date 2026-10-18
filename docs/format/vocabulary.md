@@ -129,7 +129,22 @@ replaces it; steps between, empty or with other commands, continue it, and a phr
 `!freq` it runs once (`!freq:x1` on a step after the same phrase's `!freq:x1` is refused).
 `!freq:none` returns the frequency to the instrument's `freq` before a note does, where the player
 can: a playroutine whose native command ends on a step that carries no command declares `lasts:
-step`, and the writer writes `!freq:none` on each such step after a `!freq`.
+step`, and the writer writes `!freq:none` on each such step after a `!freq`. It is written only
+where a `!freq` runs: the reader refuses it on a note that starts the instrument, after another
+`!freq:none`, and where no `!freq` runs. In such a player a phrase whose steps without a command
+continue a `!freq` writes that `!freq` (the reader refuses a step that continues the `!freq` of
+the phrase before), and on an instrument without `freq` a `!freq` of `v`, which holds the
+frequency, is `!freq:none` (see [Running values](#running-values)).
+
+## Running values
+
+The writer and the reader walk each voice's plays (see [Walking the plays](#walking-the-plays))
+knowing what its commands have set. A `!freq` runs from a `!freq` until a note starts the
+instrument; a command that sets what the voice already has changes nothing, and the reader
+refuses it. In a player whose `!freq` lasts until a step without a command (`lasts: step`), a
+step's command is what drives its frequency, and a `!freq` of `v` on an instrument without
+`freq` holds the frequency as `!freq:none` does: it is written `!freq:none`, and nothing where no
+`!freq` runs.
 
 ## Envelope commands
 

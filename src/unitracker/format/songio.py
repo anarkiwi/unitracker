@@ -28,7 +28,7 @@ from unitracker.format.codec import (
     row_place,
     written_value,
 )
-from unitracker.format.events import column, envelope, fold, freq, instrument, lifetime, naming
+from unitracker.format.events import column, envelope, fold, instrument, lifetime, naming, running
 from unitracker.format.header import (  # pylint: disable=unused-import
     DEFAULTS,
     SongFormatError,
@@ -120,7 +120,7 @@ def _player(pr, call, *args):
         lifetime.LifetimeError,
         envelope.EnvelopeError,
         column.ColumnError,
-        freq.FreqError,
+        running.RunningError,
         naming.NamingError,
     ) as exc:
         raise SongFormatError(f"{pr['name']}: {exc}") from exc
@@ -168,7 +168,10 @@ class _Writer:
         ir = {**ir, "phrases": phrases}
         self.records.update({native: rows} if native in self.records else {})
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
-        self.ir = _player(self.pr, freq.Freq(self.pr, self.xcanon).write, self.ir)
+        settled = running.Running(
+            self.pr, self.rtypes, self.commands, self.codecs, self.records, self.exprs, self.xcanon
+        )
+        self.ir = _player(self.pr, settled.write, self.ir)
         written = lifetime.Lifetime(self.pr, self.rtypes).written
         self.kept, rows = _player(
             self.pr, written, self.ir["tracks"], self.ir["phrases"], self.records.get(native, {})
@@ -871,8 +874,11 @@ class _Reader:
             "tracks": tracks,
             "phrases": events,
         }
+        settled = running.Running(
+            self.pr, self.rtypes, self.commands, self.codecs, self.records, self.exprs
+        )
+        ir = _player(self.pr, settled.read, ir)
         ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).read, ir, self.records)
-        ir = _player(self.pr, freq.Freq(self.pr).read, ir)
         _player(self.pr, column.check, self.pr, ir["phrases"])
         return ir
 

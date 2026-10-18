@@ -626,15 +626,15 @@ def test_goattracker_writes_a_freq_once_and_none_where_the_native_one_ends(nativ
             "goattracker2",
             GT_FREQ,
             "C4.i1!freq:x1, -!freq:x1",
-            "!freq repeats the !freq its phrase runs",
+            "!freq sets what the voice already has",
         ),
         (
             "goattracker2",
             GT_FREQ,
             "C4.i1!freq:x1, -!sr:3, -!freq:x1",
-            "!freq repeats the !freq its",
+            "!freq sets what the voice already has",
         ),
-        ("sidwizard", SW_INS + FREQ_X, "C4.i1!freq:x1, -!freq:x1", "!freq repeats the !freq its"),
+        ("sidwizard", SW_INS + FREQ_X, "C4.i1!freq:x1, -!freq:x1", "!freq sets what the voice"),
         ("sidwizard", SW_INS, "C4.i1, -!freq:none", "the player can't express !freq:none"),
     ],
 )
@@ -647,7 +647,7 @@ def test_a_freq_continues_over_steps_and_into_the_next_phrase_until_a_note():
     text = song(
         "goattracker2",
         GT_FREQ,
-        {"p1": "C4.i1*2, D4!freq:x1*2", "p2": "-*2, E4.i1*2"},
+        {"p1": "C4.i1*2, D4!freq:x1*2", "p2": "-!freq:x1*2, E4.i1*2"},
         "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n",
     )
     ir = songio.loads(text)
