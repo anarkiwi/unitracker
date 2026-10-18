@@ -217,7 +217,7 @@ def test_writer_errors(change, match):
         (edit(("loop",), 0), "unknown key loop in document"),
         (edit(("playroutine",), "mini"), "mapping"),
         (edit(("playroutine",), {"ref": "nope"}), "no playroutine"),
-        (edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}), "no library"),
+        (edit(("playroutine",), {"ref": "goattracker2", "tables": {"zz": {0: 1}}}), "unknown table"),
         (edit(("playroutine", "record_types", "prog", "max"), 3), "more than 3"),
         (edit(DEF + ("prog", "w1"), [[10]]), "rows then end"),
         (edit(DEF + ("prog", "w1"), [[10], {"loop": 7}]), "bad program end"),

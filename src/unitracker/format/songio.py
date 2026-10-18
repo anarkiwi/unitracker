@@ -602,7 +602,7 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
     doc = {
         "unitracker": Atom(VERSION),
         "playroutine": header.playroutine_entry(writer.pr, writer.ir, embed),
-        "meta": FlowMap({k: meta[k] for k in ("title", "author", "released") if k in meta}),
+        "meta": FlowMap({k: meta[k] for k in header.META_KEYS if k in meta}),
     }
     rows, loop = writer.song()
     doc.update(header.environment(writer.pr, writer.ir))
@@ -920,7 +920,7 @@ class _Reader:
         _player(self.pr, names.check, events, self.records.get(self.lifetime.ins_type) or {})
         ir = {
             "unitracker": IR_VERSION,
-            "meta": dict(doc.get("meta") or {}),
+            "meta": header.meta(doc),
             "clock": dict(doc.get("clock") or self.defaults["clock"]),
             "voices": voices,
             **header.initial_tempo(self.pr, doc),

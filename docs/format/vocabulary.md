@@ -50,7 +50,9 @@ is rejected on reading, naming the key or command and the player (`defmon: the p
 !tempo:6`); the writer refuses to write a value that would not read back. A key, command or record
 type outside the playroutine's codec shapes, record types and the shared command names is refused
 with one message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in
-'-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`).
+'-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`), and so is a
+constant, table or `meta` key the playroutine and the document don't have (`unknown key adparam in
+playroutine.constants`, `unknown key foo in meta`).
 
 ## Timing
 

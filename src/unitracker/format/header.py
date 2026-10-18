@@ -10,6 +10,8 @@ from unitracker.format.schema import expand
 from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.yamlstyle import Flow, FlowMap
 
+REF_KEYS = ("ref", "constants", "tables")
+META_KEYS = ("title", "author", "released")
 DEFAULTS = {"clock": {"cycles_per_tick": 19656, "clock_hz": 985248}, "voices": 3}
 
 
@@ -47,18 +49,32 @@ def read_playroutine(spec) -> tuple[dict, dict]:
     if "ref" not in spec:
         pr = expand(spec)
         return pr, {k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()}
+    for key in sorted(set(spec) - set(REF_KEYS)):
+        raise SongFormatError(f"unknown key {key} in playroutine")
     pr = library(spec["ref"])
+    for key in sorted(set(spec.get("constants") or {}) - set(pr.get("constants") or {})):
+        raise SongFormatError(f"unknown key {key} in playroutine.constants")
     pr["constants"] = {**(pr.get("constants") or {}), **(spec.get("constants") or {})}
     tables = {k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()}
     for name, diff in (spec.get("tables") or {}).items():
+        if name not in tables:
+            raise SongFormatError(f"unknown table {name!r} in playroutine.tables")
         if isinstance(diff, list):
             tables[name] = [int(x) for x in diff]
         else:
-            if name not in tables:
-                raise SongFormatError(f"table {name!r} has no library default to patch")
             for i, v in diff.items():
                 tables[name][int(i)] = int(v)
     return pr, tables
+
+
+def meta(doc: dict) -> dict:
+    """A document's ``meta``: its title, author and release."""
+    value = doc.get("meta") or {}
+    if not isinstance(value, dict):
+        raise SongFormatError("meta must be a mapping")
+    for key in sorted(set(value) - set(META_KEYS)):
+        raise SongFormatError(f"unknown key {key} in meta")
+    return dict(value)
 
 
 def initial_tempo(pr: dict, doc: dict) -> dict:

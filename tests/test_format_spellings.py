@@ -434,3 +434,31 @@ def test_equal_expressions_are_one_definition():
     text = canonical(doc("goattracker2", defs, phrases))
     assert "x1: v + 300" in text and "x2" not in text
     assert "C4.i1!freq:x1*4, D4!freq:x1*4, E4!freq:x1*4" in text
+
+
+# -- 8: keys outside the format --
+
+
+@pytest.mark.parametrize(
+    "pr,old,new,match",
+    [
+        ("goattracker2", "{ref: goattracker2}", "{ref: goattracker2, constants: {adparam: 3840}}",
+         "unknown key adparam in playroutine.constants"),
+        ("goattracker2", "{ref: goattracker2}", "{ref: goattracker2, constants: {foo: 7}}",
+         "unknown key foo in playroutine.constants"),
+        ("defmon", "{ref: defmon}", "{ref: defmon, constants: {floor: 3, foo: 7}}",
+         "unknown key foo in playroutine.constants"),
+        ("goattracker2", "{ref: goattracker2}", "{ref: goattracker2, foo: 7}",
+         "unknown key foo in playroutine$"),
+        ("goattracker2", "{ref: goattracker2}", "{ref: goattracker2, tables: {foo: [1]}}",
+         "unknown table 'foo'"),
+        ("goattracker2", "meta: {}", "meta: {title: t, foo: 1}", "unknown key foo in meta"),
+    ],
+)  # fmt: skip
+def test_a_key_outside_the_format_is_refused(pr, old, new, match):
+    defs = (
+        "      ctrl:\n        c1: [{ctrl: 65, gate: 1}, end]\n      ins:\n        i1: {ctrl: c1}\n"
+    )
+    text = canonical(doc(pr, defs if pr == "defmon" else GT_DEFS, {"p1": "C4.i1*4"}))
+    assert old in text
+    refused(text.replace(old, new, 1), match)
