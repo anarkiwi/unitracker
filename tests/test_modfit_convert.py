@@ -546,6 +546,26 @@ def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own
     assert not np.array_equal(regs(out, 80), want)
 
 
+@pytest.mark.parametrize(
+    "ctrl, glides",
+    [
+        ("[{ctrl: 65, note: +0}, end]", True),
+        ("[{ctrl: 65, note: +0}, {ctrl: 65, note: +12}, {loop: 0}]", False),
+    ],
+)
+def test_a_command_its_unit_never_fires_on_is_the_identity(ctrl, glides):
+    ins = INS.replace("[{ctrl: 65, note: +0}, end]", ctrl) + "}"
+    ir = gt_ir("[C4.i1*4, D4*4, E4*4]", ins)
+    ir["phrases"]["p1"][1]["commands"] = [[17, 0], [3, 1]]
+    ir["records"]["speedtab"] = {1: {"l": 0, "r": 64}}
+    got = convert.analyse(ir, None, 1)
+    (variant,) = [p["phrase"] for p in got.out["tracks"][0]["plays"]]
+    assert got.out["phrases"][variant][1]["commands"] == [[17, 0], [16, 1]]
+    assert ("F(N)" in got.out["exprs"][1]) == glides and (got.out["exprs"][1] == "v") != glides
+    back = songio.loads(songio.dumps(got.out))
+    assert np.array_equal(regs(back, got.ticks), regs(ir, got.ticks))
+
+
 def test_a_phrase_every_play_of_which_plays_a_variant_is_dropped():
     ir = gt_ir("[C4.i1*4, D4*4, E4*4]")
     ir["phrases"]["p1"][1]["command"] = [3, 0]
