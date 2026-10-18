@@ -225,7 +225,7 @@ def optimised_tunes(request) -> dict:
     :data:`OPTIMISED`, a subset that keeps the suite's run time bounded."""
 
     def make(name, sid, reference):
-        return sid, optimise.optimise(reference.ir(), OPTIMISED[name], workers=1, progress=False)
+        return sid, optimise.optimise(reference.ir(), OPTIMISED[name], progress=False)
 
     refs = request.getfixturevalue("references")
     return _Shared(request, "optimised", make, lambda name: (refs[name],))
