@@ -625,28 +625,18 @@ modulators:
     - name: pulse
       key: pw
       cell: "pwhi:pwlo"
-      # The register: the cell's high nibble plus the row's keyboard-track term at the note.
-      chip:
-        width: 12
-        value: "(((pwhi + pwtrack(pwkt, note + oct)) & 0x0F) << 8) | pwlo"
-        store: {pwhi: "((value >> 8) - pwtrack(pwkt, note + oct)) & 0x0F", pwlo: value}
+      # The register: the cells plus the row's keyboard-track term at the note.
+      chip: {width: 12, offset: "-(pwtrack(pwkt, note + oct) << 8)"}
       fire: [tick_pw]
-      label: [ppos]
-      x: "pwtab[ppos].x"
       site: {record: pwtab, index: ppos, field: x, clear: {a: 0, b: 0, k: 0}}
       hooks: [{at: {proc: start_note}, written: [ppos]}]
     - name: filter
       key: cut
       cell: "vfhi:vflo:3"
-      # The cutoff: the cell's high byte plus the keyboard-track term at the controlling voice's
-      # note (a sum past $FF also adds its carry to $D416, which no expression can state).
-      chip:
-        width: 11
-        value: "(((vfhi + fkd(fkt, note + oct)) & 0xFF) << 3) | (vflo & 7)"
-        store: {vfhi: "(value >> 3) - fkd(fkt, note + oct)", vflo: "value & 7"}
+      # The cutoff: the cells plus the keyboard-track term at the controlling voice's note (a
+      # high byte past $FF also adds its carry to $D416, which no expression can state).
+      chip: {width: 11, offset: "-(fkd(fkt, note + oct) << 3)"}
       mirror: "fcuthi:fcutlo:3"
       fire: [filt_row]
-      label: [fpos]
-      x: "flttab[fpos].x"
       site: {record: flttab, index: fpos, field: x, clear: {a: "a if a >= 0x80 else 0", b: 0, k: 0}}
       hooks: [{at: {proc: start_note}, written: [fpos]}]

@@ -199,14 +199,14 @@ on_bound: [{set: {vd: "vd ^ 1"}}]
 | `name` | the unit's name |
 | `key` | the shared key it drives: `freq`, `pw` or `cut` |
 | `cell` | the driven cell; a pair `hi:lo[:k]` is the value `hi << k \| lo & (2**k - 1)` (k 8 when omitted) |
-| `chip` | `{width, value, store}`: the unit's value is `value` over the cells, masked to `width` bits; `store` (reading `value`) writes a value back, run only when the cells do not already give it; each cell state the firings reach gives its own value, and `store` inverts `value` on those states |
-| `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it |
+| `chip` | `{width, offset, value, store}`: the unit's value is `value` over the cells, masked to `width` bits; `store` (reading `value`) writes a value back, run only when the cells do not already give it; each cell state the firings reach gives its own value, and `store` inverts `value` on those states. `value` defaults to the cells less `offset` (an expression, default 0), a cell narrower than `width` holding the value's top bits, and `store` to its inverse |
+| `scope` | `global` for one cell shared by the voices, owned by the voice whose start opened it (default: `global` for a global cell) |
 | `fire` | one firing: proc names, `run` actions and functions; `v` is read before the first entry's function runs and the expression's value is stored after the last's |
-| `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing |
+| `x` | an expression over the voice's cells giving the expression a start selects; 0 leaves the playroutine's own firing (default: the site's field, `record[index].field`) |
 | `hooks` | the starts: `{at: function, written: [cells], changed: [cells], pointer: [cells]}`; the unit restarts when the function writes a `written` cell, changes the `changed` cells, or writes a `pointer` to a program that sets one of `program.fields`; a hook with none of the three restarts it on every call, before the call runs |
-| `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start |
+| `program` | `{pointer, record, fields}`: the program a `pointer` selects and the fields that make it a start (`pointer` and `record` default to the site's `index` and `record`) |
 | `mirror` | a cell that takes the cell's value an expression stores when it held the cell's own |
-| `label` | the cells that group a unit's occurrences for the lifter |
+| `label` | the cells that group a unit's occurrences for the lifter (default: the site's `index`) |
 | `relative` | cells a start reads as `N` plus their offset from the note |
 | `site` | where the lifter writes the expression: `{record, index, field, clear, first, when, row}` (`clear`: fields the expression replaces; `first`: fields set on the program's first row; `when`: over the start's cells, else the event's command; `row`: the site is the program row the start runs, which holds the expression of its one firing) |
 | `retire` | `{record, clear}`: native fields the unit's expressions replace and the document does not write; the lifter clears them in every row of `record`, and the replay proves the song unchanged |

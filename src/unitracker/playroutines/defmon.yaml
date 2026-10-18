@@ -316,9 +316,7 @@ modulators:
       cell: sacc
       chip: {width: 16, value: "sacc if mode >= 0x80 or mode == 0 else por((note + mode) & 0xFF)", store: {sacc: value}}
       fire: [layer_a, pitch_acc]
-      label: [rowA]
-      x: "sidtab[rowA].xf"
-      program: {pointer: rowA, record: sidtab, fields: [af, xf]}
+      program: {fields: [af, xf]}
       site:
         record: sidtab
         index: rowA
@@ -329,20 +327,15 @@ modulators:
     - name: pulse A
       key: pw
       cell: pw
-      chip: {width: 12, value: "pw & 0xFFF", store: {pw: value}}
+      chip: {width: 12}
       fire: [layer_a, pulse]
-      label: [rowA]
-      x: "sidtab[rowA].xp"
-      program: {pointer: rowA, record: sidtab, fields: [pw, ps, xp]}
+      program: {fields: [pw, ps, xp]}
       site: {record: sidtab, index: rowA, field: xp, clear: {pw: -1, ps: -1}}
       hooks: [{at: {proc: pattern}, pointer: [rowA]}]
     - name: acid B
-      scope: global
       key: cut
       cell: acc
       fire: [layer_b, acid_step]
-      label: [rowB]
-      x: "sidtab[rowB].xc"
-      program: {pointer: rowB, record: sidtab, fields: [cp, acid, xc]}
+      program: {fields: [cp, acid, xc]}
       site: {record: sidtab, index: rowB, field: xc, clear: {cp: -1, acid: -1}}
       hooks: [{at: {proc: pattern}, pointer: [rowB]}]

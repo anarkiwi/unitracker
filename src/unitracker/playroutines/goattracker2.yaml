@@ -467,7 +467,7 @@ modulators:
     - name: command
       key: freq
       cell: freq
-      chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
+      chip: {width: 16, offset: "ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}
       fire: [{run: {record: tickn, index: command, field: do}}]
       label: [command, cmddata]
       # A step without a command runs the instrument's freq, as the native instrument vibrato.
@@ -482,10 +482,8 @@ modulators:
     - name: wave
       key: freq
       cell: freq
-      chip: {width: 16, value: "freq - ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]", store: {freq: "value + ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}}
+      chip: {width: 16, offset: "ftab[(arp & 0x7F) if arp >= 0x80 else ((note + arp) & 0x7F)]"}
       fire: [{record: wavecmd, field: do, index: [1, 2, 3, 4]}]
-      label: [wcur]
-      x: "ctrltab[wcur].x"
       relative: [lastnote]
       site: {record: ctrltab, index: wcur, field: x, row: true, clear: {w: 0xF1, n: 0}}
       hooks:
@@ -494,21 +492,16 @@ modulators:
       key: pw
       cell: pulse
       fire: [pulse_exec]
-      label: [pptr]
-      x: "pulsetab[pptr].x"
       site: {record: pulsetab, index: pptr, field: x, clear: {l: 0, r: 0}}
       hooks:
         - {at: {proc: new_note_init}, written: [pptr]}
         - {at: {record: tick0, field: do, index: 9}, written: [pptr]}
         - {at: {record: wavecmd, field: do, index: 9}, written: [pptr]}
     - name: filter
-      scope: global
       key: cut
       cell: filtercutoff
-      chip: {width: 11, value: "filtercutoff << 3", store: {filtercutoff: "value >> 3"}}
+      chip: {width: 11}
       fire: [filter_exec]
-      label: [fptr]
-      x: "filttab[fptr].x"
       site:
         record: filttab
         index: fptr

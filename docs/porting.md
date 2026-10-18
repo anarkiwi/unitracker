@@ -212,11 +212,11 @@ unit keys are in [Modulator declarations](playroutines/schema.md#modulator-decla
 
 | key | what it transcribes |
 |---|---|
-| `cell`, `scope` | the cell the replay modulates (`hi:lo[:k]` for a pair); `global` for one cell the voices share |
+| `cell`, `scope` | the cell the replay modulates (`hi:lo[:k]` for a pair); `scope` is `global` for a global cell, which the voices share |
 | `fire` | one firing, as proc names, `run` actions and functions: `v` is read before the first entry runs and the value stored after the last |
 | `hooks`, `program` | the starts: a function (`at: {proc: p}`, `{record: r, field: f, index: i}` with `i` a row or a list of rows, or `{type: t, template: f}`) writing a `written` cell, changing the `changed` cells, or writing a `pointer` to a program that sets one of `program.fields`; with none of these, every call of the function is a start. Never add a proc only to label a firing or a start: name the function the player already runs |
-| `x` | the expression a start selects; 0 leaves the playroutine's own firing |
-| `label` | the cells grouping occurrences, usually the program pointer |
+| `x` | the expression a start selects; 0 leaves the playroutine's own firing; by default the site's field |
+| `label` | the cells grouping occurrences; by default the site's index, the program pointer |
 | `site`, `retire`, `commands` | where the lifter writes the expression, the native fields it replaces, and the command codes `!freq` (the `commands` entry named `key` with `ref: x`) replaces |
 | `chip` | the chip map, below |
 
@@ -231,13 +231,16 @@ The top level of `modulators` gives what expressions read: `freq` (the word `F(k
 `functions`.
 
 **The chip map.** `chip: {width, value, store}` gives the unit's value `v` from its cells (`value`,
-`width` bits) and writes a value back (`store`, run only when the cells do not already give it). `v`
+`width` bits) and writes a value back (`store`, run only when the cells do not already give it).
+`chip: {width, offset}` generates both: `v` is the cells less `offset`, a cell narrower than `width`
+holding its top bits, and `store` the inverse. `v`
 must be a bijective image of the cell: each cell state the firings reach gives its own `v`, and
 `store` inverts `value`. A map that loses information (a clamp, a floor) makes two cell states one
 `v`, and no recurrence over `v` is exact. Keep `value` a linear image of the cell, plus at most a
 term that does not depend on the cell, wrapped to `width`, and move the rest into the ghost, where
-the register is written: GoatTracker's cutoff is `filtercutoff << 3`, SID-Wizard's pulse is
-`pwhi:pwlo` plus its keyboard-tracking term in the note (`store` subtracts it), and `defmon`'s `acid
+the register is written: GoatTracker's cutoff is `filtercutoff << 3` (`chip: {width: 11}`),
+SID-Wizard's pulse is `pwhi:pwlo` plus its keyboard-tracking term in the note (`offset` its
+negation), and `defmon`'s `acid
 B` is its whole accumulator, with the floor, the `dbl` shift and the offset in the ghost's `$D416`.
 A value the replay carries from earlier playback becomes a constant of the start's expression, which
 the lifter resolves ([Evaluation](modulation/expressions.md#evaluation)).

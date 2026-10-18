@@ -65,3 +65,75 @@ def test_an_explicit_key_overrides_each_default():
     assert out["instrument"] == pr["instrument"] and out["note_offset"] == 2
     assert out["ghost"]["voice"] == {0: "w & 0xFF", 1: "a", 2: "b", 3: "a", 4: "a"}
     assert "instrument" not in expand({"record_types": {"t": {}}})
+
+
+def test_units_take_x_label_program_and_scope_from_site_and_cell():
+    units = {u["name"]: u for u in songio.library("defmon")["modulators"]["units"]}
+    assert units["acid B"]["x"] == "sidtab[rowB].xc" and units["acid B"]["label"] == ["rowB"]
+    assert units["acid B"]["program"] == {
+        "fields": ["cp", "acid", "xc"],
+        "record": "sidtab",
+        "pointer": "rowB",
+    }
+    assert units["acid B"]["scope"] == "global" and "scope" not in units["pulse A"]
+    gt = {u["name"]: u for u in songio.library("goattracker2")["modulators"]["units"]}
+    assert gt["command"]["x"].startswith("cmddata if") and gt["command"]["label"] == [
+        "command",
+        "cmddata",
+    ]
+    assert gt["filter"]["scope"] == "global" and gt["wave"]["label"] == ["wcur"]
+
+
+def _wrap(cells: dict, widths: dict) -> dict:
+    return {c: v & ((1 << widths[c]) - 1) for c, v in cells.items()}
+
+
+@pytest.mark.parametrize(
+    "cell,widths,chip,old",
+    [
+        ("c", {"c": 8}, {"width": 11}, "c << 3"),
+        ("c", {"c": 16}, {"width": 12}, "c & 0xFFF"),
+        ("c", {"c": 16}, {"width": 16, "offset": "t"}, "(c - t) & 0xFFFF"),
+        (
+            "h:l",
+            {"h": 8, "l": 8},
+            {"width": 12, "offset": "-(t << 8)"},
+            "(((h + t) & 0x0F) << 8) | l",
+        ),
+        (
+            "h:l:3",
+            {"h": 8, "l": 8},
+            {"width": 11, "offset": "-(t << 3)"},
+            "(((h + t) & 0xFF) << 3) | (l & 7)",
+        ),
+    ],
+)
+def test_a_chip_value_and_store_follow_from_width_and_offset(cell, widths, chip, old):
+    # pylint: disable=eval-used
+    unit = {"name": "u", "cell": cell, "chip": dict(chip)}
+    out = expand(
+        {"voice": {c: {"width": w} for c, w in widths.items()}, "modulators": {"units": [unit]}}
+    )
+    got = out["modulators"]["units"][0]["chip"]
+    mask = (1 << chip["width"]) - 1
+    for t in (0, 3, 200):
+        for raw in range(0, 1 << 16, 97):
+            cells = _wrap({c: raw >> (8 * i) for i, c in enumerate(widths)}, widths)
+            value = eval(got["value"], {}, {**cells, "t": t}) & mask
+            assert value == eval(old, {}, {**cells, "t": t})
+            back = {c: eval(e, {}, {"value": value, "t": t}) for c, e in got["store"].items()}
+            assert eval(got["value"], {}, {**_wrap(back, widths), "t": t}) & mask == value
+
+
+def test_explicit_unit_keys_and_chip_maps_stay():
+    unit = {
+        "cell": "g",
+        "scope": "voice",
+        "x": "0",
+        "label": [],
+        "site": {"record": "r", "index": "i", "field": "f"},
+        "program": {"record": "q", "pointer": "p", "fields": []},
+        "chip": {"width": 8, "value": "g", "store": {"g": "value"}},
+    }
+    out = expand({"global": {"g": {"width": 8}}, "modulators": {"units": [unit]}})
+    assert out["modulators"]["units"][0] == unit
