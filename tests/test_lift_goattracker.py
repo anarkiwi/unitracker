@@ -137,14 +137,13 @@ def test_a_swing_names_its_pair_and_plays_the_player(commands, written):
     assert all(w in text for w in written) and "speedtab" not in text
 
 
-def test_a_swing_on_the_stored_pair_meeting_two_pairs_is_not_covered():
-    dec, _ = gt_tune(
+def test_a_swing_meeting_another_pair_on_each_pass_is_written_out_until_the_passes_repeat():
+    dec, native = gt_tune(
         [(0x41, 0), (0xFF, 0)], rows=tempo_rows((4, 15, 0), (8, 14, 1)), speed=[(6, 9)]
     )
-    with pytest.raises(
-        gt.LiftError, match=r"meets the pairs \[\(6, 9\), \(9, 6\)\]; named, it plays differently"
-    ):
-        gt.lift(dec, expressions=False)
+    text, _, _ = lifted(dec, native, 2000)
+    played = [e for e in yaml.safe_load(text)["song"] if isinstance(e, dict) and "play" in e]
+    assert "!tempo:9/6" in text and "!tempo:6/9" in text and len(played) >= 2
 
 
 def test_phrase_folds_empty_rows():

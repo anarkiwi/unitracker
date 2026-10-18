@@ -1,7 +1,5 @@
 """Lift a GoatTracker 2 tune (pygoattracker's decompiled .sid) to a unitracker song."""
 
-from collections import Counter
-
 import numpy as np
 from tqdm import tqdm
 from pygoattracker import constants as C
@@ -266,35 +264,51 @@ def _native(ir: dict) -> SongPlayer:
     return player
 
 
-def stored_pairs(ir: dict, ticks: int) -> dict:
-    """``{(phrase, event, command index): Counter of (l, r)}``: the funk pair stored each time a
-    command of :data:`STORED` is read, over ``ticks`` ticks."""
+def _event_steps(events: list) -> dict:
+    """``{step: event index}`` of the steps that start each of a phrase's events."""
+    steps = np.cumsum([0] + [int(e.get("steps", 1)) for e in events[:-1]])
+    return {int(s): k for k, s in enumerate(steps)}
+
+
+def stored_pairs(ir: dict, ticks: int) -> tuple[dict, list]:
+    """``({(voice, occurrence, event, command index): (l, r)}, occurrences per voice)``: the funk
+    pair each command of :data:`STORED` meets where it plays over ``ticks`` ticks, the occurrence
+    being the voice's n-th phrase play (repeats and loop passes counted)."""
     player = _native(ir)
-    fetch, starts = player.namespace["_fetch"], {}
-    for name, events in ir["phrases"].items():
-        steps = np.cumsum([0] + [int(e.get("steps", 1)) for e in events[:-1]])
-        starts[name] = {int(s): k for k, s in enumerate(steps)}
+    fetch, dispatch = player.namespace["_fetch"], player.namespace["D_v_tick0_do"]
+    starts = {name: _event_steps(events) for name, events in ir["phrases"].items()}
     voice_of = {id(cells): v for v, cells in enumerate(player.voice_cells)}
-    seen = {}
+    count, last, seen = [0] * len(voice_of), [None] * len(voice_of), {}
 
     def observed(cells):
-        cursor = cells[-1]
+        v, cursor = voice_of[id(cells)], cells[-1]
+        last[v] = None
         if not cursor.ended:
-            name = ir["tracks"][voice_of[id(cells)]]["plays"][cursor.index]["phrase"]
+            count[v] += cursor.step == 0
+            name = ir["tracks"][v]["plays"][cursor.index]["phrase"]
             k = starts[name].get(cursor.step)
-            for j, cmd in enumerate(
-                event_commands(ir["phrases"][name][k]) if k is not None else ()
-            ):
-                if tuple(cmd) in STORED:
-                    voice = voice_of[id(cells)]
-                    pair = tuple((player.cell(f"funk{i}", voice) + 1) & 0xFF for i in (0, 1))
-                    seen.setdefault((name, k, j), Counter())[pair] += 1
+            last[v] = None if k is None else (count[v] - 1, name, k)
         fetch(cells)
 
+    def recorded(run):
+        def wrapped(cells, row=None):
+            v = voice_of[id(cells)]
+            if last[v] is not None:
+                n, name, k = last[v]
+                pair = tuple((player.cell(f"funk{i}", v) + 1) & 0xFF for i in (0, 1))
+                for j, cmd in enumerate(event_commands(ir["phrases"][name][k])):
+                    if tuple(cmd) in STORED:
+                        seen[(v, n, k, j)] = pair
+            run(cells, row)
+
+        return wrapped
+
     player.namespace["_fetch"] = observed
+    for code in {code for code, _ in STORED} & set(dispatch):
+        dispatch[code] = (recorded(dispatch[code][0]), dispatch[code][1])
     for _ in tqdm(range(ticks), desc="stored swing", unit="tick", leave=False):
         player.play_frame()
-    return seen
+    return seen, count
 
 
 def _named(event: dict, j: int, pair: tuple, speed: dict) -> None:
@@ -311,38 +325,109 @@ def _named(event: dict, j: int, pair: tuple, speed: dict) -> None:
     event.update({"command": cmds[0]} if len(cmds) == 1 else {"commands": cmds})
 
 
+def _items(trk: dict) -> tuple[list, int | None]:
+    """A track's ``(phrase, transpose)`` per phrase play, repeats written out, and the item its
+    loop returns to (None for a track that ends)."""
+    items, loop = [], None
+    for k, play in enumerate(trk["plays"]):
+        loop = len(items) if k == trk.get("loop") else loop
+        items += [(play["phrase"], int(play.get("transpose", 0)))] * int(play.get("repeat", 1))
+    return items, loop
+
+
+def _plays(items: list) -> list:
+    """Plays of ``(phrase, transpose)`` items, equal neighbours as a repeat."""
+    out = []
+    for name, trans in items:
+        if out and (out[-1]["phrase"], out[-1].get("transpose", 0)) == (name, trans):
+            out[-1]["repeat"] = out[-1].get("repeat", 1) + 1
+            continue
+        out.append({"phrase": name, **({"transpose": trans} if trans else {})})
+    return out
+
+
+def _unrolled(items: list, loop, variant, occurrences: int) -> tuple[list, int | None]:
+    """``(items, loop)`` with each item ``(phrase, transpose, variant)``, ``variant(n)`` that of
+    the voice's n-th phrase play, of which ``occurrences`` were observed: a loop is written out
+    from the first item after which the variants repeat with a period of whole passes."""
+    if loop is None:
+        return [(*items[n], variant(n)) for n in range(len(items))], None
+    size = len(items) - loop
+    seen = [variant(n) for n in range(occurrences)]
+    for start in range(loop, occurrences):
+        for period in range(size, occurrences - start, size):
+            if all(seen[n] == seen[n + period] for n in range(start, occurrences - period)):
+                at = [n if n < loop else loop + (n - loop) % size for n in range(start + period)]
+                return [(*items[k], seen[n]) for n, k in enumerate(at)], start
+    raise LiftError("a swing on the stored pair meets pairs that do not repeat within the replay")
+
+
+class _Swings:
+    """The phrases and speed-table rows of a song whose stored swings name the pairs they meet
+    (see :func:`explicit_swing`)."""
+
+    # pylint: disable=too-few-public-methods,too-many-instance-attributes
+
+    def __init__(self, ir: dict, users: dict, ticks: int):
+        self.ir, self.users = ir, users
+        self.seen, self.counts = stored_pairs(ir, ticks)
+        voice = ir["playroutine"]["voice"]
+        self.initial = tuple(int(voice[f"funk{i}"]["init"]) + 1 for i in (0, 1))
+        self.speed, self.phrases, self.names = dict(ir["records"]["speedtab"]), {}, {}
+
+    def _phrase(self, name: str, pairs: tuple) -> str:
+        """The phrase that plays ``name`` with its stored swings naming ``pairs``."""
+        if (name, pairs) not in self.names:
+            alias = name if name not in self.phrases else f"{name}/{len(self.phrases)}"
+            events = [dict(e) for e in self.ir["phrases"][name]]
+            for (k, j), pair in zip(self.users[name], pairs):
+                _named(events[k], j, pair, self.speed)
+            self.names[(name, pairs)], self.phrases[alias] = alias, events
+        return self.names[(name, pairs)]
+
+    def track(self, v: int) -> dict:
+        """Voice ``v``'s track over the phrases that name its pairs."""
+        trk = self.ir["tracks"][v]
+        items, loop = _items(trk)
+
+        def variant(n):
+            k = n if loop is None or n < len(items) else loop + (n - loop) % (len(items) - loop)
+            name = items[k][0]
+            return tuple(self.seen.get((v, n, e, j), self.initial) for e, j in self.users[name])
+
+        unrolled, loop = _unrolled(items, loop, variant, self.counts[v] - 1)
+        written = [(self._phrase(name, pairs), trans) for name, trans, pairs in unrolled]
+        if loop is None:
+            return {**trk, "plays": _plays(written), "loop": None}
+        intro = _plays(written[:loop])
+        return {**trk, "plays": intro + _plays(written[loop:]), "loop": len(intro)}
+
+
 def explicit_swing(ir: dict) -> dict:
     """``ir`` with each command that swings on the stored funk pair (:data:`STORED`) naming the
-    pair it meets most, once a replay to the song's recurrence and one period more proves it
-    unheard (a pair another voice replaces on the same tick is not heard); else LiftError."""
-    users = [
-        (name, k, j)
+    pair it meets where it plays: a phrase that meets different pairs at different places becomes
+    one phrase per place, and a loop whose passes meet different pairs is written out until they
+    repeat."""
+    users = {
+        name: [
+            (k, j)
+            for k, e in enumerate(events)
+            for j, c in enumerate(event_commands(e))
+            if tuple(c) in STORED
+        ]
         for name, events in ir["phrases"].items()
-        for k, event in enumerate(events)
-        for j, cmd in enumerate(event_commands(event))
-        if tuple(cmd) in STORED
-    ]
-    if not users:
+    }
+    if not any(users.values()):
         return ir
-    ticks = window(ir)
-    seen = stored_pairs(ir, ticks)
-    phrases = {name: [dict(e) for e in events] for name, events in ir["phrases"].items()}
-    speed = dict(ir["records"]["speedtab"])
-    initial = Counter(
-        {tuple(int(ir["playroutine"]["voice"][f"funk{i}"]["init"]) + 1 for i in (0, 1)): 1}
-    )
-    met = set()
-    for name, k, j in users:
-        met.update(seen.get((name, k, j), initial))
-        _named(phrases[name][k], j, seen.get((name, k, j), initial).most_common(1)[0][0], speed)
-    out = {**ir, "phrases": phrases, "records": {**ir["records"], "speedtab": speed}}
+    ticks = 2 * window(ir)
+    swings = _Swings(ir, users, ticks)
+    tracks = [swings.track(v) for v in range(len(ir["tracks"]))]
+    out = {**ir, "phrases": swings.phrases, "tracks": tracks}
+    out["records"] = {**ir["records"], "speedtab": swings.speed}
     diff = np.argwhere(_native(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
     if len(diff):
         tick, reg = (int(x) for x in diff[0])
-        raise LiftError(
-            f"a swing on the stored pair meets the pairs {sorted(met)}; named, it plays"
-            f" differently at tick {tick}, register {reg}"
-        )
+        raise LiftError(f"the named swings play differently at tick {tick}, register {reg}")
     return out
 
 

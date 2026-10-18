@@ -58,13 +58,14 @@ Every other command is refused by name.
 
 - `!tempo:n` and `!vtempo:n` are command $F from 3 to 127; it plays a tempo of 2 as 3, so 2, 128
   and 129 are written as `!tempo:a/b` and `!vtempo:a/b` are, with the row `n/n`.
-- `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each. Each voice
-  keeps its own swing pair: `!tempo:a/b` sets every voice's, and `!vtempo:a/b`, playroutine
-  command 18, this voice's. The native player keeps one pair, which only $E and its init set, so
-  every voice's pair is that one in a native song. The lifter writes $E00 and $F00/$F01/$F80/$F81, which
-  swing on the pair already set, as the commands that name the pair they meet ($x1 reversed,
-  starting on its second tempo), once a replay proves the song unchanged; a command that meets
-  pairs no one of which plays the song is not covered.
+- `!tempo:a/b` is command $E, its argument the speed-table row's two bytes, 2-129 ticks each.
+  Each voice keeps its own swing pair: `!tempo:a/b` sets every voice's, and `!vtempo:a/b`,
+  playroutine command 18, this voice's. The native player keeps one pair, which only $E and its
+  init set, so every voice's pair is that one in a native song. The lifter writes $E00 and
+  $F00/$F01/$F80/$F81, which swing on the pair already set, as the commands that name the pair
+  each meets where it plays ($x1 reversed, starting on its second tempo): a phrase that meets
+  different pairs at different places becomes one phrase per place, and a loop whose passes meet
+  different pairs is written out from where they repeat.
 - `!vol` is command $D below $10; from $10 it is `!mark`.
 - `!run:none`, `!pw:none` and `!filter:none` are commands 8, 9 and 10 with argument 0, which stop
   the control, pulse and filter programs.
