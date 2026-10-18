@@ -1,7 +1,7 @@
 # defMON (`defmon`)
 
 The defMON `$1000` replay of [`defmon.yaml`](../../src/unitracker/playroutines/defmon.yaml).
-Terms and section names in *italics* are [format.md](../format.md)'s.
+
 
 ## Lifting
 
@@ -29,13 +29,14 @@ a nibble, as the reference grid does.
 | `vinit` | each voice's state after init (fixed) | `pw`, the pulse cell, at most $0FFF; `freq`, the frequency registers as the signed offset from `note`'s frequency (omitted: the note's frequency); `sacc`, the slide accumulator; `note` (`=n`), the note its relative rows add to |
 | `ginit` | the global state after init (fixed) | `sub`: 1 when the ACID step subtracts (its SBC), 0 when it adds (its ADC), which the replay's own ACID firing reads until a layer-B row sets the step (setting the cutoff keeps it) |
 
-The frequency registers in `vinit` are the voice's on the first tick only: init's call latches
-them, then its pitch step sets the frequency from the note. The slide accumulator counts only
-under a slide a layer-A program starts before the voice's first note, which clears it. There are no `pw` or `filter` record types.
+The frequency registers in `vinit` are the voice's on the first tick only: init's call latches them,
+then its pitch step sets the frequency from the note. The slide accumulator counts only under a
+slide a layer-A program starts before the voice's first note, which clears it. There are no `pw` or
+`filter` record types.
 
 ## Events
 
-The playroutine declares *Instrument columns*:
+The playroutine declares [Instrument columns](../format/vocabulary.md#instrument-columns):
 `instrument: {type: sidtab, base: 1, writes_as: {type: ins, column: ctrl, commands: {1: filter}}}`.
 
 - `.i3` names the instrument: its `ctrl` is the sidTAB program sidcall layer A starts (the
@@ -144,7 +145,7 @@ The lifter fails, naming what it meets:
 - a sidTAB row that resolves to a row with no body;
 - an init that does not arm the arranger, a song step that never reaches an ALT event, or an
   arranger that does not loop;
-- a modulation start whose expression is not proved (see [modfit.md](../modfit.md)).
+- a modulation start whose expression is not proved (see [modfit.md](../modulation/modfit.md)).
 
 Writing the lifted song fails, naming the row or record, on what has no written form: a `cp` on a
 layer-A row, and a voice's initial pulse cell over $0FFF.

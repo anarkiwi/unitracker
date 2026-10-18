@@ -12,9 +12,9 @@ and its register writes are flushed in one canonical order.
 
 | doc | content |
 |---|---|
-| [docs/format.md](docs/format.md) | the format specification and the playroutine schema |
-| [docs/playroutines/](docs/playroutines/) | what each playroutine and its lifter support and refuse: [goattracker2](docs/playroutines/goattracker2.md), [sidwizard](docs/playroutines/sidwizard.md), [defmon](docs/playroutines/defmon.md) |
-| [docs/modfit.md](docs/modfit.md) | modulation analysis and the proved conversion to expressions (`unitracker-modfit`) |
+| [docs/format.md](docs/format.md) | the format: an example and the index of its topic docs (document, vocabulary, expressions, playroutine schema, lifting) |
+| [docs/playroutines/](docs/playroutines/) | the playroutine [schema](docs/playroutines/schema.md), [lifting](docs/playroutines/lifting.md), and what each playroutine and its lifter support and refuse: [goattracker2](docs/playroutines/goattracker2.md), [sidwizard](docs/playroutines/sidwizard.md), [defmon](docs/playroutines/defmon.md) |
+| [docs/modulation/modfit.md](docs/modulation/modfit.md) | modulation analysis and the proved conversion to expressions (`unitracker-modfit`) |
 | [docs/optimise.md](docs/optimise.md) | `unitracker-optimise`: passes, guarantee, report |
 | [docs/porting.md](docs/porting.md) | bringing another playroutine to unitracker |
 
@@ -41,7 +41,8 @@ player = SongPlayer(songio.load("song.yaml"))
 grid = player.render_grid(3000)            # (ticks, 25) SID register grid
 ```
 
-`python tools/token_report.py song.yaml` counts a document's tokens per section (needs the `dev` extras).
+`python tools/token_report.py song.yaml` counts a document's tokens per section (needs the `dev`
+extras).
 
 `tools/oracle_hvsc.py` holds the renderers for pysidtracker's survey: `render` lifts each
 subtune, writes it, reads it back and plays it, `native` plays the backend's own player; both are
@@ -65,7 +66,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | do the three reference tunes still round-trip and match? | `python tools/reference_check.py OUTDIR [--forbid KEY ...]` |
 | the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
 | why did a modulator not become an expression? | `python tools/occurrences.py TUNE.sid [--unit freq\|pw\|cut]`, `unitracker-modfit exprs` |
-| does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modfit.md](docs/modfit.md)) |
+| does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modulation/modfit.md](docs/modulation/modfit.md)) |
 | tokens per section of a document | `python tools/token_report.py song.yaml` |
 | dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report report.md` ([docs/optimise.md](docs/optimise.md)) |
 | do the docs' relative links resolve? | `python tools/doc_links.py` |
