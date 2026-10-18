@@ -44,40 +44,38 @@ class _Table:
         return self.rt(ptr) if self.lt(ptr) == C.TABLEJUMP else ptr
 
 
-def wave_records(table) -> dict:
-    """Wavetable rows as ``w``/``n`` records, jump rows folded into ``next``."""
+def _rows(table, data) -> dict:
+    """Each row ``i`` as ``data(left, right)`` with ``next``, the row after it or, when that is
+    a jump row, the jump's target. The player follows one jump and reads the row it lands on as
+    data, so a jump row is a record too: its own bytes as data, which a jump to it or a pointer
+    at it reaches."""
     tab = _Table(table)
     return {
-        i: {"w": tab.lt(i), "n": tab.rt(i), "next": tab.fold(i + 1)}
-        for i in range(1, len(tab) + 1)
-        if tab.lt(i) != C.TABLEJUMP
+        i: {**data(tab.lt(i), tab.rt(i)), "next": tab.fold(i + 1)} for i in range(1, len(tab) + 1)
     }
+
+
+def wave_records(table) -> dict:
+    """Wavetable rows as ``w``/``n`` records; a jump row read as data changes no waveform and
+    waits no tick, as a delay row of 0."""
+    return _rows(table, lambda w, n: {"w": 0 if w == C.TABLEJUMP else w, "n": n})
 
 
 def pulse_records(table) -> dict:
-    """Pulsetable rows as ``l``/``r`` records, jump rows folded into ``next``."""
-    tab = _Table(table)
-    return {
-        i: {"l": tab.lt(i), "r": tab.rt(i), "next": tab.fold(i + 1)}
-        for i in range(1, len(tab) + 1)
-        if tab.lt(i) != C.TABLEJUMP
-    }
+    """Pulsetable rows as ``l``/``r`` records; a width row's ``l`` keeps the bits it plays."""
+    return _rows(table, lambda l, r: {"l": 0x80 | (l & 0x0F) if l >= 0x80 else l, "r": r})
 
 
 def filter_records(table) -> dict:
-    """Filtertable rows as ``l``/``r`` records; a parameter row takes a following cutoff row's
-    value as ``cut`` and continues after it, as the player reads them in one tick."""
-    tab, out = _Table(table), {}
-    for i in range(1, len(tab) + 1):
-        left = tab.lt(i)
-        if left == C.TABLEJUMP:
-            continue
-        rec, nxt = {"l": left, "r": tab.rt(i)}, i + 1
-        if left >= 0x80 and tab.lt(nxt) == 0x00:
-            rec["cut"] = tab.rt(nxt)
-            nxt += 1
-        rec["next"] = tab.fold(nxt)
-        out[i] = rec
+    """Filtertable rows as ``l``/``r`` records; a parameter row keeps the bits of ``l`` it plays,
+    takes a following cutoff row's value as ``cut`` and continues after it, as the player reads
+    them in one tick."""
+    tab, out = _Table(table), _rows(
+        table, lambda l, r: {"l": 0x80 | (l & 0x70) if l >= 0x80 else l, "r": r}
+    )
+    for i, rec in out.items():
+        if rec["l"] >= 0x80 and tab.lt(i + 1) == 0x00:
+            rec.update(cut=tab.rt(i + 1), next=tab.fold(i + 2))
     return out
 
 
