@@ -436,7 +436,7 @@ class Machine:  # pylint: disable=too-many-instance-attributes
                     break
                 need |= before & written
         self.mask = (1 << int(self.chip["width"] if self.chip else form.width[self.cell])) - 1
-        self.memo = {}
+        self.memo, self.domains = {}, {}
 
     def check_offset(self, state: dict) -> None:
         """Raise unless the chip value at control ``state`` is the pair plus its offset, wrapped
@@ -454,9 +454,14 @@ class Machine:  # pylint: disable=too-many-instance-attributes
     def domain(self, start) -> tuple:
         """``(lo, hi, r, m)``: the chip values the cells give at control ``start`` lie in
         ``[lo, hi]`` and are ``r`` modulo ``m`` (a power of two); ``(0, mask, 0, 1)`` without
-        a chip map."""
+        a chip map. Memoised per start."""
         if not self.chip or self.paired:
             return 0, self.mask, 0, 1
+        if start not in self.domains:
+            self.domains[start] = self._domain(start)
+        return self.domains[start]
+
+    def _domain(self, start) -> tuple:
         state = {c: v for c, v in dict(start).items() if c not in DOMAIN}
         f = self.form
         smt = f.solver()
@@ -829,6 +834,8 @@ class Prover:
     def env(self, smt, phi) -> dict:
         """Symbols and functions of the grammar over one solver's atoms."""
         f = self.form
+        if not z3.is_bv_value(phi):
+            phi = G.Phase(smt.solver.add, phi)
         env = {"v": smt.term(self.machine.cell), "N": smt.term("N"), "φ": phi}
         env.update({name: smt.term(cell) for cell, name in self.extra.items()})
 
@@ -900,7 +907,7 @@ class Prover:
         phi = z3.BitVec("φ", G.BITS)
         smt.solver.add(phi >= start, phi < PHI_BOUND)
         env = self.env(smt, phi)
-        later = G.to_z3(e, {**env, "φ": phi + period})
+        later = G.to_z3(e, {**env, "φ": env["φ"] + period})
         smt.solver.add(later != G.to_z3(e, env))
         return None if smt.solver.check() == z3.unsat else witness(smt.solver)
 
@@ -913,10 +920,9 @@ class Prover:
         start = {**env, "φ": z3.BitVecVal(0, G.BITS)}
         if v0 is not None:
             start["v"] = G.to_z3(v0, env)
-        step = G.to_z3(f, {**env, "v": G.to_z3(g, env), "φ": phi + 1})
-        smt.solver.add(
-            z3.Or(G.to_z3(g, start) != G.to_z3(f, start), G.to_z3(g, {**env, "φ": phi + 1}) != step)
-        )
+        nxt = {**env, "φ": env["φ"] + 1}
+        step = G.to_z3(f, {**nxt, "v": G.to_z3(g, env)})
+        smt.solver.add(z3.Or(G.to_z3(g, start) != G.to_z3(f, start), G.to_z3(g, nxt) != step))
         return None if smt.solver.check() == z3.unsat else witness(smt.solver)
 
     def in_range(self, g, mask: int) -> bool:
