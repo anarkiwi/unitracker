@@ -196,7 +196,7 @@ class _Writer:
         self.records.update({native: rows} if native in self.records else {})
         self.ir = _player(self.pr, envelope.Envelope(self.pr, self.rtypes).write, ir, self.records)
         settled = running.Running(
-            self.pr, self.rtypes, self.commands, self.codecs, self.records, self.exprs, self.xcanon
+            self.pr, self.rtypes, self.commands, self.codecs, self.records, self.exprs
         )
         self.ir = _player(self.pr, settled.write, self.ir)
         written = lifetime.Lifetime(self.pr, self.rtypes).written

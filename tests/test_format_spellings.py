@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from unitracker.format import idle, songio, timeline, xexpr
+from unitracker.format.events import context, running
 from unitracker.format.codec import CodecError, row_place
 from unitracker.player.vm import SongPlayer
 
@@ -476,3 +477,82 @@ def test_a_restart_of_the_first_tick_row_alone_is_refused(pr):
         ins = f"i1: {{ctrl: [{{ctrl: 65, note: +0}}, end], restart: [{row}, end]}}"
         defs = f"      ins:\n        {ins}\n"
         refused(doc(pr, defs, {"p1": "C4.i1*4"}), "can't express")
+
+
+# -- 10: a command that sets what the voice already has --
+
+SW_ONE = """      x:
+        x1: v + 3
+      ins:
+        i1: {ad: 18, sr: 240, ctrl: [{ctrl: 65, note: +0}, end], freq: v + 3}
+"""
+ALONE = "    play: [p1, p2, p2]\n"
+REST = {"p2": "-*8"}
+
+
+@pytest.mark.parametrize(
+    "pr,defs,atoms",
+    [
+        ("goattracker2", GT_ONE, "C4.i1!tempo:16, -!tempo:16*7"),
+        ("goattracker2", GT_ONE, "C4.i1!ad:1*8"),
+        ("goattracker2", GT_ONE, "C4.i1*4, D4!sr:240*4"),
+        ("goattracker2", GT_ONE, "C4.i1!vol:3, -!sr:5, -!vol:3*6"),
+        ("sidwizard", SW_ONE, "C4.i1*2, off!sr:253, -!sr:253*5"),
+        ("sidwizard", SW_ONE, "C4.i1!sr:240*8"),
+        ("sidwizard", SW_ONE, "C4.i1!freq:x1*8"),
+    ],
+)
+def test_a_command_that_sets_what_the_voice_has_is_refused(pr, defs, atoms):
+    refused(doc(pr, defs, {"p1": atoms, **REST}, ALONE), "sets what the voice already has")
+
+
+def _played(pr: str, defs: str, atoms: str, monkeypatch) -> dict:
+    """What the reader reads ``atoms`` as, without refusing a command that changes nothing."""
+    monkeypatch.setattr(running.Running, "_read", _lenient)
+    ir = songio.loads(doc(pr, defs, {"p1": atoms, **REST}, ALONE))
+    monkeypatch.undo()
+    return ir
+
+
+def _lenient(self, voice, event):
+    # pylint: disable=protected-access
+    settled = [(c, a, None if v == "same" else v) for c, a, v in self._settle(voice, event)]
+    return [context.with_commands(event, [(c, a) for c, a, _ in settled])]
+
+
+@pytest.mark.parametrize(
+    "pr,defs,atoms,written",
+    [
+        (
+            "goattracker2",
+            GT_ONE,
+            "C4.i1!tempo:16, -!sr:5, -!tempo:16*6",
+            "C4.i1!tempo:16, -!sr:5*7",
+        ),
+        ("goattracker2", GT_ONE, "C4.i1!ad:1*8", "C4.i1*8"),
+        ("sidwizard", SW_ONE, "C4.i1*2, off!sr:253, -!sr:253*5", "C4.i1*2, off!sr:253*6"),
+        ("sidwizard", SW_ONE, "C4.i1!freq:x1*8", "C4.i1*8"),
+    ],
+)
+def test_the_writer_leaves_out_a_command_that_changes_nothing(
+    monkeypatch, pr, defs, atoms, written
+):
+    ir = _played(pr, defs, atoms, monkeypatch)
+    out = canonical(songio.dumps(ir))
+    assert f"p1: [{written}]" in out
+    assert same_play(out, ir)
+
+
+@pytest.mark.parametrize(
+    "defs,phrases,rows",
+    [
+        (GT_ONE.replace("{wait: 1, note: +12}", "{ad: 9}"), {"p1": "C4.i1!ad:9, -!ad:9*7"}, ONCE),
+        (GT_ONE, {"p1": "C4.i1!tempo:16, -!tempo:16*7", "p2": "-!tempo:7*8"},
+         "    play: [p1, p2, p2]\n"),
+        (GT_ONE, {"p1": "C4.i1!run:c1, -!run:c1*7"}, ONCE),
+    ],
+)  # fmt: skip
+def test_a_command_is_kept_where_something_else_may_change_what_it_sets(defs, phrases, rows):
+    defs += "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
+    text = canonical(doc("goattracker2", defs, phrases, rows))
+    assert all(f"{n}: [{a}]" in text for n, a in phrases.items())

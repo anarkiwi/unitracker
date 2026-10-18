@@ -141,10 +141,19 @@ frequency, is `!freq:none` (see [Running values](#running-values)).
 ## Running values
 
 The writer and the reader walk each voice's plays (see [Walking the plays](#walking-the-plays))
-knowing what its commands have set. A `!freq` runs from a `!freq` until a note starts the
-instrument; a command that sets what the voice already has changes nothing, and the reader
-refuses it. In a player whose `!freq` lasts until a step without a command (`lasts: step`), a
-step's command is what drives its frequency, and a `!freq` of `v` on an instrument without
+knowing what its commands have set. A command that sets what the voice already has changes
+nothing: the writer leaves it out, and the reader refuses it (`!tempo:16` after the phrase's
+`!tempo:16`, `C4.i1!ad:1` where `i1` has `ad: 1`). A phrase knows what its own commands set and
+what a note that starts an instrument the phrase names sets: the instrument's `ad` and `sr`, and,
+but in a player whose `!freq` lasts until a step without a command, its `freq`. It does not know
+a value something else may set: a key of a program row of the song (a control program's `ad`
+row), the song's tempo, volume or filter where another voice sets them too, and a voice's own
+registers and programs once a note starts the instrument. A program command restarts its
+program and a swing its alternation, so only stopping a program (`none`) can change nothing of
+theirs. `!freq` runs from a `!freq` until a note
+starts the instrument (see [Lifetime of `!freq`](#lifetime-of-freq)); in a `lasts: step` player a
+step's command is what drives its frequency, so a command is left out only where the step keeps
+another or the voice has no frequency to drive, and a `!freq` of `v` on an instrument without
 `freq` holds the frequency as `!freq:none` does: it is written `!freq:none`, and nothing where no
 `!freq` runs.
 

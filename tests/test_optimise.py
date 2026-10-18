@@ -137,8 +137,8 @@ FIRES = {
     "share": ("phrases", shared(I1), ["share"], lambda t: t.count("C6") == 1),
     "commands": (
         "commands",
-        doc(I1, "[C4.i1*2, D4*2, E4!ad:9*2, F4*2]"),
-        ["drop_command", "drop_instrument"],
+        doc(I1, "[C4*2, D4*2, E4!ad:9*2, F4*2]"),
+        ["drop_command"],
         lambda t: "!ad" not in t,
     ),
     "fields": (
@@ -297,7 +297,7 @@ def test_an_embedded_playroutine_is_optimised_embedded():
 
 def test_cli_optimises_and_reports(tmp_path, capsys):
     song = tmp_path / "song.yaml"
-    song.write_text(doc(I1, "[C4.i1*2, D4*2, E4!ad:9*2, F4*2]"), encoding="utf-8")
+    song.write_text(doc(I1, "[C4*2, D4*2, E4!ad:9*2, F4*2]"), encoding="utf-8")
     out, report = tmp_path / "small.yaml", tmp_path / "orth.md"
     args = ["-o", str(out), "--report", str(report), "--passes", "commands", "--workers", "1"]
     assert cli.optimise_main([str(song), *args]) == 0

@@ -7,11 +7,12 @@ from unitracker.format import tempo
 from unitracker.format.codec import EXPR, NONE, CodecError, command_code, command_variants
 from unitracker.format.events import context, restart
 from unitracker.format.events.lifetime import order, starts
-from unitracker.format.xexpr import ExpressionError, source
+from unitracker.format.xexpr import ExpressionError, canonical
 from unitracker.player.vm import event_commands
 
 NAME = "freq"
 SONG = ("tempo", "vtempo", "vol", "cut", "resfilt")
+TEMPOS = ("tempo", "vtempo")
 BYTES = ("ad", "sr")
 KEYS = {
     "ad": {"ad"},
@@ -51,30 +52,32 @@ class _Voice:
         self.own, self.named = {}, None
 
 
-def _holds(text: str) -> bool:
-    """Whether expression ``text`` is ``v``, the value it holds."""
+def _text(text: str) -> str:
+    """The one text of expression ``text``, or ``text`` outside the grammar."""
     try:
-        return source(text)[0] == "v"
+        return canonical(text)
     except ExpressionError:
-        return False
+        return text
 
 
 class Running:
     """A playroutine's commands over a song: its ``commands`` codec, record types, the codecs of
-    their rows, its ``records`` and its expression texts ``exprs``; ``same`` maps an expression
-    index to the one it is written as."""
+    their rows, its ``records`` and its expression texts ``exprs``, which compare by their one
+    text."""
 
     # pylint: disable=too-many-instance-attributes,too-many-arguments,too-many-positional-arguments
 
-    def __init__(self, pr, rtypes, commands, codecs, records, exprs, same=None):
+    def __init__(self, pr, rtypes, commands, codecs, records, exprs):
         self.code = command_code(pr.get("commands"), NAME)
         self.step = lasts_step(pr)
         self.legato = command_code(pr.get("commands"), "legato")
         self.commands, self.rtypes, self.codecs, self.records = commands, rtypes, codecs, records
         inst = pr.get("instrument") or {}
         self.ins_type, self.base = inst.get("type"), int(inst.get("base", 0))
-        self.same = same or {}
-        self.held = {int(i) for i, t in (exprs or {}).items() if _holds(str(t))}
+        texts = {int(i): _text(str(t)) for i, t in (exprs or {}).items()}
+        canon = {}
+        self.same = {i: canon.setdefault(t, i) for i, t in sorted(texts.items())}
+        self.held = {i for i, t in texts.items() if t == "v"}
         self.unknown = set()
 
     # -- values --
@@ -126,8 +129,8 @@ class Running:
                         if key is not None and key[0] in SONG:
                             voices.setdefault(key[0], set()).add(v)
         self.unknown |= {n for n, vs in voices.items() if len(vs) > 1}
-        if self.unknown & {"tempo", "vtempo"}:
-            self.unknown |= {"tempo", "vtempo"}
+        if self.unknown & set(TEMPOS):
+            self.unknown |= set(TEMPOS)
 
     # -- the walk --
 
@@ -164,9 +167,18 @@ class Running:
 
     def _set(self, voice: _Voice, key, value) -> bool:
         """Play a command setting ``key`` to ``value``; whether it changes nothing."""
-        del value
-        voice.own.pop(key, None)
-        return False
+        tracked = value != PROGRAM and key not in self.unknown
+        tracked = tracked and not (key in TEMPOS and isinstance(value, tuple))
+        same = tracked and voice.own.get(key) == value
+        if tracked:
+            voice.own[key] = value
+        else:
+            voice.own.pop(key, None)
+        if key == "tempo" and tracked:
+            voice.own["vtempo"] = value
+        elif key == "vtempo":
+            voice.own.pop("tempo", None)
+        return same
 
     def _settle(self, voice: _Voice, event: dict) -> list:
         """``[(code, arg, verdict)]`` for each command of ``event`` where the voice plays it:
