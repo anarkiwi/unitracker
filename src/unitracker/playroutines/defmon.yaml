@@ -195,12 +195,13 @@ procs:
   # $1022 SID band: this call writes the state the previous call left.
   latch:
     - set: {o_flo: flo, o_fhi: fhi, o_pw: pw, o_ctrl: "ctrl ^ eor", o_ad: ad, o_sr: sr}
-  # $10B5 ACID accumulator. acc holds it with the offset cp added to its high byte, wrapped to
-  # 16 bits; bit 16 is the carry of the last step. CLC then ADC adds the step, or SBC adds its
-  # complement (step + 1 less), to the accumulator without the offset; a negative high byte
-  # saturates to the floor.
+  # $10B5 ACID accumulator: a 15-bit word (the replay never stores a high byte above $7F).
+  # CLC then ADC adds the step, or SBC adds its complement (step + 1 less); a result with bit 15
+  # set saturates to the floor, keeping its low byte. The cutoff byte is the high byte plus the
+  # offset cp plus the step's carry, so acc holds the accumulator with cp added to its high byte,
+  # wrapped to 16 bits, and that carry in bit 16.
   acid_step:
-    - set: {acc: "((acc - cp * 256) & 0xFFFF) + ((0xFFFF - astep) if sub else astep)"}
+    - set: {acc: "((acc - cp * 256) & 0x7FFF) + ((0xFFFF - astep) if sub else astep)"}
     - if: "(acc & 0xFFFF) > 0x7FFF"
       then: [{set: {acc: "((acc >= 0x10000) << 16) + (floor << 8) + (acc & 0xFF)"}}]
     - {if: cp, then: [{set: {acc: "((acc >= 0x10000) << 16) + ((acc + cp * 256) & 0xFFFF)"}}]}

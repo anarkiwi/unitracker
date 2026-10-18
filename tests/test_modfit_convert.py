@@ -285,7 +285,7 @@ def test_a_selected_expression_must_exist():
 
 
 CSILLAG_GATE = "(-W[N + 33]*abs((φ + 3) % 8 - 4) + 2*W[N + 33])*(φ >= 15)"
-ACID_STEP = "v % 65536 + 2560)*(v % 65536 < 62976)"
+ACID_STEP = "v % 32768 + 2048)*(v % 32768 < 30208)"
 
 
 @pytest.mark.parametrize(
@@ -294,7 +294,7 @@ ACID_STEP = "v % 65536 + 2560)*(v % 65536 < 62976)"
         ("metal_warrior", 3840, "x1: v + 32", "x1: v + 33"),
         ("metal_warrior", 3840, "C4!freq:x2!legato", "C4!freq:x2"),
         ("csillag", 3 * 2304, CSILLAG_GATE, CSILLAG_GATE.replace("(φ >= 15)", "(φ >= 14)")),
-        ("crosseyed", None, ACID_STEP, ACID_STEP.replace("2560", "2304", 1)),
+        ("crosseyed", None, ACID_STEP, ACID_STEP.replace("2048", "1792", 1)),
     ],
 )
 def test_a_wrong_constant_or_a_dropped_flag_in_a_reference_breaks_its_grid(
@@ -746,6 +746,14 @@ def test_the_offset_is_folded_into_the_cut_expressions(acid):
     assert songio.dumps(song) == text and np.array_equal(regs(song, 400), want)
 
 
+def test_an_acid_sweep_without_an_offset_reads_the_accumulator_and_its_low_byte_only():
+    back = songio.loads(songio.dumps(convert.convert(acid_ir(0), cache=None, workers=1)))
+    cuts = [G.parse(x) for x in back["exprs"].values() if "v" in x]
+    assert len(cuts) == 2
+    assert all({int(m.args[1]) for m in e.atoms(sympy.Mod)} == {256, 32768} for e in cuts)
+    assert sorted(sympy.count_ops(e) for e in cuts) == [12, 23]
+
+
 def test_an_offset_outside_the_acid_program_fails_naming_its_row():
     ir = acid_ir(0)
     ir["records"]["sidtab"][2]["cp"] = 0x10
@@ -753,10 +761,7 @@ def test_an_offset_outside_the_acid_program_fails_naming_its_row():
         songio.dumps(convert.convert(ir, cache=None, workers=1))
 
 
-SUB = (
-    "((v - 1) % 256 + 512)*(v % 65536 < 1) + ((-(v % 65536) + (v - 1) % 256 - 130559)*((v - 1) "
-    "% 65536 >= 32768) + v % 65536 + 65535)*(v % 65536 >= 1)"
-)
+SUB = "(v % 32768 + 65535)*(v % 32768 >= 1) + ((v - 1) % 256 + 512)*(v % 32768 < 1)"
 
 
 @pytest.mark.parametrize("sub", [1, 0])
@@ -865,10 +870,11 @@ def refuted(actions: list, claim) -> list:
     return out
 
 
-def test_the_folded_step_is_the_replays_add_with_carry_for_every_state():
+def test_the_folded_step_is_the_replays_add_with_carry_for_every_state_it_reaches():
     def claim(z, after, wrap=True):
         stored, out = replay(z, wrap)
-        return z3.And((after["acc"] - 256 * z["cp"]) & 0xFFFF == stored, after["ghost"] == out)
+        same = z3.And((after["acc"] - 256 * z["cp"]) & 0xFFFF == stored, after["ghost"] == out)
+        return z3.Implies(z3.ULE((z["acc"] - 256 * z["cp"]) & 0xFFFF, 0x7FFF), same)
 
     steps = [{"call": "acid_step"}, {"call": "acid_out"}]
     assert not refuted(steps, claim)
