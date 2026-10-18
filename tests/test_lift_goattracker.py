@@ -490,7 +490,8 @@ def test_a_d10_to_dff_is_the_command_it_keeps_running(commands):
 
 
 def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
-    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(31, 0, 3, 0)] + [REST] * 3 + [(36, 1, 0, 0)] + [REST] * 7
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(31, 0, 3, 0)] + [REST] * 3
+    rows += [(36, 1, 0, 0)] + [REST] * 7
     dec, native = gt_tune([(0x41, 0), (0xFF, 0)], rows=rows)
     out = gt.snapped(gt.lift(dec, expressions=False))
     cmds = [list(c) for e in out["phrases"]["p00"] for c in event_commands(e)]
