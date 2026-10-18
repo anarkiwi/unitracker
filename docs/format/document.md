@@ -50,7 +50,9 @@ stops every voice still playing, so a song that ends has no last row of `end` an
 only, and readers reject one.
 Repeats are written out as rows. When the voices' loops have different lengths, the rows run
 until all of them are back in the same state together, and `{loop: k}` names the row where that
-state first occurred.
+state first occurred. The loop is the song's shortest, from the earliest row the song repeats
+from; readers reject a loop that is a whole number of the song's loops long, or that starts later
+than it repeats.
 
 ## Definitions
 

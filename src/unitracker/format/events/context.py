@@ -5,6 +5,8 @@ starts in a state an earlier one started in, where it loops."""
 
 import copy
 
+from unitracker.format.timeline import minimal_loop
+
 
 def with_commands(event: dict, commands) -> dict:
     """``event`` with ``commands`` as its commands."""
@@ -38,11 +40,12 @@ def _plays(items: list) -> list:
     return out
 
 
-def _walked(trk: dict, phrases: dict, convert, state) -> tuple[list, int, int]:
-    """``(walk, loop, pass)``: the voice's phrase plays ``(play, events)`` with each event as the
+def _walked(trk: dict, phrases: dict, convert, state) -> tuple[list, int | None]:
+    """``(walk, cycle)``: the voice's phrase plays ``(play, events)`` with each event as the
     events ``convert(state, event)`` gives where it plays (``state.enter()``, if it has one, at
     each phrase play), its loop walked until a pass starts in the state an earlier pass started
-    in and one more period; ``loop`` the loop's first item, ``pass`` its length, 0 for none."""
+    in; ``cycle`` the first item of that earlier pass, from which the walk repeats (None for a
+    voice that ends)."""
     items, loop = _items(trk)
     enter = getattr(state, "enter", lambda: None)
 
@@ -56,24 +59,14 @@ def _walked(trk: dict, phrases: dict, convert, state) -> tuple[list, int, int]:
 
     out = walk(items if loop is None else items[:loop])
     if loop is None:
-        return out, len(out), 0
+        return out, None
     starts = {}
     while True:
         key = repr(copy.deepcopy(vars(state)))
         if key in starts:
-            return out + out[starts[key] : len(out)], loop, len(items) - loop
+            return out, starts[key]
         starts[key] = len(out)
         out += walk(items[loop:])
-
-
-def _period(seq: list, loop: int, size: int) -> tuple[int, int]:
-    """``(start, period)`` of the shortest form of the walk ``seq`` (see :func:`_walked`): from
-    ``start`` on it repeats every ``period`` items, a multiple of the pass ``size``."""
-    for start in range(loop, len(seq)):
-        for period in range(size, len(seq) - start, size):
-            if all(seq[n] == seq[n + period] for n in range(start, len(seq) - period)):
-                return start, period
-    return loop, len(seq) - loop
 
 
 def _named(walked: list, variants: dict, out: dict) -> list:
@@ -98,12 +91,12 @@ def rewrite(song: dict, convert, state) -> dict:
     from where they repeat."""
     variants, out, tracks = {}, {}, []
     for trk in song["tracks"]:
-        walked, loop, size = _walked(trk, song["phrases"], convert, state())
+        walked, cycle = _walked(trk, song["phrases"], convert, state())
         items = _named(walked, variants, out)
-        if not size:
+        if cycle is None:
             tracks.append({**trk, "plays": _plays(items), "loop": None})
             continue
-        start, period = _period(items, loop, size)
+        start, period = minimal_loop(items, cycle)
         intro = _plays(items[:start])
         tracks.append(
             {**trk, "plays": intro + _plays(items[start : start + period]), "loop": len(intro)}

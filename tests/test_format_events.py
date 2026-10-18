@@ -580,9 +580,14 @@ def test_a_command_that_also_stops_the_filter_program_is_written_with_the_stop()
 
 
 def test_a_loop_whose_passes_play_an_envelope_byte_differently_is_written_out():
-    ir = songio.loads(env_song(SPLIT_PHRASES, SPLIT, 1))
+    written = env_song(SPLIT_PHRASES, SPLIT, 1)
+    ir = songio.loads(written)
+    assert songio.dumps(ir).endswith("    play: [p3, p3, p3]\n  - {loop: 1}\n")
+    for trk in ir["tracks"]:
+        trk["plays"] = [{**p, "phrase": p["phrase"].split("/")[0]} for p in trk["plays"]]
     text = songio.dumps(ir)
-    assert text.endswith("    play: [p3, p3, p3]\n  - play: [p2, p2, p2]\n  - {loop: 2}\n")
+    tail = "  - def:\n      phrase:\n        p4: [C4!ad:52*4]\n    play: [p4, p4, p4]\n"
+    assert text.endswith(f"    play: [p3, p3, p3]\n{tail}  - {{loop: 2}}\n")
     assert songio.dumps(songio.loads(text)) == text
     assert np.array_equal(grid(songio.loads(text), 400), grid(ir, 400))
 

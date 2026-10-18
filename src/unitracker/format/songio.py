@@ -4,15 +4,13 @@ The player runs the expanded internal representation (``"unitracker": "ir"``): e
 document is read through :func:`loads`, and lifters' output is written with :func:`dumps`.
 """
 
-import functools
 import os
 import re
 import tempfile
-from importlib import resources
 
 import yaml
 
-from unitracker.format import eventcmds, refkeys, tempo, timeline, xexpr
+from unitracker.format import eventcmds, header, refkeys, tempo, timeline, xexpr
 from unitracker.format.atoms import format_atom, parse_atom, runs
 from unitracker.format.codec import (
     COMMAND_NAMES,
@@ -31,9 +29,14 @@ from unitracker.format.codec import (
     written_value,
 )
 from unitracker.format.events import column, envelope, fold, freq, instrument, lifetime
-from unitracker.format.schema import expand, first_only
+from unitracker.format.header import (  # pylint: disable=unused-import
+    DEFAULTS,
+    SongFormatError,
+    defaults,
+    library,
+)
+from unitracker.format.schema import first_only
 from unitracker.format.records import EXPR, RowEval, chained, program_path, record_types, ref_type
-from unitracker.format.tablepatch import table_diff, unread_dropped
 from unitracker.format.xexpr import ExpressionError, text_of
 from unitracker.format.yamlstyle import Atom, Dumper, Flow, FlowMap, Signed, parse
 from unitracker.player.modulation import declared
@@ -44,25 +47,7 @@ WIDTH = 100
 PHRASE = "phrase"
 DOC_KEYS = ("unitracker", "playroutine", "meta", "clock", "voices", "tempo", "song")
 _ENTRY = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<t>[+-]\d+)?$")
-DEFAULTS = {"clock": {"cycles_per_tick": 19656, "clock_hz": 985248}, "voices": 3}
 _ONE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-class SongFormatError(ValueError):
-    """A document does not follow the unitracker v1.20 format."""
-
-
-@functools.cache
-def _library_text(name: str) -> str:
-    path = resources.files("unitracker").joinpath(f"playroutines/{name}.yaml")
-    if not path.is_file():
-        raise SongFormatError(f"no playroutine {name!r} in the library")
-    return path.read_text()
-
-
-def library(name: str) -> dict:
-    """The library definition of playroutine ``name``, named by its file."""
-    return expand({"name": name, **yaml.safe_load(_library_text(name))})
 
 
 def song_rows(doc: dict) -> list:
@@ -70,17 +55,12 @@ def song_rows(doc: dict) -> list:
     return doc["song"][:-1]
 
 
-def defaults(pr: dict) -> dict:
-    """The ``clock`` and ``voices`` a song of playroutine ``pr`` has unless it says otherwise."""
-    return {**DEFAULTS, **(pr.get("defaults") or {})}
-
-
-def song_meta(header, source: str) -> dict:
-    """The ``meta`` mapping for a tune with PSID ``header``, lifted by ``source``."""
+def song_meta(psid, source: str) -> dict:
+    """The ``meta`` mapping for a tune with PSID header ``psid``, lifted by ``source``."""
     return {
-        "title": header.name,
-        "author": header.author,
-        "released": header.released,
+        "title": psid.name,
+        "author": psid.author,
+        "released": psid.released,
         "source": source,
     }
 
@@ -268,15 +248,17 @@ class _Writer:
 
     # -- phrases --
 
-    def phrases(self, rows):
-        """``{name: (base, transpose)}`` for each used phrase, and every phrase's rows.
-
-        Phrases equal up to a transpose share the first-used one as their base.
-        """
-        compiled = {
+    def compiled(self) -> dict:
+        """Every phrase's rows, its restarts and instruments folded and its lifetime marks."""
+        return {
             name: lifetime.column(self.kept, name, ev, self._folded(compile_phrase(ev)))
             for name, ev in (self.ir["phrases"] or {}).items()
         }
+
+    @staticmethod
+    def phrases(rows, compiled: dict) -> dict:
+        """``{name: (base, transpose)}`` for each used phrase: phrases equal up to a transpose
+        share the first-used one as their base."""
         bases, alias = {}, {}
         for row in rows:
             for entry in row:
@@ -285,7 +267,7 @@ class _Writer:
                 key, shift = _transpose_key(compiled[entry[0]])
                 base, base_shift = bases.setdefault(key, (entry[0], shift))
                 alias[entry[0]] = (base, shift - base_shift)
-        return alias, compiled
+        return alias
 
     def _folded(self, arr):
         """A compiled phrase with its event restarts and instruments named (see ``events.fold``)."""
@@ -517,11 +499,18 @@ class _Writer:
 
     def song(self):
         """``(song rows, loop)`` with definitions placed at first use."""
+        compiled = self.compiled()
+        keys = {name: _transpose_key(arr) for name, arr in compiled.items()}
+
+        def key(play):
+            base, shift = keys[play["phrase"]]
+            return base, shift + int(play.get("transpose", 0))
+
         rows, loop = timeline.to_rows(
-            self.ir["tracks"],
-            {n: len(compile_phrase(ev)) for n, ev in (self.ir["phrases"] or {}).items()},
+            [timeline.folded(trk, key) for trk in self.ir["tracks"]],
+            {n: len(arr) for n, arr in compiled.items()},
         )
-        alias, compiled = self.phrases(rows)
+        alias = self.phrases(rows, compiled)
         fixed = self._roots()
         phrase_row = self._discover(rows, alias, compiled)
         defs = self._defs(len(rows), fixed, phrase_row, compiled)
@@ -545,47 +534,6 @@ class _Writer:
         name = pnames[base]
         return Atom(name if trans == 0 else f"{name}{trans:+d}")
 
-    def playroutine_entry(self, embed: bool):
-        """The ``playroutine`` entry: a library reference with differences, or embedded."""
-        name = self.pr["name"]
-        tables = {k: [int(x) for x in v] for k, v in (self.ir.get("tables") or {}).items()}
-        if embed:
-            full = expand(self.pr)
-            pr = {"name": name, "constants": FlowMap(self.pr.get("constants") or {})}
-            pr["tables"] = {k: Flow(v) for k, v in tables.items()}
-            pr.update((k, v) for k, v in full.items() if k not in ("name", "constants", "tables"))
-            return pr
-        lib = library(name)
-        own = ("constants", "tables")
-        if {k: v for k, v in self.pr.items() if k not in own} != {
-            k: v for k, v in lib.items() if k not in own
-        }:
-            raise SongFormatError(
-                f"the song's playroutine differs from the library {name!r}; write with embed"
-            )
-        pr = FlowMap(ref=name)
-        libc = lib.get("constants") or {}
-        consts = {k: v for k, v in (self.pr.get("constants") or {}).items() if libc.get(k) != v}
-        if consts:
-            pr["constants"] = FlowMap(consts)
-        diff = unread_dropped(table_diff(tables, lib.get("tables") or {}), self.ir)
-        return {**pr, "tables": diff} if diff else pr
-
-    def environment(self) -> dict:
-        """``clock``, ``voices`` and ``tempo`` where they differ from the defaults."""
-        base = defaults(self.pr)
-        env = {}
-        for key in ("clock", "voices"):
-            if key in self.ir and self.ir[key] != base[key]:
-                env[key] = FlowMap(self.ir[key]) if isinstance(self.ir[key], dict) else self.ir[key]
-        value = self.ir.get(tempo.NAME)
-        if value is not None:
-            _refuse(tempo.problem(self.pr, value))
-            value = tempo.written(*tempo.pair(value))
-            if value != tempo.default(self.pr):
-                env[tempo.NAME] = Flow(value) if isinstance(value, list) else value
-        return env
-
 
 def _transpose_key(arr):
     """A phrase's rows with notes relative to its first note, and that first note."""
@@ -606,11 +554,11 @@ def dumps(ir: dict, embed: bool = False, respell=None) -> str:
     meta = ir.get("meta") or {}
     doc = {
         "unitracker": Atom(VERSION),
-        "playroutine": writer.playroutine_entry(embed),
+        "playroutine": header.playroutine_entry(writer.pr, writer.ir, embed),
         "meta": FlowMap({k: meta[k] for k in ("title", "author", "released") if k in meta}),
     }
     rows, loop = writer.song()
-    doc.update(writer.environment())
+    doc.update(header.environment(writer.pr, writer.ir))
     doc["song"] = [*rows, Atom(timeline.END) if loop is None else FlowMap(loop=loop)]
     doc = respell(doc) if respell else doc
     return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
@@ -626,7 +574,8 @@ class _Reader:
 
     def __init__(self, doc: dict):
         self.doc = doc
-        self.pr = self._playroutine(doc.get("playroutine"))
+        self.pr, self.tables = header.read_playroutine(doc.get("playroutine"))
+        self.defaults = defaults(self.pr)
         self.rtypes = record_types(self.pr)
         self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
@@ -641,31 +590,6 @@ class _Reader:
         self.lifetime = lifetime.Lifetime(self.pr, self.rtypes)
         self.folds = fold.EventFolds(self.pr, self.rtypes, self.codecs, self.commands, self.records)
         self.event_commands = eventcmds.EventCommands(self, SongFormatError)
-
-    def _playroutine(self, spec) -> dict:
-        if not isinstance(spec, dict):
-            raise SongFormatError("playroutine must be a mapping")
-        if "ref" not in spec:
-            pr = expand(spec)
-            self.tables = {
-                k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()
-            }
-            self.defaults = defaults(pr)
-            return pr
-        pr = library(spec["ref"])
-        pr["constants"] = {**(pr.get("constants") or {}), **(spec.get("constants") or {})}
-        tables = {k: [int(x) for x in v] for k, v in (pr.pop("tables", None) or {}).items()}
-        for name, diff in (spec.get("tables") or {}).items():
-            if isinstance(diff, list):
-                tables[name] = [int(x) for x in diff]
-            else:
-                if name not in tables:
-                    raise SongFormatError(f"table {name!r} has no library default to patch")
-                for i, v in diff.items():
-                    tables[name][int(i)] = int(v)
-        self.tables = tables
-        self.defaults = defaults(pr)
-        return pr
 
     def _alloc(self, rtype, count) -> int:
         start = self.next_index[rtype.name]
@@ -925,13 +849,14 @@ class _Reader:
             tracks = timeline.from_rows(rows, loop, lengths, voices)
         except timeline.TimelineError as exc:
             raise SongFormatError(str(exc)) from exc
+        _refuse(timeline.loop_problem(rows, loop, tracks, lengths))
         _player(self.pr, self.lifetime.read, tracks, events, self.records, self.names)
         ir = {
             "unitracker": IR_VERSION,
             "meta": dict(doc.get("meta") or {}),
             "clock": dict(doc.get("clock") or self.defaults["clock"]),
             "voices": voices,
-            **({tempo.NAME: self._tempo()} if self.pr.get(tempo.NAME) or tempo.NAME in doc else {}),
+            **header.initial_tempo(self.pr, doc),
             "tables": self.tables,
             "playroutine": self.pr,
             "records": {k: v for k, v in self.records.items() if v and not self.folds.held(k)},
@@ -943,12 +868,6 @@ class _Reader:
         ir = _player(self.pr, freq.Freq(self.pr).read, ir)
         _player(self.pr, column.check, self.pr, ir["phrases"])
         return ir
-
-    def _tempo(self):
-        """The document's initial tempo, else the playroutine's default."""
-        value = self.doc.get(tempo.NAME, tempo.default(self.pr))
-        _refuse(None if value is None else tempo.problem(self.pr, value))
-        return value
 
     @staticmethod
     def _entry(entry):

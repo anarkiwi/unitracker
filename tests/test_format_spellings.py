@@ -3,7 +3,7 @@ writer writes each meaning one way."""
 
 import pytest
 
-from unitracker.format import songio
+from unitracker.format import songio, timeline
 from unitracker.format.codec import CodecError, row_place
 
 FIRST, LATER = row_place(0, 2, True), row_place(1, 2, True)
@@ -70,3 +70,48 @@ def test_the_reader_refuses_and_the_writer_drops_an_expression_no_start_reads():
     ir["exprs"][len(ir["exprs"]) + 1] = "v + 3"
     rows[later] = {**rows[later], "x": len(ir["exprs"])}
     assert songio.dumps(ir) == canonical(held)
+
+
+# -- 2: a song loops from its earliest repeat, with its shortest loop --
+
+
+@pytest.mark.parametrize(
+    "seq,loop,expect",
+    [
+        ("ab", 0, (0, 2)),
+        ("abab", 0, (0, 2)),
+        ("xabab", 1, (1, 2)),
+        ("babab", 1, (0, 2)),
+        ("abcbc", 3, (1, 2)),
+        ("aaaa", 2, (0, 1)),
+        ("abcabd", 3, (3, 3)),
+    ],
+)
+def test_minimal_loop(seq, loop, expect):
+    assert timeline.minimal_loop(list(seq), loop) == expect
+
+
+GT_DEFS = "      ins:\n        i1: {ctrl: [{ctrl: 65, note: +0}, end]}\n"
+TWO = {"p1": "C4.i1*4", "p2": "D4*4"}
+
+
+@pytest.mark.parametrize(
+    "rows,loop",
+    [
+        ("    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n  - play: [p1, p1, p1]\n", 1),
+        ("    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n  - play: [p1, p1, p1]\n"
+         "  - play: [p2, p2, p2]\n", 0),
+    ],
+)  # fmt: skip
+def test_the_reader_refuses_a_loop_longer_or_later_than_the_songs(rows, loop):
+    refused(doc("goattracker2", GT_DEFS, TWO, rows, f"{{loop: {loop}}}"), "write that loop")
+
+
+def test_the_writer_folds_each_voices_loop():
+    two = "    play: [p1, p1, p1]\n  - play: [p2, p2, p2]\n"
+    want = canonical(doc("goattracker2", GT_DEFS, TWO, two, "{loop: 0}"))
+    ir = songio.loads(want)
+    for trk in ir["tracks"]:
+        trk["plays"] = trk["plays"] * 3
+        trk["loop"] = 2
+    assert songio.dumps(ir) == want
