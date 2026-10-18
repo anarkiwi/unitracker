@@ -1,6 +1,8 @@
-"""The optimiser's passes: each fires where the grid proves it and is refused where it would not."""
+"""The optimiser: the proof, each pass's edits where the grid proves them and refused where it
+does not, the driver, and its command lines."""
 
 import copy
+import functools
 
 import numpy as np
 import pytest
@@ -15,7 +17,8 @@ PULSE = "16*abs((φ - 32) % 128 - 64) + 512"
 
 
 def doc(ins: str, phrase: str, defs: str = "", steps: int = 8, extra: str = "") -> str:
-    """A three-voice GoatTracker 2 document: voice 1 plays ``phrase``, the others rest."""
+    """A three-voice GoatTracker 2 document: voice 1 plays ``phrase``, the others rest; ``extra``
+    rows follow the first."""
     return f"""unitracker: 1.19
 playroutine: {{ref: goattracker2}}
 meta: {{title: t, author: a, released: r}}
@@ -28,8 +31,8 @@ song:
 {defs}      phrase:
         p1: {phrase}
         p2: [-*{steps}]
-{extra}    play: [p1, p2, p2]
-loop: 0
+    play: [p1, p2, p2]
+{extra}loop: 0
 """
 
 
@@ -37,7 +40,139 @@ def ins_line(name: str, fields: str) -> str:
     return f"        {name}: {{{fields}, restart: r1}}"
 
 
-I1 = ins_line("i1", "ad: 9, ctrl: [{ctrl: 65, note: +0}, end]")
+def row(name: str, phrase: str) -> str:
+    return f"  - def:\n      phrase:\n        {name}: {phrase}\n    play: [{name}, p2, p2]\n"
+
+
+def ctrl(fields: str = "ad: 9", wave: str = "[{ctrl: 65, note: +0}, end]") -> str:
+    """Instrument ``i1`` with ``fields`` and wave program ``wave``."""
+    return ins_line("i1", f"{fields}, ctrl: {wave}")
+
+
+A, B, Z = "{ctrl: 65, note: +0}", "{ctrl: 33, note: +0}", "{ctrl: 17, note: +0}"
+I1 = ctrl()
+SCALE = "[C4.i1*2, D4*2, E4*2, F4*2]"
+C1 = "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
+RUN = "[C4.i1!run:@c1*2, D4!run:@c1*2, E4!run:@c1*2, F4!run:@c1*2]"
+LATE = "freq: '[φ >= 38]*(F(N + 1) - F(N))'"
+I2_UNHEARD = ins_line("i2", f"ad: 9, {LATE}, ctrl: [{A}, end]")
+I2_HEARD = ins_line("i2", f"ad: 10, ctrl: [{A}, end]")
+TWO = "[C4.i1*2, D4.i2*2, E4.i1*2, F4.i2*2]"
+AS_I2 = "[C4.i1*2, D4*2, E4.i2*2, F4.i1*2]"
+TWO_RUNS = "[C4.i1!run:@c1*2, D4!run:@c2*2, E4!run:@c1*2, F4!run:@c2*2]"
+FREQS = "[C4.i1!freq:@x1*2, D4!freq:@x2*2, E4!freq:@x1*2, F4!freq:@x2*2]"
+PART = ", ".join(["C4.i1", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5", "F5", "G5"])
+HEARD_PART = "-*4, C4.i1*4, D4*4"
+LONG = "C5, D5, E5, F5, G5, A5, B5, C6, B5, A5, G5, F5"
+LONG_I1 = LONG.replace("C5", "C5.i1", 1)
+PULSED = ctrl(f"ad: 9, pw: {PULSE}")
+SHORTEST = doc(ctrl(wave=f"[{A}, {B}, {A}, {Z}, {{loop: 0}}]"), "[C4.i1*8]")
+
+
+def programs(second: str) -> str:
+    return f"      ctrl:\n        c1: [{B}, end]\n        c2: {second}\n"
+
+
+def exprs(second: str) -> str:
+    return f"      x:\n        x1: (v + 32) % 65536\n        x2: {second}\n"
+
+
+def shared(ins: str) -> str:
+    return doc(
+        ins, f"[{LONG_I1}, C4*2, D4*2]", steps=16, extra=row("p3", f"[C4*2, D4*2, {LONG_I1}]")
+    )
+
+
+FIRES = {
+    "hoist": ("hoist", doc(I1, RUN, C1), ["hoist"], lambda t: "!run" not in t),
+    "merge instruments": (
+        "instruments",
+        doc(f"{I1}\n{I2_UNHEARD}", TWO),
+        ["merge"],
+        lambda t: "i2" not in t,
+    ),
+    "unhoist": (
+        "instruments",
+        doc(f"{I1}\n{I2_HEARD}", AS_I2),
+        ["unhoist"],
+        lambda t: "i2" not in t and "E4.i1!ad:10*2" in t,
+    ),
+    "merge programs": (
+        "programs",
+        doc(I1, TWO_RUNS, programs(f"[{B}, {B}, end]")),
+        ["merge"],
+        lambda t: "c2" not in t,
+    ),
+    "truncate": (
+        "programs",
+        doc(ctrl(wave=f"[{A}, {A}, end]"), SCALE),
+        ["truncate"],
+        lambda t: f"{A}, {A}" not in t,
+    ),
+    "reloop": (
+        "programs",
+        doc(ctrl(wave=f"[{A}, {B}, {A}, {B}, {{loop: 0}}]"), "[C4.i1*8]"),
+        ["reloop"],
+        lambda t: f"{A}, {B}, {A}" not in t,
+    ),
+    "merge expressions": (
+        "expressions",
+        doc(I1, FREQS, exprs("(v + 16 + 16) % 65536")),
+        ["merge"],
+        lambda t: "x2" not in t,
+    ),
+    "alias": (
+        "phrases",
+        doc(I1, SCALE, extra=row("p3", "[C4.i1*2, D4.i1*2, E4*2, F4*2]")),
+        ["alias"],
+        lambda t: "p3" not in t,
+    ),
+    "factor": (
+        "phrases",
+        doc(I1, f"[{', '.join([PART] * 4)}]", steps=48),
+        ["factor"],
+        lambda t: t.count("play: [p1, ~, ~]") == 3,
+    ),
+    "share": ("phrases", shared(I1), ["share"], lambda t: t.count("C6") == 1),
+    "commands": (
+        "commands",
+        doc(I1, "[C4.i1*2, D4.i1*2, E4!ad:9*2, F4*2]"),
+        ["drop_command", "drop_instrument", "drop_instrument"],
+        lambda t: "!ad" not in t,
+    ),
+    "fields": (
+        "fields",
+        doc(ctrl(f"ad: 9, {LATE}"), "[C4.i1*2, D4*2, E4*2, F4*2]"),
+        ["clear"],
+        lambda t: "ad: 9" in t and "φ" not in t,
+    ),
+}
+
+REFUSES = {
+    "hoist": ("hoist", doc(I1, RUN.replace("run:@c1", "ctrl:33")), ["hoist"]),
+    "merge instruments": ("instruments", doc(f"{I1}\n{I2_HEARD}", TWO), ["merge"]),
+    "merge programs": (
+        "programs",
+        doc(I1, TWO_RUNS, programs(f"[{B}, {Z}, end]")),
+        ["merge"],
+    ),
+    "truncate": ("programs", doc(ctrl(wave=f"[{A}, {B}, end]"), SCALE), ["truncate"]),
+    "reloop": ("programs", SHORTEST, ["reloop"]),
+    "merge expressions": ("expressions", doc(I1, FREQS, exprs("(v + 33) % 65536")), ["merge"]),
+    "alias": (
+        "phrases",
+        doc(I1, SCALE, extra=row("p3", "[C4.i1*2, D4.i1*2, G4*2, F4*2]")),
+        ["alias"],
+    ),
+    "factor": ("phrases", doc(PULSED, f"[{', '.join([HEARD_PART] * 4)}]", steps=48), ["factor"]),
+    "share": ("phrases", shared(PULSED), ["share"]),
+    "commands": (
+        "commands",
+        doc(f"{I1}\n{I2_HEARD}", "[C4.i1*2, D4.i2*2, E4!ad:11*2, F4*2]"),
+        ["drop_command", "drop_instrument"],
+    ),
+    "fields": ("fields", doc(ctrl(f"ad: 9, {LATE}"), "[C4.i1*8]"), ["clear"]),
+}
 
 
 def run(text: str, passes, workers: int = 1):
@@ -48,55 +183,76 @@ def kept(result) -> list:
     return [f.edit[0] for f in result.findings if f.kept]
 
 
-def proved(result) -> list:
-    return [f.edit[0] for f in result.findings]
-
-
 def plays_alike(result) -> bool:
-    back = songio.loads(result.text)
-    return optimise.mismatch(optimise.Trace(result.source), back) is None
+    return optimise.mismatch(optimise.Trace(result.source), songio.loads(result.text)) is None
 
 
-def test_mismatch_finds_the_first_difference_and_refuses_other_starts():
-    text = doc(I1, "[C4.i1*2, D4*2, E4*2, F4*2]")
-    ref = optimise.Trace(songio.loads(text))
-    assert optimise.mismatch(ref, songio.loads(text)) is None
-    tick, reg = optimise.mismatch(ref, songio.loads(text.replace("E4*2", "G4*2")))
-    assert tick > ref.starts[0] and reg in (0, 1)
-    late = songio.loads(text.replace("[C4.i1*2, D4*2, E4*2, F4*2]", "[-, C4.i1, D4*2, E4*2, F4*2]"))
-    assert optimise.mismatch(ref, late)[0] == ref.starts[0]
-
-
-def test_mismatch_beyond_the_bound_is_unproved(monkeypatch):
-    text = doc(I1, "[C4.i1*2, D4*2, E4*2, F4*2]")
-    ref = optimise.Trace(songio.loads(text))
-    monkeypatch.setattr(optimise.reach, "MAX_TICKS", 10)
-    assert optimise.mismatch(ref, songio.loads(text))[0] == "unproved"
-
-
-def test_trace_rows_repeat_from_the_recurrence():
-    ref = optimise.Trace(songio.loads(doc(I1, "[C4.i1*2, D4*2, E4*2, F4*2]")))
-    grid = SongPlayer(songio.loads(doc(I1, "[C4.i1*2, D4*2, E4*2, F4*2]"))).render_grid(3000)
+def test_the_proof_repeats_the_grid_and_finds_the_first_difference(monkeypatch):
+    ref = optimise.Trace(songio.loads(doc(I1, SCALE)))
+    grid = SongPlayer(songio.loads(doc(I1, SCALE))).render_grid(3000)
+    assert 0 < ref.period and ref.mu + ref.period < 3000
     np.testing.assert_array_equal(ref.grid(3000), grid)
     assert ref.row(2999) == tuple(grid[2999])
+    assert optimise.mismatch(ref, songio.loads(doc(I1, SCALE))) is None
+    tick, reg = optimise.mismatch(ref, songio.loads(doc(I1, SCALE.replace("E4", "G4"))))
+    assert tick > ref.starts[0] and reg in (0, 1)
+    late = songio.loads(doc(I1, "[-, C4.i1, D4*2, E4*2, F4*2]"))
+    assert optimise.mismatch(ref, late)[0] == ref.starts[0]
+    monkeypatch.setattr(optimise.reach, "MAX_TICKS", 10)
+    assert optimise.mismatch(ref, songio.loads(doc(I1, SCALE)))[0] == "unproved"
 
 
-C1 = "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
-RUN = "[C4.i1!run:@c1*2, D4!run:@c1*2, E4!run:@c1*2, F4!run:@c1*2]"
+@pytest.mark.parametrize("case", FIRES)
+def test_a_pass_keeps_the_edits_the_grid_proves(case):
+    name, text, ops, written = FIRES[case]
+    opt = optimise.Optimiser(songio.loads(text), [name], workers=1)
+    before = opt.tokens
+    assert opt.keep(name)
+    assert sorted(f.edit[0] for f in opt.findings.values() if f.kept) == ops
+    assert opt.tokens < before and written(opt.text)
+    assert optimise.mismatch(opt.ref, songio.loads(opt.text)) is None
 
 
-def test_hoist_moves_a_command_into_the_instrument():
-    result = run(doc(I1, RUN, C1), ["hoist"])
-    assert kept(result) == ["hoist"] and "!run" not in result.text
-    assert plays_alike(result)
+@pytest.mark.parametrize("case", REFUSES)
+def test_a_pass_refuses_the_edits_the_grid_hears(case):
+    name, text, ops = REFUSES[case]
+    ir = songio.loads(text)
+    assert {e[0] for e in optimise.PASSES[name](ir)} >= set(ops)
+    opt = optimise.Optimiser(ir, [name], workers=1)
+    assert not {edit[0] for edit, _ in opt.screen(name)} & set(ops)
 
 
-def test_hoist_refuses_a_command_the_field_does_not_play():
-    result = run(doc(I1, "[C4.i1!ctrl:33*2, D4!ctrl:33*2, E4!ctrl:33*2, F4!ctrl:33*2]"), ["hoist"])
-    assert proved(result) == [] and result.after == result.before
+UNHOIST_FULL = doc(
+    f"{I1}\n{I2_HEARD}",
+    AS_I2.replace("E4.i2", "E4.i2!legato:0!freq:@x1"),
+    "      x:\n        x1: (v + 32) % 65536\n",
+)
 
 
-def test_hoist_value_names_the_field():
+UNAPPLIED = [
+    (doc(I1, SCALE), ("merge", ("ins", 1, 7))),
+    (doc(I1, SCALE), ("alias", ("p1", "p1"))),
+    (doc(I1, SCALE), ("factor", ("p1", 3))),
+    (doc(I1, SCALE), ("drop_command", ("p1", 0, 0))),
+    (doc(I1, SCALE), ("drop_keep", ("p1", 0))),
+    (doc(I1, SCALE), ("drop_instrument", ("p1", 1))),
+    (doc(I1, SCALE), ("clear", ("ins", 1, "pw"))),
+    (doc(I1, SCALE), ("hoist", (1, 17, 0))),
+    (doc(I1, RUN.replace("D4!run", "-!run"), C1), ("hoist", (1, 8, 2))),
+    (doc(f"{I1}\n{I2_HEARD.replace('ad: 10', 'ad: 10, sr: 5')}", AS_I2), ("unhoist", (1, 2))),
+    (UNHOIST_FULL, ("unhoist", (1, 2))),
+    (UNHOIST_FULL, ("unhoist", (1, 1))),
+    (SHORTEST, ("reloop", ("ctrltab", 1))),
+    (SHORTEST, ("truncate", ("ctrltab", 1, 5))),
+]
+
+
+def test_an_edit_refuses_what_it_cannot_apply():
+    for text, (op, args) in UNAPPLIED:
+        assert optimise.EDITS[op](songio.loads(text), *args) is None, (op, args)
+
+
+def test_hoist_value_names_the_field_a_command_plays():
     ir = songio.loads(doc(I1, RUN, C1))
     assert optimise.hoist_value(ir, 1, 8, 2)[0] == "ctrl"
     assert optimise.hoist_value(ir, 1, 5, 9) == ("ad", 9)
@@ -104,158 +260,8 @@ def test_hoist_value_names_the_field():
     assert optimise.hoist_value(ir, 9, 5, 9) is None
 
 
-LATE = "freq: '[φ >= 38]*(F(N + 1) - F(N))'"
-I2_UNHEARD = ins_line("i2", f"ad: 9, {LATE}, ctrl: [{{ctrl: 65, note: +0}}, end]")
-I2_HEARD = ins_line("i2", "ad: 10, ctrl: [{ctrl: 65, note: +0}, end]")
-TWO = "[C4.i1*2, D4.i2*2, E4.i1*2, F4.i2*2]"
-
-
-def test_instruments_merge_when_their_difference_is_unheard():
-    result = run(doc(f"{I1}\n{I2_UNHEARD}", TWO), ["instruments"])
-    assert kept(result) == ["merge"] and "i2" not in result.text
-    assert plays_alike(result)
-
-
-def test_instruments_stay_apart_when_heard():
-    result = run(doc(f"{I1}\n{I2_HEARD}", TWO), ["instruments"])
-    assert "merge" not in proved(result)
-
-
-TWO_RUNS = "[C4.i1!run:@c1*2, D4!run:@c2*2, E4!run:@c1*2, F4!run:@c2*2]"
-
-
-def programs(second: str) -> str:
-    return f"      ctrl:\n        c1: [{{ctrl: 33, note: +0}}, end]\n        c2: {second}\n"
-
-
-def test_programs_merge_when_they_play_alike():
-    defs = programs("[{ctrl: 33, note: +0}, {ctrl: 33, note: +0}, end]")
-    result = run(doc(I1, TWO_RUNS, defs), ["programs"])
-    assert "merge" in kept(result) and "c2" not in result.text
-    assert plays_alike(result)
-
-
-def test_programs_stay_apart_when_heard():
-    defs = programs("[{ctrl: 33, note: +0}, {ctrl: 17, note: +0}, end]")
-    assert "merge" not in proved(run(doc(I1, TWO_RUNS, defs), ["programs"]))
-
-
-def test_truncate_cuts_rows_that_change_nothing():
-    i1 = ins_line("i1", "ad: 9, ctrl: [{ctrl: 65, note: +0}, {ctrl: 65, note: +0}, end]")
-    result = run(doc(i1, "[C4.i1*2, D4*2, E4*2, F4*2]"), ["programs"])
-    assert kept(result) == ["truncate"] and plays_alike(result)
-
-
-def test_truncate_keeps_rows_that_are_heard():
-    i1 = ins_line("i1", "ad: 9, ctrl: [{ctrl: 65, note: +0}, {ctrl: 33, note: +0}, end]")
-    assert "truncate" not in proved(run(doc(i1, "[C4.i1*2, D4*2, E4*2, F4*2]"), ["programs"]))
-
-
-A, B = "{ctrl: 65, note: +0}", "{ctrl: 33, note: +0}"
-
-
-def test_reloop_writes_the_shortest_cycle():
-    loop = f"[{A}, {B}, {A}, {B}, {{loop: 0}}]"
-    result = run(doc(ins_line("i1", f"ad: 9, ctrl: {loop}"), "[C4.i1*8]"), ["programs"])
-    assert kept(result) == ["reloop"] and plays_alike(result)
-
-
-def test_reloop_has_nothing_to_do_on_a_shortest_cycle():
-    loop = f"[{A}, {B}, {A}, {{ctrl: 17, note: +0}}, {{loop: 0}}]"
-    ir = songio.loads(doc(ins_line("i1", f"ad: 9, ctrl: {loop}"), "[C4.i1*8]"))
-    entry = ir["records"]["ins"][1]["ctrl"]
-    assert optimise.reloop(ir, "ctrltab", entry) is None
-    assert optimise.truncate(ir, "ctrltab", entry, 5) is None
-
-
-def exprs(second: str) -> str:
-    return f"      x:\n        x1: (v + 32) % 65536\n        x2: {second}\n"
-
-
-FREQS = "[C4.i1!freq:@x1*2, D4!freq:@x2*2, E4!freq:@x1*2, F4!freq:@x2*2]"
-
-
-def test_expressions_merge_when_they_play_alike():
-    result = run(doc(I1, FREQS, exprs("(v + 16 + 16) % 65536")), ["expressions"])
-    assert kept(result) == ["merge"] and "x2" not in result.text
-    assert plays_alike(result)
-
-
-def test_expressions_stay_apart_when_heard():
-    assert proved(run(doc(I1, FREQS, exprs("(v + 33) % 65536")), ["expressions"])) == []
-
-
-def aliased(second: str) -> str:
-    extra = f"  - def:\n      phrase:\n        p3: {second}\n    play: [p3, p2, p2]\n"
-    return doc(I1, "[C4.i1*2, D4*2, E4*2, F4*2]", extra="").replace(
-        "loop: 0\n", extra + "loop: 0\n"
-    )
-
-
-def test_alias_plays_one_phrase_for_another():
-    result = run(aliased("[C4.i1*2, D4.i1*2, E4*2, F4*2]"), ["phrases"])
-    assert kept(result) == ["alias"] and "p3" not in result.text
-    assert plays_alike(result)
-
-
-def test_alias_keeps_phrases_that_differ():
-    assert "alias" not in proved(run(aliased("[C4.i1*2, D4.i1*2, G4*2, F4*2]"), ["phrases"]))
-
-
-PART = ", ".join(["C4.i1", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5", "F5", "G5"])
-
-
-def test_factor_writes_a_repeating_phrase_as_plays_of_its_part():
-    result = run(doc(I1, f"[{', '.join([PART] * 4)}]", steps=48), ["phrases"])
-    assert kept(result) == ["factor"] and result.text.count("play: [p1, ~, ~]") == 3
-    assert plays_alike(result)
-
-
-def test_factor_refused_where_a_phrase_start_is_heard():
-    i1 = ins_line("i1", f"ad: 9, ctrl: [{{ctrl: 65, note: +0}}, end], pw: {PULSE}")
-    part = "-*4, C4.i1*4, D4*4"
-    text = doc(i1, f"[{', '.join([part] * 4)}]", steps=48)
-    ir = songio.loads(text)
-    assert optimise.mismatch(optimise.Trace(ir), optimise.factor(ir, "p1", 3)) is not None
-    assert "factor" not in proved(run(text, ["phrases"]))
-
-
-def test_commands_drop_what_the_context_already_plays():
-    result = run(doc(I1, "[C4.i1*2, D4.i1*2, E4!ad:9*2, F4*2]"), ["commands"])
-    assert sorted(kept(result)) == ["drop_command", "drop_instrument", "drop_instrument"]
-    assert plays_alike(result) and "!ad" not in result.text
-
-
-def test_commands_keep_what_is_heard():
-    text = doc(f"{I1}\n{I2_HEARD}", "[C4.i1*2, D4.i2*2, E4!ad:11*2, F4*2]")
-    result = run(text, ["commands"])
-    assert proved(result) == [] and "C4.i1" in result.text and "!ad:11" in result.text
-
-
-def test_fields_clear_what_is_never_heard():
-    i1 = ins_line("i1", f"ad: 9, {LATE}, ctrl: [{{ctrl: 65, note: +0}}, end]")
-    result = run(doc(i1, TWO.replace(".i2", "")), ["fields"])
-    assert ("clear", ("ins", 1, "freq")) in [f.edit for f in result.findings if f.kept]
-    assert "ad: 9" in result.text and "φ" not in result.text and plays_alike(result)
-    held = run(doc(i1, "[C4.i1*8]"), ["fields"])
-    assert ("clear", ("ins", 1, "freq")) not in [f.edit for f in held.findings if f.kept]
-    assert "φ >= 38" in held.text
-
-
-def test_edits_refuse_what_they_cannot_apply():
-    ir = songio.loads(doc(I1, "[C4.i1*2, D4*2, E4*2, F4*2]"))
-    assert optimise.merge(ir, "ins", 1, 7) is None
-    assert optimise.alias(ir, "p1", "p1") is None
-    assert optimise.factor(ir, "p1", 3) is None
-    assert optimise.drop_command(ir, "p1", 0, 0) is None
-    assert optimise.drop_keep(ir, "p1", 0) is None
-    assert optimise.drop_instrument(ir, "p1", 1) is None
-    assert optimise.clear(ir, "ins", 1, "pw") is None
-    assert optimise.hoist(ir, 1, 17, 0) is None
-
-
 def test_drop_keep_restarts_the_kept_programs():
-    ir = songio.loads(doc(I1, "[C4.i1*2, D4*2, E4*2, F4*2]"))
+    ir = songio.loads(doc(I1, SCALE))
     ir["phrases"]["p1"][1]["keep"] = 1
     assert ("drop_keep", ("p1", 1)) in optimise.commands(ir)
     assert "keep" not in optimise.drop_keep(ir, "p1", 1)["phrases"]["p1"][1]
@@ -263,11 +269,10 @@ def test_drop_keep_restarts_the_kept_programs():
 
 
 def test_the_driver_is_canonical_and_deterministic():
-    text = doc(
-        f"{I1}\n{I2_UNHEARD}", "[C4.i1!run:@c1*2, D4.i2*2, E4.i1!ad:9*2, F4.i2!run:@c1*2]", C1
-    )
-    one, two = run(text, None, workers=1), run(text, None, workers=2)
+    text = doc(f"{I1}\n{I2_UNHEARD}", TWO)
+    one, two = (run(text, ["instruments", "commands"], workers=w) for w in (1, 2))
     assert one.text == two.text and one.after < one.before
+    assert kept(one)[0] == "merge" and "drop_instrument" in kept(one)
     assert [(f.edit, f.kept, f.forms) for f in one.findings] == [
         (f.edit, f.kept, f.forms) for f in two.findings
     ]
@@ -289,23 +294,13 @@ def test_cli_optimises_and_reports(tmp_path, capsys):
     song = tmp_path / "song.yaml"
     song.write_text(doc(I1, "[C4.i1*2, D4.i1*2, E4!ad:9*2, F4*2]"), encoding="utf-8")
     out, report = tmp_path / "small.yaml", tmp_path / "orth.md"
-    args = [
-        str(song),
-        "-o",
-        str(out),
-        "--report",
-        str(report),
-        "--passes",
-        "commands",
-        "--workers",
-        "1",
-    ]
-    assert cli.optimise_main(args) == 0
+    args = ["-o", str(out), "--report", str(report), "--passes", "commands", "--workers", "1"]
+    assert cli.optimise_main([str(song), *args]) == 0
     assert "tokens" in capsys.readouterr().err
     assert "!ad" not in out.read_text(encoding="utf-8")
     assert "E4!ad:9*2" in report.read_text(encoding="utf-8")
-    assert cli.optimise_main([str(song), "--passes", "fields", "--workers", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.19")
+    assert cli.optimise_main([str(song), "--passes", "expressions", "--workers", "1"]) == 0
+    assert capsys.readouterr().out == songio.dumps(songio.load(song))
     with pytest.raises(SystemExit):
         cli.optimise_main([str(song), "--passes", "nosuch"])
 
@@ -313,61 +308,9 @@ def test_cli_optimises_and_reports(tmp_path, capsys):
 def test_lift_optimise_flag(tmp_path, monkeypatch):
     text = doc(f"{I1}\n{I2_UNHEARD}", TWO)
     monkeypatch.setattr(backends, "lift", lambda data, subtune: songio.loads(text))
+    fast = functools.partial(optimise.optimise, passes=["instruments"], workers=1, progress=False)
+    monkeypatch.setattr(optimise, "optimise", fast)
     sid, out = tmp_path / "x.sid", tmp_path / "x.yaml"
     sid.write_bytes(b"")
     assert cli.lift_main([str(sid), "-o", str(out), "--optimise"]) == 0
     assert "i2" not in out.read_text(encoding="utf-8")
-
-
-def test_unhoist_plays_an_instrument_as_another_with_a_command():
-    i2 = ins_line("i2", "ad: 10, ctrl: [{ctrl: 65, note: +0}, end]")
-    result = run(doc(f"{I1}\n{i2}", "[C4.i1*2, D4*2, E4.i2*2, F4.i1*2]"), ["instruments"])
-    assert kept(result) == ["unhoist"] and "E4.i1!ad:10*2" in result.text
-    assert "i2" not in result.text
-    assert plays_alike(result)
-
-
-def test_unhoist_refused_without_one_field_and_a_free_slot():
-    two = ins_line("i2", "ad: 10, sr: 5, ctrl: [{ctrl: 65, note: +0}, end]")
-    ir = songio.loads(doc(f"{I1}\n{two}", "[C4.i1*2, D4*2, E4.i2*2, F4.i1*2]"))
-    assert optimise.unhoist(ir, 1, 2) is None
-    i2 = ins_line("i2", "ad: 10, ctrl: [{ctrl: 65, note: +0}, end]")
-    full = "[C4.i1*2, D4*2, E4.i2!legato:0!freq:@x1*2, F4.i1*2]"
-    ir = songio.loads(doc(f"{I1}\n{i2}", full, "      x:\n        x1: (v + 32) % 65536\n"))
-    assert optimise.unhoist(ir, 1, 2) is None
-    assert optimise.unhoist(ir, 1, 1) is None
-
-
-LONG = "C5, D5, E5, F5, G5, A5, B5, C6, B5, A5, G5, F5"
-
-
-def shared(ins: str) -> str:
-    extra = f"  - def:\n      phrase:\n        p3: [C4*2, D4*2, {LONG}]\n    play: [p3, p2, p2]\n"
-    text = doc(ins, f"[{LONG.replace('C5', 'C5.i1', 1)}, C4*2, D4*2]", steps=16)
-    return text.replace("loop: 0\n", extra + "loop: 0\n")
-
-
-def test_share_plays_a_recurring_run_as_one_phrase():
-    result = run(
-        shared(I1).replace(
-            f"[C4*2, D4*2, {LONG}]", f"[C4*2, D4*2, {LONG.replace('C5', 'C5.i1', 1)}]"
-        ),
-        ["phrases"],
-    )
-    assert "share" in kept(result) and result.text.count("C6") == 1
-    assert plays_alike(result)
-
-
-def test_share_refused_where_a_phrase_start_is_heard():
-    i1 = ins_line("i1", f"ad: 9, ctrl: [{{ctrl: 65, note: +0}}, end], pw: {PULSE}")
-    text = shared(i1).replace(
-        f"[C4*2, D4*2, {LONG}]", f"[C4*2, D4*2, {LONG.replace('C5', 'C5.i1', 1)}]"
-    )
-    ir = songio.loads(text)
-    keys = optimise.shared_runs(ir)
-    assert keys and all(
-        optimise.mismatch(optimise.Trace(ir), songio.loads(songio.dumps(optimise.share(ir, k))))
-        for k in keys
-        if optimise.share(ir, k) is not None and len(k) > 4
-    )
-    assert "share" not in kept(run(text, ["phrases"]))
