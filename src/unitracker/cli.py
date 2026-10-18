@@ -43,7 +43,12 @@ def optimise_main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="unitracker-optimise", description=optimise_main.__doc__)
     parser.add_argument("song", type=Path)
     parser.add_argument("-o", "--output", type=Path)
-    parser.add_argument("--report", type=Path, metavar="MD", help="write the orthogonality report")
+    parser.add_argument(
+        "--report",
+        type=Path,
+        metavar="MD",
+        help="write the report of proved redundancies, dead state and unreached vocabulary",
+    )
     parser.add_argument("--passes", help="comma-separated passes, default all in order")
     parser.add_argument("--workers", type=int, help="processes proving candidates (default: cores)")
     args = parser.parse_args(argv)

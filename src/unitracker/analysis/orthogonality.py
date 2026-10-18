@@ -1,7 +1,7 @@
 """Where the format or the VM offers two ways to say one thing: the orthogonality report.
 
-Four kinds of finding (see docs/orthogonality.md): what the optimiser proved by the register
-grid, a playroutine's dead state found statically, and the vocabulary no lifted row reaches.
+The report lists what the optimiser proved by the register grid, a playroutine's dead state found
+statically, and the vocabulary no lifted row reaches.
 """
 
 import ast
