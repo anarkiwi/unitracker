@@ -148,15 +148,12 @@ DECLARED_HOOKS = {
     ("goattracker2", "wave"): [{"at": {"record": "wavecmd", "field": "do", "index": [1, 2, 3, 4]}}],
     ("goattracker2", "pulse"): [
         {"at": {"proc": "new_note_init"}, "written": ["pptr"]},
-        _row("tick0", 9, "pptr"),
-        _row("wavecmd", 9, "pptr"),
+        _row("cmd", 9, "pptr"),
     ],
     ("goattracker2", "filter"): [
         {"at": {"proc": "new_note_init"}, "written": ["fptr"]},
-        _row("tick0", 10, "fptr"),
-        _row("tick0", 11, "fptr"),
-        _row("wavecmd", 10, "fptr"),
-        _row("wavecmd", 11, "fptr"),
+        _row("cmd", 10, "fptr"),
+        _row("cmd", 11, "fptr"),
     ],
     ("defmon", "pulse A"): [{"at": {"proc": "pattern"}, "pointer": ["rowA"]}],
     ("defmon", "acid B"): [{"at": {"proc": "pattern"}, "pointer": ["rowB"]}],
@@ -171,7 +168,7 @@ def test_inferred_hooks_are_the_ones_the_playroutines_declared():
         for unit in songio.library(name)["modulators"]["units"]:
             found[(name, unit["name"])] = unit["hooks"]
     assert {k: found[k] for k in DECLARED_HOOKS} == DECLARED_HOOKS
-    assert sum(map(len, DECLARED_HOOKS.values())) == 13
+    assert sum(map(len, DECLARED_HOOKS.values())) == 10
     assert found[("goattracker2", "command")][0]["changed"] == ["command", "cmddata"]
     assert found[("defmon", "pitch A")] == [
         {"at": {"proc": "pattern"}, "written": ["sacc"], "pointer": ["rowA"]}
@@ -234,4 +231,40 @@ def test_a_pointer_write_inside_the_firing_is_no_hook():
     assert expand(pr)["modulators"]["units"][0]["hooks"] == [
         {"at": {"proc": "go"}, "written": ["p"]},
         {"at": {"record": "arm", "field": "do", "index": 2}, "written": ["p"]},
+    ]
+
+
+def test_a_command_shape_stands_for_each_command_with_a_row_key():
+    commands = {
+        3: {"name": "ad"},
+        4: [{"name": "vol", "when": "arg < 0x10"}, {"name": "mark", "when": "arg >= 0x10"}],
+        5: {"name": "run", "ref": "t"},
+        6: {"name": "cut", "byte": "arg"},
+        7: {"name": "sr", "arg": "arg ^ 1", "raw": "arg ^ 1"},
+        8: {"name": "freq", "ref": "x"},
+    }
+    shape = {"when": "c > 0", "command": "c & 7", "arg": "a", "skip": [3]}
+    shape["raw"] = {"c": "8 | command", "a": "arg"}
+    pr = {"commands": commands, "record_types": {"t": {"fields": ["c", "a"], "codec": [shape]}}}
+    assert expand(pr)["record_types"]["t"]["codec"] == [
+        {
+            "when": "(c > 0) and ((c & 7) == 4) and (a < 0x10)",
+            "keys": {"vol": {"value": "a"}},
+            "raw": {"c": "8 | 4", "a": "vol"},
+        },
+        {
+            "when": "(c > 0) and ((c & 7) == 5) and (a != 0)",
+            "keys": {"run": {"ref": "t", "field": "a"}},
+            "raw": {"c": "8 | 5"},
+        },
+        {
+            "when": "(c > 0) and ((c & 7) == 6)",
+            "keys": {"cut": {"byte": "a"}},
+            "raw": {"c": "8 | 6", "a": "cut"},
+        },
+        {
+            "when": "(c > 0) and ((c & 7) == 7)",
+            "keys": {"sr": {"value": "a ^ 1"}},
+            "raw": {"c": "8 | 7", "a": "(sr ^ 1)"},
+        },
     ]

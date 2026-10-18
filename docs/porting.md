@@ -51,7 +51,7 @@ Start from the existing port closest to the target player:
 
 | port | player | read it for |
 |---|---|---|
-| [`goattracker2`](playroutines/goattracker2.md) | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `tickn`, `wavecmd`), one codec shape per command row, the gate-timer lookahead |
+| [`goattracker2`](playroutines/goattracker2.md) | instruments pointing into tables whose rows are waveforms, notes and commands; pattern commands; its own tempo counter | command dispatch through playroutine `records` (`tick0`, `cmd`, `tickn`, `wavecmd`), wavetable command rows written as the `commands` they run, the gate-timer lookahead |
 | [`sidwizard`](playroutines/sidwizard.md) | an instrument header plus WF/arp, pulse and filter programs; a pattern row with an instrument column and an FX column | header bytes as instrument keys, two event slots, envelope nibble commands, `lifetime` flags |
 | [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: event`, event restarts (`restart: {command}`), `fixed` init records, a `global` unit |
 

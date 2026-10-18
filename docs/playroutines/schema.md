@@ -67,7 +67,7 @@ ctrltab:
   fields: [w, n, next]             # chained by next; none 0
   do:
     - if: "row.w >= 0xF0"
-      then: [{set: {arg: row.n}}, {run: {record: wavecmd, index: "row.w & 0x0F", field: do}}, ...]
+      then: [{set: {cmdarg: row.n}}, {run: {record: cmd, index: "row.w & 0x0F", field: do}}, ...]
     ...
 ```
 
@@ -96,6 +96,12 @@ note, two's complement in 7 bits when the absolute range reaches $FF, else in 8 
 `abs: [0x81, 0xDF]` makes $E0-$FF relative down); it gives `f`'s `raw` too. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
 written as the record's name (`run: pw1`); the reader takes the shape whose `ref` is the type the
 name has. A key given as `{none: true}` is written `none` (`pw: none`) and reads only from `none`.
+A shape `{command: c, arg: a, skip: [codes]}` writes a row that runs a command as that command:
+it stands for one shape per `commands` entry named a shared row key (not one with `ref: x`,
+`nibble`, `args` or `inline`) whose code is not in `skip`, fitting the rows whose `c` is the code
+and `a` an argument the entry takes (for a reference, not its type's `none`), and writing the key
+as the entry writes its argument; its `raw` reads `command` as the code and `arg` as the raw
+argument (`{command: "w & 0x0F", arg: n, raw: {w: "0xF0 | command", n: arg}}`).
 The writer uses the first shape whose `when` holds and refuses a row that would not read back; a
 `map` row no shape fits is an error. The reader accepts a written row only if encoding its inverse
 gives the row again. A command entry has a `name`, an optional `ref` (a record type, or `x` for an
