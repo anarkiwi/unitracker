@@ -89,7 +89,11 @@ A key with a vocabulary default (`hold`: 1) is left out at that value unless it 
 when that field is set; a key with both `value` and `expr` reads an integer as a value and a string
 as an expression. A `cut` key given as `{byte: b}` is a cutoff the player stores as its top
 byte: its value is `b << 3`, and `raw` reads `cut` as that byte, the written value `>> 3`; a
-written `cut` with any of its low three bits set does not read back. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
+written `cut` with any of its low three bits set does not read back. A `note` key given as `{byte:
+f, none: n, abs: [lo, hi]}` is the note byte raw field `f` holds: `n` is no note, a byte from `lo`
+to `hi` (default `[0x80, 0xFF]`) an absolute note in its low 7 bits, and any other byte a relative
+note, two's complement in 7 bits when the absolute range reaches $FF, else in 8 (SID-Wizard's
+`abs: [0x81, 0xDF]` makes $E0-$FF relative down); it gives `f`'s `raw` too. A key given as `{ref: type, field: f}` is the reference raw field `f` holds,
 written as the record's name (`run: pw1`); the reader takes the shape whose `ref` is the type the
 name has. A key given as `{none: true}` is written `none` (`pw: none`) and reads only from `none`.
 The writer uses the first shape whose `when` holds and refuses a row that would not read back; a

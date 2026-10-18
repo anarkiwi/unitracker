@@ -204,6 +204,27 @@ def byte_form(name: str, spec: dict, field: str) -> dict:
     return {**spec, field: f"({spec['byte']}) << {BYTE_SHIFT[name]}"}
 
 
+def note_byte(spec: dict) -> tuple[dict, dict]:
+    """``(spec, raw)`` of a ``note`` key given as ``{byte: f, none: n, abs: [lo, hi]}``: raw
+    field ``f`` is the note byte, ``n`` no note, ``lo``-``hi`` (default $80-$FF) an absolute note
+    in its low 7 bits, and any other byte a relative one, two's complement in 7 bits when the
+    absolute range reaches $FF, else in 8; ``raw`` is ``f`` from the written note."""
+    if "byte" not in spec:
+        return spec, {}
+    field, none = spec["byte"], spec.get(NONE)
+    lo, hi = spec.get("abs", (0x80, 0xFF))
+    if none is None or set(spec) - {"byte", NONE, "abs"}:
+        raise CodecError("a note byte is {byte, none, abs}")
+    mask = 0x7F if hi == 0xFF else 0xFF
+    absolute = f"{field} >= {lo} and {field} <= {hi} and {field} != {none}"
+    sign = (mask + 1) >> 1
+    return {
+        "value": f"({field} & 0x7F) if {absolute} else (({field} & {mask}) ^ {sign}) - {sign}",
+        "abs": absolute,
+        "omit": f"{field} == {none}",
+    }, {field: f"((note & 0x7F) | 0x80) if note_abs else ((note & {mask}) if has_note else {none})"}
+
+
 def key_default(key: str, kspec: dict) -> dict:
     """``kspec`` with the ``omit`` a key with a vocabulary default gets when it gives none: left
     out when its value is the default."""
@@ -229,7 +250,8 @@ class _Shape:
     ``none`` is written ``none``. The record type's ``optional`` fields give the keys and raw
     fields of :func:`optional_codec`; a key the shape gives replaces both, a raw field the raw. A
     key of :data:`KEY_DEFAULTS` is left out at its default unless it gives ``omit`` (see
-    :func:`key_default`), and reads as the default in ``raw`` when it is left out.
+    :func:`key_default`), and reads as the default in ``raw`` when it is left out. A ``note``
+    key's ``byte`` form gives its key and raw field (see :func:`note_byte`).
     """
 
     # pylint: disable=too-few-public-methods
@@ -243,6 +265,9 @@ class _Shape:
             if key not in ROW_KEYS:
                 raise CodecError(f"{key!r} is not a shared row key")
             kspec = kspec if isinstance(kspec, dict) else {"value": kspec}
+            if key == "note":
+                kspec, raw = note_byte(kspec)
+                gen_raw.update(raw)
             self.keys[key] = key_default(key, byte_form(key, kspec, "value"))
             if ("ref" in self.keys[key]) != ("field" in self.keys[key]):
                 raise CodecError(f"{key}: a reference key has both ref and field")

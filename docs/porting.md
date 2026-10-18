@@ -171,7 +171,9 @@ for a program row, its place (`first`, `last`); `keys` from raw fields to shared
 every row kind onto the shared keys ([Shared vocabulary](format/vocabulary.md)), each in its one
 meaning in chip units; a player that stores the 11-bit cutoff as its top byte writes the `cut` key
 as `{byte: f}` and the `cut` command as `{name: cut, byte: arg}`, and its `raw` reads `cut` as that
-byte. The reader accepts a written row only when encoding its raw inverse gives the
+byte; a note byte (bit 7 absolute, the rest a signed relative note, one byte no note) is
+`note: {byte: f, none: 0x80}`, with `abs: [lo, hi]` when fewer bytes are absolute, and needs no
+`raw` entry. The reader accepts a written row only when encoding its raw inverse gives the
 row again, so a shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
 `commands`: code to `{name, ref, when, arg, raw}` (or `byte` for `arg`), `{name, when, args, raw}` for several values,
 `{name, ref, inline: true}` for a row written in place, or `{name, nibble, slot}` for an envelope command.

@@ -65,10 +65,9 @@ record_types:
         keys:
           wait: {value: w, omit: "w == 0 or w >= 0x10"}
           ctrl: {value: "(w & 0x0F) if w >= 0xE0 else w", omit: "w < 0x10"}
-          note: {value: "(n & 0x7F) if n > 0x80 else ((n - 0x80) if n >= 0x40 else n)", abs: "n > 0x80", omit: "n == 0x80"}
+          note: {byte: n, none: 0x80}
         raw:
           w: "((ctrl | 0xE0) if ctrl < 0x10 else ctrl) if has_ctrl else wait"
-          n: "((note | 0x80) if note_abs else (note & 0x7F)) if has_note else 0x80"
       # A portamento, toneporta or vibrato step ($F1-$F4) is the row's one-firing freq
       # expression, read as a portamento step of speed 0, which leaves the frequency alone.
       - when: "w == 0xF1 and n == 0 and x != 0"

@@ -76,22 +76,20 @@ record_types:
         keys:
           hold: "h + 1"
           ctrl: w
-          note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
+          note: {byte: a, none: 0x80, abs: [0x81, 0xDF]}
           freq: {value: "s8(d)", omit: "d == 0"}
         raw:
           w: ctrl
-          a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
           h: "hold - 1"
           d: "(freq & 0xFF) if has_freq else 0"
       - when: "w >= 0 and w < 0x10 and h == w and a != 0x7F and d != 0xFF"
         keys:
           hold: "w + 1"
-          note: {value: "(a & 0x7F) if a >= 0x81 and a < 0xE0 else ((a - 0x100) if a >= 0xE0 else a)", abs: "a >= 0x81 and a < 0xE0", omit: "a == 0x80"}
+          note: {byte: a, none: 0x80, abs: [0x81, 0xDF]}
           freq: {value: "s8(d)", omit: "d == 0"}
         raw:
           w: "hold - 1"
           h: "hold - 1"
-          a: "((note & 0x7F) | 0x80) if note_abs else ((note & 0xFF) if has_note else 0x80)"
           d: "(freq & 0xFF) if has_freq else 0"
   # Pulse row: a $80+ sets the width from (a & $7F, b); otherwise a ticks of a signed b sweep.
   # k is the keyboard-track amount; x the expression a program of that one row is.
