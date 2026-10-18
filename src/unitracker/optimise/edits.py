@@ -3,6 +3,7 @@
 import copy
 
 from unitracker.format.codec import CodecError
+from unitracker.format.events import column
 from unitracker.format.records import RowEval, chained, program_path, ref_type
 from unitracker.format.refs import put_slots, redirect, slots, view
 from unitracker.optimise.model import (
@@ -195,15 +196,15 @@ def unhoist(ir: dict, keep: int, drop: int) -> dict | None:
             if (
                 current == drop + v.base
                 and is_note(event)
-                and not _play_as(event, keep + v.base, command)
+                and not _play_as(event, keep + v.base, command, ir["playroutine"])
             ):
                 return None
     return out
 
 
-def _play_as(event: dict, ins: int, command: list) -> bool:
+def _play_as(event: dict, ins: int, command: list, pr: dict) -> bool:
     """Give a note of the dropped instrument ``command`` in its last free slot, and ``ins`` for
-    the instrument it names; whether a slot was free."""
+    the instrument it names; whether a slot was free whose column holds it."""
     cmds = slots(event)
     if [0, 0] not in cmds:
         return False
@@ -211,6 +212,10 @@ def _play_as(event: dict, ins: int, command: list) -> bool:
     put_slots(event, cmds)
     if event.get("instrument"):
         event["instrument"] = ins
+    try:
+        column.check(pr, {"": [event]})
+    except column.ColumnError:
+        return False
     return True
 
 

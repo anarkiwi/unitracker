@@ -31,7 +31,8 @@ commands:
   # This voice swings on the pair it names.
   18: {name: vtempo, ref: speedtab, inline: true, when: "2 <= l <= 129 and 2 <= r <= 129"}
   16: {name: freq, ref: x}
-  17: {name: legato, when: "arg == 0"}
+  # Legato is read from either slot, beside the event's one command.
+  17: {name: legato, when: "arg == 0", column: instrument}
 record_types:
   ins:
     pin: [1]

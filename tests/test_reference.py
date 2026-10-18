@@ -2,6 +2,7 @@
 round-trip canonically, play their native players, use only the shared vocabulary, and lift,
 check and optimise the same through the command-line tools."""
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -93,7 +94,9 @@ def _vocabulary(text: str) -> tuple[set, set]:
         for tname, defs in (item.get("def") or {}).items():
             for value in defs.values():
                 if tname == "phrase":
-                    commands |= {p.split(":")[0] for a in value for p in str(a).split("!")[1:]}
+                    commands |= {
+                        re.split("[:*]", p)[0] for a in value for p in str(a).split("!")[1:]
+                    }
                 else:
                     keys |= _keys(value)
     return {k for k in keys if isinstance(k, str)} - {"loop"}, commands

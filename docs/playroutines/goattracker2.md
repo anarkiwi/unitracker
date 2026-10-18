@@ -32,8 +32,8 @@ expressions, and `!tempo` and `!vtempo` write a swing's row inline.
 
 ## Events
 
-`.i3` names the instrument. `!legato` is read from either slot and the other command from the
-other; otherwise the slots are only an order.
+`.i3` names the instrument. An event carries one command and `!legato`: `!legato` is in the
+instrument column, every other command in the FX column.
 
 ## Commands
 

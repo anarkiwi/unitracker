@@ -115,7 +115,8 @@ is the type's `none`, written as the stop command of its slot (`!run:none`, `!pw
 `!filter:none`). An entry's `column`
 is the event column its command is read into, `instrument` (event slot 0) or `fx` (slot 1), or a
 list of them of which it takes the first the event leaves free (an event that names an instrument
-fills `instrument`); a column holds one command, and an event with two in one is refused. An entry
+fills `instrument`); a named entry without one is read into `fx`. A column holds one command, and
+an event with two in one is refused. An entry
 `{name: ad, nibble: s, column: c}` is an envelope command: the code sets the nibble at shift `s` of
 the register `name` over the instrument's field `name`, played from the slot of column `c`, and is
 written as the byte it writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)).

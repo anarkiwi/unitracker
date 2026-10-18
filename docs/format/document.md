@@ -105,7 +105,10 @@ note[.instrument][!command[:arg]...][*steps]
   the instrument column and the second the FX column; an event that names an instrument fills the
   instrument column with it, so its commands are the FX column's. A playroutine declares the
   column each command is read into (`column`); a column holds one command, and an event with two
-  in one is refused, naming both.
+  in one is refused, naming both. The commands are written in the order of the command table of
+  [Shared vocabulary](vocabulary.md), but an envelope command keeps its slot, which decides its
+  column (see [Envelope commands](vocabulary.md#envelope-commands)); `!pw` and `!filter` come last,
+  in that order. The reader refuses any other order.
 - `*3` makes the event last 3 steps; the steps after the first are empty. One step is written
   without `*`: `*1` is refused.
 

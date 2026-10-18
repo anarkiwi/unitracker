@@ -350,10 +350,10 @@ COL_DEFS = SW_ENV + "      ctrl:\n        c1: [{ctrl: 33, note: +0}, end]\n"
 
 
 def test_commands_in_different_columns_share_an_event():
-    atoms = "C4.i1*4, D4!sr:192!tempo:4*4, E4!run:c1!tempo:4*4, F4!legato!tempo:4*4"
+    atoms = "C4.i1*4, D4!sr:192!tempo:4*4, E4!run:c1!tempo:4*4, F4!tempo:4!legato*4"
     text = songio.dumps(songio.loads(env_song({"p1": atoms}, defs=COL_DEFS)))
     ir = songio.loads(text)
-    assert commands(ir)[1:] == [[[336, 12], [18, 4]], [[112, 2], [18, 4]], [[63, 0], [18, 4]]]
+    assert commands(ir)[1:] == [[[336, 12], [18, 4]], [[112, 2], [18, 4]], [[18, 4], [63, 0]]]
     assert songio.dumps(ir) == text
 
 
@@ -498,3 +498,38 @@ def test_a_stop_command_names_its_slot():
     for wrong in ("-!run:pw", "-!pw:pw1", "-!pw:1"):
         with pytest.raises(songio.SongFormatError):
             songio.loads(text.replace("-!pw:none", wrong))
+
+
+# -- order: an event's commands in one written order --
+
+
+def test_an_events_commands_are_written_in_one_order_whatever_their_slots():
+    text = song("goattracker2", GT_INS, {"p1": "C4.i1!freq:x1!legato*2, D4.i2!pw!filter*2"})
+    ir = songio.loads(text)
+    swapped = songio.loads(text)
+    swapped["phrases"]["p1"][0]["commands"].reverse()
+    assert commands(ir)[0] == [[16, 1], [17, 0]] and commands(swapped)[0] == [[17, 0], [16, 1]]
+    assert songio.dumps(swapped) == songio.dumps(ir)
+    assert "p1: [C4.i1!freq:x1!legato*2, D4.i2*2]" in songio.dumps(ir)
+    assert np.array_equal(grid(swapped), grid(ir))
+
+
+@pytest.mark.parametrize(
+    "pr,defs,atoms,match",
+    [
+        ("goattracker2", GT_INS, "C4.i1!legato!freq:x1", "in the order !freq, !legato"),
+        ("sidwizard", COL_DEFS, "C4.i1*4, D4!legato!tempo:4", "in the order !tempo, !legato"),
+        ("goattracker2", GT_INS, "D4.i2!pw!vol:3", "!pw and !filter follow the other"),
+        ("goattracker2", GT_INS, "D4.i2!filter!pw", "!pw and !filter follow the other"),
+        ("goattracker2", GT_INS, "C4.i1!vol:3!cut:8", "can't play !vol and !cut on one event"),
+    ],
+)
+def test_the_reader_refuses_commands_out_of_their_order(pr, defs, atoms, match):
+    with pytest.raises(songio.SongFormatError, match=match):
+        songio.loads(song(pr, defs, {"p1": atoms}))
+
+
+def test_an_envelope_command_keeps_the_slot_that_decides_its_column():
+    ir = songio.loads(env_song({"p1": "C4.i1*4, D4!legato!sr:192*4"}, defs=COL_DEFS))
+    assert commands(ir)[1] == [[63, 0], [80, 12]]
+    assert "D4!legato!sr:192*4" in songio.dumps(ir)

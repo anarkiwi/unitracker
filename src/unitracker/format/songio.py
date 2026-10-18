@@ -23,6 +23,7 @@ from unitracker.format.codec import (
     Evaluator,
     RowCodec,
     command_text,
+    envelope_names,
     inline_row,
     inline_text,
     is_expr,
@@ -147,6 +148,7 @@ class _Writer:
         }
         self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, ir.get("tables"))
+        self.slotted = envelope_names(self.pr.get("commands"))
         self.exprs = {int(k): str(v) for k, v in (ir.get("exprs") or {}).items()}
         canon = {}
         self.xcanon = {i: canon.setdefault(t, i) for i, t in sorted(self.exprs.items())}
@@ -388,7 +390,7 @@ class _Writer:
             if ins:
                 name = self.names[(self.ins_type, ins - self.ins_base)]
             commands = [self.command(c, a) for c, a in zip(cmds[::2], cmds[1::2])]
-            commands = [c for c in commands if c is not None]
+            commands = column.ordered([c for c in commands if c is not None], self.slotted)
             commands += lifetime.names(keep)
             out.append(Atom(format_atom(kind, note - self.offset, steps, name, commands)))
         return Flow(out)
@@ -598,6 +600,7 @@ class _Reader:
         self.rtypes = record_types(self.pr)
         self.ins_type, self.ins_base = instrument.document(self.pr)
         self.offset, self.codecs, self.commands = _codecs(self.pr, self.rtypes, self.tables)
+        self.slotted = envelope_names(self.pr.get("commands"))
         self.exprs = {}
         self.named_tables = set((declared(self.pr).get("tables") or {}))
         self.next_index = {name: rt.first for name, rt in self.rtypes.items()}
@@ -829,6 +832,15 @@ class _Reader:
         if parsed["ins"] is not None:
             event["instrument"] = self.lookup(parsed["ins"], self.ins_type) + self.ins_base
         written = [c for c in parsed["commands"] if not lifetime.is_lifetime(*c)]
+        kept = [c for c in parsed["commands"] if lifetime.is_lifetime(*c)]
+        names = [c for c, _ in written]
+        if parsed["commands"] != written + sorted(kept, key=lambda c: lifetime.NAMES.index(c[0])):
+            raise SongFormatError(
+                f"!pw and !filter follow the other commands, in that order: {atom!r}"
+            )
+        if names != column.ordered(names, self.slotted):
+            order = "!" + ", !".join(column.ordered(names))
+            raise SongFormatError(f"an event's commands are written in the order {order}: {atom!r}")
         if len(written) > MAX_COMMANDS:
             raise SongFormatError(f"more than {MAX_COMMANDS} commands in {atom!r}")
         commands = [self.command(cmd, arg, atom) for cmd, arg in written]

@@ -51,7 +51,7 @@ song:
         x3: v + 64*((φ - 3) % 12 >= 6) - 32
       phrase:
         ...
-        p6: [off*3, A#3.i4!freq:x1, C4!legato!freq:x2, D4, D#4*2, C4, G4*2, C5, G#4!freq:x1, ...]
+        p6: [off*3, A#3.i4!freq:x1, C4!freq:x2!legato, D4, D#4*2, C4, G4*2, C5, G#4!freq:x1, ...]
     play: [p4, p5, p6]
   - {loop: 0}
 ```
