@@ -20,7 +20,7 @@ commands:
   8: {name: run, ref: ctrltab}
   9: {name: run, ref: pulsetab}
   10: {name: run, ref: filttab}
-  11: {name: resfilt}
+  11: {name: resfilt, when: "arg < 0x100", args: {res: "arg >> 4", route: "arg & 0x0F"}, raw: "(res << 4) | route"}
   12: {name: cut, byte: arg}
   13: [{name: vol, when: "arg < 0x10"}, {name: mark, when: "arg >= 0x10"}]
   # E: every voice swings, the pair written as the speed-table row's two bytes (!tempo:6/7).

@@ -264,9 +264,9 @@ The player keeps one cursor per voice and the playroutine decides when it moves.
 
 Each tick, the player runs `init` (first tick) or `tick` (every later tick). Then it
 evaluates the ghost, masks each value to 8 bits, and flushes the registers that
-changed since the last flush, in GoatTracker 2's buffered order (`BUFFEREDWRITES`:
-the filter step first, then `mt_loadregs`). A register with no ghost entry keeps its
-value. An entry `r` naming a cell wider than 8 bits (`0: freq`) or a pair (`0: "fhi:flo"`) gives
+changed since the last flush, in the canonical order below: the filter and volume registers,
+then each voice's pulse width, envelope, frequency and, last, its control register. A register
+with no ghost entry keeps its value. An entry `r` naming a cell wider than 8 bits (`0: freq`) or a pair (`0: "fhi:flo"`) gives
 register `r` the low byte and `r + 1` the high byte, unless `r + 1` has an entry of its own.
 
 ```

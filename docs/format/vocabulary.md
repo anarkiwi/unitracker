@@ -8,7 +8,7 @@ record type is one player's own.
 | `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, `v^n` both (see [The gate](#the-gate)) |
 | `gate` | the gate, 0 off or 1 on (see [The gate](#the-gate)) |
 | `note` | `+n` / `-n` relative to the event note, or a note name (`G#5`) for an absolute note; omitted: no change |
-| `wait` | ticks before the row applies |
+| `wait` | ticks before the row applies (see [Timing](#timing)) |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
 | `ad`, `sr` | envelope registers |
 | `pw` | the 12-bit pulse width, a value or an expression; `none` stops the voice's pulse program |
@@ -21,21 +21,24 @@ record type is one player's own.
 | `filter` | `none`: the row stops the filter program, as `pw: none` the pulse program |
 | `vol` | the volume, the low nibble of `$D418` |
 
+A command means one thing in every player; it applies on the step that carries it.
+
 | command | meaning |
 |---|---|
 | `!run:x` | start program `x` in the slot its kind implies: the control, pulse or filter program; `!run:none` stops the control program |
-| `!pw:none`, `!filter:none` | stop the pulse / filter program |
-| `!ad:`, `!sr:`, `!ctrl:` | set the register to the byte |
-| `!resfilt:n` | set `$D417` whole, `n = 16*res + route` |
+| `!pw:none`, `!filter:none` | stop the voice's pulse / filter program |
+| `!pw`, `!filter` (no argument) | the note does not restart its instrument's pulse / filter program (see [Lifetime](#lifetime)) |
+| `!ad:n`, `!sr:n` | set the envelope register to the byte |
+| `!ctrl:n` | set the control register's waveform and mode bits, as a row's `ctrl` |
+| `!resfilt:r/m` | set `res` and `route` (a mask), as a row's keys of those names |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
-| `!tempo:n`, `!tempo:a/b` | every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks |
-| `!vtempo:n`, `!vtempo:a/b` | this voice's tempo |
+| `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks |
+| `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
 | `!freq:x` | drive the voice frequency by expression `x` (see [Modulators](../modulation/expressions.md)) |
+| `!mark:n` | a mark that changes no sound: the player reads the byte and plays nothing |
+| `!restart:r` | play hard restart `r` before the note (see [Hard restart](#hard-restart)) |
 | `!legato` | the event's note does not retrigger (see [Legato](../modulation/expressions.md#legato)) |
-| `!mark:n` | a timing mark that changes no sound |
-| `!restart:r` | the note's hard restart, for a player whose instruments have none (see [Hard restart](#hard-restart)) |
-| `!pw`, `!filter` (no argument) | the note does not restart the instrument's pulse / filter program (see [Lifetime](#lifetime)) |
 
 A playroutine takes the commands its `commands`, `restart` and `lifetime` declare, over the
 arguments its codec accepts; each playroutine's file
@@ -49,6 +52,12 @@ is rejected on reading, naming the key or command and the player (`defmon: the p
 type outside the playroutine's codec shapes, record types and the shared command names is refused
 with one message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in
 '-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`).
+
+## Timing
+
+A row applies after its `wait` and lasts its `hold`. A `wait: n` row is `hold: +n` on the row
+before it, except on a program's entry row, which has no row before it, and on the row a loop
+returns to, which two rows precede; so both keys stay.
 
 ## The gate
 

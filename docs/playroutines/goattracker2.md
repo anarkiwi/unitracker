@@ -1,7 +1,9 @@
 # GoatTracker 2 (`goattracker2`)
 
 The GoatTracker 2 playroutine (`player.s`, buffered writes) of
-[`goattracker2.yaml`](../../src/unitracker/playroutines/goattracker2.yaml).
+[`goattracker2.yaml`](../../src/unitracker/playroutines/goattracker2.yaml). The format's
+canonical flush order (see [Ticks, the ghost and the canonical flush](schema.md#ticks-the-ghost-and-the-canonical-flush))
+is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loadregs`).
 
 ## Lifting
 
@@ -43,7 +45,7 @@ other; otherwise the slots are only an order.
 | `!ad` | 0-255 |
 | `!sr` | 0-255 |
 | `!ctrl` | 0-255 |
-| `!resfilt` | 0-255 |
+| `!resfilt` | 0-15/0-15 |
 | `!vol` | 0-15 |
 | `!cut` | 0-2040 step 8 |
 | `!tempo` | 3-127, 2-129/2-129 |
@@ -96,7 +98,7 @@ run, as on a note row:
 | $F5, $F6 | `ad`, `sr` |
 | $F7 | the waveform row `ctrl` of its value, when a replay proves its pause of the continuous effect unheard |
 | $F9, $FA | `run` (the pulse or filter program); with 00, `pw: none` and `filter: none` |
-| $FB | `res` and `route`; 00 also stops the filter program: `{res: 0, route: 0, filter: none}` |
+| $FB | `res` and `route`; with 00, `{res: 0, route: 0, filter: none}` (see Filter) |
 | $FC | `cut` |
 | $FD below $10 | `vol` |
 | $FD $10-$FF | the empty row `{}`, when a replay proves its pause unheard (`{vol: 16}` is refused) |
@@ -112,8 +114,9 @@ A control mask (`ctrl: ^n`) is refused.
 | `cut` | the filter program's `cut` expression; a parameter row carries the following cutoff row's value, because the player reads both in one tick; `!cut` |
 | volume | `!vol` |
 
-`!resfilt:n` is one command: the player sets both nibbles with one code, and `!resfilt:0` also
-stops the filter program. A pattern command or wavetable row that sets the cutoff, `res`/`route`
+`res` and `route` are one byte, which a filter parameter row, `!resfilt:r/m` (command $B) and a
+wavetable $FB row set whole; from the command or the wavetable row, the byte 0 also stops the
+filter program (`!resfilt:0/0`, `{res: 0, route: 0, filter: none}`). A pattern command or wavetable row that sets the cutoff, `res`/`route`
 or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step writes
 `$D416`-`$D418` before the channels run, so the playroutine latches them there (`fcutreg`,
 `fctrlreg`, `fmodereg`).
@@ -144,7 +147,7 @@ or its programs' rows, and whose event runs none (`!run`); the writer leaves the
 | `command` | `freq` | `freq` | the offset from the frequency of the note (with the wavetable's arpeggio) | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, the instrument's `freq` |
 | `wave` | `freq` | `freq` | as `command` | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
-| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!resfilt:0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
+| `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
 - A `!freq` lasts its step. The same `!freq` on the next step continues the occurrence (`φ`
   keeps counting); a different one, or a step with another or no command, starts the next. A step
