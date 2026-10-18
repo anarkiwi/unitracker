@@ -23,7 +23,7 @@ names in *italics* are [format.md](../format.md)'s.
 | `ins` | instruments | keys `ad`, `sr`, `ctrl`, `pw`, `filter`, `freq`, `restart`; instrument 1 is pinned, because every voice starts on it |
 | `ctrl` | wavetable (`ctrltab`) | see Control programs |
 | `pw` | pulse table (`pulsetab`) | written as the program's `pw` expression |
-| `filter` | filter table (`filttab`) | parameter rows set `mode` (bits 4-6) and both `res` and `route` (a mask), with the following cutoff row's value as `cut`, because the player reads both in one tick; the cutoff is the program's `cut` expression |
+| `filter` | filter table (`filttab`) | see Filter |
 | `restart` | the instrument's gate timer and first wave | instruments with one gate timer and first wave share a restart program |
 
 The speed table has no written form: its vibrato and slide speeds are terms of the `freq`
@@ -60,15 +60,10 @@ Every other command is refused by name.
   `deftempo` + 1 ticks per row, the player's own count.
 - `!funk:a/b` is command $E, its argument the speed-table row's two bytes; `!funk:none` swings on
   the pair already set.
-- `!resfilt:n` is one command: the player sets both nibbles with one code, and `!resfilt:0` also
-  stops the filter program.
 - `!vol` is command $D below $10; from $10 it is `!mark`.
-- `!legato:0` (command 17) is a toneporta note's: the lifter writes a toneporta on a note as
-  `!legato:0` and the toneporta, so the note does not retrigger.
+- `!legato:0` is command 17: the lifter writes a native toneporta on a note as `!legato:0` plus
+  the toneporta, so the note does not retrigger.
 - `!freq` is command 16, which plays every expression.
-- A pattern command or wavetable row that sets the cutoff, `res`/`route` or the volume ($B-$D,
-  $FB-$FD) sounds on the following tick: the filter step writes `$D416`-`$D418` before the
-  channels run, so the playroutine latches them there (`fcutreg`, `fctrlreg`, `fmodereg`).
 
 ## Control programs
 
@@ -104,6 +99,21 @@ run, as on a note row:
 | $FD $10-$FF | the empty row `{}`, when a replay proves its pause unheard (`{vol: 16}` is refused) |
 
 A control mask (`ctrl: ^n`) is refused.
+
+## Filter
+
+| keys | set by |
+|---|---|
+| `res`, `route` (a mask) | filter parameter rows, which set both; `!resfilt` |
+| `mode` | filter parameter rows, bits 4-6 |
+| `cut` | the filter program's `cut` expression; a parameter row carries the following cutoff row's value, because the player reads both in one tick; `!cut` |
+| volume | `!vol` |
+
+`!resfilt:n` is one command: the player sets both nibbles with one code, and `!resfilt:0` also
+stops the filter program. A pattern command or wavetable row that sets the cutoff, `res`/`route`
+or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step writes
+`$D416`-`$D418` before the channels run, so the playroutine latches them there (`fcutreg`,
+`fctrlreg`, `fmodereg`).
 
 ## Hard restart
 
