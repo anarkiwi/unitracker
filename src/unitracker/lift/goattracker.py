@@ -13,7 +13,7 @@ PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
 NTSC_CLOCK = {"cycles_per_tick": 17095, "clock_hz": 1022727}
 # The playroutine's legato command: the note does not retrigger, as a toneporta's; its swing of
 # one voice on a named pair.
-LEGATO, VOICE_SWING = 17, 18
+LEGATO, VOICE_SWING, FREQ = 17, 18, 16
 
 
 class LiftError(ValueError):
@@ -343,6 +343,45 @@ def unmark(ir: dict, start: dict) -> dict:
     return _rewritten(ir, start, rewrite, "the rewritten $D10-$DFF commands")
 
 
+SNAP = (C.CMD_TONEPORTA, 0)
+# The modulator expression of a toneporta of speed 0: the frequency of the note.
+AT_NOTE = "0"
+
+
+def snapped(ir: dict) -> dict:
+    """``ir`` (its modulations expressions) with each toneporta of speed 0 the conversion left,
+    which sets the frequency to the note's on each tick, as ``!freq`` of the expression that does
+    (:data:`AT_NOTE`), once a replay to the song's recurrence and one period more proves the song
+    unchanged."""
+    where = [
+        (name, k)
+        for name, events in ir["phrases"].items()
+        for k, e in enumerate(events)
+        if SNAP in map(tuple, event_commands(e))
+    ]
+    if not where:
+        return ir
+    exprs = dict(ir.get("exprs") or {})
+    index = next((i for i, t in exprs.items() if t == AT_NOTE), max(exprs, default=0) + 1)
+    exprs[index] = AT_NOTE
+    phrases = {name: [dict(e) for e in events] for name, events in ir["phrases"].items()}
+    for name, k in where:
+        cmds = [
+            [FREQ, index] if tuple(c) == SNAP else list(c) for c in event_commands(phrases[name][k])
+        ]
+        _set_commands(phrases[name][k], cmds)
+    out = {**ir, "phrases": phrases, "exprs": exprs}
+    ticks = window(ir)
+    diff = np.argwhere(SongPlayer(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
+    if len(diff):
+        tick, reg = (int(x) for x in diff[0])
+        raise LiftError(
+            f"a toneporta of speed 0 as !freq of the note's frequency plays differently at tick"
+            f" {tick}, register {reg}"
+        )
+    return out
+
+
 def wave_rows(records: dict, phrases: dict) -> list:
     """The wavetable rows the instruments and the wavetable pointer command reach, in order."""
     rows = records["ctrltab"]
@@ -466,4 +505,4 @@ def lift(dec, expressions: bool = True) -> dict:
         "playroutine": playroutine,
     }
     ir = unmark(explicit_swing(unpause(ir), start), start)
-    return convert(ir) if expressions else ir
+    return snapped(convert(ir)) if expressions else ir

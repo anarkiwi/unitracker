@@ -23,7 +23,7 @@ from unitracker.format.codec import CodecError, CommandCodec, RowCodec
 from unitracker.format.records import record_types
 from unitracker.lift import goattracker as gt
 from unitracker.modfit.convert import ConversionError
-from unitracker.player.vm import SongPlayer
+from unitracker.player.vm import SongPlayer, event_commands
 
 
 # Each table's rows and the records it lifts to, as ``keys`` values (None: absent).
@@ -487,3 +487,16 @@ def test_a_d10_to_dff_is_the_command_it_keeps_running(commands):
     dec, native = gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, speed=[(2, 0x20)])
     text, _, _ = lifted(dec, native)
     assert "mark" not in text and "!vol" not in text
+
+
+def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(31, 0, 3, 0)] + [REST] * 3 + [(36, 1, 0, 0)] + [REST] * 7
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], rows=rows)
+    out = gt.snapped(gt.lift(dec, expressions=False))
+    cmds = [list(c) for e in out["phrases"]["p00"] for c in event_commands(e)]
+    assert [3, 0] not in cmds and [gt.LEGATO, 0] in cmds
+    (index,) = [a for c, a in cmds if c == gt.FREQ]
+    assert out["exprs"][index] == gt.AT_NOTE
+    theirs = np.asarray(native.render_grid(400), dtype=np.uint8)
+    assert SongPlayer(out).mismatch(theirs) is None
+    assert gt.snapped(out) is out

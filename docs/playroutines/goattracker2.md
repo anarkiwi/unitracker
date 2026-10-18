@@ -71,7 +71,10 @@ Every other command is refused by name.
 - `!run:none`, `!pw:none` and `!filter:none` are commands 8, 9 and 10 with argument 0, which stop
   the control, pulse and filter programs.
 - `!legato` is command 17: the lifter writes a native toneporta on a note as `!legato` plus
-  the toneporta, so the note does not retrigger.
+  the toneporta, so the note does not retrigger. A toneporta of speed 0 sets the frequency to the
+  note's on every tick, which is not `!legato` alone (that leaves the frequency where it was); one
+  the expression conversion leaves is written `!freq` of the expression `0`, the note's frequency,
+  once a replay proves the song unchanged.
 - `!freq` is command 16, which plays every expression; `!freq:none` is 16 with 0 (see
   Modulators).
 
