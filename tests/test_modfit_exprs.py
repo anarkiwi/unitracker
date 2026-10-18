@@ -306,6 +306,15 @@ def test_a_remainder_under_its_guard_folds_to_a_constant():
     assert equal(shown, e, bounds=((0, 131072),))
 
 
+def test_a_form_with_fewer_brackets_ranks_first_at_equal_tokens():
+    two = "16*(φ >= 4)*(((φ - 5) % 65 + 68*((φ - 5) // 65) + 25) % 256) + 2048*(φ < 4)"
+    one = "(16*(((φ - 5) % 65 + 68*((φ - 5) // 65) + 25) % 256) - 2048)*(φ >= 4) + 2048"
+    cycle = G.parse("((φ - 5) % 65 + 68*((φ - 5) // 65) + 25) % 256")
+    a, b = G.parse(one), 16 * G.ge(PHI, 4) * cycle + 2048 * G.IvLt(PHI - 4)
+    assert [G.text(a), G.text(b)] == [one, two] and G.tokens(one) == G.tokens(two)
+    assert len(one) > len(two) and G.rank(a) < G.rank(b) and equal(a, b)
+
+
 _FN = G.freq(N)
 
 

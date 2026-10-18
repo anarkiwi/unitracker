@@ -757,9 +757,12 @@ def tokens(s: str) -> int:
 
 @functools.lru_cache(maxsize=None)
 def rank(e) -> tuple:
-    """The order of equivalent forms: fewest tokens, then characters, then text."""
+    """The order of equivalent forms: fewest tokens, then brackets, then operations, then
+    characters, then text."""
     s = text(e)
-    return tokens(s), len(s), s
+    nodes = list(ast.walk(ast.parse(s, mode="eval")))
+    ops = sum(isinstance(n, (ast.BinOp, ast.UnaryOp, ast.Compare, ast.Call)) for n in nodes)
+    return tokens(s), sum(isinstance(n, ast.Compare) for n in nodes), ops, len(s), s
 
 
 def valid(e) -> bool:
