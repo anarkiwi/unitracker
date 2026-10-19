@@ -280,19 +280,19 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             elif key == "freq" and (key in value or self.g is not None):
                 out[key] = self.expr(value.get(key, 0), freq=True, note=True)
             elif key in value:
-                named = self.named(key, value[key])
+                named = self._named(key, value[key])
                 out[key] = self.program(named, f"{where}.{key}", key, key == "ctrl")
         if self.name in ROUTED_BY_INSTRUMENT:
-            out["filter"] = self.routed(out.get("filter"))
+            out["filter"] = self._routed(out.get("filter"))
             out = _ordered(out, INS_KEYS)
         if "restart" in out and self.name in FIRST_TICK_BEFORE:
-            rows = self.restart_rows(value["restart"], where)
+            rows = self._restart_rows(value["restart"], where)
             if self.name in NOTE_KEEPS_GATE and _gate_left(rows) == 0:
-                out["ctrl"] = self.gated(out.get("ctrl"), where)
-            out["restart"] = self.restart(rows, out, where)
+                out["ctrl"] = self._gated(out.get("ctrl"), where)
+            out["restart"] = self._restart(rows, out, where)
         return out
 
-    def gated(self, value, where: str) -> Flow:
+    def _gated(self, value, where: str) -> Flow:
         """An instrument's control program that first turns off the gate its note turns on."""
         if isinstance(value, Atom):
             value = self.program(self.defined[str(value)][2], f"{where}.ctrl", "ctrl", True)
@@ -302,7 +302,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             loop = FlowMap(loop=loop["loop"] + 1)
         return Flow([FlowMap(hold=0, gate=0), *rows[:-1], loop])
 
-    def named(self, kind: str, value):
+    def _named(self, kind: str, value):
         """A program name an instrument's ``kind`` field holds, as one of that kind's names:
         a program of another kind is defined again under ``kind``."""
         match = _NAME.fullmatch(value) if isinstance(value, Atom) else None
@@ -315,7 +315,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             )
         return self.aliases[(kind, value)]
 
-    def routed(self, value):
+    def _routed(self, value):
         """An instrument's filter program that routes the filter to its voice, or one that
         removes the voice where it has none."""
         if value is None:
@@ -326,14 +326,14 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             value = Flow([FlowMap(cut=value), Atom("end")])
         return Flow([_ordered({**value[0], "route": Atom("+")}), *value[1:]])
 
-    def restart_rows(self, value, where: str) -> list:
+    def _restart_rows(self, value, where: str) -> list:
         """The internal rows of an instrument's restart, its name resolved."""
         rows = list(self.defined[str(value)][2] if isinstance(value, Atom) else value)
         if len(rows) < 2 or rows[-1] != "end":
             raise GenericError(f"{where}.restart: {rows} is not a restart program")
         return rows
 
-    def restart(self, rows: list, ins: dict, where: str) -> Flow:
+    def _restart(self, rows: list, ins: dict, where: str) -> Flow:
         """An instrument's restart with its first-tick row, the gate it sets, the instrument's
         envelope and the voice's held frequency and stopped control program a tick before the
         note, whose own row is then empty."""
@@ -348,10 +348,10 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
 
     # -- phrases, init and the lead-in --
 
-    def phrase_uses(self, rows) -> dict:
+    def _phrase_uses(self, rows) -> dict:
         """``{x name: command}`` of the expressions phrases name."""
         uses: dict[str, set] = {}
-        for atom in self.atoms(rows):
+        for atom in self._atoms(rows):
             for cmd, name in _XREF.findall(atom):
                 uses.setdefault(name, set()).add(cmd)
         mixed = {n: sorted(c) for n, c in uses.items() if len(c) > 1 and "freq" in c}
@@ -360,13 +360,13 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         return {n: next(iter(c)) for n, c in uses.items()}
 
     @staticmethod
-    def atoms(rows):
+    def _atoms(rows):
         """Every event atom of the song's phrases, as text."""
         for item in rows:
             for atoms in ((item.get("def") or {}).get("phrase") or {}).values():
                 yield from (str(a) for a in atoms)
 
-    def freq_offsets(self, rows) -> None:
+    def _freq_offsets(self, rows) -> None:
         """Each ``!freq:n`` as an expression of the document's note table."""
         made: dict[int, Atom] = {}
         for item in rows:
@@ -390,14 +390,14 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         fixed = {t: defs.pop(t) for t in INIT_TYPES if t in defs}
         cmds: list[dict] = [{} for _ in range(self.voices)]
         notes = ["-"] * self.voices
-        cmds[0].update(self.after_init())
+        cmds[0].update(self._after_init())
         if self.init_tempo is not None:
             cmds[0]["tempo"] = self.init_tempo
         for kind in INIT_TYPES:
             for index, rec in (fixed.get(kind) or {}).items():
                 voice = int(index) if kind == "vinit" else 0
                 for key, value in rec.items():
-                    cmds[voice].update(self.init_command(kind, index, key, value))
+                    cmds[voice].update(self._init_command(kind, index, key, value))
                     if kind == "vinit" and key == "note":
                         notes[voice] = str(value)
         if not any(cmds) and notes == ["-"] * self.voices:
@@ -414,7 +414,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             for v in range(self.voices)
         )
 
-    def init_command(self, kind: str, index, key: str, value) -> dict:
+    def _init_command(self, kind: str, index, key: str, value) -> dict:
         """``{command: argument}`` of a fixed record's key; a note is a legato note."""
         if kind == "vinit" and key == "note":
             return {"legato": None}
@@ -427,7 +427,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             return {key: value}
         raise GenericError(f"{kind} {index}: {key} has no init command")
 
-    def after_init(self) -> dict:
+    def _after_init(self) -> dict:
         """The init commands of the global registers the native player sets in its init."""
         regs = self.native.init
         if regs is None:
@@ -438,18 +438,18 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         out.update((k, v) for k, v in (("mode", mode), ("vol", vol), ("cut", cut)) if v)
         return out
 
-    def tempo_pair(self) -> tuple[int, int]:
+    def _tempo_pair(self) -> tuple[int, int]:
         """The song's initial tempo ``(a, b)``; a playroutine without a tempo steps each tick."""
         value = self.ir.get(tempo.NAME, tempo.default(self.pr))
         if value is None:
             value = 6 if self.pr.get(tempo.NAME) else 1
         return tempo.pair(value)
 
-    def lead_in(self, rows: list) -> dict:
+    def _lead_in(self, rows: list) -> dict:
         """The row before the song's first that delays it ``lead`` ticks, the native player's
         start: a step the init row times, then a step whose event restores the song's tempo,
         or that event on the song's first step where the lead is shorter than a step."""
-        a, b = self.tempo_pair()
+        a, b = self._tempo_pair()
         back = f"{b}/{a}" if a != b else str(a)
         atoms = [Atom("-")]
         if self.lead > b:
@@ -459,12 +459,12 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             self.init_tempo = back if a != b else None
         else:
             self.init_tempo = str(self.lead)
-            self.restore(rows, f"{a}/{b}" if a != b else str(a))
+            self._restore(rows, f"{a}/{b}" if a != b else str(a))
         lead = self.fresh("phrase", Flow(atoms))
         defs = {"phrase": {lead: self.added["phrase"].pop(lead)}}
         return {"def": defs, "play": Flow([lead] * self.voices)}
 
-    def restore(self, rows: list, value: str) -> None:
+    def _restore(self, rows: list, value: str) -> None:
         """The song's first row playing a copy of its first phrase whose first event sets the
         song's tempo ``value``."""
         play = rows[0]["play"]
@@ -477,8 +477,8 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
 
     # -- the document --
 
-    def __call__(self, doc: dict) -> dict:
-        rows = songio.song_rows(doc)
+    def _names(self, rows: list) -> None:
+        """Every definition of the song by name, and each prefix's highest number."""
         self.defined = {
             str(name): (r, kind, value)
             for r, item in enumerate(rows)
@@ -489,17 +489,31 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             if match := _NAME.fullmatch(name):
                 prefix, number = match.groups()
                 self.used[prefix] = max(self.used.get(prefix, 0), int(number))
-        uses = self.phrase_uses(rows)
-        self.runs = {n for a in self.atoms(rows) for n in _RUN.findall(a)} | {
+
+    def __call__(self, doc: dict) -> dict:
+        rows = songio.song_rows(doc)
+        self._names(rows)
+        uses = self._phrase_uses(rows)
+        self.runs = {n for a in self._atoms(rows) for n in _RUN.findall(a)} | {
             str(d["run"]) for d in _dicts(rows) if "run" in d
         }
         if self.g is not None:
-            self.freq_offsets(rows)
-        lead = self.lead_in(rows) if self.lead else None
+            self._freq_offsets(rows)
+        lead = self._lead_in(rows) if self.lead else None
         init = self.init(rows[0].get("def") or {}) if rows else None
         for item in rows:
             for kind, entries in (item.get("def") or {}).items():
-                self.section(kind, entries, uses)
+                self._section(kind, entries, uses)
+        self._settle(rows)
+        if lead is not None:
+            doc["song"].insert(0, lead)
+            if isinstance(doc["song"][-1], dict):
+                doc["song"][-1] = FlowMap(loop=doc["song"][-1]["loop"] + 1)
+        return self.header(doc, init)
+
+    def _settle(self, rows: list) -> None:
+        """The rows without the restarts the instruments now hold and without empty
+        definitions, the first row with the definitions the respelling adds."""
         for item in rows:
             if self.name in FIRST_TICK_BEFORE:
                 (item.get("def") or {}).pop("restart", None)
@@ -511,13 +525,8 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
                 if entries:
                     first.setdefault(kind, {}).update(entries)
             rows[0] = {"def": first, "play": rows[0]["play"]}
-        if lead is not None:
-            doc["song"].insert(0, lead)
-            if isinstance(doc["song"][-1], dict):
-                doc["song"][-1] = FlowMap(loop=doc["song"][-1]["loop"] + 1)
-        return self.header(doc, init)
 
-    def section(self, kind: str, entries: dict, uses: dict) -> None:
+    def _section(self, kind: str, entries: dict, uses: dict) -> None:
         """A row's definitions of ``kind`` respelled in place."""
         if kind not in SECTIONS:
             names = ", ".join(str(n) for n in entries)
@@ -543,7 +552,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             )
         if self.voices != 3:
             out["voices"] = self.voices
-        value = tempo.written(*self.tempo_pair())
+        value = tempo.written(*self._tempo_pair())
         if value != 6:
             out["tempo"] = Flow(value) if isinstance(value, list) else value
         tables = {NOTE_TABLE: self.g} if self.g is not None and NOTE_TABLE in self.read else {}
