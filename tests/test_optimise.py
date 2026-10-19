@@ -296,21 +296,6 @@ def test_an_embedded_playroutine_is_optimised_embedded():
     assert kept(result) == ["merge"] and "record_types:" in result.text
 
 
-def test_cli_optimises_and_reports(tmp_path, capsys):
-    song = tmp_path / "song.yaml"
-    song.write_text(doc(I1, "[C4*2, D4*2, E4!ad:9*2, F4*2]"), encoding="utf-8")
-    out, report = tmp_path / "small.yaml", tmp_path / "orth.md"
-    args = ["-o", str(out), "--report", str(report), "--passes", "commands", "--workers", "1"]
-    assert cli.optimise_main([str(song), *args]) == 0
-    assert "tokens" in capsys.readouterr().err
-    assert "!ad" not in out.read_text(encoding="utf-8")
-    assert "E4!ad:9*2" in report.read_text(encoding="utf-8")
-    assert cli.optimise_main([str(song), "--passes", "expressions", "--workers", "1"]) == 0
-    assert capsys.readouterr().out == songio.dumps(songio.load(song))
-    with pytest.raises(SystemExit):
-        cli.optimise_main([str(song), "--passes", "nosuch"])
-
-
 def test_lift_optimise_flag(tmp_path, monkeypatch):
     text = doc(f"{I1}\n{I2_UNHEARD}", TWO)
     verified = []
@@ -328,12 +313,13 @@ def test_lift_optimise_flag(tmp_path, monkeypatch):
         @staticmethod
         def verify(song):
             verified.append(song)
+            Lift.document = "document\n"
 
     monkeypatch.setattr(backends, "lifter", lambda data, subtune: Lift())
     fast = functools.partial(optimise.optimise, passes=["instruments"], workers=1, progress=False)
     monkeypatch.setattr(optimise, "optimise", fast)
     sid, out = tmp_path / "x.sid", tmp_path / "x.yaml"
     sid.write_bytes(b"")
-    assert cli.lift_main([str(sid), "-o", str(out), "--optimise", "--internal"]) == 0
-    assert "i2" not in out.read_text(encoding="utf-8")
-    assert songio.dumps(verified[0]) == out.read_text(encoding="utf-8")
+    assert cli.lift_main([str(sid), "-o", str(out), "--optimise"]) == 0
+    assert out.read_text(encoding="utf-8") == "document\n"
+    assert "i2" in text and "i2" not in songio.dumps(verified[0])

@@ -1,7 +1,7 @@
 # GoatTracker 2 (`goattracker2`)
 
 The GoatTracker 2 playroutine (`player.s`, buffered writes) of
-[`goattracker2.yaml`](../../src/unitracker/playroutines/goattracker2.yaml). The format's
+[`goattracker2.yaml`](../../src/unitracker/playroutines/goattracker2.yaml). The VM's
 canonical flush order (see [Ticks, the ghost and the canonical flush](schema.md#ticks-the-ghost-and-the-canonical-flush))
 is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loadregs`).
 
@@ -11,7 +11,7 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 |---|---|
 | tune | a packed GoatTracker 2 `.sid`, decompiled by pygoattracker |
 | lifted from | the decompiled song, and the build's hard-restart preset `adparam` as the restart programs' `ad` and `sr` |
-| tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo. A document's `tempo` takes 2-129, as `!tempo` does: 3-127 starts the tempo cell, and 2, 128 and 129 the funk pair, both that tempo |
+| tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo. The playroutine's `tempo` starts 2-129 as `!tempo` does: 3-127 in the tempo cell, and 2, 128 and 129 on the funk pair, both that tempo |
 | clock | NTSC when the header's clock flags say so, else PAL |
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
 | notes | `note_offset` 0 |
@@ -60,7 +60,6 @@ command, $B00, see [Filter](#filter)).
 | `!freq` | `x` name, `none` |
 | `!legato` | no argument |
 
-Every other command is refused by name.
 
 - `!tempo:n` and `!vtempo:n` are command $F from 3 to 127; it plays a tempo of 2 as 3, so 2, 128
   and 129 are written as `!tempo:a/b` and `!vtempo:a/b` are, with the row `n/n`.
@@ -116,9 +115,7 @@ run, as on a note row:
 | $FB | `res` and `route`; with 00, `{res: 0, route: 0, filter: none}` (see Filter) |
 | $FC | `cut` |
 | $FD below $10 | `vol` |
-| $FD $10-$FF | the empty row `{}`, when a replay proves its pause unheard (`{vol: 16}` is refused) |
-
-A control mask (`ctrl: ^n`) is refused.
+| $FD $10-$FF | the empty row `{}`, when a replay proves its pause unheard |
 
 ## Filter
 
@@ -132,8 +129,7 @@ A control mask (`ctrl: ^n`) is refused.
 
 `res` and `route` are one byte, which a filter parameter row, `!resfilt:r/m` (command $B) and a
 wavetable $FB row set whole; from the command or the wavetable row, the byte 0 also stops the
-filter program, and is written so: `!filter:none!resfilt:0/0` (one command $B00; `!resfilt:0/0`
-alone is refused) and `{res: 0, route: 0, filter: none}`. A pattern command or wavetable row that sets the cutoff, `res`/`route`
+filter program, and is written so: `!filter:none!resfilt:0/0` (one command $B00) and `{res: 0, route: 0, filter: none}`. A pattern command or wavetable row that sets the cutoff, `res`/`route`
 or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step writes
 `$D416`-`$D418` before the channels run, so the playroutine latches them there (`fcutreg`,
 `fctrlreg`, `fmodereg`).
@@ -152,8 +148,8 @@ so every lookahead row that sets `ad` and `sr` sets the same values (`uniform`).
 ## Lifetime
 
 A note starts the instrument's `pw` and `filter` programs, and wavetable `run` rows ($F9, $FA)
-start them where the composer put them; the playroutine declares no `lifetime`, so `!pw` and
-`!filter` without an argument are refused.
+start them where the composer put them; the playroutine declares no `lifetime`, so no event
+decodes as `!pw` or `!filter` without an argument.
 
 ## Modulators
 

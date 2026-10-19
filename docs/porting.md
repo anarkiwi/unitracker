@@ -1,10 +1,11 @@
 # Porting a playroutine
 
-A port brings another C64 playroutine (a tracker's replay) into unitracker: its tunes lift to
-documents in the shared vocabulary and play on the generic player with the native replay's register
-grid. This guide assumes you know 6502 and the target player. The format is indexed in
+A port brings another C64 playroutine (a tracker's replay) into unitracker: its tunes lift to the
+generic document of [unitracker-grammar](https://github.com/anarkiwi/unitracker-grammar), verified
+on [unitracker-player](https://github.com/anarkiwi/unitracker-player) against the native replay's
+register grid. This guide assumes you know 6502 and the target player. The format is indexed in
 [format.md](format.md); the modulator machinery is [modfit.md](modulation/modfit.md), the optimiser
-and its report [optimise.md](optimise.md), and each existing port's support and limits
+[optimise.md](optimise.md), and each existing port's support and limits
 [playroutines/](playroutines/).
 
 In a worktree the venv's editable install points at the main checkout, so every command runs
@@ -19,16 +20,13 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | need | tool |
 |---|---|
 | the native replay's register grid | `lift.backends.native_player(raw).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
-| the first differing `(tick, register)` | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)`; for a document, `unitracker-vm song.yaml --check TUNE.sid` |
-| both grids side by side over a tick range | `tools/grid_diff.py song.yaml TUNE.sid --from T --to T` |
-| round trip, native grid and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
-| whether an edit to a written song plays the native grid, or plays as another edit | `tools/perturb.py song.yaml --sid TUNE.sid 'old=>new' ...`, `--same 'a=>b' 'c=>d'` |
-| whether the reader refuses an edit, or the writer keeps or rewrites it, and whether it plays as the song | `tools/perturb.py song.yaml --probe 'old=>new' ...` |
-| whether the reader raises anything but its own error for a document with one value changed | `tools/perturb.py song.yaml --fuzz` |
+| the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
+| whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
+| where the generic document first differs, both grids side by side over a tick range | `tools/grid_diff.py out/porting/doc.yaml TUNE.sid --from T --to T` |
+| the verify verdict and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
 | proofs, closed forms, command composition, keyword signatures | `unitracker-modfit {exprs,command,keywords,fit,poly,generic,sweeps,orbit}` ([modfit.md](modulation/modfit.md)) |
-| redundancy the lifter writes | `unitracker-optimise song.yaml -o OUT --report report.md` ([Report](optimise.md#report)) |
-| document size | `tools/token_report.py song.yaml` |
+| the size of the lifter's song | `tools/token_report.py SONG.yaml` (the song's serialised text) |
 | how many tunes of the player lift, by failure cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |
 | a reference tune in the tests | `conftest.hvsc_tune(name, "MUSICIANS/...", doc)` |
 | a one-feature tune in the tests | `conftest.gt_tune`, `sw_fx`, `sw_table_byte` (patch a native module), `mini_song`, `table` (an IR song) |
@@ -59,8 +57,8 @@ Start from the existing port closest to the target player:
 | [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: event` with the notes' restarts (`event: {restart}`), `fixed` init records, a `global` unit |
 
 **Files:** none yet. **Verify** the toolchain and the existing ports:
-`PYTHONPATH=src .venv/bin/python tools/reference_check.py out/porting` prints
-`round trip ok; first mismatch: None; forbidden: none` for each reference tune.
+`PYTHONPATH=src .venv/bin/python tools/reference_check.py out/porting` prints a `verified`
+verdict and `forbidden: none` for each reference tune.
 
 ## 2. Transcribing the replay
 
@@ -74,7 +72,7 @@ order:
 | replay | playroutine |
 |---|---|
 | build constants | `constants`, which the lifter sets per tune; `defaults` (clock, voices, tempo) where they are not PAL, 3 and none |
-| the initial tempo | the document's `tempo`, which the lifter sets per tune |
+| the initial tempo | the song's `tempo`, which the lifter sets per tune |
 | frequency and other lookup tables | `tables` (a song patches them, see [Document](format/document.md)); `note_offset` |
 | zero-page and self-modified operands, per voice or shared | `voice` and `global` cells, each with the `width` of its 6502 location; a scratch value has no width |
 | jump tables (command dispatch) | playroutine-owned `records`, run with `run: {record, index, field}` |
@@ -104,8 +102,7 @@ has no command for.
 **The cursor.** `fetch` sets `ev_kind`, `ev_note`, `ev_instr`, the two command slots
 `ev_cmd`/`ev_arg` and `ev_cmd2`/`ev_arg2`, `at_phrase_start` and `ended` ([The
 cursor](playroutines/schema.md#the-cursor)). Map each pattern column onto them; the lifter writes
-events in the same form (section 6). An event carries at most two slot commands, one per slot
-([Events](format/document.md#events)).
+events in the same form (section 6). An event carries at most two slot commands, one per slot.
 
 **The ghost and the canonical flush.** The ghost gives each register after the tick, and the
 player flushes the changed registers in one canonical order (*Ticks, the ghost and the canonical
@@ -136,11 +133,12 @@ print(SongPlayer(backends.lift(raw, expressions=False)).mismatch(theirs))
 ' TUNE.sid
 ```
 
-It prints `None`, or the first `(tick, register)` that differs. Once the song writes as a
-document, `tools/grid_diff.py` prints both grids over a tick range, marking differing registers:
+It prints `None`, or the first `(tick, register)` that differs. Once the lifter writes a generic
+document (section 6), `tools/grid_diff.py` prints its first mismatch and both grids over a tick
+range, marking differing registers:
 
 ```sh
-PYTHONPATH=src .venv/bin/python tools/grid_diff.py song.yaml TUNE.sid --from 94 --to 98 --ticks 100
+PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --from 94 --to 98 --ticks 100
 ```
 
 **Files:** `src/unitracker/playroutines/<name>.yaml`. **Verify:** the snippet above prints `None`.
@@ -158,8 +156,8 @@ Declare each native table as a record type ([Record types](playroutines/schema.m
 | a modulated program | `expr: x`, the field holding a row's expression (its `refs` entry is implied) |
 | raw fields with no written form | `unwritten: [field, ...]` |
 
-`writes_as` names the record type the table is written as (`ins`, `ctrl`, `pw`, `filter`, `restart`;
-the table in [Definitions](format/document.md#definitions)), and `prefix` its name prefix when that
+`writes_as` names the record type the table is written as (`ins`, `ctrl`, `pw`, `filter`,
+`restart`), and `prefix` its name prefix when that
 is not the written name's first letter. `none`, the index meaning "no row", is 0 unless given
 (`none: null` when every index is a row, as `defmon`'s sidTAB). The type written as `ins` is the
 instrument an event names unless `instrument` says otherwise, and `note_offset` is 0 unless given.
@@ -177,19 +175,19 @@ meaning in chip units; a player that stores the 11-bit cutoff as its top byte wr
 as `{byte: f}` and the `cut` command as `{name: cut, byte: arg}`, and its `raw` reads `cut` as that
 byte; a note byte (bit 7 absolute, the rest a signed relative note, one byte no note) is
 `note: {byte: f, none: 0x80}`, with `abs: [lo, hi]` when fewer bytes are absolute, and needs no
-`raw` entry. The reader accepts a written row only when encoding its raw inverse gives the
-row again, so a shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
+`raw` entry. A row is accepted only when encoding its raw inverse gives the row again, so a
+shape whose `keys` and `raw` disagree refuses its own rows. Command codes go in
 `commands`: code to `{name, ref, when, arg, raw}` (or `byte` for `arg`), `{name, when, args, raw}` for several values,
 `{name, ref, inline: true}` for a row written in place, or `{name, nibble, column}` for an envelope command; `column` gives the event column a command is
 read into.
 
-**A document names no player.** No key, command or record type is one player's own. What the
-player cannot play has no shape, so the reader refuses it naming the key or command and the
-player (`sidwizard: the player can't express !tempo:2`), and the writer refuses a raw value that
-would not read back. Never add a key for one player: resolve the native row at lift time into a
-form that has shared keys (section 6), or fail the lift naming it. A shared form two players need
-and the format lacks is a format change (`songio.VERSION`, the shared vocabulary `ROW_KEYS` and
-`COMMAND_NAMES` in `codec.py`, format.md), not part of the port.
+**No player's own vocabulary.** No key, command or record type is one player's own. What the
+player cannot play has no shape, so the codec refuses it naming the key or command and the
+player (`sidwizard: the player can't express !tempo:2`). Never add a key for one player: resolve
+the native row at lift time into a form that has shared keys (section 6), or fail the lift naming
+it. A shared form two players need and the generic document lacks is a change to
+unitracker-grammar and the shared vocabulary (`ROW_KEYS` and `COMMAND_NAMES` in `codec.py`), not
+part of the port.
 
 **The vocabulary and command-table tests.** `tests/test_format_codec.py` runs over every
 playroutine in `playroutines/` (`PLAYERS`). `test_the_documented_tables_are_the_playroutines`
@@ -293,8 +291,8 @@ the existing ports do.
 | legato | `!legato` ([Legato](modulation/expressions.md#legato)) | `modulators.legato: {cell, command}` | each playroutine file's command table |
 | tempo | the tempo commands and the initial `tempo` ([Shared vocabulary](format/vocabulary.md)) | `commands` entries with `when`, `arg`, `raw` | each playroutine file's command table; a tempo command no entry declares is refused by name |
 
-The writer and reader resolve the context these forms need by walking each voice's plays:
-`src/unitracker/format/events/`: `lifetime.py` (the instrument a note plays), `envelope.py` (an
+The modules of `src/unitracker/format/events/` resolve the context these forms need by walking
+each voice's plays: `lifetime.py` (the instrument a note plays), `envelope.py` (an
 envelope nibble command as the byte it writes), and the event folds `fold.py`, `instrument.py` (the
 record an event's columns arm) and `restart.py` (a restart run on the steps before its note), and
 `column.py` refuses two commands on one event for a column that holds one. They read the
@@ -338,13 +336,15 @@ supplies the player:
 | `phrases` | `{name: [event]}`; an event has `note` (the player's note index, `off` or `on`), `instrument`, `command: [code, arg]` or `commands: [[c, a], [c, a]]`, and `steps` (`vm.fold_empty`) |
 | `playroutine` | `songio.library("<name>")` with `constants` set from the build |
 
-`run()` checks the build, runs `structure` and the normalisations, then `convert` with
-`expressions`; `passes()` names them in order and `stages()` yields each one's song.
-Register it in `backends.py`: `detect` recognises the image (before the GoatTracker fallback,
-which recognises a tune by decompiling it), and `lift` and `native_player` dispatch to
-`<Name>Lift.from_sid(raw, subtune, expressions).run()` and `.native()`. The CLI, the tools and the tests all go through these three.
+`run()` checks the build, runs `structure` and the normalisations, then, with `expressions`,
+`convert`, `canonical` and `verify`, which leaves the generic document in `document` and its
+verdict on unitracker-player against the native grid in `verdict`; `passes()` names the stages in
+order and `stages()` yields each one's song. Register it in `backends.py`: `detect` recognises the
+image (before the GoatTracker fallback, which recognises a tune by decompiling it), and `lifter`
+dispatches to `<Name>Lift.from_sid(raw, subtune, expressions)`; `lift`, `native_player` and
+`verify` go through it, and the CLI, the tools and the tests go through these.
 
-**Resolved at lift time.** A document carries only what the composer's rows and definitions
+**Resolved at lift time.** The generic document carries only what the composer's rows and definitions
 imply, so the lifter resolves what the native data leaves implicit:
 
 | what | example |
@@ -366,11 +366,13 @@ native package, the description), `docs/playroutines/lifting.md` (its table),
 `docs/playroutines/<name>.md` (*Lifting*, *Commands*, *Not covered*). **Verify:**
 
 ```sh
-PYTHONPATH=src .venv/bin/unitracker-lift TUNE.sid -o out/porting/song.yaml
-PYTHONPATH=src .venv/bin/unitracker-vm out/porting/song.yaml --check TUNE.sid
+PYTHONPATH=src .venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.yaml
+PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid
 ```
 
-`--check` prints `match: 3007 ticks identical to the native player`.
+`unitracker-lift` exits 0 with `verified: 3007 ticks play the native grid` on its last line when
+the generic document plays the native grid on unitracker-player; `grid_diff.py` prints the first
+mismatch.
 
 ## 7. Tests and acceptance
 
@@ -378,29 +380,18 @@ PYTHONPATH=src .venv/bin/unitracker-vm out/porting/song.yaml --check TUNE.sid
 |---|---|---|
 | reference tune | `tests/conftest.py` | a session fixture `hvsc_tune(name, "MUSICIANS/.../Tune.sid", doc)` (local `$HVSC`, `.tunecache/`, or the mirror; skipped when unavailable); the path also goes in `tools/reference_check.py`'s `TUNES` |
 | synthetic tunes | `tests/conftest.py` | a builder like `gt_tune`, returning `(decoded tune, native player)` for a one-feature tune, where the native package can build modules |
-| conformance | `tests/test_reference.py` `test_the_document_round_trips_and_plays_its_native_player` | the `references` fixture lifts once per session and renders the native grid over `REFERENCE_TICKS[name]` (the intro and two loops, in `tests/conftest.py`); the test checks the canonical round trip for `embed` False and True, a non-trivial grid (`len(np.unique(ref.native, axis=0))`) and `SongPlayer(song).mismatch(ref.native) is None`; add the tune to `TUNES` |
-| dispatch | `tests/test_reference.py` `test_the_tools_lift_detect_and_check_each_tune` | `backends.detect` against `BACKEND[name]`; the CLI's lift equals the session's lift (a deterministic lift); `--check` against the native player |
+| conformance | `tests/test_reference.py` | the `references` fixture lifts once per session and renders the native grid over `REFERENCE_TICKS[name]` (the intro and two loops, in `tests/conftest.py`); the tests check a non-trivial grid (`len(np.unique(ref.native, axis=0))`) and the generic document's verify verdict; add the tune to `TUNES` |
+| dispatch | `tests/test_reference.py` | `backends.detect` against `BACKEND[name]`; the CLI's lift equals the session's lift (a deterministic lift); the CLI's exit status and verdict line |
 | vocabulary, command tables | `tests/test_reference.py`, `tests/test_format_codec.py` | section 3 |
 | lifter | `tests/test_lift_<name>.py` | each `LiftError`, with `pytest.raises(LiftError, match=...)`, as `tests/test_lift_goattracker.py`; the passes, as `tests/test_lift_base.py` |
 | exprs report | `unitracker-modfit exprs` | section 4 |
 | optimiser | `tests/conftest.py` `OPTIMISED` | the tune with a subset of passes that keeps the suite's time bounded |
 
-**The optimiser.** `unitracker-optimise` rewrites a song into a smaller document proved to play the
-same grid (optimise.md). Run it on the lifted reference tune, check the output against the native
-player, and read its `--report` ([Report](optimise.md#report)): a kept edit on a freshly lifted tune
-is a redundancy the lifter or codec writes (a key the context already gives, a command every note of
-an instrument carries), which the lifter should not write.
-
-```sh
-PYTHONPATH=src .venv/bin/unitracker-optimise out/porting/song.yaml -o out/porting/song.opt.yaml --report out/porting/report.md
-PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/song.opt.yaml TUNE.sid --ticks 3007 --to 0
-```
-
-**Acceptance:** `tools/grid_diff.py song.yaml TUNE.sid --ticks 3007 --to 0` prints
-`first mismatch: None` for the lifted and the optimised song; `tools/reference_check.py`, with
-the native table and column names as `--forbid`, prints `round trip ok` and `forbidden: none`;
-`tools/token_report.py song.yaml` counts the document's tokens; coverage stays above 85% and the
-lint is clean. Run `pylint` without `-j`: the parallel run misses cross-module checks such as
+**Acceptance:** `unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0, and so does
+`unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise`, which runs every pass of the
+[optimiser](optimise.md) on the lifter's song before verify; `tools/reference_check.py`, with the
+native table and column names as `--forbid`, prints a `verified` verdict and `forbidden: none`;
+coverage stays above 85% and the lint is clean. Run `pylint` without `-j`: the parallel run misses cross-module checks such as
 W0621. Then run the HVSC survey over the player's tunes (README) to see which builds and
 features the lifter still refuses.
 
@@ -424,11 +415,11 @@ PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under
 | 4 | record types, codec shapes and commands on the shared keys | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit keywords <name>` |
 | 5 | hard restart, chords, filter, lifetime, relative control in their shared forms | `playroutines/<name>.yaml` | `.venv/bin/python -m pytest -n 4 tests/test_format_events.py` |
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |
-| 7 | lift with expressions; check against the native player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/song.yaml`, then `.venv/bin/unitracker-vm out/porting/song.yaml --check TUNE.sid` |
-| 8 | the register grid from the voices' onsets | | `.venv/bin/python tools/grid_diff.py out/porting/song.yaml TUNE.sid --ticks 3007 --to 0` |
+| 7 | lift with expressions; verify the generic document on unitracker-player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0 |
+| 8 | where the generic document first differs from the native grid | | `.venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 --to 0` |
 | 9 | vocabulary and command tables; the playroutine's doc | `tests/test_format_codec.py`, `tests/test_reference.py`, `docs/playroutines/<name>.md`, `docs/playroutines/lifting.md` | `.venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_reference.py` |
 | 10 | conformance, dispatch and lifter tests | `tests/` | `.venv/bin/python -m pytest -n 4 tests/test_reference.py tests/test_lift_<name>.py` |
-| 11 | the optimiser on the lifted tune | `tests/conftest.py` | `.venv/bin/unitracker-optimise out/porting/song.yaml -o out/porting/song.opt.yaml`, then step 8 on it |
-| 12 | canonical round trip and forbidden names | `tools/reference_check.py` | `.venv/bin/python tools/reference_check.py out/porting --forbid <native names>` |
+| 11 | the optimiser on the lifted tune | `tests/conftest.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise` exits 0 |
+| 12 | verify verdicts and forbidden names | `tools/reference_check.py` | `.venv/bin/python tools/reference_check.py out/porting --forbid <native names>` |
 | 13 | lint and the full suite | | the four commands of section 7 |
 | 14 | the player's tunes over HVSC | | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |

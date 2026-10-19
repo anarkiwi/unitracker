@@ -180,7 +180,7 @@ two differ on a row with a note.
 ## `unitracker-modfit`
 
 `--out FILE` writes the report to a file instead of standard output (`exprs` defaults to
-`out/modfit/exprs.txt`). A `SONG` is a unitracker YAML or a tune a backend lifts; a pair cell
+`out/modfit/exprs.txt`). A `SONG` is a tune a backend lifts (`sweeps` also takes the lifter's song serialised as YAML); a pair cell
 is `hi:lo` or `hi:lo:k`.
 
 | subcommand | arguments | output |
@@ -191,7 +191,7 @@ is `hi:lo` or `hi:lo:k`.
 | `keywords` | `[PLAYROUTINE ...]` | one row per keyword or field: playroutine, shared key, signature, matches, verdict, reason ([Signatures](#signatures)) |
 | `generic` | `[PLAYROUTINE ...] [--ticks N]` | each keyword and record row kind factorised as one generic accumulator (step, basis, hit, respond, gate, proof status), the rows grouped, timers, vibrato and bounce orbits |
 | `sweeps` | `[SONG ...]` | the specs' `bounces`, the `fit` lines of the specs' pair-cell fits and checks, and each song's table programs matched to one accumulator |
-| `exprs` | `[SONG ...] [--before DIR] [--after DIR] [--workers N]` (default: `cli.SONGS`) | per song: occurrences over the window, the grid check, its text read back against the native player, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; token counts against the `--before` and `--after` documents |
+| `exprs` | `[SONG ...] [--before DIR] [--after DIR] [--workers N]` (default: `cli.SONGS`) | per song: occurrences over the window, the converted song's serialisation replayed on the lifter's VM against the native grid, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; the converted song's token count beside those of the same-named files in `--before` and `--after` |
 | `orbit` | `[PLAYROUTINE ...] [--ticks N]` (default: the specs' `orbits`) | per period, the reflect accumulator whose per-tick deltas equal the original's over the run, then the periods with none |
 
 ### Specs

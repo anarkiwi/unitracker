@@ -1,7 +1,9 @@
 # Modulators
 
-A modulator drives one cell of the player (a voice's frequency, its pulse width, or the filter
-cutoff) by an integer expression evaluated at each of the unit's firings.
+The lifters decode each native modulation into a modulator: an expression in the
+[grammar](https://github.com/anarkiwi/unitracker-grammar/blob/main/src/unitracker_grammar/canonical.lark)'s
+`expr`, evaluated at each of the unit's firings, that drives one cell (a voice's frequency, its
+pulse width, or the filter cutoff).
 
 ## Grammar
 
@@ -16,20 +18,8 @@ cutoff) by an integer expression evaluated at each of the unit's firings.
 | `v` | the cell's value before the firing |
 | `φ` | the firings since the modulator started, from 0 |
 | `N` | the voice's sounding note, format numbering (C2 = 24) |
-| `F(k)` | the player's frequency word of format note `k` |
-| `T[k]` | entry `k` of a table `T` the playroutine declares (`modulators: tables:`); 0 outside its size |
-
-Anything else is rejected on reading, naming the text (`... is outside the grammar`,
-`... calls no grammar function`, `(...) is not one comparison`, `unknown table 'T'`).
-
-The lifter writes each expression with no `% m` over its sums and products that the cell's wrap to
-its width repeats (`v + 32`, not `(v + 32) % 65536`, for a 16-bit cell), its constant term then
-the nearest to 0. The writer prints every expression in one form: a sum's constant terms folded
-into its last term and its like terms merged, a product's integers into its leading coefficient,
-terms and factors in one order (integers, then `v`, `φ` and `N`, then the rest by their text), a
-comparison and only what the grammar needs in parentheses, and integers in decimal. `32 + v`,
-`v+32`, `v - -32` and `((v + 32))` are all written `v + 32`, and equal expressions share one
-definition.
+| `F(k)` | the frequency word of format note `k` at the document's clock |
+| `T[k]` | entry `k` of the document's table `T` (from the playroutine's `modulators: tables:`, and `G`, the native note table); 0 outside its size |
 
 ## Evaluation
 
@@ -64,14 +54,7 @@ units ([goattracker2](../playroutines/goattracker2.md#modulators),
 | a program row's `pw`, `cut` or `freq` | the row key's expression |
 | an instrument's `pw` or `filter` program | the program's one expression |
 | an instrument's `freq` | the pitch expression a note starting the instrument runs |
-| an event's `!freq:x1` | a name of an `x` definition |
-
-A key that also takes a plain value reads an integer as that value and a string as an
-expression; elsewhere an integer is a constant expression. A constant is written in its plain
-form: a constant expression in a key that takes the value as the value (`cut: 1024`, quoted only
-where the value can't be played), and a program of one row that sets only its unit's key as that
-constant (`pw: 2048`, not `[{pw: 2048}, end]`). An expression that contains a comma is quoted
-inside a YAML flow map: `pw: '2*min(64, φ) - 8*min(64, max(0, φ - 65)) + 2048'`.
+| an event's `!freq:x1`, `!pw:x1`, `!cut:x1` | a name of an `x` definition |
 
 ## Legato
 
