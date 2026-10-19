@@ -1,0 +1,152 @@
+// The canonical unitracker document: format 1.20 with the init row (#165), value-or-expression
+// command arguments (#172) and no fixed record types (#126, #165). Whitespace is exact, but a
+// space inside a flow collection or a block scalar may be a line wrap (a newline and the
+// continuation indentation); a flow expression that contains a comma is written in single quotes.
+// Every block line ends with its newline. An embedded playroutine follows
+// docs/playroutines/schema.md and is outside this grammar.
+
+start: "unitracker: " VERSION _NL playroutine meta _NL (clock _NL)? (voices _NL)? (tempo _NL)? (init _NL)? "song:" _NL row+ ending
+
+// ---- header -----------------------------------------------------------------------------
+
+playroutine: "playroutine: {ref: " PLAYER (_SEP "constants: " constants)? "}" _NL
+           | "playroutine:" _NL "  ref: " PLAYER _NL ("  constants: " constants _NL)? "  tables:" _NL table+
+table: "    " TABLE ": " (intmap | intlist) _NL
+constants: _LC constant (_SEP constant)* "}"
+constant: CONSTANT ": " INT
+intmap: _LC INT ": " INT (_SEP INT ": " INT)* "}"
+intlist: _LB INT (_SEP INT)* "]"
+
+meta: "meta: " _LC meta_item (_SEP meta_item)* "}"
+meta_item: META_KEY ": " text
+text: TEXT | SQUOTED | DQUOTED
+
+clock: "clock: {cycles_per_tick: " INT ", clock_hz: " INT "}"
+voices: "voices: " INT
+tempo: "tempo: " (INT | "[" INT ", " INT "]")
+
+// one event per voice: the state after init, a step of no duration before the first tick
+init: "init: " _LB event (_SEP event)* "]"
+
+// ---- timeline ---------------------------------------------------------------------------
+
+row: "  - def:" _NL section+ "    play: " plays _NL
+   | "  - play: " plays _NL
+ending: "  - end" _NL | "  - {loop: " INT "}" _NL
+plays: _LB play (_SEP play)* "]"
+play: PHRASE SIGNED? | "~" | "end"
+
+// ---- definitions: each record type once per row, names in first-use order --------------
+
+section: "      restart:" _NL ("        " RESTART ": " program _NL)+
+       | "      ins:" _NL ("        " INS ": " instrument _NL)+
+       | "      ctrl:" _NL ("        " CTRL ": " program _NL)+
+       | "      pw:" _NL ("        " PW ": " modulation _NL)+
+       | "      filter:" _NL ("        " FILTER ": " modulation _NL)+
+       | "      x:" _NL ("        " X ": " expr _NL)+
+       | "      phrase:" _NL ("        " PHRASE ": " phrase _NL)+
+
+instrument: _LC ins_ad "}"
+ins_ad: "ad: " (INT) (_SEP ins_sr)? | ins_sr
+ins_sr: "sr: " (INT) (_SEP ins_ctrl)? | ins_ctrl
+ins_ctrl: "ctrl: " (CTRL | program) (_SEP ins_pw)? | ins_pw
+ins_pw: "pw: " (PW | modulation) (_SEP ins_filter)? | ins_filter
+ins_filter: "filter: " (FILTER | modulation) (_SEP ins_freq)? | ins_freq
+ins_freq: "freq: " (fexpr) (_SEP ins_restart)? | ins_restart
+ins_restart: "restart: " (RESTART | program)
+
+// a program: its rows in the order they run, then its end or its loop
+program: _LB (row_ _SEP)* ("end" | _LC "loop: " INT "}") "]"
+// a pulse or filter program that is one expression (a constant is one) is written as that
+modulation: program | fexpr
+
+row_: _LC "}" | _LC row_wait "}"
+row_wait: "wait: " (INT) (_SEP row_hold)? | row_hold
+row_hold: "hold: " (INT) (_SEP row_ctrl)? | row_ctrl
+row_ctrl: "ctrl: " (ctrl_value) (_SEP row_gate)? | row_gate
+row_gate: "gate: " (INT) (_SEP row_note)? | row_note
+row_note: "note: " (note_value) (_SEP row_ad)? | row_ad
+row_ad: "ad: " (INT) (_SEP row_sr)? | row_sr
+row_sr: "sr: " (INT) (_SEP row_pw)? | row_pw
+row_pw: "pw: " (pw_value) (_SEP row_cut)? | row_cut
+row_cut: "cut: " (fexpr) (_SEP row_res)? | row_res
+row_res: "res: " (INT) (_SEP row_route)? | row_route
+row_route: "route: " (route_value) (_SEP row_mode)? | row_mode
+row_mode: "mode: " (INT) (_SEP row_freq)? | row_freq
+row_freq: "freq: " (fexpr) (_SEP row_run)? | row_run
+row_run: "run: " (program_name) (_SEP row_filter)? | row_filter
+row_filter: "filter: " ("none") (_SEP row_vol)? | row_vol
+row_vol: "vol: " (INT)
+
+ctrl_value: INT | CTRLMASK
+note_value: SIGNED | NOTE
+pw_value: fexpr | "none"
+route_value: INT | "+" | "+ " INT | "'-'" | "'- " INT "'"
+program_name: CTRL | PW | FILTER
+
+// ---- events -----------------------------------------------------------------------------
+
+phrase: _LB event (_SEP event)* "]"
+event: NOTE_ATOM ("." INS)? cmd_run keep_pw keep_filter ("*" INT)?
+cmd_run: "!run:" (program_name | "none") cmd_pw | cmd_pw
+cmd_pw: "!pw:" (INT | X | "none") cmd_filter | cmd_filter
+cmd_filter: "!filter:none" cmd_ad | cmd_ad
+cmd_ad: "!ad:" INT cmd_sr | cmd_sr
+cmd_sr: "!sr:" INT cmd_ctrl | cmd_ctrl
+cmd_ctrl: "!ctrl:" INT cmd_resfilt | cmd_resfilt
+cmd_resfilt: "!resfilt:" INT "/" INT cmd_vol | cmd_vol
+cmd_vol: "!vol:" INT cmd_cut | cmd_cut
+cmd_cut: "!cut:" (INT | X) cmd_tempo | cmd_tempo
+cmd_tempo: "!tempo:" INT ("/" INT)? cmd_vtempo | cmd_vtempo
+cmd_vtempo: "!vtempo:" INT ("/" INT)? cmd_freq | cmd_freq
+cmd_freq: "!freq:" (X | "none" | SIGNED | INT) cmd_legato | cmd_legato
+cmd_legato: "!legato" | 
+keep_pw: "!pw" |
+keep_filter: "!filter" |
+
+// ---- expressions (docs/modulation/expressions.md) ---------------------------------------
+
+// plain in a block mapping; in a flow collection plain, or in quotes when it contains a comma
+fexpr: expr | "'" expr "'"
+expr: term (_ADD term)*
+term: factor ("*" factor | _FLOORDIV factor | _MOD factor)*
+factor: INT | SIGNED | "v" | "φ" | "N"
+      | "F(" expr ")" | XTABLE "[" expr "]"
+      | "abs(" expr ")" | "min(" expr _SEP expr ")" | "max(" expr _SEP expr ")"
+      | "(" expr ")" | "(" expr _CMP expr ")"
+      | "-" factor
+
+// ---- terminals --------------------------------------------------------------------------
+
+VERSION: /\d+\.\d+/
+PLAYER: "goattracker2" | "sidwizard" | "defmon"
+META_KEY: "title" | "author" | "released"
+TABLE: /[a-z_]+/
+XTABLE: /[A-EG-MO-Z][A-Za-z]*/
+CONSTANT: /[a-z]+/
+INT: /\d+/
+SIGNED: /[+-]\d+/
+CTRLMASK: /\d*\^\d+/
+NOTE: /[A-G]#?-?\d+/
+NOTE_ATOM: /[A-G]#?-?\d+|-|off|on/
+INS: /i\d+/
+CTRL: /c\d+/
+PW: /pw\d+/
+FILTER: /f\d+/
+RESTART: /r\d+/
+X: /x\d+/
+PHRASE: /p\d+/
+TEXT: /[^\s,\[\]{}'"#&*!|>%@`][^,\[\]{}]*/
+SQUOTED: /'(?:[^']|'')*'/
+DQUOTED: /"(?:[^"\\]|\\.)*"/
+
+_NL: "\n"
+// a flow collection may wrap after its opening bracket
+_LB: /\[(?:\n +)?/
+_LC: /\{(?:\n +)?/
+_SEP: /,(?: |\n +)/
+
+_ADD: /(?: |\n +)[+-](?: |\n +)/
+_FLOORDIV: /(?: |\n +)\/\/(?: |\n +)/
+_MOD: /(?: |\n +)%(?: |\n +)/
+_CMP: /(?: |\n +)(?:==|!=|<=|>=|<|>)(?: |\n +)/
