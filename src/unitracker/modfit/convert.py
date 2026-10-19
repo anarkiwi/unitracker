@@ -5,6 +5,7 @@ derived and proved (in parallel, cached by content) and its expression written w
 lives: a record site (a program's first row, an instrument field) or the event's ``!freq``.
 """
 
+# pylint: disable=too-many-lines
 import ast
 import copy
 import dataclasses
@@ -338,7 +339,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         self.obs, self.texts = obs, texts
         self.exprs = {int(i): str(t) for i, t in (self.ir.get("exprs") or {}).items()}
         self.xindex = {t: i for i, t in sorted(self.exprs.items(), reverse=True)}
-        self.events, self.held = {}, set()
+        self.events, self.held, self._clones, self._pending = {}, set(), {}, []
         self.instrument = self.pr.get("instrument") or {}
         self.records = self.ir.setdefault("records", {})
         self.codecs = codecs(self.pr, self.ir.get("tables"))
@@ -371,6 +372,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 ).append(occ)
         for where, by_unit in sites.items():
             self.record_site(where, by_unit)
+        self._renamed_programs()
         self.event_sites()
         self.retire()
         self.phrases()
@@ -630,7 +632,15 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         return out
 
     def select(self, where: tuple, chosen: list) -> None:
-        """Make each ``(occurrence, copy)``'s event play that copy of record ``where``.
+        """Make each ``(occurrence, copy)``'s event play that copy of record ``where``: the
+        instrument type on its own, a program record through the instrument it plays."""
+        if where[0] == self.instrument.get("type"):
+            self._instrument_selects(where, chosen)
+        else:
+            self._program_selects(where, chosen)
+
+    def _instrument_selects(self, where: tuple, chosen: list) -> None:
+        """Make each ``(occurrence, copy)``'s event play that copy of the instrument ``where``.
 
         An event that names the record selects it. The instrument an occurrence plays is the
         one the voice's last event at its first firing selects (its ``fetched``), which is the
@@ -641,19 +651,12 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         name, old = where
         commands, lives = self.commands(name), {}
         for occ, record in chosen:
-            instance = occ.fetched if name == self.instrument.get("type") else occ.instance
+            instance = occ.fetched
             if instance is None:
                 raise ConversionError(f"{occ.unit} at tick {occ.tick}: no event selects {where}")
             head = instance
             if not self._names(self._event(head), name, old, commands):
-                if name == self.instrument.get("type"):
-                    head = self._heads.get(head)
-                elif record == old:
-                    continue
-                else:
-                    raise ConversionError(
-                        f"{occ.unit} at tick {occ.tick}: its event does not name {where}"
-                    )
+                head = self._heads.get(head)
             life = lives.setdefault(head, {})
             if life.setdefault(instance, record) != record:
                 raise ConversionError(f"{occ.unit} at tick {occ.tick}: one event plays two {where}")
@@ -668,6 +671,115 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
                 elif not self.point(self.edit(head), name, old, life[instance], commands):
                     raise ConversionError(f"{head}: its event does not name {where}")
                 current = life[instance]
+
+    def _program_selects(self, where: tuple, chosen: list) -> None:
+        """Plan the events that reach a program record's copy through the instrument they play.
+
+        Each such event names a clone of that instrument whose record field takes the copy,
+        named once every record's copy is written (``_renamed_programs``), so a clone carries
+        the fields its instrument's own copies set; an event that names the record keeps its
+        command's argument repointed.
+        """
+        name, old = where
+        field = self._ins_field(name)
+        commands = self.commands(name)
+        rows = self.records.get(self.instrument.get("type")) or {}
+        picks = {}
+        for occ, record in chosen:
+            instance = occ.instance
+            if instance is None:
+                raise ConversionError(f"{occ.unit} at tick {occ.tick}: no event selects {where}")
+            if self._names(self._event(instance), name, old, commands):
+                if record != old and not self.point(
+                    self.edit(instance), name, old, record, commands
+                ):
+                    raise ConversionError(
+                        f"{occ.unit} at tick {occ.tick}: its event does not name {where}"
+                    )
+                continue
+            if picks.setdefault(instance, record) != record:
+                raise ConversionError(f"{occ.unit} at tick {occ.tick}: one event plays two {where}")
+            if record == old:
+                continue
+            ins = self._ins_of(instance)
+            row = rows.get(ins) if ins is not None else None
+            if field is None or ins is None or row is None or int(row.get(field, 0)) != old:
+                raise ConversionError(
+                    f"{occ.unit} at tick {occ.tick}: its event does not name {where}"
+                )
+        if any(record != old for record in picks.values()):
+            self._pending.append((name, old, field, picks))
+
+    def _ins_field(self, record: str) -> str | None:
+        """The field of the instrument type that references record type ``record``, or None."""
+        name = self.instrument.get("type")
+        if name is None:
+            return None
+        for field, targets in self.rtypes[name].refs.items():
+            if any(t == record for t, _ in targets):
+                return field
+        return None
+
+    def _ins_of(self, instance: tuple) -> int | None:
+        """The instrument an event plays (its own, or the one its lifetime names), or None."""
+        base = int(self.instrument.get("base", 0))
+        for head in (instance, self._heads.get(instance)):
+            if head is None:
+                continue
+            named = self._event(head).get("instrument")
+            if named is not None:
+                return int(named) - base
+        return None
+
+    def _instrument_clone(self, ins: int, record: str, field: str, index: int) -> int:
+        """A clone of instrument ``ins`` whose ``field`` references record ``index``, shared by
+        the events that select it."""
+        key = (ins, record, index)
+        clone = self._clones.get(key)
+        if clone is None:
+            name = self.instrument["type"]
+            rtype = self.rtypes[name]
+            row = {**rtype.fields, **self.records.get(name, {}).get(ins, {})}
+            row[field] = index
+            clone = self._clones[key] = self.allocate(rtype, [row])
+        return clone
+
+    def _plan_targets(self, plan: list) -> dict:
+        """``{instance: instrument}`` of each planned event, its instrument cloned once for
+        every record copy it selects."""
+        targets = {}
+        for instance in {i for _, _, _, picks in plan for i in picks}:
+            ins = self._ins_of(instance)
+            if ins is None:
+                continue
+            for name, old, field, picks in plan:
+                record = picks.get(instance)
+                if record is not None and record != old:
+                    ins = self._instrument_clone(ins, name, field, record)
+            targets[instance] = ins
+        return targets
+
+    def _renamed_programs(self) -> None:
+        """Name each planned event's instrument clone, and the original it keeps where a clone
+        overtook it, per voice in the order the events play."""
+        plan = self._pending
+        if not plan:
+            return
+        self._pending = []
+        base = int(self.instrument.get("base", 0))
+        targets = self._plan_targets(plan)
+        for voice in range(len(self.obs["plays"])):
+            current = None
+            for instance, _event in self._instances(voice):
+                target = targets.get(instance)
+                if target is not None:
+                    if target != current:
+                        self.edit(instance)["instrument"] = target + base
+                    current = target
+                    continue
+                named = self._event(instance).get("instrument")
+                if named is not None:
+                    current = int(named) - base
 
     def _event(self, instance: tuple) -> dict:
         """The event an instance plays, as rewritten so far."""
