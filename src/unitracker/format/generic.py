@@ -5,12 +5,13 @@ native note table that differs from ``F`` where the song reads it is the documen
 """
 
 import ast
+import itertools
 import re
 from dataclasses import dataclass, field
 
 from unitracker_grammar import PAL_HZ, CanonicalError, frequency, parse
 
-from unitracker.format import songio, tempo, xexpr
+from unitracker.format import retime, songio, tempo, xexpr
 from unitracker.format.header import DEFAULTS
 from unitracker.format.records import record_types
 from unitracker.format.yamlstyle import Atom, Flow, FlowMap
@@ -25,14 +26,27 @@ ROW_KEYS = tuple("wait hold ctrl gate note ad sr pw cut res route mode freq run 
 INS_KEYS = ("ad", "sr", "ctrl", "pw", "filter", "freq", "restart")
 INIT_TYPES = ("vinit", "ginit")
 CMD_ORDER = tuple("run pw filter ad sr ctrl resfilt mode vol cut tempo vtempo freq legato".split())
-PREFIX = {"ctrl": "c", "pw": "pw", "filter": "f", "restart": "r", "x": "x", "phrase": "p"}
+PREFIX = {
+    "ctrl": "c",
+    "pw": "pw",
+    "filter": "f",
+    "restart": "r",
+    "x": "x",
+    "phrase": "p",
+    "ins": "i",
+}
+FIELD = {"pw": "pw", "cut": "filter", "freq": "freq"}  # the instrument field of a cell key
 # The ticks a note sounds after its onset cell is set (each playroutine's doc).
 ONSET_LAG = {"defmon": 1}
 GATE_CLEARS_MASK = ("defmon",)  # a row that sets the gate without a mask clears the mask
 FIRST_TICK_BEFORE = ("goattracker2", "sidwizard")  # first-tick row a tick before the programs
 NOTE_KEEPS_GATE = ("goattracker2",)  # a note keeps the gate its restart leaves
 ROUTED_BY_INSTRUMENT = ("sidwizard",)  # the filter routes each voice with a filter program
-_NAME = re.compile(r"(c|pw|f|r|x|p)(\d+)")
+NOTED = "note command"  # an origin (oracle.firings) whose note resets the frequency's offset
+COPY = "instrument copy"  # an instrument origin that only a copy of the instrument plays
+_NAME = re.compile(r"(c|pw|f|r|x|p|i)(\d+)")
+_NAMES = re.compile(r"\b(?:c|pw|f|r|x|p|i)\d+\b")
+_HEAD = re.compile(r"([^.!*]+)(?:\.(i\d+))?")
 _XREF = re.compile(r"!(pw|cut|freq):(x\d+)")
 _RUN = re.compile(r"!run:(c\d+)")
 _FREQ_INT = re.compile(r"!freq:([+-]?\d+)(?=[!*]|$)")
@@ -48,7 +62,8 @@ class Native:  # pylint: disable=too-many-instance-attributes
     """What a song plays natively that its generic document needs: the ticks to its state's
     recurrence and a period more, the format notes it reads the frequency of, its note table
     there, its modulator tables, each voice's onset tick and, where no voice starts on the
-    first tick, the registers after it: the state after init."""
+    first tick, the registers after it: the state after init; and each expression's firings,
+    ``{cell: {tick: occurrence}}`` with ``{occurrence: expression text}``."""
 
     ticks: int
     notes: frozenset
@@ -57,6 +72,8 @@ class Native:  # pylint: disable=too-many-instance-attributes
     clock_hz: int = PAL_HZ
     starts: tuple = ()
     init: tuple | None = None
+    fired: dict = field(default_factory=dict)
+    texts: dict = field(default_factory=dict)
 
     def note_table(self) -> list[int] | None:
         """The native note table from format note 0 when it differs from ``F`` at a note the
@@ -66,10 +83,17 @@ class Native:  # pylint: disable=too-many-instance-attributes
         return [self.table.get(k, 0) for k in range(max(self.notes) + 1)]
 
 
+def _canonical(value) -> str:
+    """The one text of an expression value (see :func:`xexpr.canonical`)."""
+    return xexpr.canonical(str(value))
+
+
 def _replay(ir: dict, max_ticks: int, ticks: int | None) -> tuple:
-    """``(player, ticks, registers after the first tick)`` of a replay of ``ir`` to its state's
-    recurrence and a period more, or ``ticks`` where it does not recur within ``max_ticks``."""
+    """``(player, ticks, registers after the first tick, log)`` of a replay of ``ir`` to its
+    state's recurrence and a period more, or ``ticks`` where it does not recur within
+    ``max_ticks``: the player has played those ticks, logging its expressions' firings."""
     player = SongPlayer(ir, record_reads=True)
+    log = _log(player)
     first: list = []
     try:
         tick, period = reach.recurrence(
@@ -79,7 +103,47 @@ def _replay(ir: dict, max_ticks: int, ticks: int | None) -> tuple:
         if ticks is None:
             raise
         tick, period = ticks, 0
-    return player, tick + period, first[0] if first else None
+    while player.ticks < tick + period:
+        player.play_frame()
+    return player, tick + period, first[0] if first else None, log
+
+
+def _log(player) -> list:
+    """The list to which each firing of an expression the player's units play appends
+    ``(tick, cell, occurrence, expression index)``: the cell ``(key, voice)`` (voice None for
+    a global unit's), an occurrence numbered from 1 per start."""
+    log: list = []
+    modulation = player.modulation
+    if modulation is None:
+        return log
+    cells = {u["name"]: (u["key"], u.get("scope") == "global") for u in modulation.units}
+    last: dict = {}
+    serials = itertools.count(1)
+
+    def fired(unit: dict, occ) -> None:
+        if occ.derived is None:
+            return
+        key, glob = cells[unit["name"]]
+        name = (unit["name"], occ.voice)
+        if last.get(name, (None,))[0] is not occ:
+            last[name] = (occ, next(serials))
+        log.append((modulation.tick, (key, None if glob else occ.voice), last[name][1], occ.key))
+
+    modulation.fired = fired
+    return log
+
+
+def _firings(player, log: list, ticks: int) -> tuple:
+    """``({cell: {tick: occurrence}}, {occurrence: expression text})`` of the firings logged
+    before ``ticks``."""
+    fired: dict = {}
+    keys: dict = {}
+    exprs = player.song.get("exprs") or {}
+    for tick, cell, serial, key in log:
+        if tick < ticks:
+            fired.setdefault(cell, {})[tick] = serial
+            keys[serial] = _canonical(exprs[key])
+    return fired, keys
 
 
 def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None = None) -> Native:
@@ -87,7 +151,7 @@ def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None =
     frequency-table entries it reads and its registers after the first tick. ``ticks``, where
     given, stands for the recurrence and a period of a song whose state does not recur within
     ``max_ticks``."""
-    player, ticks, first = _replay(ir, max_ticks, ticks)
+    player, ticks, first, log = _replay(ir, max_ticks, ticks)
     spec = declared(ir["playroutine"]) or {}
     ns, offset = player.namespace, int(ir["playroutine"].get("note_offset", 0))
     reads = (player.table_reads or {}).get
@@ -101,7 +165,69 @@ def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None =
         for name, t in (spec.get("tables") or {}).items()
     }
     init = first if 0 not in player.starts else None
-    return Native(ticks, frozenset(notes), table, tables, clock, tuple(player.starts), init)
+    fired, texts = _firings(player, log, ticks)
+    return Native(
+        ticks, frozenset(notes), table, tables, clock, tuple(player.starts), init, fired, texts
+    )
+
+
+@dataclass
+class Timing:
+    """The schedules (:mod:`unitracker.format.retime`) of the expressions a document plays:
+    ``base``, ``{(cell key, expression text): Schedule}`` where its modulators agree, and
+    ``events``, ``{(phrase, event index): {cell key: (text, Schedule, how)}}`` for an event
+    whose modulators of a text agree with each other but not with the text's base: it plays
+    its own through its command, a copy of the program it runs or (``COPY``) of its
+    instrument, ``how`` the origin of :func:`oracle.firings`. A text's base is the consensus
+    of its modulators (:func:`retime.consensus`)."""
+
+    base: dict = field(default_factory=dict)
+    events: dict = field(default_factory=dict)
+
+
+def _alone(mods: list) -> list:
+    """For each ``(cell, ticks, origin)`` of :func:`oracle.firings`, whether it fires on every
+    tick to its last and the cell's next modulator is one an event starts on the next tick:
+    an event's command plays it as the program its note starts does."""
+    out, last = [], {}
+    for k in range(len(mods) - 1, -1, -1):
+        cell, ticks, _ = mods[k]
+        nxt = last.get(cell)
+        out.append(
+            ticks[-1] - ticks[0] + 1 == len(ticks)
+            and (nxt is None or nxt[2] is not None and nxt[1][0] == ticks[-1] + 1)
+        )
+        last[cell] = mods[k]
+    return out[::-1]
+
+
+def timing(native: Native, text: str) -> Timing:
+    """The :class:`Timing` of document ``text``: each modulator plays the native occurrence
+    that fires on the earliest of its ticks one fires, and holds on its others."""
+    found: dict = {}
+    mods = oracle.firings(text, native.ticks)
+    for (cell, ticks, origin), alone in zip(mods, _alone(mods)):
+        fired = native.fired.get(cell) or {}
+        occ = next((fired[t] for t in ticks if t in fired), None)
+        if occ is not None:
+            skips = frozenset(phi for phi, t in enumerate(ticks) if fired.get(t) != occ)
+            group = found.setdefault((cell[0], native.texts[occ]), {}).setdefault(origin, [])
+            group.append((retime.Schedule(skips, len(ticks)), alone))
+    out = Timing()
+    for key, groups in found.items():
+        base = retime.consensus(s for group in groups.values() for s, _ in group)
+        for origin, group in groups.items():
+            own = retime.merged(s for s, _ in group)
+            if origin is None or own is None:
+                continue
+            how = origin[2]
+            if how == "instrument" and not all(alone for _, alone in group):
+                how = COPY
+            if not base.covers(own) or key[0] == "freq" and how == NOTED and own.lead:
+                out.events.setdefault(origin[:2], {})[key[0]] = (key[1], own, how)
+        if base.skips:
+            out.base[key] = base
+    return out
 
 
 def with_command(atom: str, name: str, value: str) -> str:
@@ -129,6 +255,33 @@ def _gate_left(rows: list) -> int | None:
 
 def _ordered(row: dict, keys=ROW_KEYS) -> FlowMap:
     return FlowMap((k, row[k]) for k in keys if k in row)
+
+
+def _values(node):
+    """The text of every value inside ``node``, a mapping's keys left out."""
+    if isinstance(node, dict):
+        node = list(node.values())
+    if isinstance(node, list):
+        for value in node:
+            yield from _values(value)
+    elif node is not None:
+        yield str(node)
+
+
+def _is_note(atom: str) -> bool:
+    """Whether event ``atom`` plays a note."""
+    return _HEAD.match(atom).group(1) not in ("-", "off", "on")
+
+
+def _instrument_at(atoms: list, i: int) -> str | None:
+    """The instrument event ``i`` of a phrase's ``atoms`` plays where the phrase names it."""
+    return next((_HEAD.match(a).group(2) for a in atoms[i::-1] if _HEAD.match(a).group(2)), None)
+
+
+def _with_ins(atom: Atom, ins: str) -> Atom:
+    """Event ``atom`` naming instrument ``ins``."""
+    match = _HEAD.match(atom)
+    return Atom(f"{match.group(1)}.{ins}{atom[match.end():]}")
 
 
 def _dicts(node):
@@ -163,8 +316,11 @@ class _Swap(ast.NodeTransformer):
 class _Respell:  # pylint: disable=too-many-instance-attributes
     """The rewrite of one internal document's written structure into the generic one."""
 
-    def __init__(self, ir: dict, native: Native, lead: int = 0):
+    def __init__(self, ir: dict, native: Native, lead: int = 0, timing: Timing | None = None):
         self.ir, self.native, self.lead = ir, native, lead
+        self.timing = timing or Timing()
+        self.replaced: set[str] = set()
+        self.forced: dict = {}
         self.pr, self.name = ir["playroutine"], ir["playroutine"]["name"]
         self.voices = int(ir.get("voices", 3))
         self.g = native.note_table()
@@ -196,12 +352,22 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             return ast.Call(ast.Name("F"), [arg], [])
         return ast.Subscript(ast.Name(NOTE_TABLE), arg)
 
-    def expr(self, value, freq: bool = False, note: bool = False):
-        """An expression value in the generic language; ``freq`` for a frequency's, whose
-        internal ``v`` is the offset from the note's frequency, which ``note``, a frequency
-        starting on its note's first tick, starts at 0."""
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    def expr(self, value, freq=False, note=False, cell: str | None = None, schedule=None):
+        """An expression value in the generic language, re-timed to ``schedule`` or the ticks
+        of the modulators of ``cell`` that play it (:class:`Timing`); ``freq`` for a
+        frequency's, whose internal ``v`` is the offset from the note's frequency, which
+        ``note``, a frequency starting on its note's first tick, keeps at 0 to its first
+        firing."""
         if isinstance(value, (bool, Atom)) or not isinstance(value, (int, str)):
             return value
+        if schedule is None and cell:
+            key = (cell, _canonical(value))
+            schedule = self.forced.get(key) or self.timing.base.get(key)
+        found = None if schedule is None else retime.retimed(str(value), schedule, note and freq)
+        if found is not None:
+            value = xexpr.written(found)
+        lead = max(1, schedule.lead) if found is not None else 1
         if isinstance(value, int) and (not freq or self.g is None):
             return value
         try:
@@ -214,7 +380,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
                 ast.BinOp(ast.Name("v"), ast.Sub(), base), ast.Mod(), ast.Constant(FREQ_WIDTH)
             )
             if note:
-                started = ast.Compare(ast.Name("φ"), [ast.GtE()], [ast.Constant(1)])
+                started = ast.Compare(ast.Name("φ"), [ast.GtE()], [ast.Constant(lead)])
                 off = ast.BinOp(started, ast.Mult(), off)
             tree = _Swap(self._note, off).visit(tree)
             if self.g is None and isinstance(tree, ast.Constant):
@@ -242,9 +408,9 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         out = FlowMap(row)
         for key in ("pw", "cut"):
             if key in out and out[key] != "none":
-                out[key] = self.expr(out[key])
+                out[key] = self.expr(out[key], cell=key)
         if "freq" in out:
-            out["freq"] = self.expr(out["freq"], freq=True, note=note)
+            out["freq"] = self.expr(out["freq"], freq=True, note=note, cell="freq")
         if self.name in GATE_CLEARS_MASK and "gate" in out and "^" not in str(out.get("ctrl")):
             out["ctrl"] = Atom(f"{out.get('ctrl', '')}^0")
             out = _ordered(out)
@@ -262,7 +428,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
                 for i, r in enumerate(value)
             )
         if key in ("pw", "filter"):
-            return self.expr(value)
+            return self.expr(value, cell="pw" if key == "pw" else "cut")
         raise GenericError(f"{where}: {value!r} is not a program")
 
     def instrument(self, value, where: str):
@@ -278,7 +444,8 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             if key in ("ad", "sr") and (key in value or key in self.envelope):
                 out[key] = value.get(key, self.envelope.get(key))
             elif key == "freq" and (key in value or self.g is not None):
-                out[key] = self.expr(value.get(key, 0), freq=True, note=True)
+                cell = "freq" if key in value else None
+                out[key] = self.expr(value.get(key, 0), freq=True, note=True, cell=cell)
             elif key in value:
                 named = self._named(key, value[key])
                 out[key] = self.program(named, f"{where}.{key}", key, key == "ctrl")
@@ -378,7 +545,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
                     if match:
                         n = int(match.group(1))
                         if n not in made:
-                            made[n] = self.fresh("x", self.expr(n, freq=True))
+                            made[n] = self.fresh("x", self.expr(n, freq=True, cell="freq"))
                         atom = Atom(str(atom).replace(match.group(0), f"!freq:{made[n]}"))
                     out.append(atom)
                 phrases[name] = Flow(out)
@@ -422,7 +589,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             freq = key == "freq"
             if isinstance(value, int) and not (freq and self.g is not None):
                 return {key: value}
-            return {key: self.fresh("x", self.expr(value, freq))}
+            return {key: self.fresh("x", self.expr(value, freq, cell=key))}
         if key in ("mode", "vol"):
             return {key: value}
         raise GenericError(f"{kind} {index}: {key} has no init command")
@@ -504,6 +671,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         for item in rows:
             for kind, entries in (item.get("def") or {}).items():
                 self._section(kind, entries, uses)
+        self._own_timing(rows, init)
         self._settle(rows)
         if lead is not None:
             doc["song"].insert(0, lead)
@@ -526,6 +694,123 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
                     first.setdefault(kind, {}).update(entries)
             rows[0] = {"def": first, "play": rows[0]["play"]}
 
+    def _own_timing(self, rows: list, init) -> None:
+        """Each event of :attr:`Timing.events` with its own re-timed expressions: a copy of the
+        program it runs or of its instrument, or its command naming the expression, in place
+        of its command; a definition no event names any more is dropped."""
+        made: dict = {}
+        sections = [item.get("def") or {} for item in rows] + [self.added]
+        for entries in (d.get("phrase") or {} for d in sections):
+            for name, atoms in entries.items():
+                original, copied = [str(a) for a in atoms], []
+                for i in range(len(original)):
+                    owns = self.timing.events.get((name, i), {})
+                    for key, own in owns.items():
+                        if own[2] != COPY:
+                            atoms[i] = self._own(Atom(atoms[i]), key, own, made)
+                    owns = {k: o for k, o in owns.items() if o[2] == COPY}
+                    if owns:
+                        before = atoms[i]
+                        atoms[i] = self._own_ins(Atom(before), owns, made, (original, i))
+                        copied += [i] if atoms[i] != before else []
+                self._restore_ins(original, atoms, copied)
+        named = {n for text in _values([rows, init, self.added]) for n in _NAMES.findall(text)}
+        for defs in sections:
+            for kind, entries in list(defs.items()):
+                unnamed = [n for n in entries if str(n) in self.replaced - named]
+                for name in unnamed:
+                    del entries[name]
+                if unnamed and not entries and defs is not self.added:
+                    del defs[kind]
+
+    def _own_ins(self, atom: Atom, owns: dict, made: dict, at: tuple) -> Atom:
+        """Event ``atom`` playing a copy of its instrument with its own re-timings ``owns``,
+        ``{cell key: (text, Schedule, how)}``; ``at`` is the phrase's atoms and its index."""
+        ins = _instrument_at(*at)
+        owns = {k: o for k, o in owns.items() if retime.retimed(o[0], o[1]) is not None}
+        if ins is None or at[1] + 1 == len(at[0]) or not owns:
+            return atom
+        key = (ins, tuple(sorted(owns.items())))
+        if key not in made:
+            made[key] = self._ins_copy(ins, owns)
+        return atom if made[key] is None else _with_ins(atom, made[key])
+
+    def _own(self, atom: Atom, key: str, own: tuple, made: dict) -> Atom:
+        """Event ``atom`` playing its own re-timing ``own`` of cell ``key``'s expression."""
+        text, schedule, how = own
+        if retime.retimed(text, schedule) is None:
+            return atom
+        if how == "run":
+            match = re.search(rf"!run:({PREFIX['pw' if key == 'pw' else 'filter']}\d+)", atom)
+            if match is None:
+                return atom
+            copy = made.get((match.group(1), schedule))
+            if copy is None:
+                copy = made[(match.group(1), schedule)] = self._run_copy(match.group(1), own)
+            if copy is None:
+                return atom
+            self.replaced.add(match.group(1))
+            return Atom(atom.replace(match.group(0), f"!run:{copy}"))
+        x = made.get((key, own))
+        if x is None:
+            value = self.expr(text, key == "freq", how in (NOTED, "instrument"), key, schedule)
+            x = made[(key, own)] = self.fresh("x", value)
+        self.replaced.update(re.findall(rf"!{key}:(x\d+)", atom))
+        atom = re.sub(rf"!{key}:[^!*]+", f"!{key}:{x}", atom)
+        return Atom(with_command(atom, key, str(x)))
+
+    def _ins_copy(self, name: str, owns: dict) -> Atom | None:
+        """A copy of instrument ``name`` each of whose fields of ``owns``, a program or
+        expression whose first row plays its text, plays its re-timing; None where none does."""
+        value = dict(self.defined[name][2])
+        self.forced = {}
+        for key, (text, schedule, _) in owns.items():
+            program = value.get(FIELD[key])
+            if isinstance(program, Atom) and _NAME.fullmatch(program):
+                program = value[FIELD[key]] = self.defined[str(program)][2]
+            first = program[0] if isinstance(program, list) and program else program
+            if isinstance(first, dict):
+                first = first.get(key)
+            if first is not None and not isinstance(first, (list, dict)):
+                if _canonical(first) == text:
+                    self.forced[(key, text)] = schedule
+        if not self.forced:
+            return None
+        try:
+            return self.fresh("ins", self.instrument(value, f"ins {name}"))
+        finally:
+            self.forced = {}
+
+    @staticmethod
+    def _restore_ins(original: list, atoms: list, copied: list) -> None:
+        """After each event of ``copied``, given an instrument copy, the next note naming the
+        instrument it played, or the phrase's last event where no note follows."""
+        for i in copied:
+            later = [j for j in range(i + 1, len(original)) if _is_note(original[j])]
+            j = later[0] if later else len(original) - 1
+            if _HEAD.match(original[j]).group(2) is None and j not in copied:
+                atoms[j] = _with_ins(Atom(atoms[j]), _instrument_at(original, i))
+
+    def _run_copy(self, name: str, own: tuple) -> Atom | None:
+        """A copy of pulse or filter program ``name`` whose first row's expression, ``own``'s
+        text, plays its re-timing; None where the program's first row does not hold it."""
+        text, schedule, _ = own
+        _, kind, value = self.defined[name]
+        found = retime.retimed(text, schedule)
+        field_ = "pw" if kind == "pw" else "cut"
+        if isinstance(value, list):
+            first = value[0] if value else None
+            if not isinstance(first, dict) or _canonical(first.get(field_, "")) != text:
+                return None
+            value = [{**first, field_: found}, *value[1:]]
+        elif _canonical(value) != text:
+            return None
+        else:
+            value = found
+        if found is None:
+            return None
+        return self.fresh(kind, self.program(value, f"{kind} {name}", kind))
+
     def _section(self, kind: str, entries: dict, uses: dict) -> None:
         """A row's definitions of ``kind`` respelled in place."""
         if kind not in SECTIONS:
@@ -536,7 +821,8 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             if kind == "ins":
                 entries[name] = self.instrument(value, where)
             elif kind == "x":
-                entries[name] = self.expr(value, uses.get(str(name)) == "freq")
+                use = uses.get(str(name))
+                entries[name] = self.expr(value, use == "freq", cell=use)
             elif kind != "phrase":
                 started = kind == "ctrl" and str(name) not in self.runs
                 entries[name] = self.program(value, where, kind, started)
@@ -587,16 +873,27 @@ def _lead(text: str, starts: tuple, lag: int = 0) -> int:
     return leads.pop() + lag
 
 
-def dumps(ir: dict, native: Native | None = None) -> str:
-    """The generic document of internal song ``ir``, which parses with ``unitracker_grammar``.
-
-    Raises :class:`GenericError` naming the record and row the document cannot spell.
-    """
-    native = native_state(ir) if native is None else native
+def untimed(ir: dict, native: Native) -> tuple[str, int]:
+    """``(text, lead)``: the generic document of ``ir`` with its expressions over the native
+    firings, and the ticks its lead-in delays it (see :func:`_lead`)."""
     text = songio.dumps(ir, embed=True, respell=_Respell(ir, native))
     lead = _lead(text, native.starts, ONSET_LAG.get(ir["playroutine"]["name"], 0))
     if lead:
         text = songio.dumps(ir, embed=True, respell=_Respell(ir, native, lead))
+    return text, lead
+
+
+def dumps(ir: dict, native: Native | None = None) -> str:
+    """The generic document of internal song ``ir``, which parses with ``unitracker_grammar``:
+    :func:`untimed`, its expressions re-timed to the ticks its modulators play (:func:`timing`).
+
+    Raises :class:`GenericError` naming the record and row the document cannot spell.
+    """
+    native = native_state(ir) if native is None else native
+    text, lead = untimed(ir, native)
+    retimed = timing(native, text) if native.fired else Timing()
+    if retimed.base or retimed.events:
+        text = songio.dumps(ir, embed=True, respell=_Respell(ir, native, lead, retimed))
     try:
         parse(text)
     except CanonicalError as exc:

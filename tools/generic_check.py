@@ -1,8 +1,10 @@
 """Verify lifted documents on unitracker-player against their tunes' native register grids.
 
     python tools/generic_check.py [DOC.yaml ...] [--csv CSV] [--hvsc DIR] [--jobs J] [--out DIR]
+        [--against RESULTS.csv]
 
-Default: ``out/sample128/*.yaml``, tunes by ``sample.csv`` or the survey ``tunes.csv``'s md5.
+Default: ``out/sample128/*.yaml``, tunes by ``sample.csv`` or the survey ``tunes.csv``'s md5;
+``--against`` lists each document's first mismatch beside the one an earlier ``--out`` kept.
 """
 
 import argparse
@@ -125,6 +127,23 @@ def report(rows: list) -> None:
         print(f"  {count:4d}  {name}")
 
 
+def against(rows: list, path: Path) -> None:
+    """Print each row's first mismatch beside the one of the same document in ``path``."""
+    with path.open(newline="") as fh:
+        before = {r["doc"]: r for r in csv.DictReader(fh)}
+
+    def where(r: dict | None) -> str:
+        if r is None:
+            return "-"
+        if r["verified"] == "yes":
+            return "verified"
+        return f"{r['onset']} {r['onset_reg']}".strip() or r["gap"][:40]
+
+    print(f"\n{'doc':40} {'before':>12} {'after':>12}")
+    for r in rows:
+        print(f"{r['doc'][:40]:40} {where(before.get(r['doc'])):>12} {where(r):>12}")
+
+
 def main(argv=None) -> int:
     """Command-line entry."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -133,6 +152,7 @@ def main(argv=None) -> int:
     parser.add_argument("--hvsc", type=Path, default=Path(os.environ.get("HVSC", ".")))
     parser.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) // 4))
     parser.add_argument("--out", type=Path, help="keep the generic documents and results.csv")
+    parser.add_argument("--against", type=Path, help="an earlier results.csv to compare with")
     args = parser.parse_args(argv)
     docs = args.docs or sorted(CORPUS.glob("*.yaml"))
     sources = (CORPUS / "sample.csv", CORPUS / "tunes.csv")
@@ -152,6 +172,8 @@ def main(argv=None) -> int:
     finally:
         pool.close()
     report(rows)
+    if args.against:
+        against(rows, args.against)
     if len(docs) > len(tunes):
         print(f"{len(docs) - len(tunes)} documents have no tune in {csv_path}")
     if args.out:

@@ -25,7 +25,7 @@ COMMANDS = {
     "csillag": {"freq", "ad", "sr", "run", "legato"},
 }
 GENERIC = {
-    "metal_warrior": (25, 0x02),  # #183: GoatTracker 2's pulse holds on the step-read tick
+    "metal_warrior": (105, 0x0B),  # #186: GoatTracker 2 keys off on the tick it reads the step
     "crosseyed": (5, 0x07),  # #185: defMON detunes voice 2 by 1
     "csillag": (4, 0x0E),  # #185: SID-Wizard adds the carry once the wavetable program ends
 }

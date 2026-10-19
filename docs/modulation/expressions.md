@@ -36,7 +36,8 @@ the value after firing `φ`. A plain integer in an expression slot is a constant
 Values a modulator carries from earlier playback (a slide's start frequency, a delay counter, an
 accumulator's direction) are constants of its expression, which the lifter resolves at the
 modulator's start. A start that selects no expression leaves the unit to the playroutine's own
-firing.
+firing. In a [generic document](../format/document.md) `φ` counts ticks from the modulator's
+start, and the writer re-times each expression to the ticks its native unit fires on.
 
 ## Units
 
