@@ -164,10 +164,15 @@ def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None =
         name: [int(ns["_T"][name](i)) for i in range(int(t["size"]))]
         for name, t in (spec.get("tables") or {}).items()
     }
-    init = first if 0 not in player.starts else None
-    fired, texts = _firings(player, log, ticks)
     return Native(
-        ticks, frozenset(notes), table, tables, clock, tuple(player.starts), init, fired, texts
+        ticks,
+        frozenset(notes),
+        table,
+        tables,
+        clock,
+        tuple(player.starts),
+        first if 0 not in player.starts else None,
+        *_firings(player, log, ticks),
     )
 
 
@@ -201,9 +206,10 @@ def _alone(mods: list) -> list:
     return out[::-1]
 
 
-def timing(native: Native, text: str) -> Timing:
-    """The :class:`Timing` of document ``text``: each modulator plays the native occurrence
-    that fires on the earliest of its ticks one fires, and holds on its others."""
+def _schedules(native: Native, text: str) -> dict:
+    """``{(cell key, expression text): {origin: [(Schedule, alone)]}}`` of document ``text``'s
+    modulators (:func:`oracle.firings`, :func:`_alone`): each plays the native occurrence that
+    fires on the earliest of its ticks one fires, and holds on its others."""
     found: dict = {}
     mods = oracle.firings(text, native.ticks)
     for (cell, ticks, origin), alone in zip(mods, _alone(mods)):
@@ -213,8 +219,13 @@ def timing(native: Native, text: str) -> Timing:
             skips = frozenset(phi for phi, t in enumerate(ticks) if fired.get(t) != occ)
             group = found.setdefault((cell[0], native.texts[occ]), {}).setdefault(origin, [])
             group.append((retime.Schedule(skips, len(ticks)), alone))
+    return found
+
+
+def timing(native: Native, text: str) -> Timing:
+    """The :class:`Timing` of document ``text`` (see :func:`_schedules`)."""
     out = Timing()
-    for key, groups in found.items():
+    for key, groups in _schedules(native, text).items():
         base = retime.consensus(s for group in groups.values() for s, _ in group)
         for origin, group in groups.items():
             own = retime.merged(s for s, _ in group)
@@ -316,9 +327,9 @@ class _Swap(ast.NodeTransformer):
 class _Respell:  # pylint: disable=too-many-instance-attributes
     """The rewrite of one internal document's written structure into the generic one."""
 
-    def __init__(self, ir: dict, native: Native, lead: int = 0, timing: Timing | None = None):
+    def __init__(self, ir: dict, native: Native, lead: int = 0, schedules: Timing | None = None):
         self.ir, self.native, self.lead = ir, native, lead
-        self.timing = timing or Timing()
+        self.timing = schedules or Timing()
         self.replaced: set[str] = set()
         self.forced: dict = {}
         self.pr, self.name = ir["playroutine"], ir["playroutine"]["name"]
@@ -352,6 +363,12 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             return ast.Call(ast.Name("F"), [arg], [])
         return ast.Subscript(ast.Name(NOTE_TABLE), arg)
 
+    def _schedule(self, cell: str, value):
+        """The schedule an expression of ``cell`` plays to: the one forced on it, else its
+        base, else None."""
+        key = (cell, _canonical(value))
+        return self.forced.get(key) or self.timing.base.get(key)
+
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def expr(self, value, freq=False, note=False, cell: str | None = None, schedule=None):
         """An expression value in the generic language, re-timed to ``schedule`` or the ticks
@@ -362,8 +379,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         if isinstance(value, (bool, Atom)) or not isinstance(value, (int, str)):
             return value
         if schedule is None and cell:
-            key = (cell, _canonical(value))
-            schedule = self.forced.get(key) or self.timing.base.get(key)
+            schedule = self._schedule(cell, value)
         found = None if schedule is None else retime.retimed(str(value), schedule, note and freq)
         if found is not None:
             value = xexpr.written(found)
@@ -702,18 +718,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         sections = [item.get("def") or {} for item in rows] + [self.added]
         for entries in (d.get("phrase") or {} for d in sections):
             for name, atoms in entries.items():
-                original, copied = [str(a) for a in atoms], []
-                for i in range(len(original)):
-                    owns = self.timing.events.get((name, i), {})
-                    for key, own in owns.items():
-                        if own[2] != COPY:
-                            atoms[i] = self._own(Atom(atoms[i]), key, own, made)
-                    owns = {k: o for k, o in owns.items() if o[2] == COPY}
-                    if owns:
-                        before = atoms[i]
-                        atoms[i] = self._own_ins(Atom(before), owns, made, (original, i))
-                        copied += [i] if atoms[i] != before else []
-                self._restore_ins(original, atoms, copied)
+                self._own_phrase(name, atoms, made)
         named = {n for text in _values([rows, init, self.added]) for n in _NAMES.findall(text)}
         for defs in sections:
             for kind, entries in list(defs.items()):
@@ -722,6 +727,21 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
                     del entries[name]
                 if unnamed and not entries and defs is not self.added:
                     del defs[kind]
+
+    def _own_phrase(self, name: str, atoms: list, made: dict) -> None:
+        """Phrase ``name``'s ``atoms`` with each event's own re-timings (:meth:`_own_timing`)."""
+        original, copied = [str(a) for a in atoms], []
+        for i in range(len(original)):
+            owns = self.timing.events.get((name, i), {})
+            for key, own in owns.items():
+                if own[2] != COPY:
+                    atoms[i] = self._own(Atom(atoms[i]), key, own, made)
+            owns = {k: o for k, o in owns.items() if o[2] == COPY}
+            if owns:
+                before = atoms[i]
+                atoms[i] = self._own_ins(Atom(before), owns, made, (original, i))
+                copied += [i] if atoms[i] != before else []
+        self._restore_ins(original, atoms, copied)
 
     def _own_ins(self, atom: Atom, owns: dict, made: dict, at: tuple) -> Atom:
         """Event ``atom`` playing a copy of its instrument with its own re-timings ``owns``,
