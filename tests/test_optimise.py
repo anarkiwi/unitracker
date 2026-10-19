@@ -319,7 +319,7 @@ def test_the_proof_repeats_the_grid_and_finds_the_first_difference(monkeypatch):
 UNPROVED = {
     "merge expressions": "the writer's re-timing already writes the two expressions as one",
     "unhoist": "the generic document plays a note's !ad at its hard restart a tick apart from"
-    " the instrument's ad"
+    " the instrument's ad",
 }
 
 
