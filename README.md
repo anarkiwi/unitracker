@@ -57,7 +57,8 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 
 | question | tool |
 |---|---|
-| does each export's generic document play its native player on unitracker-player? | `python tools/generic_check.py [DOC.yaml ...] [--csv sample.csv] [--out DIR]` |
+| does each export's generic document play its native player on unitracker-player? | `python tools/generic_check.py [DOC.yaml ...] [--csv sample.csv] [--out DIR] [--against RESULTS.csv]` |
+| on which ticks does the native unit hold each expression its generic modulators play? | `python tools/firing_schedule.py DOC.yaml [--cell pw:0] [--ticks A:B] [--timed]` |
 | where does a generic document first differ from the native grid, and on which register? | `python tools/grid_diff.py DOC.yaml TUNE.sid [--ticks N] [--from T --to T]` |
 | each reference tune's verify verdict | `python tools/reference_check.py OUTDIR [--forbid KEY ...]` |
 | the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |

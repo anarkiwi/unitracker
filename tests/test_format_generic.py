@@ -64,7 +64,7 @@ def test_the_header_names_no_player_and_what_differs_from_pal():
 def test_the_native_note_table_is_read_for_every_f():
     _, _, text = written(GT)
     assert "F(" not in text
-    assert "x1: G[N + 1]" in text and "freq: 'G[N]'" in text
+    assert "x2: (G[N + 1] - G[N])*(φ >= 1) + G[N]" in text and "freq: 'G[N]'" in text
     assert "freq: '(v - G[N]) % 65536 + G[N]'" in text
 
 
@@ -92,8 +92,8 @@ def test_a_lead_shorter_than_a_step_restores_the_tempo_on_the_first_step(referen
     lead = text.split("play: ", 1)[1].split("\n", 1)[0]
     assert lead == "[p40, p40, p40]" and "p40: [-]" in text
     first = text.split("play: ", 2)[2].split("\n", 1)[0]
-    assert first == "[p39, p2, p3]" and "p39: [C5.i1!tempo:6*8, off*24, " in text
-    assert "p1: [C5.i1*8, off*24, " in text
+    assert first == "[p39, p2, p3]" and "p39: [C5.i1!pw:x28!tempo:6*8, off*24, " in text
+    assert "p1: [C5.i1!pw:x28*8, off*24, " in text
 
 
 def test_with_command_keeps_the_grammar_order_and_an_existing_command():
@@ -185,8 +185,8 @@ def test_the_lift_names_a_gap_and_a_song_whose_state_does_not_recur(monkeypatch)
 
 def test_backends_verify_a_document_against_its_tune(references):
     ref = references["metal_warrior"]
-    assert backends.verify(ref.generic, ref.raw, ticks=24).ok
-    assert backends.verify(ref.generic, ref.raw, ticks=40).onset == (25, 2)
+    assert backends.verify(ref.generic, ref.raw, ticks=105).ok
+    assert backends.verify(ref.generic, ref.raw, ticks=120).onset == (105, 0x0B)
 
 
 class _Gap:  # pylint: disable=too-few-public-methods

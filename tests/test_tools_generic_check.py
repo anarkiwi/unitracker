@@ -57,7 +57,16 @@ def test_a_reference_document_is_checked_and_reported(references, tmp_path, caps
     argv = [str(doc), "--csv", str(tunes), "--hvsc", str(ref.sid.parent), "--jobs", "1"]
     assert generic_check.main([*argv, "--out", str(out)]) == 0
     printed = capsys.readouterr().out
-    assert "goattracker2: 0/1 verified" in printed and "mismatch: pw, native holds" in printed
+    assert "goattracker2: 0/1 verified" in printed and "mismatch: ctrl, document holds" in printed
     (row,) = csv.DictReader((out / "results.csv").open())
-    assert (row["onset"], row["onset_reg"], row["motion"]) == ("25", "$02", "native holds")
+    assert (row["onset"], row["onset_reg"], row["motion"]) == ("105", "$0B", "document holds")
     assert (out / doc.name).read_text() == ref.generic
+    earlier = _csv(tmp_path / "before.csv", generic_check.FIELDS, [{**row, "onset": "25"}])
+    assert generic_check.main([*argv, "--against", str(earlier)]) == 0
+    assert capsys.readouterr().out.splitlines()[-1].split() == [
+        "mw.yaml",
+        "25",
+        "$0B",
+        "105",
+        "$0B",
+    ]

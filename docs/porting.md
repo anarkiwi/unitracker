@@ -23,6 +23,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
 | where the generic document first differs, both grids side by side over a tick range | `tools/grid_diff.py out/porting/doc.yaml TUNE.sid --from T --to T` |
+| the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/firing_schedule.py SONG.yaml --cell pw:0 --ticks A:B` |
 | the verify verdict and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
 | proofs, closed forms, command composition, keyword signatures | `unitracker-modfit {exprs,command,keywords,fit,poly,generic,sweeps,orbit}` ([modfit.md](modulation/modfit.md)) |
