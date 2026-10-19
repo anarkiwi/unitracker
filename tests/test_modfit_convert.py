@@ -15,7 +15,9 @@ from unitracker.format.events.lifetime import selected
 from unitracker.format.songio import library
 from unitracker.lift import defmon
 from unitracker.modfit import convert
+from unitracker.modfit import exprs as modfit_exprs
 from unitracker.modfit import grammar as G
+from unitracker.modfit import phase
 from unitracker.modfit.form import Form
 from unitracker.player.modulation import INIT, Occurrence
 from unitracker.player.vm import SongError, SongPlayer
@@ -660,6 +662,46 @@ def test_an_unproved_start_names_its_program_and_start():
         convert.group_texts(an, [occ], {})
     freq = occurrence("command", (0, 0, 0), {"command": 1, "cmddata": 2}, 0, (1, 2))
     assert convert.diagnosis(an.unit("command"), freq).startswith("command program the event's")
+
+
+def pulse_ir():
+    """A one-voice goattracker2 song with a looping pulse program, so a start is derived."""
+    ir = gt_ir("[C4.i1*16, D4*16]")
+    ir["records"]["ins"][1]["pw"] = 1
+    ir["records"]["pulsetab"] = {1: {"l": 0x88, "r": 0, "next": 1}}
+    return ir
+
+
+@pytest.mark.parametrize(
+    "exc,marker",
+    [
+        (RecursionError, "maximum recursion depth"),
+        (TypeError, "cannot determine truth value of Relational"),
+    ],
+)
+def test_a_failure_during_derive_is_a_named_conversion_error(monkeypatch, exc, marker):
+    """A recursion, or a relational TypeError, in the derivation is a named refusal."""
+
+    def boom(*args, **kwargs):
+        raise exc(marker)
+
+    monkeypatch.setattr(modfit_exprs, "derive", boom)
+    with pytest.raises(convert.ConversionError) as err:
+        convert.analyse(pulse_ir(), None, 1)
+    assert exc.__name__ in str(err.value)
+    assert marker in str(err.value)
+
+
+def test_a_failure_in_the_start_key_is_a_named_conversion_error(monkeypatch):
+    """The same conversion applies when the start's key cannot be computed."""
+
+    def boom(*args, **kwargs):
+        raise RecursionError("maximum recursion depth")
+
+    monkeypatch.setattr(phase.Machine, "start", boom)
+    with pytest.raises(convert.ConversionError) as err:
+        convert.analyse(pulse_ir(), None, 1)
+    assert "RecursionError" in str(err.value)
 
 
 @pytest.mark.parametrize(
