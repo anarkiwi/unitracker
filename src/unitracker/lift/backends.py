@@ -2,6 +2,7 @@
 
 from pysidtracker import SidError, SidImage
 
+from unitracker.lift import verify as proof
 from unitracker.lift.base import start_song
 
 
@@ -27,40 +28,39 @@ def detect(raw: bytes) -> str:
     return "goattracker2"
 
 
+def lifter(raw: bytes, subtune=None, expressions: bool = True):
+    """The :class:`~unitracker.lift.base.Lift` of ``raw``'s ``subtune`` (by default the one its
+    header starts on) by the backend that recognises it."""
+    if subtune is None:
+        subtune = start_song(raw)
+    backend = detect(raw)
+    if backend == "defmon":
+        from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
+
+        return defmon.DefmonLift.from_sid(raw, subtune, expressions)
+    if backend == "sidwizard":
+        from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
+
+        return sidwizard.SidWizardLift.from_sid(raw, subtune, expressions)
+    from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
+
+    return goattracker.GoatTrackerLift.from_sid(raw, subtune, expressions)
+
+
 def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     """A unitracker song for ``raw``, lifted by the backend that recognises it.
 
     With ``expressions`` its modulations are written as the format's expressions.
     """
-    if subtune is None:
-        subtune = start_song(raw)
-    backend = detect(raw)
-    if backend == "defmon":
-        from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
-
-        return defmon.DefmonLift.from_sid(raw, subtune, expressions).run()
-    if backend == "sidwizard":
-        from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
-
-        return sidwizard.SidWizardLift.from_sid(raw, subtune, expressions).run()
-    from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
-
-    return goattracker.GoatTrackerLift.from_sid(raw, subtune, expressions).run()
+    return lifter(raw, subtune, expressions).run()
 
 
 def native_player(raw: bytes, subtune=None):
     """The native player for ``raw``, a ``pysidtracker.MemPlayer``."""
-    if subtune is None:
-        subtune = start_song(raw)
-    backend = detect(raw)
-    if backend == "defmon":
-        from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
+    return lifter(raw, subtune).native()
 
-        return defmon.DefmonLift.from_sid(raw, subtune).native()
-    if backend == "sidwizard":
-        from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
 
-        return sidwizard.SidWizardLift.from_sid(raw, subtune).native()
-    from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
-
-    return goattracker.GoatTrackerLift.from_sid(raw, subtune).native()
+def verify(document_text: str, raw_sid: bytes, subtune=None, ticks: int = 3007) -> proof.Verdict:
+    """The :class:`~unitracker.lift.verify.Verdict` of a generic document against ``ticks``
+    ticks of the native player of ``raw_sid``'s ``subtune`` (by default its header's)."""
+    return proof.compare(document_text, native_player(raw_sid, subtune).render_grid(ticks))

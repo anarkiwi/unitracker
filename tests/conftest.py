@@ -230,12 +230,14 @@ def once(factory, key: str, make):
 
 @dataclass(frozen=True)
 class Reference:
-    """A reference tune lifted once: its path, bytes, canonical document and native grid."""
+    """A reference tune lifted once: its path, bytes, canonical internal document, native grid
+    and the lift's generic document."""
 
     sid: Path
     raw: bytes
     text: str
     native: np.ndarray
+    generic: str
 
     def ir(self) -> dict:
         """A fresh copy of the lifted song."""
@@ -260,7 +262,9 @@ class _Shared(dict):
 def _reference(name, sid):
     raw = sid.read_bytes()
     grid = backends.native_player(raw).render_grid(REFERENCE_TICKS[name])
-    return Reference(sid, raw, songio.dumps(backends.lift(raw)), np.asarray(grid, np.uint8))
+    lift = backends.lifter(raw)
+    text = songio.dumps(lift.run())
+    return Reference(sid, raw, text, np.asarray(grid, np.uint8), lift.document)
 
 
 @pytest.fixture(scope="session")

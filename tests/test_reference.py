@@ -13,7 +13,7 @@ from unitracker import cli
 from unitracker.format import songio
 from unitracker.format.codec import COMMAND_NAMES, ROW_KEYS
 from unitracker.format.yamlstyle import parse
-from unitracker.lift import backends
+from unitracker.lift import backends, verify
 from unitracker.player.vm import SongPlayer, first_mismatch
 
 TUNES = ("metal_warrior", "crosseyed", "csillag")
@@ -22,6 +22,11 @@ COMMANDS = {
     "metal_warrior": {"run", "freq", "legato", "tempo"},
     "crosseyed": set(),
     "csillag": {"freq", "ad", "sr", "run", "legato"},
+}
+GENERIC = {
+    "metal_warrior": (25, 0x02),  # #183: GoatTracker 2's pulse holds on the step-read tick
+    "crosseyed": (5, 0x07),  # #185: defMON detunes voice 2 by 1
+    "csillag": (4, 0x0E),  # #185: SID-Wizard adds the carry once the wavetable program ends
 }
 ROOT = Path(__file__).resolve().parents[1]
 ELIDED = "..."
@@ -113,12 +118,30 @@ def test_the_players_share_only_the_shared_vocabulary(references):
 
 
 @pytest.mark.parametrize("name", TUNES)
+def test_the_generic_document_plays_unitracker_player_to_its_known_difference(references, name):
+    ref = references[name]
+    verdict = verify.compare(ref.generic, ref.native)
+    assert verdict.onset == GENERIC[name] and not verdict.ok
+    assert verdict.played == len(ref.native) and verdict.whole[0] <= verdict.onset[0]
+    assert verdict.line().startswith(f"mismatch: tick {GENERIC[name][0]}, register $")
+
+
+@pytest.mark.parametrize("name", TUNES)
 def test_the_tools_lift_detect_and_check_each_tune(references, name, tmp_path, capsys):
     ref = references[name]
     assert backends.detect(ref.raw) == BACKEND[name]
-    assert cli.lift_main([str(ref.sid)]) == 0
-    assert capsys.readouterr().out == ref.text
     out, wav = tmp_path / "song.yaml", tmp_path / "song.wav"
+    argv = (
+        [str(ref.sid), "--internal"] if name == "metal_warrior" else [str(ref.sid), "-o", str(out)]
+    )
+    assert cli.lift_main(argv) == 1
+    captured = capsys.readouterr()
+    tick, reg = GENERIC[name]
+    assert captured.err.splitlines()[-1].startswith(f"mismatch: tick {tick}, register ${reg:02X}")
+    if name == "metal_warrior":
+        assert captured.out == ref.text
+    else:
+        assert out.read_text() == ref.generic
     out.write_text(ref.text)
     argv = [str(out), "--seconds", "3", "--check", str(ref.sid)]
     if name == "metal_warrior":

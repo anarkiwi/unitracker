@@ -1,14 +1,20 @@
-"""The lift framework: a tune through its build check, structure, normalisations, expressions
-and their canonical form."""
+"""The lift framework: a tune through its build check, structure, normalisations, expressions,
+their canonical form, and the proof of its generic document against the native player."""
 
 import abc
+import dataclasses
 from collections import deque
 from collections.abc import Callable, Iterator
 
 from pysidtracker import SidImage
+from unitracker_player import PlayError
 
-from unitracker.modfit.convert import convert
+from unitracker.format import generic
+from unitracker.format.header import SongFormatError
+from unitracker.lift import verify
+from unitracker.modfit.convert import convert, window
 from unitracker.optimise import canonical
+from unitracker.player.reach import ReachabilityError
 
 Pass = Callable[["Lift", dict], dict]
 
@@ -35,6 +41,10 @@ class Lift(abc.ABC):
 
     def __init__(self, tune, expressions: bool = True):
         self.tune, self.expressions = tune, expressions
+        self.ticks: int | None = None
+        self.document: str | None = None
+        self.verdict: verify.Verdict | None = None
+        self.gap: str | None = None
 
     @classmethod
     def from_sid(cls, raw: bytes, subtune: int | None = None, expressions: bool = True) -> "Lift":
@@ -66,14 +76,38 @@ class Lift(abc.ABC):
         optimiser's canonical passes, proved on the written text."""
         return canonical(song)
 
+    def verify(self, song: dict) -> verify.Verdict | None:
+        """The verdict of ``song``'s generic document, played by unitracker-player, against
+        the native grid over the conversion's ticks; :attr:`document` holds the document, and
+        :attr:`gap` the lifting gap that keeps it from being written or played."""
+        self.document, self.verdict = None, None
+        if self.ticks is None:
+            self.gap = "the song's state does not recur: no ticks to verify it over"
+            return None
+        native = generic.native_state(song, self.ticks, self.ticks)
+        try:
+            self.document = generic.dumps(song, dataclasses.replace(native, ticks=self.ticks))
+        except (generic.GenericError, SongFormatError, PlayError) as exc:
+            self.gap = str(exc)
+            return None
+        try:
+            self.verdict = verify.compare(self.document, self.native().render_grid(self.ticks))
+        except PlayError as exc:
+            self.gap = f"unitracker-player refuses the document: {exc}"
+            return None
+        self.gap = None
+        return self.verdict
+
     @classmethod
     def passes(cls) -> tuple[str, ...]:
         """The names of the passes, in the order :meth:`stages` runs them."""
-        return ("structure", *(p.__name__ for p in cls.normalisations), "convert", "canonical")
+        normalised = (p.__name__ for p in cls.normalisations)
+        return ("structure", *normalised, "convert", "canonical", "verify")
 
     def stages(self) -> Iterator[tuple[str, dict]]:
-        """Each pass's name and the song after it, after the build check; ``convert`` and
-        ``canonical`` only with ``expressions``."""
+        """Each pass's name and the song after it, after the build check; ``convert``,
+        ``canonical`` and ``verify`` (which leaves the song as it is) only with
+        ``expressions``."""
         self.check_build()
         song = self.structure()
         yield "structure", song
@@ -81,9 +115,16 @@ class Lift(abc.ABC):
             song = normalise(self, song)
             yield normalise.__name__, song
         if self.expressions:
+            try:
+                self.ticks = window(song)
+            except ReachabilityError:
+                self.ticks = None
             song = self.convert(song)
             yield "convert", song
-            yield "canonical", self.canonical(song)
+            song = self.canonical(song)
+            yield "canonical", song
+            self.verify(song)
+            yield "verify", song
 
     def run(self) -> dict:
         """The lifted song: the last stage's."""
