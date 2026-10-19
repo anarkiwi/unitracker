@@ -66,6 +66,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | do the three reference tunes still round-trip and match? | `python tools/reference_check.py OUTDIR [--forbid KEY ...]` |
 | the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
 | why did a modulator not become an expression? | `python tools/occurrences.py TUNE.sid [--unit freq\|pw\|cut]`, `unitracker-modfit exprs` |
+| what writes a unit's cell, and which starts inherit its value | `python tools/cell_writers.py goattracker2 sidwizard defmon` |
 | does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modulation/modfit.md](docs/modulation/modfit.md)) |
 | tokens per section of a document | `python tools/token_report.py song.yaml` |
 | what the canonical passes find, prove and refuse over many songs or tunes | `python tools/canonical_tally.py SONG.yaml\|TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
