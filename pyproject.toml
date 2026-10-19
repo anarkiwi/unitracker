@@ -18,10 +18,10 @@ dependencies = [
     "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker",
     "pydefmon @ git+https://github.com/anarkiwi/pydefmon",
     "pysidwizard @ git+https://github.com/anarkiwi/pysidwizard",
+    "unitracker-grammar @ git+https://github.com/anarkiwi/unitracker-grammar",
     "z3-solver>=4.12",
     "sympy>=1.12",
     "tiktoken>=0.7",
-    "lark>=1.2",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +37,7 @@ unitracker-optimise = "unitracker.cli:optimise_main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-unitracker = ["playroutines/*.yaml", "modfit/specs.yaml", "format/*.lark"]
+unitracker = ["playroutines/*.yaml", "modfit/specs.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

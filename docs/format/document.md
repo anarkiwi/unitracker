@@ -157,5 +157,5 @@ The writer produces one text per song:
   place (see [Envelope commands](vocabulary.md#envelope-commands)), the inverse of the merge.
 
 Writing what the reader returns gives the same bytes. The canonical text is the language of
-[`canonical.lark`](../../src/unitracker/format/canonical.lark) (`unitracker.format.canonical.parse`),
-which fixes every byte but the position of a line wrap inside a flow collection.
+the grammar in [unitracker-grammar](https://github.com/anarkiwi/unitracker-grammar)
+(`unitracker_grammar.parse`), which fixes every byte but the position of a line wrap inside a flow collection.
