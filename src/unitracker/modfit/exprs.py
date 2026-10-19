@@ -16,13 +16,18 @@ from tqdm import tqdm
 
 from unitracker.modfit import grammar as G
 from unitracker.modfit.form import atoms
-from unitracker.modfit.phase import Lift, Machine, derive, dispatch
+from unitracker.modfit.phase import Derived, Lift, Machine, derive, dispatch
 from unitracker.modfit.replay import Stepper
 from unitracker.player.modulation import INIT, declared, run_of
 
 # ---- derivation --------------------------------------------------------------------------
 
 CHUNK = 256
+
+
+def refusal(exc: BaseException) -> str:
+    """The text of a failure to derive a start: the message, named when it is not a ValueError."""
+    return str(exc) if isinstance(exc, ValueError) else f"{type(exc).__name__}: {exc}"
 
 
 @dataclasses.dataclass
@@ -108,27 +113,29 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         The start hook's cells written from the note become terms of ``N`` where they still
         hold their values at the first firing.
         """
-        machine = self.machines[unit["name"]]
-        values = dict(occ.start)
-        lay = self.overlay(machine, occ.hook, occ.start) if occ.hook and occ.hook != INIT else {}
-        for c in self.spec["notes"]:
-            values[c] = self.note_term(occ.start)
-        n = occ.start.get(self.spec["notes"][0], 0) - self.shift(occ.start)
-        for c, t in lay.items():
-            if c in machine.reads or c in machine.control:
-                if self.evaluate(machine, t, n) == occ.start.get(c):
-                    values[c] = t
-        for c in unit.get("relative") or []:
-            if c not in lay and (c in machine.reads or c in machine.control):
-                k = int(occ.start[c]) - n
-                values[c] = ("lin", k, (("N", 1),)) if k else "N"
-        v0 = lay.get(machine.cell)
-        if v0 is not None and self.evaluate(machine, v0, n) != occ.v:
-            v0 = None
         try:
+            machine = self.machines[unit["name"]]
+            values = dict(occ.start)
+            lay = (
+                self.overlay(machine, occ.hook, occ.start) if occ.hook and occ.hook != INIT else {}
+            )
+            for c in self.spec["notes"]:
+                values[c] = self.note_term(occ.start)
+            n = occ.start.get(self.spec["notes"][0], 0) - self.shift(occ.start)
+            for c, t in lay.items():
+                if c in machine.reads or c in machine.control:
+                    if self.evaluate(machine, t, n) == occ.start.get(c):
+                        values[c] = t
+            for c in unit.get("relative") or []:
+                if c not in lay and (c in machine.reads or c in machine.control):
+                    k = int(occ.start[c]) - n
+                    values[c] = ("lin", k, (("N", 1),)) if k else "N"
+            v0 = lay.get(machine.cell)
+            if v0 is not None and self.evaluate(machine, v0, n) != occ.v:
+                v0 = None
             return unit["name"], machine.start(values), v0
-        except ValueError as exc:
-            occ.error = str(exc)
+        except (ValueError, TypeError, RecursionError) as exc:
+            occ.error = refusal(exc)
             return None
 
     def derived(self, key: tuple):
@@ -136,8 +143,11 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         name, start, v0 = key
         machine = self.machines[name]
         lift = Lift(machine.form, machine.cell, self.freq)
-        v0e = None if v0 is None else lift.fold(lift.term(v0))
-        return derive(machine, start, v0e, self.freq), v0e
+        try:
+            v0e = None if v0 is None else lift.fold(lift.term(v0))
+            return derive(machine, start, v0e, self.freq), v0e
+        except (ValueError, TypeError, RecursionError) as exc:
+            return Derived(error=refusal(exc)), None
 
     def result(self, key: tuple, found: tuple) -> Result:
         """A start's result with a stepper over this song's tables."""
