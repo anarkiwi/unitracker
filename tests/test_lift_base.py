@@ -29,7 +29,13 @@ def every_pass_tune():
 
 
 def test_the_passes_are_named_in_the_order_they_run():
-    assert GoatTrackerLift.passes() == ("structure", *NORMALISATIONS, "convert", "canonical")
+    assert GoatTrackerLift.passes() == (
+        "structure",
+        *NORMALISATIONS,
+        "convert",
+        "canonical",
+        "verify",
+    )
     names = [name for name, _ in GoatTrackerLift(every_pass_tune()[0]).stages()]
     assert tuple(names) == GoatTrackerLift.passes()
 
@@ -67,7 +73,7 @@ def test_a_normalisation_receives_the_lift_and_the_song_before_it():
     )
     lift = recorded(every_pass_tune()[0], expressions=False)
     stages = dict(lift.stages())
-    assert recorded.passes()[-3:] == ("record", "convert", "canonical")
+    assert recorded.passes()[-4:] == ("record", "convert", "canonical", "verify")
     assert seen == [(lift, stages["unmark"])] and stages["record"]["voices"] == 3
 
 
@@ -106,11 +112,18 @@ SW_NORMALISATIONS = ("first_note_selects", "chord_runs", "fold_octaves")
 def test_the_sidwizard_passes_run_in_order_and_convert_last(csillag, monkeypatch):
     monkeypatch.setattr(SidWizardLift, "convert", lambda _lift, song: {**song, "exprs": {}})
     monkeypatch.setattr(SidWizardLift, "canonical", lambda _lift, song: {**song, "voices": 3})
-    assert SidWizardLift.passes() == ("structure", *SW_NORMALISATIONS, "convert", "canonical")
+    assert SidWizardLift.passes() == (
+        "structure",
+        *SW_NORMALISATIONS,
+        "convert",
+        "canonical",
+        "verify",
+    )
     stages = list(SidWizardLift.from_sid(csillag.read_bytes()).stages())
     assert tuple(name for name, _ in stages) == SidWizardLift.passes()
-    assert stages[-2][1] == {**stages[-3][1], "exprs": {}}
-    assert stages[-1][1] == {**stages[-2][1], "voices": 3}
+    assert stages[-3][1] == {**stages[-4][1], "exprs": {}}
+    assert stages[-2][1] == {**stages[-3][1], "voices": 3}
+    assert stages[-1][1] is stages[-2][1]
 
 
 def test_each_sidwizard_normalisation_receives_the_song_before_it(csillag):
@@ -166,11 +179,12 @@ def test_a_decoded_sidwizard_module_lifts_and_plays_as_given(csillag):
 def test_the_defmon_passes_run_in_order_and_convert_last(rent_a_cop, monkeypatch):
     monkeypatch.setattr(DefmonLift, "convert", lambda _lift, song: {**song, "exprs": {}})
     monkeypatch.setattr(DefmonLift, "canonical", lambda _lift, song: {**song, "voices": 3})
-    assert DefmonLift.passes() == ("structure", "unheard_init", "convert", "canonical")
+    assert DefmonLift.passes() == ("structure", "unheard_init", "convert", "canonical", "verify")
     stages = list(DefmonLift.from_sid(rent_a_cop.read_bytes()).stages())
     assert tuple(name for name, _ in stages) == DefmonLift.passes()
-    assert stages[-2][1] == {**stages[-3][1], "exprs": {}}
-    assert stages[-1][1] == {**stages[-2][1], "voices": 3}
+    assert stages[-3][1] == {**stages[-4][1], "exprs": {}}
+    assert stages[-2][1] == {**stages[-3][1], "voices": 3}
+    assert stages[-1][1] is stages[-2][1]
 
 
 def test_the_defmon_normalisation_receives_the_structure(rent_a_cop, monkeypatch):

@@ -1,14 +1,15 @@
 # unitracker
 
-A generic tracker song format (v1.19) for the C64 SID, GoatTracker 2, defMON and
-SID-Wizard lifters, and a generic player. A song is a compact YAML document: a header
-naming its playroutine (integer cells, bounded accumulators, event handlers and modulator
-units, from the library in `src/unitracker/playroutines/`), then one timeline that defines
-each instrument, program, expression and phrase where it is first used. Rows and commands
-share one vocabulary across players, pitch, pulse and filter modulations are integer
-expressions in `v` and `φ` (`pw: 16*abs((φ - 32) % 128 - 64) + 512`, `!freq:x1`), and
-notes are named by real pitch. The player has no player-specific knowledge,
-and its register writes are flushed in one canonical order.
+GoatTracker 2, defMON and SID-Wizard lifters to the generic C64 SID tracker document of
+[unitracker-grammar](https://github.com/anarkiwi/unitracker-grammar), which names no player
+and which [unitracker-player](https://github.com/anarkiwi/unitracker-player) plays; each lift
+ends by proving its document plays the native player's register grid. The lifters work in an
+internal form: a header naming its playroutine (integer cells, bounded accumulators, event
+handlers and modulator units, from the library in `src/unitracker/playroutines/`), then one
+timeline that defines each instrument, program, expression and phrase where it is first used.
+Rows and commands share one vocabulary across players, pitch, pulse and filter modulations are
+integer expressions in `v` and `φ` (`pw: 16*abs((φ - 32) % 128 - 64) + 512`, `!freq:x1`), and
+notes are named by real pitch.
 
 | doc | content |
 |---|---|
@@ -27,9 +28,10 @@ pip install -e ".[dev]"
 ## Use
 
 ```sh
-unitracker-lift TUNE.sid -o song.yaml [--subtune N] [--embed]   # lift a GoatTracker 2, defMON or SID-Wizard .sid
-unitracker-play song.yaml --wav out.wav [--seconds 60] [--model 8580|6581]
-unitracker-play song.yaml --check TUNE.sid                  # compare with the native player from each voice's first note
+unitracker-lift TUNE.sid -o song.yaml [--subtune N]   # lift a GoatTracker 2, defMON or SID-Wizard .sid, verified on unitracker-player
+unitracker-lift TUNE.sid --internal [--embed]         # the lifter's internal, player-naming form
+unitracker-vm song.yaml --wav out.wav [--seconds 60] [--model 8580|6581]
+unitracker-vm song.yaml --check TUNE.sid                  # compare with the native player from each voice's first note
 unitracker-optimise song.yaml -o smaller.yaml [--report report.md]  # same output, fewer tokens
 ```
 
@@ -61,7 +63,8 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 
 | question | tool |
 |---|---|
-| does a lifted song play its native player? | `unitracker-play song.yaml --check TUNE.sid`; in code `SongPlayer.mismatch` |
+| does a lifted song play its native player? | `unitracker-vm song.yaml --check TUNE.sid`; in code `SongPlayer.mismatch` |
+| does each export's generic document play its native player on unitracker-player, and where does it first differ? | `python tools/generic_check.py [DOC.yaml ...] [--csv sample.csv] [--out DIR]`; `tools/grid_diff.py --generic` for one tune's grids |
 | where and on which register does it first differ? | `python tools/grid_diff.py song.yaml TUNE.sid --ticks 3007 [--from T --to T]` |
 | do the three reference tunes still round-trip and match? | `python tools/reference_check.py OUTDIR [--forbid KEY ...]` |
 | the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
@@ -82,7 +85,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 ## Layout
 
 `src/unitracker/`: `format/` (reading and writing documents, the shared vocabulary, event folds),
-`player/` (the generic player), `lift/` (detection, the `Lift` passes and the three lifters), `modfit/` (proved
+`player/` (the lifter's VM, and `oracle`: unitracker-player with each voice's first note), `lift/` (detection, the `Lift` passes and the three lifters), `modfit/` (proved
 modulation conversion), `optimise/` (smaller documents), `analysis/` (format studies),
 `playroutines/` (the library).
 

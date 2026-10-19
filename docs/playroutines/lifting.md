@@ -16,8 +16,11 @@ cover:
 | each of `normalisations` | a player-specific rewrite `(lift, song) -> song` (GoatTracker 2, each proved by a replay: `unpause`, `explicit_swing`, `unmark`; SID-Wizard: `first_note_selects`, `chord_runs`, `fold_octaves`; defMON: `unheard_init`, proved by the replay's grid) |
 | `convert` | with `expressions` only: the modulations as expressions (GoatTracker 2 then writes a toneporta of speed 0 as `!freq`, `snapped`) |
 | `canonical` | with `expressions` only: modulation written shattered in the format's canonical form, by the optimiser's canonical passes ([Canonical passes](../optimise.md#canonical-passes)), each proved on the written text; cached by content beside the conversion's cache; a song whose state does not recur is left as converted |
+| `verify` | with `expressions` only, leaving the song as it is: its [generic document](../format/document.md), played by unitracker-player for the conversion's ticks (the song's recurrence and a period more) against the native player's grid; `verdict` holds the first mismatch each voice from its first note and from tick 0, `document` the text, and `gap` the lifting gap that keeps it from being written or played |
 
-`stages()` yields each pass's name and the song after it. The conversion
+`stages()` yields each pass's name and the song after it. `unitracker-lift` writes the generic
+document and exits nonzero with the verdict on its last line when the document does not play the
+native grid; `backends.verify(document_text, raw_sid, subtune)` proves a document a tool holds. The conversion
 (`unitracker.modfit.convert`, see [modfit.md](../modulation/modfit.md)) must leave the song playing
 the native register grid exactly, each voice from its onset (see [Checking against the native
 player](schema.md#checking-against-the-native-player)); a start whose expression is not proved, and

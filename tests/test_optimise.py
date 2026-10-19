@@ -10,6 +10,7 @@ import pytest
 from unitracker import cli, optimise
 from unitracker.format import songio
 from unitracker.lift import backends
+from unitracker.lift.verify import Verdict
 from unitracker.player.vm import SongPlayer
 
 RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]"
@@ -312,10 +313,27 @@ def test_cli_optimises_and_reports(tmp_path, capsys):
 
 def test_lift_optimise_flag(tmp_path, monkeypatch):
     text = doc(f"{I1}\n{I2_UNHEARD}", TWO)
-    monkeypatch.setattr(backends, "lift", lambda data, subtune: songio.loads(text))
+    verified = []
+
+    class Lift:
+        """A lift of ``text`` whose verdict is the songs it is asked to verify."""
+
+        document = gap = None
+        verdict = Verdict(1, 1, (), None, None)
+
+        @staticmethod
+        def run():
+            return songio.loads(text)
+
+        @staticmethod
+        def verify(song):
+            verified.append(song)
+
+    monkeypatch.setattr(backends, "lifter", lambda data, subtune: Lift())
     fast = functools.partial(optimise.optimise, passes=["instruments"], workers=1, progress=False)
     monkeypatch.setattr(optimise, "optimise", fast)
     sid, out = tmp_path / "x.sid", tmp_path / "x.yaml"
     sid.write_bytes(b"")
-    assert cli.lift_main([str(sid), "-o", str(out), "--optimise"]) == 0
+    assert cli.lift_main([str(sid), "-o", str(out), "--optimise", "--internal"]) == 0
     assert "i2" not in out.read_text(encoding="utf-8")
+    assert songio.dumps(verified[0]) == out.read_text(encoding="utf-8")

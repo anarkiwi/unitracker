@@ -282,7 +282,7 @@ $15 $16 $17 $18,  then for each voice v (base 7v): +2 +3 +6 +5 +0 +1 +4
 
 ## Checking against the native player
 
-The player starts from a zeroed SID. `unitracker-play --check` compares a voice's seven
+The player starts from a zeroed SID. `unitracker-vm --check` compares a voice's seven
 registers with the native player's from the tick the voice's `onset` cell first reads 1,
 and the filter and volume registers (`$D415`-`$D418`) from the earliest onset. What a
 native player writes before then is its own initialisation, not the song's, and the

@@ -19,6 +19,7 @@ dependencies = [
     "pydefmon @ git+https://github.com/anarkiwi/pydefmon",
     "pysidwizard @ git+https://github.com/anarkiwi/pysidwizard",
     "unitracker-grammar @ git+https://github.com/anarkiwi/unitracker-grammar",
+    "unitracker-player @ git+https://github.com/anarkiwi/unitracker-player",
     "z3-solver>=4.12",
     "sympy>=1.12",
     "tiktoken>=0.7",
@@ -29,7 +30,7 @@ dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4"
 
 [project.scripts]
 unitracker-lift = "unitracker.cli:lift_main"
-unitracker-play = "unitracker.cli:play_main"
+unitracker-vm = "unitracker.cli:play_main"
 unitracker-modfit = "unitracker.modfit.cli:main"
 unitracker-optimise = "unitracker.cli:optimise_main"
 

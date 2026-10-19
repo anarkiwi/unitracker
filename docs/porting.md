@@ -19,7 +19,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | need | tool |
 |---|---|
 | the native replay's register grid | `lift.backends.native_player(raw).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
-| the first differing `(tick, register)` | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)`; for a document, `unitracker-play song.yaml --check TUNE.sid` |
+| the first differing `(tick, register)` | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)`; for a document, `unitracker-vm song.yaml --check TUNE.sid` |
 | both grids side by side over a tick range | `tools/grid_diff.py song.yaml TUNE.sid --from T --to T` |
 | round trip, native grid and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | whether an edit to a written song plays the native grid, or plays as another edit | `tools/perturb.py song.yaml --sid TUNE.sid 'old=>new' ...`, `--same 'a=>b' 'c=>d'` |
@@ -367,7 +367,7 @@ native package, the description), `docs/playroutines/lifting.md` (its table),
 
 ```sh
 PYTHONPATH=src .venv/bin/unitracker-lift TUNE.sid -o out/porting/song.yaml
-PYTHONPATH=src .venv/bin/unitracker-play out/porting/song.yaml --check TUNE.sid
+PYTHONPATH=src .venv/bin/unitracker-vm out/porting/song.yaml --check TUNE.sid
 ```
 
 `--check` prints `match: 3007 ticks identical to the native player`.
@@ -424,7 +424,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under
 | 4 | record types, codec shapes and commands on the shared keys | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit keywords <name>` |
 | 5 | hard restart, chords, filter, lifetime, relative control in their shared forms | `playroutines/<name>.yaml` | `.venv/bin/python -m pytest -n 4 tests/test_format_events.py` |
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |
-| 7 | lift with expressions; check against the native player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/song.yaml`, then `.venv/bin/unitracker-play out/porting/song.yaml --check TUNE.sid` |
+| 7 | lift with expressions; check against the native player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/song.yaml`, then `.venv/bin/unitracker-vm out/porting/song.yaml --check TUNE.sid` |
 | 8 | the register grid from the voices' onsets | | `.venv/bin/python tools/grid_diff.py out/porting/song.yaml TUNE.sid --ticks 3007 --to 0` |
 | 9 | vocabulary and command tables; the playroutine's doc | `tests/test_format_codec.py`, `tests/test_reference.py`, `docs/playroutines/<name>.md`, `docs/playroutines/lifting.md` | `.venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_reference.py` |
 | 10 | conformance, dispatch and lifter tests | `tests/` | `.venv/bin/python -m pytest -n 4 tests/test_reference.py tests/test_lift_<name>.py` |

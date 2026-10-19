@@ -193,8 +193,9 @@ def test_the_lift_ends_on_canonical_and_skips_it_without_expressions(monkeypatch
     seen = []
     monkeypatch.setattr(GoatTrackerLift, "canonical", lambda _lift, song: seen.append(song) or song)
     dec, _ = gt_tune([(0x41, 0), (0xFF, 0)])
-    assert GoatTrackerLift.passes()[-2:] == ("convert", "canonical")
+    assert GoatTrackerLift.passes()[-3:] == ("convert", "canonical", "verify")
     stages = list(GoatTrackerLift(dec).stages())
-    assert [n for n, _ in stages][-2:] == ["convert", "canonical"] and seen == [stages[-2][1]]
+    assert [n for n, _ in stages][-3:] == ["convert", "canonical", "verify"]
+    assert seen == [stages[-3][1]]
     assert "canonical" not in dict(GoatTrackerLift(dec, expressions=False).stages())
     assert len(seen) == 1

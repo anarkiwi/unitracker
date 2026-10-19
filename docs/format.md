@@ -1,14 +1,16 @@
 # unitracker song format (v1.20)
 
-A unitracker song is one YAML document, played by the generic player (`unitracker-play`) on an
-emulated SID. Any prefix of the document is a playable partial song: a short header, then one
+A unitracker song is one YAML document in the language of unitracker-grammar, played by
+unitracker-player (see [format/document.md](format/document.md)); this page and the topic docs
+describe the lifter's internal form, which the lifter's VM (`unitracker-vm`) plays on an emulated
+SID. Any prefix of the document is a playable partial song: a short header, then one
 timeline in which every instrument, program, expression and phrase is defined in the row where it
 is first used. Everything a player does is in its **playroutine**, which the song references
 from the library in `src/unitracker/playroutines/`.
 
 | doc | content |
 |---|---|
-| [format/document.md](format/document.md) | top-level keys, embedding, the timeline, definitions, events, the canonical form |
+| [format/document.md](format/document.md) | the generic document and its writer; the internal form's top-level keys, embedding, the timeline, definitions, events, the canonical form |
 | [format/vocabulary.md](format/vocabulary.md) | the shared row keys and commands; chords, filter, hard restart, lifetime, envelope commands, instrument columns |
 | [modulation/expressions.md](modulation/expressions.md) | modulator expressions: grammar, evaluation, units, where expressions go, legato |
 | [modulation/modfit.md](modulation/modfit.md) | the modulation analysis and the proved conversion to expressions (`unitracker-modfit`) |
