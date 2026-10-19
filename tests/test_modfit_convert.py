@@ -437,6 +437,52 @@ def test_an_instrument_with_two_expressions_is_cloned_and_its_event_names_the_cl
     assert sorted(freq.values()) == ["v + 1", "v + 2"] and named == ["v + 1", "v + 2"]
 
 
+def filter_clones(ir):
+    """Two filter occurrences of one program on the phrase's first two steps."""
+    ir["records"]["ins"][1]["filter"] = 1
+    ir["records"]["flttab"] = {1: {"a": 0x90, "b": 0, "k": 0, "next": 0}}
+    return [
+        occurrence("filter", (0, 0, 0), {"fpos": 1}, 0),
+        occurrence("filter", (0, 0, 4), {"fpos": 1}, 1),
+    ]
+
+
+def test_a_program_copy_selects_the_instrument_the_event_inherits():
+    ir = sw_ir("[C4.i1*4, D4*4]")
+    ramp, steep = "640 + 16*min(4, φ)", "1280 + 16*min(4, φ)"
+    out = convert.Rewrite(ir, obs_of(filter_clones(ir)), [ramp, steep]).run()
+    exprs = dict(out["exprs"].items())
+    at = {i: exprs[r["x"]] for i, r in out["records"]["flttab"].items() if "x" in r}
+    assert set(at.values()) == {ramp, steep} and len(at) == 2
+    (variant,) = [p["phrase"] for p in out["tracks"][0]["plays"]]
+    named = [e.get("instrument") for e in out["phrases"][variant]]
+    ins = out["records"]["ins"]
+    assert len({i for i in named if i is not None}) == 2
+    assert {ins[named[0]]["filter"], ins[named[1]]["filter"]} == set(at)
+    cut = [int(c) for c in regs(out, 60)[:, 22]]
+    assert list(dict.fromkeys(cut)) == [0, 80, 82, 84, 86, 88, 160, 162, 164, 166, 168]
+    assert cut.index(160) >= 24
+
+
+def test_a_program_copy_the_instrument_does_not_select_is_refused():
+    ir = sw_ir("[C4.i1*4, D4*4]")
+    ir["records"]["flttab"] = {1: {"a": 0x90, "b": 0, "k": 0, "next": 0}}
+    occs = [
+        occurrence("filter", (0, 0, 0), {"fpos": 1}, 0),
+        occurrence("filter", (0, 0, 4), {"fpos": 1}, 1),
+    ]
+    with pytest.raises(convert.ConversionError, match="does not name"):
+        convert.Rewrite(ir, obs_of(occs), ["1024 + 16*min(4, φ)", "2048 + 16*min(4, φ)"]).run()
+
+
+def test_one_event_playing_two_program_copies_is_refused():
+    ir = sw_ir("[C4.i1*4, D4*4]")
+    occs = filter_clones(ir)
+    occs[1].instance = (0, 0, 0)
+    with pytest.raises(convert.ConversionError, match="one event plays two"):
+        convert.Rewrite(ir, obs_of(occs), ["1024 + 16*min(4, φ)", "2048 + 16*min(4, φ)"]).run()
+
+
 def test_a_clone_without_a_naming_event_is_refused():
     ir = gt_ir("[C4.i1*4, D4*4]")
     occs = pulse_clones(ir)
