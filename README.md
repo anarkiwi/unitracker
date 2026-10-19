@@ -1,22 +1,18 @@
 # unitracker
 
-GoatTracker 2, defMON and SID-Wizard lifters to the generic C64 SID tracker document of
-[unitracker-grammar](https://github.com/anarkiwi/unitracker-grammar), which names no player
-and which [unitracker-player](https://github.com/anarkiwi/unitracker-player) plays; each lift
-ends by proving its document plays the native player's register grid. The lifters work in an
-internal form: a header naming its playroutine (integer cells, bounded accumulators, event
-handlers and modulator units, from the library in `src/unitracker/playroutines/`), then one
-timeline that defines each instrument, program, expression and phrase where it is first used.
-Rows and commands share one vocabulary across players, pitch, pulse and filter modulations are
-integer expressions in `v` and `φ` (`pw: 16*abs((φ - 32) % 128 - 64) + 512`, `!freq:x1`), and
-notes are named by real pitch.
+Lifters of GoatTracker 2, defMON and SID-Wizard tunes to the generic C64 SID tracker document of
+[unitracker-grammar](https://github.com/anarkiwi/unitracker-grammar), which names no player and
+which [unitracker-player](https://github.com/anarkiwi/unitracker-player) plays. Each lift ends by
+verifying its document on unitracker-player against the native player's register grid. The
+lifters decode each player by its playroutine declaration in `src/unitracker/playroutines/` and
+convert native pitch, pulse and filter modulations to proved integer expressions in `v` and `φ`.
 
 | doc | content |
 |---|---|
-| [docs/format.md](docs/format.md) | the format: an example and the index of its topic docs (document, vocabulary, expressions, playroutine schema, lifting) |
-| [docs/playroutines/](docs/playroutines/) | the playroutine [schema](docs/playroutines/schema.md), [lifting](docs/playroutines/lifting.md), and what each playroutine and its lifter support and refuse: [goattracker2](docs/playroutines/goattracker2.md), [sidwizard](docs/playroutines/sidwizard.md), [defmon](docs/playroutines/defmon.md) |
+| [docs/format.md](docs/format.md) | the generic document: an example and the index of its topic docs |
+| [docs/playroutines/](docs/playroutines/) | the playroutine [schema](docs/playroutines/schema.md), [lifting](docs/playroutines/lifting.md), and what each lifter decodes, covers and refuses: [goattracker2](docs/playroutines/goattracker2.md), [sidwizard](docs/playroutines/sidwizard.md), [defmon](docs/playroutines/defmon.md) |
 | [docs/modulation/modfit.md](docs/modulation/modfit.md) | modulation analysis and the proved conversion to expressions (`unitracker-modfit`) |
-| [docs/optimise.md](docs/optimise.md) | `unitracker-optimise`: passes, guarantee, report |
+| [docs/optimise.md](docs/optimise.md) | the optimiser's passes and guarantee |
 | [docs/porting.md](docs/porting.md) | bringing another playroutine to unitracker |
 
 ## Install
@@ -28,27 +24,25 @@ pip install -e ".[dev]"
 ## Use
 
 ```sh
-unitracker-lift TUNE.sid -o song.yaml [--subtune N]   # lift a GoatTracker 2, defMON or SID-Wizard .sid, verified on unitracker-player
-unitracker-lift TUNE.sid --internal [--embed]         # the lifter's internal, player-naming form
-unitracker-vm song.yaml --wav out.wav [--seconds 60] [--model 8580|6581]
-unitracker-vm song.yaml --check TUNE.sid                  # compare with the native player from each voice's first note
-unitracker-optimise song.yaml -o smaller.yaml [--report report.md]  # same output, fewer tokens
+unitracker-lift TUNE.sid -o doc.yaml [--subtune N] [--optimise]
 ```
+
+It writes the generic document and exits nonzero, with the verdict on its last line, when the
+document does not play the native grid on unitracker-player.
 
 ```python
-from unitracker.format import songio
-from unitracker.player.vm import SongPlayer
+from unitracker.lift import backends
 
-player = SongPlayer(songio.load("song.yaml"))
-grid = player.render_grid(3000)            # (ticks, 25) SID register grid
+lift = backends.lifter(raw)          # raw: the .sid bytes; subtune by default the header's
+lift.run()
+lift.document                        # the generic document's text
+lift.verdict                         # unitracker-player against the native grid
+backends.verify(text, raw, subtune)  # the verdict of any generic document
 ```
 
-`python tools/token_report.py song.yaml` counts a document's tokens per section (needs the `dev`
-extras).
-
-`tools/oracle_hvsc.py` holds the renderers for pysidtracker's survey: `render` lifts each
-subtune, writes it, reads it back and plays it, `native` plays the backend's own player; both are
-compared with the sidtrace oracle (lift failures are `library_error` rows):
+`tools/oracle_hvsc.py` holds the renderers for pysidtracker's survey: `render` lifts each subtune
+and plays its generic document on unitracker-player, `native` plays the backend's player; both
+are compared with the sidtrace oracle (lift failures are `library_error` rows):
 
 ```sh
 python -m pysidtracker.survey find $HVSC --out out/survey/tunes.csv --player 'goattracker|wizard|defmon'
@@ -63,31 +57,30 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 
 | question | tool |
 |---|---|
-| does a lifted song play its native player? | `unitracker-vm song.yaml --check TUNE.sid`; in code `SongPlayer.mismatch` |
-| does each export's generic document play its native player on unitracker-player, and where does it first differ? | `python tools/generic_check.py [DOC.yaml ...] [--csv sample.csv] [--out DIR]`; `tools/grid_diff.py --generic` for one tune's grids |
-| where and on which register does it first differ? | `python tools/grid_diff.py song.yaml TUNE.sid --ticks 3007 [--from T --to T]` |
-| do the three reference tunes still round-trip and match? | `python tools/reference_check.py OUTDIR [--forbid KEY ...]` |
+| does each export's generic document play its native player on unitracker-player? | `python tools/generic_check.py [DOC.yaml ...] [--csv sample.csv] [--out DIR]` |
+| where does a generic document first differ from the native grid, and on which register? | `python tools/grid_diff.py DOC.yaml TUNE.sid [--ticks N] [--from T --to T]` |
+| each reference tune's verify verdict | `python tools/reference_check.py OUTDIR [--forbid KEY ...]` |
 | the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
 | why did a modulator not become an expression? | `python tools/occurrences.py TUNE.sid [--unit freq\|pw\|cut]`, `unitracker-modfit exprs` |
 | what writes a unit's cell, and which starts inherit its value | `python tools/cell_writers.py goattracker2 sidwizard defmon` |
 | does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modulation/modfit.md](docs/modulation/modfit.md)) |
-| tokens per section of a document | `python tools/token_report.py song.yaml` |
+| tokens per section of the lifter's song (IR) text | `python tools/token_report.py SONG.yaml` |
 | what the canonical passes find, prove and refuse over many songs or tunes | `python tools/canonical_tally.py SONG.yaml\|TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
-| dead state, duplicate forms, unreached vocabulary | `unitracker-optimise song.yaml --report report.md` ([docs/optimise.md](docs/optimise.md)) |
 | does a lifter change alter any tune's lift? | `python tools/lift_snapshot.py OUTDIR SID ... [--plain]` before and after, then `diff -r` |
 | do the docs' relative links resolve? | `python tools/doc_links.py` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (above) |
-| lift (and `--check`) a tune list in parallel, results by cause | `python tools/lift_tally.py TUNES.csv --player SidWizard [--check 3007] [--registers 2,3]` |
+| lift a tune list in parallel, results by cause (`--check`: the lifter's song replayed on its VM against the native grid) | `python tools/lift_tally.py TUNES.csv --root $HVSC --player SidWizard [--check 3007] [--registers 2,3]` |
 | a random lifted sample, balanced over the three players | `python tools/sample_tunes.py $HVSC tunes.csv OUTDIR [--count N --seed S]` (from the survey's `find` csv; `sample.csv` records each attempt) |
-| how the written vocabulary is used over a corpus of documents (events, commands, row keys, expression operators) | `python tools/vocab_census.py out/sample128/*.yaml [--json OUT.json]` |
+| how the lifter's song (IR) text uses the vocabulary over a corpus (events, commands, row keys, expression operators) | `python tools/vocab_census.py out/sample128/*.yaml [--json OUT.json]` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `sw_fx`, `sw_table_byte`, `mini_song`, `table`, `hvsc_tune` |
 
 ## Layout
 
-`src/unitracker/`: `format/` (reading and writing documents, the shared vocabulary, event folds),
-`player/` (the lifter's VM, and `oracle`: unitracker-player with each voice's first note), `lift/` (detection, the `Lift` passes and the three lifters), `modfit/` (proved
-modulation conversion), `optimise/` (smaller documents), `analysis/` (format studies),
-`playroutines/` (the library).
+`src/unitracker/`: `format/` (the generic writer, the lifter's song serialisation, the shared
+vocabulary, event folds), `player/` (the lifter's VM, its analysis engine, and `oracle`:
+unitracker-player with each voice's first note), `lift/` (detection, the `Lift` stages and the
+three lifters), `modfit/` (proved modulation conversion), `optimise/` (the optimiser),
+`analysis/` (format studies), `playroutines/` (the lifters' decoding declarations).
 
 ## Test
 

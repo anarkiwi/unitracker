@@ -1,15 +1,16 @@
 # Shared vocabulary
 
-Program rows and commands use one vocabulary in every song, in chip units. No key or command is
-one player's own, and a record type is a player's own only as the fixed record of its state after
-init (defMON's `vinit` and `ginit`), which is written in the shared keys.
+The lifters decode every native row and command into one vocabulary, in chip units: the row keys
+and commands of the [generic document](document.md), whose meaning is unitracker-player's
+[semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md). No key or
+command is one player's own.
 
 | row key | meaning |
 |---|---|
-| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, which holds until a row of the player that plays it changes it, `v^n` both (see [The gate](#the-gate)) |
+| `ctrl` | the control register's waveform and mode bits; its bit 0 lets the gate through, so the register's bit 0 is `ctrl`'s bit 0 and `gate`; `^n` an exclusive-or mask over the register's other bits, which holds until a row with a mask changes it, `v^n` both (see [The gate](#the-gate)) |
 | `gate` | the gate, 0 off or 1 on (see [The gate](#the-gate)) |
 | `note` | `+n` / `-n` relative to the event note, or a note name (`G#5`) for an absolute note; omitted: no change |
-| `wait` | ticks before the row applies (see [Timing](#timing)) |
+| `wait` | ticks before the row applies |
 | `hold` | ticks the row lasts after applying; omitted: 1 |
 | `ad`, `sr` | envelope registers |
 | `pw` | the 12-bit pulse width, a value or an expression; `none` stops the voice's pulse program |
@@ -34,39 +35,24 @@ A command means one thing in every player; it applies from the step that carries
 | `!resfilt:r/m` | set `res` and `route` (a mask), as a row's keys of those names |
 | `!vol:n` | set the volume, the low nibble of `$D418` |
 | `!cut:n` | set the 11-bit cutoff |
-| `!tempo:n`, `!tempo:a/b` | set every voice's tempo, as the document's `tempo`: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks, two different tempos (`!tempo:6/6` is refused: it is `!tempo:6`) |
+| `!tempo:n`, `!tempo:a/b` | set every voice's tempo: `n` ticks per step, or a swing whose steps alternate `a` and `b` ticks |
 | `!vtempo:n`, `!vtempo:a/b` | set this voice's tempo |
 | `!freq:x` | drive the voice frequency by expression `x` until a note starts the instrument or another `!freq` (see [Lifetime of `!freq`](#lifetime-of-freq) and [Modulators](../modulation/expressions.md)) |
 | `!freq:none` | return the voice frequency to its instrument's `freq` |
 | `!legato` | the event's note does not retrigger; it needs a note (see [Legato](../modulation/expressions.md#legato)) |
 
-A playroutine takes the commands its `commands` and `lifetime` declare, over the
-arguments its codec accepts; each playroutine's file
-([goattracker2](../playroutines/goattracker2.md#commands),
+A playroutine's `commands` and `lifetime` declare the native commands its lifter decodes into
+these; each playroutine's file ([goattracker2](../playroutines/goattracker2.md#commands),
 [sidwizard](../playroutines/sidwizard.md#commands), [defmon](../playroutines/defmon.md#commands))
-lists them. A shared key means the same wherever it appears: in program rows, in fixed records, and
-in instruments, where `ctrl` names the program run on the control register, `pw` and `filter` the
-pulse and filter programs, and `restart` the hard restart. A row or command a player can't express
-is rejected on reading, naming the key or command and the player (`defmon: the player can't express
-!tempo:6`); the writer refuses to write a value that would not read back. A key, command or record
-type outside the playroutine's codec shapes, record types and the shared command names is refused
-with one message naming it and where it appeared (`unknown key k in pw`, `unknown command !mod in
-'-!mod:1'`, `unknown record type 'speedtab'`, `unknown key registers in document`), and so is a
-constant, table or `meta` key the playroutine and the document don't have (`unknown key adparam in
-playroutine.constants`, `unknown key foo in meta`).
-
-## Timing
-
-A row applies after its `wait` and lasts its `hold`. A `wait: n` row is `hold: +n` on the row
-before it, except on a program's entry row, which has no row before it, and on the row a loop
-returns to, which two rows precede; so both keys stay.
+lists them. A shared key means the same wherever it appears: in program rows and in instruments,
+where `ctrl` names the program run on the control register, `pw` and `filter` the pulse and
+filter programs, and `restart` the hard restart.
 
 ## The gate
 
 `ctrl` and `gate` each hold until a row sets them; a note, `off` and `on` set the gate as the
 player does. A row's `ctrl` leaves the gate as it is, but on a restart's first-tick row, where a
-`ctrl` sets the gate on: the row has no `gate`, and the reader refuses one beside the `ctrl`.
-A playroutine whose rows take a mask says which rows change it.
+`ctrl` sets the gate on. A playroutine whose rows take a mask says which rows change it.
 
 ## Chords
 
@@ -87,12 +73,11 @@ voice and the bits of `m`, `route: - m` removes them, and `m` is left out when i
 
 ## Hard restart
 
-A `restart` is a program (record type `restart`, prefix `r`) anchored to a note: its last row
-applies on the note's first tick, and each earlier row its `hold` ticks before the row after it.
-A row uses `hold`, `ctrl`, `gate`, `ad` and `sr`; a player may give a lookahead row's `ctrl` a
-further effect, which its file states where it defines the row (SID-Wizard's `ctrl: 24` also pauses
-the voice's tables). A note's restart is its instrument's
-(`restart: r1`) in every player:
+A `restart` is a program (prefix `r`) anchored to a note: its last row applies on the note's
+first tick, and each earlier row its `hold` ticks before the row after it. A row uses `hold`,
+`ctrl`, `gate`, `ad` and `sr`; a player may give a lookahead row's `ctrl` a further effect, which
+its file states where it defines the row (SID-Wizard's `ctrl: 24` also pauses the voice's
+tables). A note's restart is its instrument's (`restart: r1`) in every player:
 
 ```yaml
 restart:
@@ -101,80 +86,51 @@ restart:
 
 Four ticks before the note the gate goes off with envelope $0F00; on its first tick the control
 register takes $09 with the gate on. A note with `!legato` runs no restart, and an instrument
-without `restart` has none. A playroutine plays the shapes its codec accepts; a row's place in
-its program is part of its shape (see [Codecs](../playroutines/schema.md#codecs)).
+without `restart` has none. A row's place in its program is part of its shape (see
+[Codecs](../playroutines/schema.md#codecs)).
 
 A player whose notes arm the restart on the steps before them declares it with its [instrument
 columns](#instrument-columns), `event: {..., restart: c}`: the restart of a note's instrument is
-read as command `c` on the step its lookahead rows' holds put before the note, running those rows
-as a program of the command's record type, and that step must be empty. The writer folds such a
-command into its note's instrument when it is alone on its step, followed only by empty steps up
-to a note with a free command slot, and its program ends and fits in the steps.
+native command `c` on the step its lookahead rows' holds put before the note, running those rows
+as a program of the command's record type.
 
 ## Lifetime
 
 Whether a note restarts its instrument's pulse or filter program is a property of the note:
-`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. They need a note
-that names no instrument. A playroutine that plays them keeps the program by an instrument bit,
-and declares `lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`: `flag` is the instrument
-field and bit mask, and `field` the instrument key of the program (default: the slot's name). The
-writer puts the command on every note that names no instrument and plays one with the bit set,
-and the reader sets the bit from those notes; it refuses an instrument some of whose such notes
-carry it and others not, and the command on a note that names an instrument. A note that names
-no instrument plays the voice's last one (see [Walking the plays](#walking-the-plays)). A note
-played under instruments of which some keep a program and others restart it has no written form.
-A legato note restarts nothing, so the command adds nothing there.
+`!pw` and `!filter` mean it does not, as `!legato` means it does not retrigger. A playroutine
+that keeps the program by an instrument bit declares
+`lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}`: `flag` is the instrument field and bit
+mask, and `field` the instrument key of the program (default: the slot's name). A note that
+names no instrument plays the voice's last one. A legato note restarts nothing.
 
 ## Lifetime of `!freq`
 
 A `!freq:x` lasts until a note starts the instrument (a legato note does not) or another `!freq`
-replaces it; steps between, empty or with other commands, continue it, and a phrase writes the
-`!freq` it runs once (`!freq:x1` on a step after the same phrase's `!freq:x1` is refused, see
-[Running values](#running-values)). `!freq:none` returns the frequency to the instrument's `freq`
-before a note does, where the player can, and only where a `!freq` runs: the reader refuses it on
-a note that starts the instrument, after another `!freq:none`, and where no `!freq` runs.
+replaces it; steps between, empty or with other commands, continue it. `!freq:none` returns the
+frequency to the instrument's `freq` before a note does.
 
 A playroutine whose native `!freq` ends on a step that carries no command declares `lasts: step`
-on its `freq` entry. There the writer writes `!freq:none` on each step without a command after a
-`!freq`, and the reader repeats the running `!freq` on each step without one, which the phrase
-must have written (the reader refuses a step that continues the `!freq` of the phrase before). A
-step's command is what drives its frequency in such a player: a command that changes nothing is
-left out only where the step keeps another or the voice has no frequency to drive, and on an
-instrument without `freq` a `!freq` of `v`, which holds the frequency, is `!freq:none`.
+on its `freq` entry: there each step without a command after a `!freq` is `!freq:none`.
 
 ## Running values
 
-The writer and the reader walk each voice's plays (see [Walking the plays](#walking-the-plays))
-knowing what its commands have set. A command that sets what the voice already has changes
-nothing: the writer leaves it out, and the reader refuses it (`!tempo:16` after the phrase's
-`!tempo:16`, `C4.i1!ad:1` where `i1` has `ad: 1`). A phrase knows what its own commands set and
-what a note that starts an instrument the phrase names sets: the instrument's `ad` and `sr`, and,
-but in a player whose `!freq` lasts until a step without a command, its `freq`. It does not know
-a value something else may set: a key of a program row of the song (a control program's `ad`
-row), the song's tempo, volume or filter where another voice sets them too, and a voice's own
-registers and programs once a note starts the instrument. A program command restarts its
-program and a swing its alternation, so only stopping a program (`none`) can change nothing of
-theirs; for `!freq` see [Lifetime of `!freq`](#lifetime-of-freq).
+A command that sets what the voice already has changes nothing (`!tempo:16` after the phrase's
+`!tempo:16`, `C4.i1!ad:1` where `i1` has `ad: 1`). A note that starts an instrument sets the
+instrument's `ad` and `sr`, and its `freq`. A program command restarts its program and a swing
+its alternation, so only stopping a program (`none`) can change nothing of theirs.
 
 ## Envelope commands
 
 `!ad:n` and `!sr:n` are the byte the envelope register takes. A player whose envelope commands set
 one nibble over the instrument's byte (an envelope command entry, see
-[Codecs](../playroutines/schema.md#codecs)) has them written as the byte they write, in the slot of
-their column, from the voice's instrument (see [Walking the plays](#walking-the-plays)); the reader
-plays each byte as the nibble command that changes one nibble of the instrument's byte. A phrase
-whose bytes differ between the places it plays becomes one phrase per place.
-
-## Walking the plays
-
-What a command means can depend on what the voice played before it: the instrument a note that
-names none plays, and the byte an envelope command writes. The writer and the reader find it by
-walking each voice's plays, repeats written out, twice through its loop.
+[Codecs](../playroutines/schema.md#codecs)) has them decoded as the byte they write, from the
+voice's instrument. A phrase whose bytes differ between the places it plays becomes one phrase
+per place.
 
 ## Instrument columns
 
 A playroutine whose events arm programs directly, with no native instrument, declares
 `instrument: {type: t, base: b, event: {type: ins, column: k, commands: {c: f}}}`: an event's
 instrument column (record `t` at index value - `b`) is field `k` of an `ins` record and the
-argument of its command `c` field `f`. The writer names one instrument per combination of
+argument of its command `c` field `f`. The lifter names one instrument per combination of
 programs the events arm, and the event names that instrument.

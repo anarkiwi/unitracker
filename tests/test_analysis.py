@@ -1,8 +1,7 @@
-"""The analyses: the orthogonality report, the token studies and the note and duration spellings."""
+"""The analyses: dead state, unreached vocabulary, the token studies and the spellings."""
 
 import pytest
-from conftest import OPTIMISED
-from test_optimise import C1, I1, PULSE, RUN, RUN_TWICE, doc, ins_line, run
+from test_optimise import C1, I1, PULSE, RUN, doc, ins_line
 
 from unitracker.analysis import orthogonality, spelling, tokenstudy
 from unitracker.format import songio
@@ -62,32 +61,6 @@ def test_vocabulary_lists_shapes_and_commands_no_row_reaches():
     assert all("command `!run`" not in w for w, _ in found)
     uses = orthogonality.shape_uses(ir)
     assert uses[("ctrltab", 0)] >= 2 and orthogonality.command_uses(ir) == {"run": 4}
-
-
-def test_report_lists_a_known_redundancy_once_per_form():
-    result = run(doc(I1, "[C4*2, E4!ad:9*2, F4!ad:9*2, D4.i1*2]"), ["commands"])
-    report = orthogonality.report([("toy", result)])
-    assert report.startswith("# Orthogonality and redundancy")
-    key = report.split("## Non-orthogonal key")[1].split("##")[0]
-    assert "toy p1[1], p1[2]: `E4!ad:9*2` ≡ `E4*2`" not in key
-    assert "`E4!ad:9*2` ≡ `E4*2`" in key and "`F4!ad:9*2` ≡ `F4*2`" in key
-    assert "`D4.i1*2` ≡ `D4*2`" in key
-
-
-def test_report_lists_vocabulary_and_song_redundancy():
-    result = run(doc(I1, RUN_TWICE, C1, steps=16), ["hoist", "instruments"])
-    report = orthogonality.report([("toy", result)])
-    vocab = report.split("## Vocabulary redundancy")[1].split("##")[0]
-    assert "goattracker2 · toy i1: `X.i1!run:c1` ≡ `X.i1 with i1 + {ctrl: c1}`" in vocab
-    assert "## Song redundancy\n\n- none" in report
-
-
-def test_reference_tunes_report_is_independent_of_order(optimised_tunes):
-    songs = [(name, optimised_tunes[name][1]) for name in sorted(OPTIMISED)]
-    first = orthogonality.report(songs)
-    assert orthogonality.report(songs[::-1]) == first
-    assert "X.i3!run:c1" in first and "## VM dead state" in first
-    assert "defmon · field `restart.ad`" in first and "sidwizard · csillag codec shape" in first
 
 
 I2 = ins_line("i2", "ad: 4, ctrl: [{ctrl: 33, note: +0}, end]")

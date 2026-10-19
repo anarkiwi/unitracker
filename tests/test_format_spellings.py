@@ -1,9 +1,7 @@
 """One spelling per meaning: forms that play as another are refused by the reader, and the
 writer writes each meaning one way."""
 
-import importlib.util
 import itertools
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -605,12 +603,6 @@ def test_equal_records_are_one():
 
 # -- 14: the reader raises SongFormatError --
 
-PERTURB = importlib.util.spec_from_file_location(
-    "perturb", Path(__file__).resolve().parent.parent / "tools" / "perturb.py"
-)
-perturb = importlib.util.module_from_spec(PERTURB)
-PERTURB.loader.exec_module(perturb)
-
 
 def test_a_table_entry_outside_the_table_and_an_expression_where_none_goes_are_refused():
     text = canonical(doc("goattracker2", GT_DEFS, {"p1": "C4.i1*4"}))
@@ -622,23 +614,6 @@ def test_a_table_entry_outside_the_table_and_an_expression_where_none_goes_are_r
     refused(
         doc("sidwizard", sw.replace("PW", "8*φ + 100"), {"p1": "C4.i1*4"}), "holds no expression"
     )
-
-
-@pytest.mark.parametrize(
-    "pr,defs",
-    [
-        ("goattracker2", GT_ONE),
-        ("sidwizard", SW_ONE),
-        (
-            "defmon",
-            "      ctrl:\n        c1: [{ctrl: 65, gate: 1}, end]\n"
-            "      ins:\n        i1: {ctrl: c1}\n",
-        ),
-    ],
-)
-def test_the_reader_raises_only_its_own_error(pr, defs):
-    text = canonical(doc(pr, defs, {"p1": "C4.i1!tempo:7*4" if pr != "defmon" else "C4.i1*4"}))
-    assert not perturb.fuzz(text)
 
 
 # -- 15: a name is its type's prefix and a number --

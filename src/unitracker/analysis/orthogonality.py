@@ -1,8 +1,5 @@
-"""Where the format or the VM offers two ways to say one thing: the orthogonality report.
-
-The report lists what the optimiser proved by the register grid, a playroutine's dead state found
-statically, and the vocabulary no lifted row reaches.
-"""
+"""Where a playroutine or the VM offers two ways to say one thing: a playroutine's dead state
+found statically, and the vocabulary no lifted row reaches."""
 
 import ast
 import itertools
@@ -31,15 +28,6 @@ VOCABULARY = "vocabulary redundancy"
 KEY = "non-orthogonal key"
 DEAD = "VM dead state"
 UNREACHABLE = "unreachable vocabulary"
-SONG = "song redundancy"
-KINDS = (VOCABULARY, KEY, DEAD, UNREACHABLE, SONG)
-LEGEND = (
-    "Written by `unitracker-optimise --report`: the optimiser's edits the register grid proves"
-    " (kept, or proved but not kept when they write more tokens), the playroutines' dead state"
-    " found statically, and the vocabulary no lifted row reaches. One line per finding: player"
-    " · place: the two forms; *the proposed resolution*. Places and names are those of the"
-    " document each edit was proved on, which the optimiser renumbers as it goes."
-)
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _MAX_COMBINATIONS = 1 << 12
 
@@ -53,57 +41,6 @@ class Line:
     where: str
     forms: str
     resolution: str
-
-    def text(self) -> str:
-        """The report line."""
-        return f"- {self.players} · {self.where}: {self.forms}. *{self.resolution}*"
-
-
-# ---- the optimiser's proved edits ------------------------------------------------------
-
-_EDIT_KINDS = {
-    "hoist": (VOCABULARY, "canonicalise: a command every note of an instrument carries is a field"),
-    "drop_command": (KEY, "canonicalise: the writer drops a command its context already plays"),
-    "drop_instrument": (KEY, "canonicalise: name an instrument only where the voice changes it"),
-    "drop_keep": (KEY, "canonicalise: !pw and !filter only where the note restarts one"),
-    "merge": (SONG, "optimiser: one record for two that play alike"),
-    "truncate": (SONG, "optimiser: rows no start reaches drop"),
-    "reloop": (SONG, "optimiser: a loop is written with its shortest cycle"),
-    "alias": (SONG, "optimiser: one phrase for two that play alike"),
-    "factor": (SONG, "optimiser: a repeating phrase is plays of its part"),
-    "stitch": (SONG, "canonicalise: a modulation the lift wrote shattered is one expression"),
-    "hold": (SONG, "canonicalise: a !freq that holds the frequency is !freq:none"),
-    "staircase": (SONG, "canonicalise: a staircase of values is one expression"),
-}
-_CLEAR = {
-    "fixed": "codec rule: the lifter leaves out initial state the song overwrites unheard",
-    "chain": "codec rule: a program row key the context already gives is left out",
-    "record": "canonicalise: an instrument field with no effect where it plays is left out",
-}
-
-
-def _clear_kind(ir: dict, tname: str) -> str:
-    rtype = view(ir).rtypes[tname]
-    return "fixed" if rtype.fixed else ("chain" if rtype.chain is not None else "record")
-
-
-def from_findings(label: str, ir: dict, findings: list) -> list:
-    """Report lines for the optimiser's proved edits of song ``label``, alike ones joined."""
-    groups = {}
-    for found in findings:
-        op = found.edit[0]
-        if op == "clear":
-            kind, resolution = KEY, _CLEAR[_clear_kind(ir, found.edit[1][0])]
-        else:
-            kind, resolution = _EDIT_KINDS[op]
-        where, before, after = found.forms
-        forms = f"`{before}` ≡ `{after}`"
-        key = (kind, ir["playroutine"]["name"], forms, resolution)
-        groups.setdefault(key, []).append(f"{where}{'' if found.kept else ' (not kept)'}")
-    return [
-        Line(kind, player, f"{label} {', '.join(places)}", forms, resolution)
-        for (kind, player, forms, resolution), places in groups.items()
-    ]
 
 
 # ---- static analysis of a playroutine ---------------------------------------------------
@@ -548,30 +485,3 @@ def _unreached(label: str, ir: dict) -> list:
 
 def _cname(pr: dict, code: int, variant: dict) -> str:
     return str(variant.get("name") or written_as(pr, code))
-
-
-# ---- the report ----------------------------------------------------------------------
-
-
-def lines(songs: list) -> list:
-    """Every finding for ``songs`` (``(label, optimiser Result)``), sorted and unique."""
-    out = []
-    for label, result in songs:
-        out += from_findings(label, result.source, result.findings)
-    prs = {r.source["playroutine"]["name"]: r.source["playroutine"] for _, r in songs}
-    for pr in prs.values():
-        out += dead_state(pr)
-    out += vocabulary([(label, r.source) for label, r in songs])
-    return sorted(set(out), key=lambda ln: (KINDS.index(ln.kind), ln.players, ln.where, ln.forms))
-
-
-def report(songs: list) -> str:
-    """The orthogonality report as Markdown: one section per kind, one line per finding."""
-    found = lines(songs)
-    out = ["# Orthogonality and redundancy", "", LEGEND, ""]
-    for kind in KINDS:
-        mine = [ln for ln in found if ln.kind == kind]
-        out += [f"## {kind[0].upper()}{kind[1:]}", ""]
-        out += [ln.text() for ln in mine] or ["- none"]
-        out.append("")
-    return "\n".join(out)

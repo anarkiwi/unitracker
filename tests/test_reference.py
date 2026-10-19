@@ -14,6 +14,7 @@ from unitracker.format import songio
 from unitracker.format.codec import COMMAND_NAMES, ROW_KEYS
 from unitracker.format.yamlstyle import parse
 from unitracker.lift import backends, verify
+from unitracker.player import oracle
 from unitracker.player.vm import SongPlayer, first_mismatch
 
 TUNES = ("metal_warrior", "crosseyed", "csillag")
@@ -72,7 +73,7 @@ def test_the_document_round_trips_and_plays_its_native_player(references, name):
 
 def test_the_format_example_is_the_metal_warrior_document(references):
     example = (ROOT / "docs" / "format.md").read_text().split("```yaml\n", 1)[1].split("```", 1)[0]
-    assert elided_in(example, references["metal_warrior"].text)
+    assert elided_in(example, references["metal_warrior"].generic)
 
 
 def test_flushes_rebuild_the_grid(references):
@@ -127,37 +128,18 @@ def test_the_generic_document_plays_unitracker_player_to_its_known_difference(re
 
 
 @pytest.mark.parametrize("name", TUNES)
-def test_the_tools_lift_detect_and_check_each_tune(references, name, tmp_path, capsys):
+def test_the_lift_tool_writes_the_generic_document_and_its_verdict(
+    references, name, tmp_path, capsys
+):
     ref = references[name]
     assert backends.detect(ref.raw) == BACKEND[name]
-    out, wav = tmp_path / "song.yaml", tmp_path / "song.wav"
-    argv = (
-        [str(ref.sid), "--internal"] if name == "metal_warrior" else [str(ref.sid), "-o", str(out)]
-    )
+    out = tmp_path / "doc.yaml"
+    argv = [str(ref.sid)] if name == "metal_warrior" else [str(ref.sid), "-o", str(out)]
     assert cli.lift_main(argv) == 1
     captured = capsys.readouterr()
     tick, reg = GENERIC[name]
     assert captured.err.splitlines()[-1].startswith(f"mismatch: tick {tick}, register ${reg:02X}")
-    if name == "metal_warrior":
-        assert captured.out == ref.text
-    else:
-        assert out.read_text() == ref.generic
-    out.write_text(ref.text)
-    argv = [str(out), "--seconds", "3", "--check", str(ref.sid)]
-    if name == "metal_warrior":
-        argv += ["--wav", str(wav)]
-    assert cli.play_main(argv) == 0
-    assert "match: 150 ticks" in capsys.readouterr().out
-    if name != "metal_warrior":
-        return
-    assert wav.stat().st_size > 10000
-    song = ref.ir()
-    for event in (e for events in song["phrases"].values() for e in events):
-        if isinstance(event.get("note"), int):
-            event["note"] += 1
-    songio.dump(song, out)
-    assert cli.play_main([str(out), "--seconds", "3", "--check", str(ref.sid)]) == 1
-    assert "mismatch: tick" in capsys.readouterr().out
+    assert (captured.out if name == "metal_warrior" else out.read_text()) == ref.generic
 
 
 def test_an_unknown_format_is_refused(references):
@@ -171,10 +153,8 @@ def test_the_survey_renderer_plays_the_document_as_the_native_player(references)
     ref, tool = references["metal_warrior"], str(ROOT / "tools" / "oracle_hvsc.py")
     grid, info = load_render(tool)(ref.raw, 1, 300)
     assert grid.shape == (300, 25) and grid.dtype.name == "int16"
-    assert info["backend"] == "goattracker2" and info["chars"] > 0
-    song = SongPlayer(ref.ir())
-    assert (grid == song.render_grid(300)).all()
-    assert first_mismatch(grid, ref.native[:300], song.starts) is None
+    assert info == {"backend": "goattracker2", "chars": len(ref.generic)}
+    assert (grid == oracle.play(ref.generic, 300)[0]).all()
     grid, info = load_render(tool.replace(".py", ".py:native"))(ref.raw, 1, 100)
     assert info == {"backend": "goattracker2"} and (grid == ref.native[:100]).all()
 

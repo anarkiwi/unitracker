@@ -72,7 +72,7 @@ restart: 1}}`.
 
 - `.i3` names the instrument: its `ctrl` is the sidTAB program sidcall layer A starts (the
   event's instrument column), its `filter` the one layer B starts (the event's command), and a
-  layer the instrument leaves out keeps running. The writer names one instrument per pair of
+  layer the instrument leaves out keeps running. The lifter names one instrument per pair of
   programs the events arm (`{ctrl: c1, filter: c2}`, `{filter: c2}` on an event that arms only
   layer B), so `C2.i4` and `-.i5` are a note and an empty step arming them. An instrument's
   `restart` arms layer B on the steps before the note (see Hard restart), so the notes of one
@@ -82,9 +82,8 @@ restart: 1}}`.
 
 ## Commands
 
-The player takes no shared command: each is refused by name (`defmon: the player can't express
-!tempo:6`), and so is a document's `tempo`: timing is the timeline's, and the volume is fixed at
-15.
+No native code decodes as a shared command, and the lifted song has no `tempo`: a step is one
+tick, and the volume is fixed at 15.
 
 ## Control programs
 
@@ -158,15 +157,15 @@ defMON has no instrument restart: composers run a short sidTAB program on layer 
 steps before a note. The playroutine declares this with `event: {..., restart: 1}` (see
 [Hard restart](../format/vocabulary.md#hard-restart)): the `restart` of a note's instrument reads
 as a layer-B start (the event command an instrument's `filter` is) of a sidTAB program of the
-lookahead rows, the last one frozen, holding until the note. The writer folds such a start back
+lookahead rows, the last one frozen, holding until the note. The lifter folds such a start back
 before it names the events' instruments, as vocabulary.md says, when its program also sets no
 column but `dl`, `wgh`, `wgl`, `ad` and `sr`. The note's own sidTAB program starts on its first
 tick, so the restart's last row is empty.
 
 ## Lifetime
 
-`!pw` and `!filter` are refused: an instrument's programs start on every event that names
-it.
+No event decodes as `!pw` or `!filter`: an instrument's programs start on every event that
+names it.
 
 ## Modulators
 

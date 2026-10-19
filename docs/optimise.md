@@ -1,25 +1,10 @@
-# unitracker-optimise
+# The optimiser
 
-`unitracker-optimise` rewrites a song as a document with fewer tokens that plays the same register
-grid. Size is the token count of the written text under `cl100k_base` (`tiktoken`). The code is
-`unitracker.optimise`.
-
-```sh
-unitracker-optimise song.yaml -o smaller.yaml [--passes hoist,commands] [--workers N] [--report report.md]
-unitracker-lift TUNE.sid -o song.yaml --optimise    # every pass, default workers
-```
-
-## Options
-
-| option | meaning |
-|---|---|
-| `song` | the input document |
-| `-o`, `--output` | where to write the result; standard output when absent |
-| `--passes` | comma-separated pass names, run in the order given; default every pass in the order of the table below; an unknown name is an error |
-| `--workers` | processes screening candidates; default the host's cores; `1` screens in-process |
-| `--report MD` | write the report (see Report) to `MD` |
-
-The token counts before and after are printed to standard error.
+`unitracker.optimise` rewrites the lifter's song smaller with the same register grid, each edit
+proved by replaying the song on the lifter's VM against the input's grid. Size is the token count
+of the song's serialised text under `cl100k_base` (`tiktoken`). Its canonical passes are the
+`canonical` stage of `Lift` ([Lifting](playroutines/lifting.md)); `unitracker-lift TUNE.sid
+--optimise` runs every pass, in the order of the table below, before the verify stage.
 
 ## Passes
 
@@ -53,9 +38,8 @@ Pinned records are never dropped by `merge` nor rewritten by `truncate` or `relo
 ### Canonical passes
 
 The first five passes (`optimise.CANONICAL`) write modulation the lift wrote shattered in its
-canonical form. They read only the internal song: phrases of events and their shared commands,
-and expressions in `v` and `φ`; the codec decides on reading the written text whether a rewrite
-is writable for the player.
+canonical form. They read only the lifter's song: phrases of events and their shared commands,
+and expressions in `v` and `φ`.
 
 A run is a phrase's consecutive events each carrying the pass's command, with no note after its
 first. A `!freq` run is cut into groups, consecutive events that name one expression, each one
@@ -71,17 +55,17 @@ run where `!freq` lasts a step (`lasts: step`), else on its first step alone.
 grammar's rank. No playroutine has an expression form of `!cut`, `!ad`, `!sr` or `!vol` yet, so
 `staircase` rewrites nothing until one does.
 
-A canonical pass is not screened candidate by candidate: each candidate whose written text reads
-back and is no larger is applied together with the others, the composite is proved once, and a
+A canonical pass is not screened candidate by candidate: each candidate that is no larger is
+applied together with the others, the composite is proved once, and a
 refused composite is split in halves, each kept where it proves, so `k` refused candidates of `n`
-cost `O(k log n)` proofs; a refused part of at most `--workers` candidates is screened in one
+cost `O(k log n)` proofs; a refused part of at most `workers` candidates is screened in one
 parallel batch, and the composite of those that prove alone is proved in turn. A pass that keeps
-its candidates is not run again on its own text. `Result.tally` counts each pass's candidates `found`, `refused` (no
-written form, or refused on reading the written text) and `proved`.
+its candidates is not run again on its own result. `Result.tally` counts each pass's candidates
+`found`, `refused` and `proved`.
 
 ## The guarantee
 
-The output plays the input's register grid in the song's own state: every voice's registers from
+The result plays the input's register grid in the song's own state: every voice's registers from
 the tick its first note starts, the filter and volume registers from the earliest start
 (`first_mismatch`), and the voices' start ticks equal the input's.
 
@@ -95,16 +79,10 @@ The check (`proof.mismatch`) is exact, not sampled:
 4. A candidate that fails to play, whose state does not recur, or whose bound exceeds
    `reach.MAX_TICKS` is unproved and never kept.
 
-What is checked is the candidate's written text read back (`songio.loads(songio.dumps(...))`), so
-the canonical writer's own rewriting ([Canonical form](format/document.md#canonical-form)) is inside
-the check. A song that cannot be written with its playroutine by `ref` is written embedded
-([Embedding](format/document.md#embedding)).
-
 ### Resuming from the input
 
 A candidate plays exactly as the input until it first reads a datum the two hold differently, so
-its trace need not start at tick 0. The input's read-back, when it plays the input's grid, is
-played once as a `Baseline` (`unitracker.player.checkpoint`), kept on the input's trace:
+its trace need not start at tick 0. The input, when it plays its own grid, is played once as a `Baseline` (`unitracker.player.checkpoint`), kept on the input's trace:
 
 | it notes | |
 |---|---|
@@ -120,30 +98,14 @@ else plays from tick 0. The verdict is the full replay's.
 
 | step | what happens |
 |---|---|
-| screen | each candidate is applied, written, counted, read back and checked in a process pool; a candidate whose text is unchanged is skipped; `factor` and `share` are checked only when they shrink the text; a pass is not screened again on a text it kept nothing from |
-| keep | the proved candidates are applied in candidate order, each kept in the run only if it shrinks the running text; the longest prefix of that run whose text proves is kept, found by bisection |
+| screen | each candidate is applied, counted and checked in a process pool; a candidate that leaves the song unchanged is skipped; `factor` and `share` are checked only when they shrink the song; a pass is not screened again on a song it kept nothing from |
+| keep | the proved candidates are applied in candidate order, each kept in the run only if it shrinks the running song; the longest prefix of that run that proves is kept, found by bisection |
 | settle | a canonical pass instead keeps its candidates together, bisecting a refused composite (see [Canonical passes](#canonical-passes)) |
 | repeat | a pass repeats while it keeps an edit; the passes repeat until none does |
-| canonical | after each round the text is read and rewritten; a rewrite that differs is checked again (failure is an error) and starts another round |
+| canonical | after each round the song is normalised to its serialised form; a song that changes is checked again (failure is an error) and starts another round |
 
-The current song is always the current text read back, so a pass's screen depends only on that
-text. One pool of `--workers` spawned processes, each holding the input's trace, screens every pass
-and is stopped when the optimiser finishes. Screening results are ordered by candidate index, so
-the output does not depend on `--workers`.
-The output is canonical: `dumps(loads(text)) == text`.
-
-## Report
-
-`--report` writes `analysis.orthogonality.report` as Markdown: one section per kind, one line per
-finding (`player · place: the two forms; resolution`), alike findings joined.
-
-| section | contents |
-|---|---|
-| Vocabulary redundancy | proved `hoist` edits |
-| Non-orthogonal key | proved `drop_command`, `drop_keep`, `drop_instrument` and `clear` edits |
-| VM dead state | the input playroutine's cells, procs, fields and constants that nothing reads or names, and tests that every value their cells take decides alike, found statically |
-| Unreachable vocabulary | shared row keys no player's codec writes, shared commands no player names, and the input's codec shapes and commands no lifted row or event uses |
-| Song redundancy | proved `merge`, `truncate`, `reloop`, `alias`, `factor`, `stitch`, `hold` and `staircase` edits |
-
-Every proved edit is listed, kept or not; one proved but not kept is marked `(not kept)`. Places
-and names are those of the document the edit was proved on.
+A pass's screen depends only on the current song. One pool of `workers` spawned processes (by
+default `$UNITRACKER_WORKERS`, else one per core the process may run on; `1` screens in-process),
+each holding the input's trace, screens every pass and is stopped when the optimiser finishes.
+Screening results are ordered by candidate index, so the result does not depend on `workers`.
+`optimise(song, passes, workers)` takes the pass names to run in order, by default every pass.

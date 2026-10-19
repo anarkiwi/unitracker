@@ -21,7 +21,7 @@ The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame,
 | `ins` | instrument header | keys `ad`, `sr`, `ctrl`, `pw`, `filter`, `freq`, `restart`; the header's vibrato is its `freq` expression, its hard-restart bytes and control bits 0-3 its `restart`, control bits 6 and 7 its notes' `!pw` and `!filter` (see Lifetime), and its octave shift is in the notes it plays, each written as the pitch it sounds |
 | `ctrl` | WF/arp table (`wftab`) | see Control programs |
 | `pw` | pulse table (`pwtab`) | set rows use `pw`; a program with a sweep or keyboard-tracked row is its `pw` expression |
-| `filter` | filter table (`flttab`) | set rows use `mode` (bits 4-6), `cut` and `res`; a program with a sweep or keyboard-tracked row is its `cut` expression; `route` is refused |
+| `filter` | filter table (`flttab`) | set rows use `mode` (bits 4-6), `cut` and `res`; a program with a sweep or keyboard-tracked row is its `cut` expression; no row decodes a `route` |
 | `restart` | the header's hard-restart bytes | see Hard restart |
 
 A note is read as the player's note with no octave shift, which plays the same pitch.
@@ -44,11 +44,9 @@ row rests, as the end does.
 
 `.i3` names the instrument. The first slot is the instrument column and the second the FX
 column. `!ad` and `!sr` play in the column of their slot (see Commands); `!freq`, `!legato`,
-`!run` and the timing commands play in their own. The FX column holds one command, so an event
-whose two commands both play there is refused, naming both (`sidwizard: the player can't play
-!tempo and !freq on one event of phrase p1`); a pair is played when one of them is an
-instrument-column form (`!ad` or `!sr` in the first slot of an event that names no instrument,
-`!run` on such an event) or `!legato`.
+`!run` and the timing commands play in their own. The FX column holds one command; an event's
+other command is an instrument-column form (`!ad` or `!sr` in the first slot of an event that
+names no instrument, `!run` on such an event) or `!legato`.
 
 ## Commands
 
@@ -64,7 +62,6 @@ instrument-column form (`!ad` or `!sr` in the first slot of an event that names 
 | `!freq` | `x` name |
 | `!legato` | no argument |
 
-Every other command is refused by name.
 
 - `!run` plays a chord: it is a chord small FX ($7x), which holds until the voice's next note, so
   on a note it is `!run` of the instrument's program with that chord inlined. It plays in the
@@ -73,10 +70,9 @@ Every other command is refused by name.
 - `!ad` and `!sr` are the envelope small FX ($2x attack, $3x decay, $5x sustain, $6x release;
   playroutine codes $12x-$16x from the instrument column), each setting one nibble's override, which
   clears the other nibble's of that register and lasts until the voice's next note start (see
-  [Envelope commands](../format/vocabulary.md#envelope-commands)). The reader plays each byte as the
-  small FX that changes one nibble of the instrument's byte (the attack or sustain nibble when the
-  byte is the instrument's). An FX-column one alone on a row that starts no note is written in the
-  first slot, which plays the same.
+  [Envelope commands](../format/vocabulary.md#envelope-commands)). Each decodes as the byte it makes of
+  the instrument's. An FX-column one alone on a row that starts no note decodes into the first
+  slot, which plays the same.
 - The tempo FX apply on the row's TICK_2 with its other FX: $10 (`!tempo:n`, playroutine code
   $12, as $10 is `!freq`) sets every voice's tempo pair to its value, $13 (`!vtempo:n`) this
   voice's, $11 (`!tempo:a/b`) every voice's to its nibbles and $14 (`!vtempo:a/b`) this voice's.
@@ -104,13 +100,12 @@ Every other command is refused by name.
 - A WF row with `a` $7F plays the chord: the lifter inlines the chord's offsets there, each row
   with that row's waveform, which the player writes on every chord step. Chords have no record
   type of their own.
-- A control mask (`ctrl: ^n`) is refused.
 
 ## Filter
 
 Filter set rows set `res` and `mode`; there is no routing in a row: the player routes the filter
 to every voice whose instrument has a filter program, so the routing depends on what the other
-voices play, and `route` is refused. The volume is not covered.
+voices play, and no row decodes a `route`. The volume is not covered.
 
 ## Hard restart
 
@@ -119,14 +114,14 @@ voices play, and `route` is refused. The volume is not covered.
 | at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform) or `{gate: 1}` |
 
 A note sets the gate on itself, so the first-tick row always does, and a restart of that row alone
-is none: the reader refuses it.
+decodes as none.
 
 ## Lifetime
 
 `!pw` and `!filter` are the header's control bits 6 and 7 (`flag` `{flags: 0x40}` and
 `{flags: 0x80}`), which keep the program running on a note that selects no instrument. A note
-that names an instrument restarts both programs. A phrase note played under instruments of which
-one keeps a program and another restarts it is refused when writing.
+that names an instrument restarts both programs. The lift fails on a phrase note played under
+instruments of which one keeps a program and another restarts it.
 
 ## Modulators
 
