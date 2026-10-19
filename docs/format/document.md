@@ -156,4 +156,6 @@ The writer produces one text per song:
 - a phrase whose envelope bytes differ between the places it plays is split into one phrase per
   place (see [Envelope commands](vocabulary.md#envelope-commands)), the inverse of the merge.
 
-Writing what the reader returns gives the same bytes.
+Writing what the reader returns gives the same bytes. The canonical text is the language of
+[`canonical.lark`](../../src/unitracker/format/canonical.lark) (`unitracker.format.canonical.parse`),
+which fixes every byte but the position of a line wrap inside a flow collection.

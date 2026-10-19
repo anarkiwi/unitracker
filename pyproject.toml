@@ -21,6 +21,7 @@ dependencies = [
     "z3-solver>=4.12",
     "sympy>=1.12",
     "tiktoken>=0.7",
+    "lark>=1.2",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +37,7 @@ unitracker-optimise = "unitracker.cli:optimise_main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-unitracker = ["playroutines/*.yaml", "modfit/specs.yaml"]
+unitracker = ["playroutines/*.yaml", "modfit/specs.yaml", "format/*.lark"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
