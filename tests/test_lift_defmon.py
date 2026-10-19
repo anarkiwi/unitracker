@@ -8,7 +8,7 @@ import pytest
 from pydefmon import DefmonPlayer
 from conftest import CACHE
 from pysidtracker.testing import resolve_tune
-from test_format_codec import defmon_doc
+from irs import song as ir_song
 
 from unitracker.lift import defmon as dm
 from unitracker.modfit.convert import window
@@ -283,8 +283,19 @@ def flipped(song, tick=None):
     return SimpleNamespace(grid=lambda ticks: grid[:ticks])
 
 
+def init_song() -> dict:
+    """A silent defMON song whose voice init sets a pulse width and note C3."""
+    return ir_song(
+        "defmon",
+        records={"ginit": {0: {}}, "vinit": {0: {"pw": 0x100, "sacc": 0, "tbase": 60}}},
+        phrases={"p1": [{"steps": 4}]},
+        play=["p1"] * 3,
+        loop=0,
+    )
+
+
 def test_an_unheard_init_note_is_dropped_and_a_heard_frequency_refused():
-    ir = defmon_doc({"pw": 0x100, "note": "C3"})
+    ir = init_song()
     assert dm.unheard_init(flipped(ir), ir)["records"]["vinit"][0] == {"pw": 0x100, "sacc": 0}
     ir["phrases"]["p1"] = [{"note": 60, "steps": 4}]
     with pytest.raises(dm.LiftError, match="the init's frequency registers are heard: tick 3"):

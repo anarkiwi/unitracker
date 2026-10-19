@@ -1,16 +1,17 @@
 """Each expression's native firing schedule over the generic document's modulators.
 
-    python tools/firing_schedule.py DOC.yaml [--cell pw:0] [--ticks A:B]
+    python tools/firing_schedule.py TUNE.sid [--subtune N] [--cell pw:0] [--ticks A:B]
 
-Prints, per expression a modulator of the cell plays in the document before re-timing (with
-``--timed``, after), its modulators' distinct schedules (the ticks the native unit holds, by
-``φ``) and whether they agree; with ``--ticks``, each tick's native occurrence and the generic
-modulator's ``φ``.
+Prints, per expression a modulator of the cell plays in the lifted tune's generic document
+before re-timing (with ``--timed``, after), its modulators' distinct schedules (the ticks the
+native unit holds, by ``φ``) and whether they agree; with ``--ticks``, each tick's native
+occurrence and the generic modulator's ``φ``.
 """
 
 import argparse
 import os
 from collections import Counter
+from pathlib import Path
 
 MAX_TICKS, TICKS = 100_000, 3007
 
@@ -33,7 +34,7 @@ def schedules(native, text: str, want) -> dict:
 
 def report(found: dict, shown: int) -> None:
     """Print each expression's distinct schedules, the most frequent ``shown`` of them."""
-    from unitracker.format import retime  # pylint: disable=import-outside-toplevel
+    from unitracker.document import retime  # pylint: disable=import-outside-toplevel
 
     for (key, expr), mods in sorted(found.items()):
         merged = retime.merged(retime.Schedule(frozenset(m[0]), m[1]) for m in mods)
@@ -61,28 +62,41 @@ def trace(native, text: str, want, lo: int, hi: int) -> None:
         print(t, "native", occ, native.texts.get(occ), "generic (φ, start)", phis.get(t))
 
 
+def run(ir: dict, cell=None, ticks=None, timed: bool = False, shown: int = 6) -> None:
+    """Print the report of song ``ir``: ``cell`` a ``(key, voice)`` (None: every cell),
+    ``ticks`` an ``(A, B)`` to trace cell's ticks over, ``timed`` the re-timed document's
+    modulators, ``shown`` the schedules shown per expression."""
+    from unitracker import document  # pylint: disable=import-outside-toplevel
+    from unitracker.document import writer  # pylint: disable=import-outside-toplevel
+
+    native = document.native_state(ir, MAX_TICKS, TICKS)
+    text = document.write(ir, native) if timed else writer.untimed(ir, native)[0]
+    report(schedules(native, text, cell), shown)
+    if ticks and cell:
+        trace(native, text, cell, *ticks)
+
+
 def main(argv=None) -> int:
     """Command-line entry."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("doc")
+    parser.add_argument("sid", type=Path)
+    parser.add_argument("--subtune", type=int, help="the subtune from 1 (default: the header's)")
     parser.add_argument("--cell", help="KEY:VOICE (voice from 0) or cut")
     parser.add_argument("--ticks", help="A:B, the ticks to list")
     parser.add_argument("--shown", type=int, default=6, help="schedules shown per expression")
     parser.add_argument("--timed", action="store_true", help="the re-timed document's modulators")
     args = parser.parse_args(argv)
     os.environ.setdefault("UNITRACKER_WORKERS", "1")
-    from unitracker.format import generic, songio  # pylint: disable=import-outside-toplevel
+    from unitracker.lift import backends  # pylint: disable=import-outside-toplevel
 
-    ir = songio.load(args.doc)
-    native = generic.native_state(ir, MAX_TICKS, TICKS)
-    text = generic.dumps(ir, native) if args.timed else generic.untimed(ir, native)[0]
-    want = None
+    subtune = None if args.subtune is None else args.subtune - 1
+    ir = backends.lifter(args.sid.read_bytes(), subtune).run()
+    cell = None
     if args.cell:
         key, _, voice = args.cell.partition(":")
-        want = (key, int(voice) if voice else None)
-    report(schedules(native, text, want), args.shown)
-    if args.ticks and want:
-        trace(native, text, want, *(int(x) for x in args.ticks.split(":")))
+        cell = (key, int(voice) if voice else None)
+    ticks = tuple(int(x) for x in args.ticks.split(":")) if args.ticks else None
+    run(ir, cell, ticks, args.timed, args.shown)
     return 0
 
 

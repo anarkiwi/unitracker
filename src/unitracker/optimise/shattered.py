@@ -1,4 +1,4 @@
-"""The canonical passes: modulation written shattered, found on the internal song.
+"""The canonical passes: modulation written shattered, found on the lifter's song.
 
 A ``!freq`` run's groups (one per occurrence) play as one expression ``E`` where
 ``E(φ + S_k) = e_k(φ)`` over each group's firings, ``S_k`` the firings before group ``k``
@@ -12,10 +12,10 @@ import sympy
 import z3
 from sympy.core.function import AppliedUndef
 
-from unitracker.format.codec import EXPR, NONE, CodecError, command_code
-from unitracker.format.events.lifetime import starts
-from unitracker.format.refs import entries, slots, view
-from unitracker.format.xexpr import ExpressionError, canonical
+from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code
+from unitracker.document.events.lifetime import starts
+from unitracker.optimise.refs import entries, slots, view
+from unitracker.playroutine.xexpr import ExpressionError, canonical
 from unitracker.modfit import convert
 from unitracker.modfit import grammar as G
 from unitracker.modfit.phase import Order, _clipped, _ramp, by_phase, shortest_lasso

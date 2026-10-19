@@ -162,10 +162,9 @@ decodes as `!pw` or `!filter` without an argument.
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!filter:none!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
-- `!freq` is command 16 with `lasts: step` (see [Lifetime of
-  `!freq`](../format/vocabulary.md#lifetime-of-freq)); `!freq:none` is command 16 with 0, which
-  plays as a step without a command, and the same `!freq` on the next step continues the
-  occurrence (`φ` keeps counting). A note's steps without a command run the instrument's `freq`
+- `!freq` is command 16 with `lasts: step` (see [Lifetime](schema.md#lifetime)); `!freq:none`
+  is command 16 with 0, which plays as a step without a command, and the same `!freq` on the
+  next step continues the occurrence (`φ` keeps counting). A note's steps without a command run the instrument's `freq`
   expression.
 - Commands 1-4 and the instrument vibrato are the `command` unit's own firings: the lifter writes
   the commands' modulations as `!freq`, and the instrument vibrato as the instrument's `freq`,

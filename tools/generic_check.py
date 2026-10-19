@@ -1,10 +1,13 @@
-"""Verify lifted documents on unitracker-player against their tunes' native register grids.
+"""Verify tunes' lifted generic documents on unitracker-player against their native grids.
 
-    python tools/generic_check.py [DOC.yaml ...] [--csv CSV] [--hvsc DIR] [--jobs J] [--out DIR]
+    python tools/generic_check.py [--csv CSV] [--hvsc DIR] [--jobs J] [--out DIR]
         [--against RESULTS.csv]
 
-Default: ``out/sample128/*.yaml``, tunes by ``sample.csv`` or the survey ``tunes.csv``'s md5;
-``--against`` lists each document's first mismatch beside the one an earlier ``--out`` kept.
+Each tune of ``CSV`` (default ``out/sample128/tunes.csv``, else ``out/sample128/sample.csv``),
+its ``path`` under ``--hvsc``, is lifted in its own worker; the conversion cache is relative to
+the working directory, so run from the repository root. ``--out`` keeps each generic document
+and ``results.csv``; ``--against`` lists each document's first mismatch beside the one an earlier
+``--out`` kept.
 """
 
 import argparse
@@ -17,7 +20,6 @@ from pathlib import Path
 import numpy as np
 
 CORPUS = Path("out/sample128")
-MAX_TICKS, TICKS = 100_000, 3007  # a song whose state does not recur by MAX_TICKS plays TICKS
 FIELDS = (
     "doc",
     "player",
@@ -34,15 +36,14 @@ GROUPS = ("freq", "freq", "pw", "pw", "ctrl", "ad", "sr")
 GLOBALS = ("cut", "cut", "res/route", "mode/vol")
 
 
-def tune_paths(docs: list[Path], csv_path: Path) -> dict:
-    """``{doc: HVSC path}`` from a ``sample.csv`` (``output``, ``path``) or a survey
-    ``tunes.csv`` (``md5``, ``path``) whose md5 prefix starts the document's name."""
+def tunes(csv_path: Path) -> dict:
+    """``{document name: HVSC path}`` from a ``sample.csv`` (``path``, ``output``, ``error``: the
+    rows that lifted) or a survey ``tunes.csv`` (``path``, ``md5``)."""
     with csv_path.open(newline="") as fh:
-        rows = list(csv.DictReader(fh))
-    by_output = {r["output"]: r["path"] for r in rows if r.get("output")}
-    by_md5 = {r["md5"][:8]: r["path"] for r in rows if r.get("md5")}
-    found = ((d, by_output.get(d.name) or by_md5.get(d.name.split("-", 1)[0])) for d in docs)
-    return {doc: path for doc, path in found if path}
+        rows = [r for r in csv.DictReader(fh) if r["path"] and not r.get("error")]
+    return {
+        r.get("output") or f"{r['md5'][:8]}-{Path(r['path']).stem}.yaml": r["path"] for r in rows
+    }
 
 
 def motion(theirs, ours) -> str:
@@ -54,44 +55,42 @@ def motion(theirs, ours) -> str:
 
 
 def check(doc: str, sid: str, out: str | None) -> dict:
-    """One document's row (player, verified, the first mismatch under the project criterion,
-    which grid holds it, the first from tick 0, or the lifting gap); an exception is its gap."""
+    """Tune ``sid``'s row, named ``doc``: its player, whether its lift's generic document plays
+    the native grid, the first mismatch under the project criterion, which grid holds it, the
+    first from tick 0, or the lifting gap; an exception is its gap."""
     os.environ["UNITRACKER_WORKERS"] = "1"
-    from unitracker.format import songio  # pylint: disable=import-outside-toplevel
+    from unitracker.lift import backends  # pylint: disable=import-outside-toplevel
 
-    ir = songio.load(doc)
     row = dict.fromkeys(FIELDS, "")
-    row.update(doc=Path(doc).name, player=ir["playroutine"]["name"], verified="no")
+    row.update(doc=doc, verified="no")
     try:
-        return _check(ir, row, sid, out)
+        lift = backends.lifter(Path(sid).read_bytes())
+        row["player"] = lift.playroutine
+        lift.run()
+        return _check(lift, row, out)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         row["gap"] = f"{type(exc).__name__}: {exc}"
         return row
 
 
-def _check(ir: dict, row: dict, sid: str, out: str | None) -> dict:
-    # pylint: disable=import-outside-toplevel,too-many-locals
-    from unitracker.format import generic
-    from unitracker.lift import backends, verify
-    from unitracker.player import oracle
+def _check(lift, row: dict, out: str | None) -> dict:
+    from unitracker.player import oracle  # pylint: disable=import-outside-toplevel
 
-    try:
-        native = generic.native_state(ir, MAX_TICKS, TICKS)
-        text = generic.dumps(ir, native)
-    except generic.GenericError as exc:
-        row["gap"] = str(exc)
-        return row
-    if out:
+    verdict, text = lift.verdict, lift.document
+    if text is not None and out:
         Path(out, row["doc"]).write_text(text, encoding="utf-8")
-    grid = np.asarray(backends.native_player(Path(sid).read_bytes()).render_grid(native.ticks))
-    verdict = verify.compare(text, grid)
+    if verdict is None:
+        row["gap"] = lift.gap
+        return row
     row.update(verified="yes" if verdict.ok else "no", ticks=verdict.ticks)
     for key, found in (("onset", verdict.onset), ("whole", verdict.whole)):
         if found is not None:
             row[key], row[f"{key}_reg"] = found[0], f"${found[1]:02X}"
     if verdict.onset is not None and verdict.onset[0]:
-        ours = oracle.play(text, verdict.onset[0] + 1)[0]
-        row["motion"] = motion(*(g[-2:, verdict.onset[1]] for g in (grid[: len(ours)], ours)))
+        tick, reg = verdict.onset
+        theirs = np.asarray(lift.native().render_grid(tick + 1))
+        ours = oracle.play(text, tick + 1)[0]
+        row["motion"] = motion(theirs[tick - 1 : tick + 1, reg], ours[tick - 1 : tick + 1, reg])
     elif verdict.onset is None and not verdict.ok:
         row["gap"] = f"the document ends at tick {verdict.played}"
     return row
@@ -147,25 +146,22 @@ def against(rows: list, path: Path) -> None:
 def main(argv=None) -> int:
     """Command-line entry."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("docs", nargs="*", type=Path)
     parser.add_argument("--csv", type=Path)
     parser.add_argument("--hvsc", type=Path, default=Path(os.environ.get("HVSC", ".")))
     parser.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) // 4))
     parser.add_argument("--out", type=Path, help="keep the generic documents and results.csv")
     parser.add_argument("--against", type=Path, help="an earlier results.csv to compare with")
     args = parser.parse_args(argv)
-    docs = args.docs or sorted(CORPUS.glob("*.yaml"))
-    sources = (CORPUS / "sample.csv", CORPUS / "tunes.csv")
+    sources = (CORPUS / "tunes.csv", CORPUS / "sample.csv")
     csv_path = args.csv or next((p for p in sources if p.is_file()), None)
     if csv_path is None:
-        parser.error("no sample.csv or tunes.csv to map the documents to their tunes")
-    tunes = tune_paths(docs, csv_path)
+        parser.error("no tunes.csv or sample.csv to read the tunes from")
     if args.out:
         args.out.mkdir(parents=True, exist_ok=True)
     from unitracker.modfit.exprs import Pool  # pylint: disable=import-outside-toplevel
 
     out = str(args.out) if args.out else None
-    tasks = [(str(doc), str(args.hvsc / path), out) for doc, path in tunes.items()]
+    tasks = [(doc, str(args.hvsc / path), out) for doc, path in tunes(csv_path).items()]
     pool = Pool(args.jobs, len(tasks))
     try:
         rows = sorted(pool.map(check, tasks, "verify"), key=lambda r: (r["player"], r["doc"]))
@@ -174,8 +170,6 @@ def main(argv=None) -> int:
     report(rows)
     if args.against:
         against(rows, args.against)
-    if len(docs) > len(tunes):
-        print(f"{len(docs) - len(tunes)} documents have no tune in {csv_path}")
     if args.out:
         with (args.out / "results.csv").open("w", newline="") as fh:
             writer = csv.DictWriter(fh, FIELDS)

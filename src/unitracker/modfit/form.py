@@ -8,8 +8,8 @@ import ast
 
 import z3
 
-from unitracker.format.expr import with_builtins
-from unitracker.format.records import field_defaults
+from unitracker.playroutine.expr import with_builtins
+from unitracker.playroutine.records import field_defaults
 from unitracker.modfit.flow import flow_of, parse
 from unitracker.player.vm import acc_mode
 

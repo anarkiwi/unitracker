@@ -4,17 +4,17 @@ import dataclasses
 from pathlib import Path
 
 import numpy as np
-import yaml
 
-from unitracker.format import songio
-from unitracker.lift import backends
+from unitracker import document
+from unitracker.optimise.refs import references
+from unitracker.playroutine.records import EXPR
+from unitracker.lift import backends, verify
 from unitracker.modfit import grammar as G
 from unitracker.modfit.convert import CACHE, analyse, groups
 from unitracker.modfit.exprs import Result
 from unitracker.modfit.inherit import inherit
 from unitracker.modfit.phase import unproved_functions
 from unitracker.player.modulation import declared
-from unitracker.player.vm import SongPlayer
 
 KEYS = ("freq", "pw", "cut")
 
@@ -23,7 +23,7 @@ TICKS = {"goattracker2": 2 * 3840, "defmon": 95 + 2 * 1152 + 100, "sidwizard": 2
 
 @dataclasses.dataclass
 class Song:
-    """A tune: its bytes and its internal form lifted with its native modulations."""
+    """A tune: its bytes and the lifter's song with its native modulations."""
 
     path: Path
     ir: dict
@@ -68,30 +68,16 @@ def start_lines(r: Result, tag: str) -> list:
     return lines
 
 
-def locations(doc: dict) -> dict:
-    """``{expression text: [where the document writes it]}``."""
+def locations(ir: dict) -> dict:
+    """``{expression text: [where the song uses it]}``: a record's field (``type index field``)
+    or an event's command (``phrase[event]``)."""
     out = {}
-
-    def rows(where: str, value):
-        if isinstance(value, dict):
-            for key in KEYS:
-                if isinstance(value.get(key), (str, int)):
-                    out.setdefault(str(value[key]), []).append(f"{where} {key}")
-            for field, sub in value.items():
-                if isinstance(sub, list):
-                    rows(f"{where} {field}", sub)
-        elif isinstance(value, list):
-            for k, row in enumerate(value):
-                if isinstance(row, dict):
-                    rows(f"{where} row {k}", row)
-
-    for item in songio.song_rows(doc):
-        for kind, defs in (item.get("def") or {}).items():
-            for name, value in (defs or {}).items():
-                if kind == "x":
-                    out.setdefault(str(value), []).append(f"!freq:{name}")
-                elif kind != "phrase" and isinstance(name, str):
-                    rows(name, value)
+    for place, target, index in references(ir):
+        if target == EXPR and index in ir["exprs"]:
+            where = (
+                " ".join(map(str, place[1:])) if place[0] == "record" else f"{place[1]}[{place[2]}]"
+            )
+            out.setdefault(str(ir["exprs"][index]), []).append(where)
     return out
 
 
@@ -138,30 +124,29 @@ def song_lines(song: Song, workers) -> tuple:
     """``(report lines, song text)`` of one song."""
     conv = analyse(song.ir, CACHE, workers)
     an = conv.analysis
-    text = songio.dumps(conv.out)
+    text = document.write(conv.out)
     ticks = TICKS[song.player]
-    exact = SongPlayer(songio.loads(text)).mismatch(native_grid(song, ticks)) is None
+    verdict = verify.compare(text, native_grid(song, ticks))
     lines = [f"## {song.path.stem} ({song.player})"]
     occs = conv.obs["occurrences"]
     lines.append(f"  occurrences {len(occs)} over {conv.ticks} ticks (to the state's recurrence "
                  f"and one period more); expressions {len(conv.out['exprs'])}")  # fmt: skip
     lines.append("  the rewritten song plays the native song's register grid exactly over them")
-    same = "equal to" if exact else "DIFFERENT from"
     lines.append(
-        f"  read back from its v{songio.VERSION} text, {ticks} ticks are {same} the native player's"
+        f"  its generic document on unitracker-player over {ticks} ticks: {verdict.line()}"
     )
     unproved = unproved_functions(song.ir, declared(song.ir["playroutine"]))
     if unproved:
         lines.append(f"  named-table functions NOT equal: {unproved}")
-    places = locations(yaml.safe_load(text))
+    places = locations(conv.out)
     for key, members in groups(occs).items():
         if any(conv.texts[i] is not None for i in members):
             lines += [""] + group_lines(conv, an, key, members, places)
     return lines + [""], text
 
 
-def report(paths, before: Path | None = None, after: Path | None = None, workers=None) -> list:
-    """The ``exprs`` report of tunes, with token counts of their v1.3, v1.4 and v1.5 documents."""
+def report(paths, workers=None) -> list:
+    """The ``exprs`` report of tunes, with the token count of each one's generic document."""
     lines = [
         "# Modulators as phase and value expressions",
         "",
@@ -172,31 +157,15 @@ def report(paths, before: Path | None = None, after: Path | None = None, workers
         "Proofs are z3 over 48-bit integers. Values a start carries from earlier playback are",
         "constants of its expression; a general form proves one expression for every value.",
         "",
+        "## Tokens",
+        "",
     ]
-    tokens = []
+    body, total = [], 0
     for path in paths:
         song = load(Path(path))
         more, text = song_lines(song, workers)
-        lines += more
-        tokens.append((song.path.stem, text))
-    return lines + ["## Tokens", ""] + token_lines(tokens, before, after)
-
-
-def token_lines(songs: list, before: Path | None, after: Path | None) -> list:
-    """Tokens of each song in v1.3, v1.4 and v1.5."""
-    lines = ["  song: v1.3 / v1.4 / v1.5"]
-    totals = [0, 0, 0]
-    for stem, text in songs:
-        counts = [_tokens_of(before / f"{stem}.yaml") if before else None,
-                  _tokens_of(after / f"{stem}.yaml") if after else None,
-                  G.tokens(text)]  # fmt: skip
-        for i, n in enumerate(counts):
-            totals[i] += n or 0
-        lines.append(f"  {stem}: " + " / ".join("-" if n is None else str(n) for n in counts))
-    lines.append("  total: " + " / ".join(str(n) for n in totals))
-    return lines
-
-
-def _tokens_of(path: Path) -> int | None:
-    """Tokens of a file, or None when it is missing."""
-    return G.tokens(path.read_text(encoding="utf-8")) if path.exists() else None
+        body += more
+        count = G.tokens(text)
+        total += count
+        lines.append(f"  {song.path.stem}: {count}")
+    return lines + [f"  total: {total}", ""] + body

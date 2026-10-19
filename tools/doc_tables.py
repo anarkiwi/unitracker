@@ -2,7 +2,7 @@
 
     python tools/doc_tables.py [--write]
 
-The tables are the ones ``tests/test_format_docs.py`` checks against docs/playroutines/<name>.md;
+The tables are the ones ``tests/test_playroutine_docs.py`` checks against the playroutine docs;
 ``--write`` replaces them in the docs.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 
-import test_format_docs as T  # noqa: E402  pylint: disable=wrong-import-position
+import test_playroutine_docs as T  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def main(argv=None) -> int:

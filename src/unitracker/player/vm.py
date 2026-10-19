@@ -5,9 +5,9 @@ from collections.abc import Iterator
 import numpy as np
 from tqdm import tqdm
 
-from unitracker.format import tempo, xexpr
-from unitracker.format.expr import ExprError, Resolver
-from unitracker.format.records import EXPR, record_types
+from unitracker.playroutine import tempo, xexpr
+from unitracker.playroutine.expr import ExprError, Resolver
+from unitracker.playroutine.records import EXPR, record_types
 from unitracker.player import modulation
 from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT
 
@@ -565,7 +565,7 @@ class SongPlayer:
     def __init__(self, song: dict, record_reads: bool = False, watch: bool | None = None):
         if song.get("unitracker") != IR_VERSION:
             raise SongError(
-                "not an expanded unitracker song; read files with unitracker.format.songio"
+                "not an expanded unitracker song; read files with unitracker.document.tree"
             )
         if len(song["tracks"]) != int(song.get("voices", 3)):
             raise SongError("one track per voice is required")

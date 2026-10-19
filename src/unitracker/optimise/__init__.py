@@ -1,11 +1,11 @@
-"""Smaller documents with the same output: passes over the internal representation.
+"""Smaller songs with the same output: passes over the lifter's song.
 
 Each edit is a pure function of a song and its arguments. The driver keeps an edit when its
-written text has fewer tokens and plays the input's register grid (see :func:`mismatch`), and
-applies the passes to a fixpoint (see docs/optimise.md).
+generic document has fewer tokens, the lifter's VM replays it as the input (see
+:func:`mismatch`) and its document plays on unitracker-player as the input's, and applies the
+passes to a fixpoint (see docs/optimise.md).
 """
 
-from unitracker.optimise.describe import describe, first_difference, one_line, writer
 from unitracker.optimise.driver import Finding, Optimiser, Result, canonical, optimise
 from unitracker.optimise.edits import (
     EDITS,
@@ -49,7 +49,6 @@ __all__ = [
     "canonical",
     "clear",
     "commands",
-    "describe",
     "drop_command",
     "drop_instrument",
     "drop_keep",
@@ -59,7 +58,6 @@ __all__ = [
     "factor",
     "fields",
     "Finding",
-    "first_difference",
     "hoist",
     "hoist_value",
     "hold",
@@ -68,7 +66,6 @@ __all__ = [
     "LARGER_UNPROVED",
     "merge",
     "mismatch",
-    "one_line",
     "optimise",
     "Optimiser",
     "PASSES",
@@ -87,5 +84,4 @@ __all__ = [
     "Trace",
     "truncate",
     "unhoist",
-    "writer",
 ]

@@ -1,14 +1,16 @@
-"""Pair the expressions two sets of written songs write differently and prove each pair equal.
+"""Pair the expressions two sets of generic documents write differently and prove each pair equal.
 
     python tools/expr_diff.py OLD_DIR NEW_DIR [--bits B]
 
-For each ``OLD_DIR/<tune>.yaml`` with a ``NEW_DIR`` namesake, prints every leaf whose text
-differs, before and after, with tokens and characters, and whether the two parse to terms equal
+For each ``OLD_DIR/<tune>.yaml`` with a ``NEW_DIR`` namesake, prints every expression (an ``x``
+record, or a ``pw``, ``cut`` or ``freq`` field of a defined record) whose text differs, before
+and after, with tokens and characters, and whether the two parse to terms equal
 for every ``v`` (z3), else for ``0 <= v < 2**B``, else modulo the largest ``2**k`` (``k <= B``) for
 that ``v``, as a unit's wrap to ``k`` bits writes them; the number of pairs not in fewer tokens.
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -17,6 +19,9 @@ import z3
 from tqdm import tqdm
 
 from unitracker.modfit import grammar as G
+
+FIELDS = {"pw", "cut", "freq"}
+NAME = re.compile(r"[a-z]+\d+|none")
 
 
 def leaves(x, path=()):
@@ -29,6 +34,17 @@ def leaves(x, path=()):
             yield from leaves(v, (*path, i))
     else:
         yield path, x
+
+
+def expressions(doc: dict) -> dict:
+    """``{path: text}`` of every expression a generic document's records define."""
+    out = {}
+    for path, value in leaves(doc.get("song") or [], ("song",)):
+        if len(path) < 5 or path[2] != "def" or path[3] == "phrase" or not isinstance(value, str):
+            continue
+        if (path[3] == "x" or path[-1] in FIELDS) and not NAME.fullmatch(value):
+            out[path] = value
+    return out
 
 
 def equal(a: str, b: str, bits: int | None, wrap: int | None = None) -> bool:
@@ -46,13 +62,13 @@ def equal(a: str, b: str, bits: int | None, wrap: int | None = None) -> bool:
 
 
 def changed(old: Path, new: Path) -> list:
-    """``(tune, path, before, after)`` of every differing leaf of the namesake songs."""
+    """``(tune, path, before, after)`` of every differing expression of the namesake documents."""
     out = []
     for f in sorted(old.glob("*.yaml")):
         if (new / f.name).exists():
-            a = dict(leaves(yaml.safe_load(f.read_text())))
-            b = dict(leaves(yaml.safe_load((new / f.name).read_text())))
-            out += [(f.stem, k, str(a[k]), str(b[k])) for k in a if k in b and a[k] != b[k]]
+            a = expressions(yaml.safe_load(f.read_text(encoding="utf-8")))
+            b = expressions(yaml.safe_load((new / f.name).read_text(encoding="utf-8")))
+            out += [(f.stem, k, x, b[k]) for k, x in a.items() if b.get(k, x) != x]
     return out
 
 

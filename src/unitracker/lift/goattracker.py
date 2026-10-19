@@ -7,7 +7,8 @@ from pygoattracker import constants as C
 from pygoattracker import decompile_sid
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 
-from unitracker.format.songio import library, song_meta
+from unitracker.lift.base import song_meta
+from unitracker.playroutine.library import library
 from unitracker.lift import placed
 from unitracker.lift.base import Lift, LiftError
 from unitracker.modfit.convert import window

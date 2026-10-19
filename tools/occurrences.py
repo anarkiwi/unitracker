@@ -14,7 +14,7 @@ from unitracker.modfit import convert
 
 
 def report(ir: dict, unit: str | None = None, cells: tuple = ()) -> list[str]:
-    """The occurrence lines of an internal song with its native modulations."""
+    """The occurrence lines of the lifter's song with its native modulations."""
     ir = convert.expand_repeats(ir)
     obs = convert.observe(ir, convert.window(ir), None)
     _, texts = convert.derive_all(ir, obs, None, workers=1)

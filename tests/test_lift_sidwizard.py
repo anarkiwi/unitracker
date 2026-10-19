@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import yaml
 from conftest import oracle, sw_fx, sw_table_byte
 from pysidwizard import (
     End,
@@ -25,11 +26,12 @@ from pysidwizard.constants import INST_WF_TABLE_POS
 from pysidwizard.features import features_for_driver
 from pysidwizard.model import Instrument, encode_sequence
 
-from unitracker.format import songio
-from unitracker.format.codec import Evaluator
+from unitracker import document
 from unitracker.lift import sidwizard
 from unitracker.lift.sidwizard import NO_DETUNE as KEEP
 from unitracker.lift.sidwizard import LiftError
+from unitracker.playroutine.codec import Evaluator
+from unitracker.playroutine.library import library
 from unitracker.player.vm import SongPlayer
 
 TICKS = 2000
@@ -478,9 +480,7 @@ def test_a_wf_hold_row_lasts_its_hold(references):
     wave = [int(x) for x in grid[:, 7 + 4] & 0xF0]
     start = wave.index(0x40)
     assert wave[start : start + 5] == [0x40] * 4 + [0x20]
-    text = songio.dumps(ir)
-    assert "ctrl: [{ctrl: 65}, {hold: 3}, {ctrl: 33}, end]" in text
-    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
+    assert "ctrl: [{ctrl: 65}, {hold: 3}, {ctrl: 33}, end]" in document.write(ir)
 
 
 def test_a_wf_detune_is_written_as_the_rows_constant_freq(references):
@@ -492,19 +492,28 @@ def test_a_wf_detune_is_written_as_the_rows_constant_freq(references):
     assert not np.array_equal(grid, plain)
     wf[wf[entry]["next"]]["d"] = 0xFB
     assert np.array_equal(SongPlayer(ir).render_grid(TICKS), grid)
-    text = songio.dumps(ir)
-    assert text.count(", freq: -5}") == 2
-    assert np.array_equal(SongPlayer(songio.loads(text)).render_grid(TICKS), grid)
+    rows = list(_rows(yaml.safe_load(document.write(ir))["song"]))
+    assert sum(row.get("freq") == "G[N] - 5" for row in rows) == 2
 
 
-CSILLAG_FREQS, CSILLAG_EMPTY_STEP_COMMANDS = 91, 16
+def _rows(node):
+    """Every mapping in a generic document's tree."""
+    if isinstance(node, dict):
+        yield node
+        node = list(node.values())
+    if isinstance(node, list):
+        for child in node:
+            yield from _rows(child)
+
+
+CSILLAG_FREQS, CSILLAG_EMPTY_STEP_COMMANDS = 98, 16
 
 
 def test_a_vibrato_across_empty_steps_is_written_once(references):
     ref = references["csillag"]
     played = [e for p in ref.ir()["phrases"].values() for e in p]
     cmds = [(e, c) for e in played for c in e.get("commands") or [e.get("command")] if c]
-    assert ref.text.count("!freq") <= CSILLAG_FREQS
+    assert ref.generic.count("!freq") <= CSILLAG_FREQS
     assert sum("note" not in e for e, _ in cmds) <= CSILLAG_EMPTY_STEP_COMMANDS
 
 
@@ -529,11 +538,11 @@ def swm_grid(swm) -> np.ndarray:
 
 
 def lifted(raw: bytes) -> tuple[dict, str]:
-    """The lift of ``raw`` and its canonical text, asserting it round-trips."""
-    text = songio.dumps(sidwizard.SidWizardLift.from_sid(raw).run())
-    song = songio.loads(text)
-    assert songio.dumps(song) == text
-    return song, text
+    """The lift of ``raw`` and its generic document, asserting the document is written."""
+    lift = sidwizard.SidWizardLift.from_sid(raw)
+    song = lift.run()
+    assert lift.document is not None, lift.gap
+    return song, lift.document
 
 
 def kept(swm):
@@ -702,7 +711,7 @@ def test_frequency_tables():
 
 @pytest.mark.parametrize("name", ["pulse", "filter"])
 def test_a_keyboard_tracked_chip_map_inverts_its_store(name):
-    pr = songio.library("sidwizard")
+    pr = library("sidwizard")
     chip = next(u for u in pr["modulators"]["units"] if u["name"] == name)["chip"]
     ev = Evaluator(pr["functions"], pr["tables"])
     width = {c: int(pr["voice"][c]["width"]) for c in chip["store"]}

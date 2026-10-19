@@ -18,16 +18,20 @@ def _csv(path: Path, fields: list, rows: list) -> Path:
     return path
 
 
-def test_documents_map_to_tunes_by_output_or_md5_prefix(tmp_path):
-    docs = [tmp_path / "0123abcd-Tune.yaml", tmp_path / "ffffffff-Other.yaml", tmp_path / "x.yaml"]
+def test_tunes_come_from_a_sample_or_a_survey_csv(tmp_path):
     sample = _csv(
-        tmp_path / "sample.csv", ["path", "output"], [{"path": "A/x.sid", "output": "x.yaml"}]
+        tmp_path / "sample.csv",
+        ["path", "output", "error"],
+        [
+            {"path": "A/x.sid", "output": "x.yaml", "error": ""},
+            {"path": "A/y.sid", "output": "", "error": "LiftError: refused"},
+        ],
     )
-    assert generic_check.tune_paths(docs, sample) == {docs[2]: "A/x.sid"}
-    tunes = _csv(
+    assert generic_check.tunes(sample) == {"x.yaml": "A/x.sid"}
+    survey = _csv(
         tmp_path / "tunes.csv", ["path", "md5"], [{"path": "B/t.sid", "md5": "0123abcd99"}]
     )
-    assert generic_check.tune_paths(docs, tunes) == {docs[0]: "B/t.sid"}
+    assert generic_check.tunes(survey) == {"0123abcd-t.yaml": "B/t.sid"}
 
 
 def test_rows_fall_into_categories():
@@ -46,27 +50,31 @@ def test_rows_fall_into_categories():
     assert generic_check.motion([3, 4], [3, 5]) == "both move"
 
 
-def test_a_reference_document_is_checked_and_reported(references, tmp_path, capsys):
+def test_a_reference_tune_is_lifted_checked_and_reported(references, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("UNITRACKER_WORKERS", "1")
     ref = references["metal_warrior"]
-    doc = tmp_path / "mw.yaml"
-    doc.write_text(ref.text)
-    tunes = _csv(
-        tmp_path / "s.csv", ["path", "output"], [{"path": ref.sid.name, "output": doc.name}]
-    )
+    tunes = _csv(tmp_path / "t.csv", ["path", "md5"], [{"path": ref.sid.name, "md5": "0" * 32}])
     out = tmp_path / "out"
-    argv = [str(doc), "--csv", str(tunes), "--hvsc", str(ref.sid.parent), "--jobs", "1"]
-    assert generic_check.main([*argv, "--out", str(out)]) == 0
+    argv = ["--csv", str(tunes), "--hvsc", str(ref.sid.parent), "--jobs", "1", "--out", str(out)]
+    assert generic_check.main(argv) == 0
     printed = capsys.readouterr().out
-    assert "goattracker2: 0/1 verified" in printed and "mismatch: ctrl, document holds" in printed
+    assert "goattracker2: 0/1 verified" in printed and "mismatch: freq, " in printed
     (row,) = csv.DictReader((out / "results.csv").open())
-    assert (row["onset"], row["onset_reg"], row["motion"]) == ("105", "$0B", "document holds")
-    assert (out / doc.name).read_text() == ref.generic
-    earlier = _csv(tmp_path / "before.csv", generic_check.FIELDS, [{**row, "onset": "25"}])
+    assert (row["onset"], row["onset_reg"]) == ("1550", "$0E")
+    assert row["motion"] in ("document holds", "both move")
+    name = f"00000000-{ref.sid.stem}.yaml"
+    assert (out / name).read_text() == ref.generic
+    earlier = _csv(
+        tmp_path / "before.csv", generic_check.FIELDS, [{**row, "onset": "105", "onset_reg": "$0B"}]
+    )
     assert generic_check.main([*argv, "--against", str(earlier)]) == 0
-    assert capsys.readouterr().out.splitlines()[-1].split() == [
-        "mw.yaml",
-        "25",
-        "$0B",
-        "105",
-        "$0B",
-    ]
+    assert capsys.readouterr().out.splitlines()[-1].split() == [name, "105", "$0B", "1550", "$0E"]
+
+
+def test_a_tune_that_does_not_lift_is_a_gap(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNITRACKER_WORKERS", "1")
+    sid = tmp_path / "junk.sid"
+    sid.write_bytes(b"not a sid")
+    row = generic_check.check("junk.yaml", str(sid), None)
+    assert row["verified"] == "no" and row["gap"].startswith("UnknownFormat")
+    assert generic_check.category(row).startswith("gap: UnknownFormat")

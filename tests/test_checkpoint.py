@@ -3,21 +3,22 @@ verdict, and the baseline notes each datum no later than the tick a change to it
 
 import copy
 
-from test_optimise import A, I1, I2_HEARD, LATE, doc, ins_line, row
+from test_optimise import A, DRIFT, FREQ, LATE, ev, ins, line, song
 
 from unitracker import optimise
-from unitracker.format import songio
 from unitracker.player.checkpoint import Baseline
 from unitracker.player.vm import SongPlayer
 
-I3 = ins_line("i3", f"ad: 9, {LATE}, ctrl: [{A}, end]")
-EXPRS = "      x:\n        x1: (v + 32) % 65536\n        x2: (v + 16 + 16) % 65536\n"
-LATE_DOC = doc(
-    f"{I1}\n{I2_HEARD}\n{I3}",
-    "[C4.i1!freq:x1*16, D4.i2*2, E4.i3!freq:x2*2, F4.i1!freq:x3*2]",
-    EXPRS + "        x3: (v + 33) % 65536\n",
+LATE_DOC = song(
+    [ev("C4", command=[FREQ, 2], instrument=1), *[{"command": [FREQ, 2]}] * 15]
+    + line("D4", 2, [2])
+    + [ev("E4", command=[FREQ, 3], instrument=3), {"command": [FREQ, 3]}]
+    + [ev("F4", command=[FREQ, 4], instrument=1), {"command": [FREQ, 4]}],
+    {1: ins(), 2: ins(ad=10, ctrl=2), 3: ins(ctrl=3, freq=1)},
+    ([A], [A], [A]),
+    (LATE, DRIFT, "(v + 16 + 16) % 65536", "(v + 33) % 65536"),
     steps=22,
-    extra=row("p3", "[C4.i2*2, D4*20]"),
+    more={"p3": line("C4", 2, [2]) + line("D4", 20)},
 )
 
 
@@ -26,11 +27,11 @@ def candidates(opt, names):
         for edit in optimise.PASSES[name](opt.base):
             ir = optimise.EDITS[edit[0]](opt.base, *edit[1])
             if ir is not None:
-                yield edit, songio.loads(songio.dumps(ir))
+                yield edit, ir
 
 
 def test_a_resumed_proof_gives_the_full_replays_verdict():
-    opt = optimise.Optimiser(songio.loads(LATE_DOC), workers=1)
+    opt = optimise.Optimiser(LATE_DOC, workers=1)
     assert opt.ref.baseline is not None
     full = optimise.Trace(opt.source)
     resumed = set()
@@ -76,7 +77,7 @@ def states(ir: dict, ticks: int) -> list:
 
 
 def test_the_baseline_notes_each_read_when_the_full_play_first_reads_it():
-    ir = songio.loads(LATE_DOC)
+    ir = LATE_DOC
     base = Baseline(SongPlayer(ir))
     reads = dict(base.reads)
     tables = {item: tick for item, tick in reads.items() if item[0] == "T"}

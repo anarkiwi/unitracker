@@ -2,12 +2,12 @@
 
 import copy
 
-from unitracker.format.codec import EXPR, NONE, CodecError, command_code
-from unitracker.format.events import column
-from unitracker.format.events.running import lasts_step
-from unitracker.format.records import RowEval, chained, program_path, ref_type
-from unitracker.format.refs import put_slots, redirect, slots, view
-from unitracker.format.xexpr import canonical
+from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code
+from unitracker.document.events import column
+from unitracker.document.events.running import lasts_step
+from unitracker.playroutine.records import RowEval, chained, program_path, ref_type
+from unitracker.optimise.refs import put_slots, redirect, slots, view
+from unitracker.playroutine.xexpr import canonical
 from unitracker.optimise.model import (
     apart,
     copied,
@@ -205,12 +205,13 @@ def unhoist(ir: dict, keep: int, drop: int) -> dict | None:
 
 
 def _play_as(event: dict, ins: int, command: list, pr: dict) -> bool:
-    """Give a note of the dropped instrument ``command`` in its last free slot, and ``ins`` for
-    the instrument it names; whether a slot was free whose column holds it."""
+    """Give a note of the dropped instrument ``command`` in its first free slot, as a lifter
+    packs an event's commands, and ``ins`` for the instrument it names; whether a slot was free
+    whose column holds it."""
     cmds = slots(event)
     if [0, 0] not in cmds:
         return False
-    cmds[len(cmds) - 1 - cmds[::-1].index([0, 0])] = command
+    cmds[cmds.index([0, 0])] = command
     put_slots(event, cmds)
     if event.get("instrument"):
         event["instrument"] = ins

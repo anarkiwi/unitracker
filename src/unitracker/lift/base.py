@@ -9,8 +9,8 @@ from collections.abc import Callable, Iterator
 from pysidtracker import SidImage
 from unitracker_player import PlayError
 
-from unitracker.format import generic
-from unitracker.format.header import SongFormatError
+from unitracker import document
+from unitracker.playroutine.library import SongFormatError
 from unitracker.lift import verify
 from unitracker.modfit.convert import convert, window
 from unitracker.optimise import canonical
@@ -27,6 +27,16 @@ def start_song(raw: bytes) -> int:
     """The 0-based subtune the PSID header of ``raw`` starts on (0 without a header)."""
     header = SidImage.from_bytes(raw).header
     return (header.start_song or 1) - 1 if header is not None else 0
+
+
+def song_meta(psid, source: str) -> dict:
+    """The ``meta`` mapping for a tune with PSID header ``psid``, lifted by ``source``."""
+    return {
+        "title": psid.name,
+        "author": psid.author,
+        "released": psid.released,
+        "source": source,
+    }
 
 
 class Lift(abc.ABC):
@@ -65,7 +75,7 @@ class Lift(abc.ABC):
 
     @abc.abstractmethod
     def structure(self) -> dict:
-        """The tune transcribed to the internal song, before the normalisations."""
+        """The tune transcribed to the lifter's song, before the normalisations."""
 
     def convert(self, song: dict) -> dict:
         """``song`` with its native modulations written as the format's expressions."""
@@ -84,10 +94,10 @@ class Lift(abc.ABC):
         if self.ticks is None:
             self.gap = "the song's state does not recur: no ticks to verify it over"
             return None
-        native = generic.native_state(song, self.ticks, self.ticks)
+        native = document.native_state(song, self.ticks, self.ticks)
         try:
-            self.document = generic.dumps(song, dataclasses.replace(native, ticks=self.ticks))
-        except (generic.GenericError, SongFormatError, PlayError) as exc:
+            self.document = document.write(song, dataclasses.replace(native, ticks=self.ticks))
+        except (document.GenericError, SongFormatError, PlayError) as exc:
             self.gap = str(exc)
             return None
         try:

@@ -13,7 +13,7 @@ note_offset: 0                            # frequency-table index of format note
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
                                           # default: the type decoded as ins, base 0
                                           # event: {type, column, commands, restart}: see Instrument columns
-tempo: {cells: {tl: a, tr: b}, when: "3 <= a <= 127"}   # the initial tempo (see Tempo)
+tempo: {cells: {tl: a, tr: b}}           # the initial tempo (see Tempo)
 lifetime: {pw: {flag: {flags: 0x40}}, filter: {flag: {flags: 0x80}}}   # !pw and !filter (see Lifetime)
 commands: {8: {name: run, ref: ctrltab}, 15: [{name: tempo, when: ..., arg: ..., raw: ...}], ...}
 record_types: {name: {...}}
@@ -89,7 +89,7 @@ The lifter maps a row by the first shape whose `when` holds, and accepts the map
 An `optional` field `f` that is a shared key gives each shape the key
 `f: {value: f, omit: "f < 0"}` and the raw field `f: "f if has_f else -1"`; a shape that gives
 key `f` itself gives its raw field too, and a raw field `f` the shape gives replaces the
-generated one. A key with a vocabulary default (`hold`: 1) is left out at that value unless it
+generated one. A key with a shared default (`hold`: 1) is left out at that value unless it
 gives its own `omit`, and `raw` reads it as the default when it is left out (`hold: "w + 1"`
 with `w: "hold - 1"`). A key with `expr` maps to the expression when that field is set; a key
 with both `value` and `expr` maps an integer to a value and a string to an expression.
@@ -121,7 +121,7 @@ reads by those names (`!tempo:5/7`).
 | `also` | `name:arg`, another command whose native effect the code has too: the code decodes as both (`!filter:none!resfilt:0/0`) |
 | `inline` | `true` with a `ref`: the referenced row's fields, each a byte, joined by `/` (`!tempo:6/7`), `when` over the row's fields; the type has no records of its own in the lifter's song |
 | `column` | the event column the command decodes into, `instrument` (event slot 0) or `fx` (slot 1), or a list of them of which it takes the first the event leaves free (an event that names an instrument fills `instrument`); a named entry without one decodes into `fx`, and a column holds one command |
-| `nibble` | `{name: ad, nibble: s, column: c}`, an envelope command: the code sets the nibble at shift `s` of the register `name` over the instrument's field `name`, played from the slot of column `c`, and decodes as the byte it writes (see [Envelope commands](../format/vocabulary.md#envelope-commands)) |
+| `nibble` | `{name: ad, nibble: s, column: c}`, an envelope command: the code sets the nibble at shift `s` of the register `name` over the instrument's field `name`, played from the slot of column `c`, and decodes as the byte it writes (see [Envelope commands](#envelope-commands)) |
 
 A program `ref` entry's argument `none` is the type's `none`, the stop command of its slot
 (`!run:none`, `!pw:none`, `!filter:none`). Codec expressions may read the song's tables and the
@@ -132,8 +132,43 @@ playroutine's functions.
 A song's tempo is `n` ticks per step or a swing pair `[a, b]`. The playroutine's `tempo` gives
 the cells that hold it, `cells` (`{cell: expr}`), each expression over `a` and `b` (`b` is `a` for
 one tempo): the lifter reads the tune's tempo from them after its init, and the VM assigns them
-over the cells' `init` before the first tick; `when` is the tempos the player plays. A
-playroutine without `tempo` has none.
+over the cells' `init` before the first tick. A playroutine without `tempo` has none.
+
+## Lifter declarations
+
+The lifter decodes these native mechanisms into the shared row keys and commands, whose meaning
+is unitracker-player's [semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md).
+
+### Lifetime
+
+`lifetime: {pw: {flag: {flags: 0x40}}, filter: {...}}` declares a player that keeps a note's
+pulse or filter program by an instrument bit: `flag` is the instrument field and bit mask, and
+`field` the instrument key of the program (default: the slot's name). A note whose instrument
+sets the bit carries `!pw` / `!filter`; a note that names no instrument plays the voice's last
+one, and a legato note restarts nothing.
+
+A `commands` entry `{name: freq, lasts: step}` declares a native `!freq` that ends on a step
+carrying no command: each such step after a `!freq` decodes as `!freq:none`.
+
+### Envelope commands
+
+A `nibble` entry (see [Codecs](#codecs)) sets one nibble over the instrument's byte; the lifter
+decodes it as the byte it writes, from the voice's instrument. A phrase whose bytes differ
+between the places it plays becomes one phrase per place.
+
+### Instrument columns
+
+`instrument: {type: t, base: b, event: {type: ins, column: k, commands: {c: f}}}` declares a
+player whose events arm programs directly, with no native instrument: an event's instrument
+column (record `t` at index value - `b`) is field `k` of an `ins` record and the argument of its
+command `c` field `f`. The lifter names one instrument per combination of programs the events
+arm, and the event names that instrument.
+
+`event: {..., restart: c}` declares a player whose notes arm the hard restart on the steps before
+them: the restart of a note's instrument is native command `c` on the step its lookahead rows'
+holds put before the note, running those rows as a program of the command's record type. A
+`restart` program's rows use `hold`, `ctrl`, `gate`, `ad` and `sr`; a row's place in it (`first`,
+`last`) is part of its codec shape.
 
 ## Cells and expressions
 
@@ -151,7 +186,11 @@ first tick. Expressions use Python syntax, restricted to:
   complement.
 
 Arithmetic is unbounded; only assignment wraps. These are the playroutine's expressions; the lifter's
-modulator expressions use the grammar of [Modulators](../modulation/expressions.md#grammar).
+modulator expressions are the grammar's `expr`
+([`canonical.lark`](https://github.com/anarkiwi/unitracker-grammar/blob/main/src/unitracker_grammar/canonical.lark)),
+evaluated as unitracker-player's
+[Modulators](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#modulators)
+say.
 
 ## Actions
 

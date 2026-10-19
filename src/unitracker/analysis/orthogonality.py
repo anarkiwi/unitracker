@@ -6,26 +6,25 @@ import itertools
 import re
 from dataclasses import dataclass
 
-from unitracker.format import songio
-from unitracker.format.codec import (
+from unitracker.playroutine.library import library
+from unitracker.playroutine.codec import (
     COMMAND_NAMES,
     ROW_KEYS,
     CodecError,
     RowCodec,
     evaluate,
     row_place,
+    row_codecs,
     command_variants,
 )
-from unitracker.format.events.instrument import spec as event_instrument
-from unitracker.format.events.instrument import written_as
-from unitracker.format.expr import with_builtins
-from unitracker.format.records import META_KEYS, field_defaults, record_types
-from unitracker.format.refs import view
+from unitracker.document.events.instrument import spec as event_instrument
+from unitracker.document.events.instrument import written_as
+from unitracker.playroutine.expr import with_builtins
+from unitracker.playroutine.records import META_KEYS, field_defaults, record_types
+from unitracker.optimise.refs import view
 from unitracker.optimise import programs_of
 from unitracker.player.vm import ONSET, PSEUDO
 
-VOCABULARY = "vocabulary redundancy"
-KEY = "non-orthogonal key"
 DEAD = "VM dead state"
 UNREACHABLE = "unreachable vocabulary"
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -332,7 +331,7 @@ def _field_fix(pr: dict, tname: str, fname: str) -> str:
     if fname in retired:
         return "retired: the expression replaces it, the format does not write it"
     if tname == "restart" and (event_instrument(pr) or {}).get("restart") is not None:
-        return "format-side: the reader plays the note's restart as a program of the player's own"
+        return "format-side: the writer folds the note's restart into its instrument"
     if fname == spec.get("chain") or fname in (spec.get("refs") or {}):
         return "read by the format's program walk, not by the player"
     return "transcription fix: the player ignores what the lifter writes here"
@@ -345,7 +344,7 @@ def shape_uses(ir: dict) -> dict:
     """``{(type, shape index): rows}`` of the codec shape each record row is written with
     (index -1: no shape fits), each program row once per program place."""
     v = view(ir)
-    codecs = songio.codecs(ir["playroutine"], ir.get("tables"))
+    codecs = row_codecs(ir["playroutine"], ir.get("tables"))
     out = {}
     places = _places(ir)
     for tname, rows in (ir.get("records") or {}).items():
@@ -417,7 +416,7 @@ def vocabulary(songs: list) -> list:
     for _, ir in songs:
         prs.setdefault(ir["playroutine"]["name"], ir["playroutine"])
     for name in ("goattracker2", "sidwizard", "defmon"):
-        prs.setdefault(name, songio.library(name))
+        prs.setdefault(name, library(name))
     keys = {
         k: [n for n, pr in prs.items() if any(k in ks for ks in _codec_keys(pr).values())]
         for k in ROW_KEYS

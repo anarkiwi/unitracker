@@ -1,7 +1,7 @@
 """The passes: each lists the candidate edits of a song, in a deterministic order."""
 
-from unitracker.format.records import EXPR
-from unitracker.format.refs import entries, slots, view
+from unitracker.playroutine.records import EXPR
+from unitracker.optimise.refs import entries, slots, view
 from unitracker.optimise import shattered
 from unitracker.optimise.edits import hoist_value, repeats
 from unitracker.optimise.model import (

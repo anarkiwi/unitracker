@@ -12,7 +12,7 @@ import sympy
 import z3
 from conftest import gt_tune
 
-from unitracker.format.songio import library
+from unitracker.playroutine.library import library
 from unitracker.lift import goattracker
 from unitracker.modfit import chipinv, exprs_report
 from unitracker.modfit import grammar as G
@@ -807,20 +807,19 @@ def test_cli_writes_the_report(gt_song, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(exprs_report, "load", lambda p: exprs_report.Song(Path(p), ir, b""))
     monkeypatch.setattr(exprs_report, "native_grid", lambda song, ticks: grid[:ticks])
-    (tmp_path / "synthetic.yaml").write_text("unitracker: 1.3\n", encoding="utf-8")
     texts = []
     for workers in ("2", "1"):
         out = tmp_path / f"exprs-{workers}.txt"
-        main(["--out", str(out), "exprs", "synthetic.sid", "--before", str(tmp_path),
-              "--after", str(tmp_path / "none"), "--workers", workers])  # fmt: skip
+        main(["--out", str(out), "exprs", "synthetic.sid", "--workers", workers])
         texts.append(out.read_text())
-    assert all("read back from its v1.20 text, 7680 ticks are equal to" in t for t in texts)
+    line = "its generic document on unitracker-player over 7680 ticks: (verified|mismatch): "
+    assert all(re.search(line, t) for t in texts)
     text = texts[0]
     assert "## synthetic (goattracker2)" in text and "## Tokens" in text
     assert "closed form (start value any): v = 16*abs((φ - 32) % 128 - 64) + 512" in text
-    assert re.search(r"written \(\d+ occurrences\): v \+ 32  at !freq:x\d", text)
-    assert re.search(r"written \(\d+ occurrences\): 2048  at i2 pw", text)
-    assert re.search(r"synthetic: \d+ / - / \d+", text)
+    assert re.search(r"written \(\d+ occurrences\): v \+ 32  at p\w+~1\[0\]\n", text)
+    assert re.search(r"written \(\d+ occurrences\): 2048  at pulsetab \d+ x\n", text)
+    assert re.search(r"## Tokens\n\n  synthetic: (\d+)\n  total: \1\n", text)
 
 
 def test_a_fired_record_function_runs_at_the_index_of_its_call():

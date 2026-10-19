@@ -18,11 +18,11 @@ from pathlib import Path
 
 import sympy
 
-from unitracker.format.codec import command_code, command_variants, evaluate
-from unitracker.format.events.lifetime import selected
-from unitracker.format.records import chained, program_path, record_types
-from unitracker.format.songio import codecs
-from unitracker.format.xexpr import ExpressionError, source
+from unitracker.playroutine.codec import command_code, command_variants, evaluate
+from unitracker.document.events.lifetime import selected
+from unitracker.playroutine.records import chained, program_path, record_types
+from unitracker.playroutine.codec import row_codecs
+from unitracker.playroutine.xexpr import ExpressionError, source
 from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
@@ -39,7 +39,7 @@ SOURCES = (
     + sorted((_HERE.parent / "playroutines").glob("*.yaml"))
     + [
         Path(importlib.util.find_spec(f"unitracker.{m}").origin)
-        for m in ("player.modulation", "player.vm", "format.records", "format.codec")
+        for m in ("player.modulation", "player.vm", "playroutine.records", "playroutine.codec")
     ]
 )
 
@@ -119,7 +119,7 @@ class Observer(Replay):
 
 
 def ir_key(ir: dict) -> str:
-    """The content key of an internal song and the code its conversion depends on."""
+    """The content key of a lifter's song and the code its conversion depends on."""
     return content_key(json.dumps(ir, sort_keys=True, default=repr), code_identity())
 
 
@@ -342,7 +342,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         self.events, self.held, self._clones, self._pending = {}, set(), {}, []
         self.instrument = self.pr.get("instrument") or {}
         self.records = self.ir.setdefault("records", {})
-        self.codecs = codecs(self.pr, self.ir.get("tables"))
+        self.codecs = row_codecs(self.pr, self.ir.get("tables"))
 
     def x(self, text: str) -> int:
         """The index of an expression text, after the song's own expressions."""
@@ -361,7 +361,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         return init if init and init["record"] == record else self.units[unit]["site"]
 
     def run(self) -> dict:
-        """The rewritten internal song."""
+        """The rewritten lifter's song."""
         occs = self.obs["occurrences"]
         sites = {}
         for i, occ in enumerate(occs):

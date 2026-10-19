@@ -1,5 +1,5 @@
-"""The three reference tunes, each lifted once per session (``references``): their documents
-round-trip canonically, play their native players, use only the shared vocabulary, and lift,
+"""The three reference tunes, each lifted once per session (``references``): their songs replay
+their native players, their generic documents use only the shared vocabulary, and they lift,
 check and optimise the same through the command-line tools."""
 
 import re
@@ -7,25 +7,25 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 from pysidtracker.survey import load_render
 
-from unitracker import cli
-from unitracker.format import songio
-from unitracker.format.codec import COMMAND_NAMES, ROW_KEYS
-from unitracker.format.yamlstyle import parse
+from unitracker import cli, document
 from unitracker.lift import backends, verify
 from unitracker.player import oracle
+from unitracker.playroutine.codec import COMMAND_NAMES, RESTART, ROW_KEYS
 from unitracker.player.vm import SongPlayer, first_mismatch
 
 TUNES = ("metal_warrior", "crosseyed", "csillag")
 BACKEND = {"metal_warrior": "goattracker2", "crosseyed": "defmon", "csillag": "sidwizard"}
 COMMANDS = {
-    "metal_warrior": {"run", "freq", "legato", "tempo"},
-    "crosseyed": set(),
-    "csillag": {"freq", "ad", "sr", "run", "legato"},
+    "metal_warrior": {"run", "freq", "legato", "tempo", "vol", "pw"},
+    "crosseyed": {"cut", "pw", "vol"},
+    "csillag": {"freq", "ad", "sr", "run", "legato", "tempo", "vol", "pw"},
 }
+KINDS = {"ins", "ctrl", "pw", "filter", "restart", "x", "phrase"}
 GENERIC = {
-    "metal_warrior": (105, 0x0B),  # #186: GoatTracker 2 keys off on the tick it reads the step
+    "metal_warrior": (1550, 0x0E),  # voice 3's frequency word
     "crosseyed": (5, 0x07),  # #185: defMON detunes voice 2 by 1
     "csillag": (4, 0x0E),  # #185: SID-Wizard adds the carry once the wavetable program ends
 }
@@ -60,19 +60,19 @@ def test_elided_in():
 
 
 @pytest.mark.parametrize("name", TUNES)
-def test_the_document_round_trips_and_plays_its_native_player(references, name):
+def test_the_lift_replays_its_native_player(references, name):
     ref = references[name]
-    song = ref.ir()
-    assert songio.dumps(song) == ref.text
-    embedded = songio.dumps(song, embed=True)
-    assert songio.dumps(songio.loads(embedded), embed=True) == embedded
     assert len(np.unique(ref.native, axis=0)) > 500
-    assert SongPlayer(song).mismatch(ref.native) is None
-    assert songio.dumps(songio.loads(embedded)) == ref.text
+    assert SongPlayer(ref.ir()).mismatch(ref.native) is None
 
 
 def test_the_format_example_is_the_metal_warrior_document(references):
-    example = (ROOT / "docs" / "format.md").read_text().split("```yaml\n", 1)[1].split("```", 1)[0]
+    example = (
+        (ROOT / "docs" / "format" / "document.md")
+        .read_text()
+        .split("```yaml\n", 1)[1]
+        .split("```", 1)[0]
+    )
     assert elided_in(example, references["metal_warrior"].generic)
 
 
@@ -93,29 +93,29 @@ def _keys(node) -> set:
     return set()
 
 
-def _vocabulary(text: str) -> tuple[set, set]:
-    """``(record keys, commands)`` a document writes."""
-    keys, commands = set(), set()
-    for item in parse(text)["song"]:
-        for tname, defs in (item.get("def") or {}).items():
+def _vocabulary(text: str) -> tuple[set, set, set]:
+    """``(def kinds, record keys, commands)`` a generic document writes, the commands of its
+    init row and phrases."""
+    doc = yaml.safe_load(text)
+    kinds, keys, atoms = set(), set(), list(doc.get("init") or [])
+    for item in doc["song"]:
+        for kind, defs in (item.get("def") or {}).items():
+            kinds.add(kind)
             for value in defs.values():
-                if tname == "phrase":
-                    commands |= {
-                        re.split("[:*]", p)[0] for a in value for p in str(a).split("!")[1:]
-                    }
+                if kind == "phrase":
+                    atoms += value
                 else:
                     keys |= _keys(value)
-    return {k for k in keys if isinstance(k, str)} - {"loop"}, commands
+    commands = {re.split("[:*]", p)[0] for a in atoms for p in str(a).split("!")[1:]}
+    return kinds, {k for k in keys if isinstance(k, str)} - {"loop"}, commands
 
 
 def test_the_players_share_only_the_shared_vocabulary(references):
-    used = {name: _vocabulary(references[name].text) for name in TUNES}
-    for name, (_, commands) in used.items():
+    for name in TUNES:
+        kinds, keys, commands = _vocabulary(references[name].generic)
+        assert kinds <= KINDS and keys <= set(ROW_KEYS) | {RESTART}
+        assert commands <= set(COMMAND_NAMES)
         assert commands == COMMANDS[name]
-    for a in TUNES:
-        for b in set(TUNES) - {a}:
-            assert used[a][0] & used[b][0] <= set(ROW_KEYS) | {"restart"}
-    assert not used["csillag"][0] & (set(COMMAND_NAMES) - set(ROW_KEYS))
 
 
 @pytest.mark.parametrize("name", TUNES)
@@ -163,6 +163,7 @@ def test_the_survey_renderer_plays_the_document_as_the_native_player(references)
 def test_the_optimised_tune_plays_its_native_player(references, optimised_tunes, name):
     result = optimised_tunes[name][1]
     assert result.after < result.before and any(f.kept for f in result.findings)
-    player = SongPlayer(songio.loads(result.text))
+    assert result.text == document.write(result.ir)
+    player = SongPlayer(result.ir)
     native = references[name].native
     assert first_mismatch(player.render_grid(len(native)), native, player.starts) is None

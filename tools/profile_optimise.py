@@ -1,6 +1,6 @@
-"""Time or profile the optimiser on a song document or an HVSC tune's lift.
+"""Time or profile the optimiser on an HVSC tune's lift.
 
-    python tools/profile_optimise.py SONG.yaml|HVSC/PATH.sid --passes instruments,programs
+    python tools/profile_optimise.py TUNE.sid --passes instruments,programs
         [--workers N] [--cut N] [--stats] [--output OUT.yaml] [--profile OUT.prof] [--top N]
 
 A ``.sid`` argument that is not a local file is resolved through the test tune cache. The
@@ -19,23 +19,27 @@ import numpy as np
 from tqdm import tqdm
 
 from unitracker import optimise
-from unitracker.format import songio
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
 
 
-def load(source: str) -> dict:
-    """The song of a document, or of a tune's lift."""
+def tune(source: str) -> Path:
+    """The ``.sid`` file ``source``, or the HVSC-relative tune it names through the tune cache."""
     path = Path(source)
     if path.suffix != ".sid":
-        return songio.loads(path.read_text(encoding="utf-8"))
-    if not path.exists():
-        from pysidtracker.testing import resolve_tune  # pylint: disable=import-outside-toplevel
+        raise ValueError(f"{source}: not a .sid tune")
+    if path.exists():
+        return path
+    from pysidtracker.testing import resolve_tune  # pylint: disable=import-outside-toplevel
 
-        path = resolve_tune(source, cache_dir=CACHE)
+    return resolve_tune(source, cache_dir=CACHE)
+
+
+def load(source: str) -> dict:
+    """The lift of tune ``source``."""
     from unitracker.lift import backends  # pylint: disable=import-outside-toplevel
 
-    return backends.lift(path.read_bytes())
+    return backends.lift(tune(source).read_bytes())
 
 
 def divergence(ir: dict, name: str) -> None:
@@ -50,7 +54,7 @@ def divergence(ir: dict, name: str) -> None:
     states = []
     print("edit first_state_change failure")
     for edit in tqdm(optimise.PASSES[name](opt.base), desc="candidates", unit="edit"):
-        written = driver._written(driver._apply(opt.base, edit), opt.embed)
+        written = driver._written(driver._apply(opt.base, edit), opt.state["native"])
         if written is None or written[0] == opt.text:
             continue
         bad = optimise.mismatch(opt.ref, written[2])
@@ -77,7 +81,7 @@ def check_baseline(ir: dict, name: str) -> int:
     refs = (optimise.Trace(ir), opt.ref)
     played, failed = [0.0, 0.0], 0
     for edit in tqdm(optimise.PASSES[name](opt.base), desc="candidates", unit="edit"):
-        written = driver._written(driver._apply(opt.base, edit), opt.embed)
+        written = driver._written(driver._apply(opt.base, edit), opt.state["native"])
         if written is None or written[0] == opt.text:
             continue
         results = []
@@ -150,7 +154,7 @@ def summarise(log: list) -> None:
 def main(argv=None) -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("song")
+    parser.add_argument("song", metavar="TUNE.sid")
     parser.add_argument("--passes", default=None)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--output", type=Path)

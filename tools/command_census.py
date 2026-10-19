@@ -17,7 +17,7 @@ from unitracker.player.vm import event_commands
 
 
 def census(ir: dict, codes=None) -> Counter:
-    """``{(code, arg): count}`` over every event of an internal song."""
+    """``{(code, arg): count}`` over every event of the lifter's song."""
     out = Counter()
     for events in (ir.get("phrases") or {}).values():
         for event in events:
