@@ -9,7 +9,8 @@ import pytest
 
 from unitracker import cli, optimise
 from unitracker.format import songio
-from unitracker.lift import backends, verify
+from unitracker.lift import backends
+from unitracker.lift.verify import Verdict
 from unitracker.player.vm import SongPlayer
 
 RESTART = "r1: [{hold: 4, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]"
@@ -318,7 +319,7 @@ def test_lift_optimise_flag(tmp_path, monkeypatch):
         """A lift of ``text`` whose verdict is the songs it is asked to verify."""
 
         document = gap = None
-        verdict = verify.Verdict(1, 1, (), None, None)
+        verdict = Verdict(1, 1, (), None, None)
 
         @staticmethod
         def run():
