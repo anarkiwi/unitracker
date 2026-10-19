@@ -3,11 +3,9 @@ order, and the table entries a song can reach."""
 
 import numpy as np
 import pytest
-import yaml
 from conftest import mini_song
 
-from unitracker.format import songio, tablepatch
-from unitracker.format.expr import ExprError
+from unitracker.playroutine.expr import ExprError
 from unitracker.player.canonical import CANONICAL_ORDER, canonical_frames
 from unitracker.player.reach import ReachabilityError, table_reads
 from unitracker.player.vm import Cursor, SongError, SongPlayer, compile_phrase, first_mismatch
@@ -310,25 +308,3 @@ def test_table_reads_cover_the_reached_entries_over_one_recurrence():
     assert player.table_reads is None
     with pytest.raises(ReachabilityError, match="did not recur within 50 ticks"):
         table_reads(counter_song(None), max_ticks=50)
-
-
-def unreachable(_ir):
-    raise ReachabilityError("no recurrence")
-
-
-def test_writer_keeps_read_patch_entries_and_drops_unread(references, monkeypatch):
-    ir = references["metal_warrior"].ir()
-    ftab = ir["tables"]["ftab"]
-    ftab[0] += 1
-    ftab[24] += 1
-    with monkeypatch.context() as patch:
-        patch.setattr(tablepatch, "table_reads", unreachable)
-        assert {0, 24} <= set(yaml.safe_load(songio.dumps(ir))["playroutine"]["tables"]["ftab"])
-    text = songio.dumps(ir)
-    assert yaml.safe_load(text)["playroutine"]["tables"] == {"ftab": {24: ftab[24]}}
-    back = songio.loads(text)
-    assert back["tables"]["ftab"][24] == ftab[24] and back["tables"]["ftab"][0] != ftab[0]
-    np.testing.assert_array_equal(
-        SongPlayer(back).render_grid(4000), SongPlayer(ir).render_grid(4000)
-    )
-    assert songio.dumps(back) == text

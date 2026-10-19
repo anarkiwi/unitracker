@@ -3,8 +3,8 @@
 A port brings another C64 playroutine (a tracker's replay) into unitracker: its tunes lift to the
 generic document of [unitracker-grammar](https://github.com/anarkiwi/unitracker-grammar), verified
 on [unitracker-player](https://github.com/anarkiwi/unitracker-player) against the native replay's
-register grid. This guide assumes you know 6502 and the target player. The format is indexed in
-[format.md](format.md); the modulator machinery is [modfit.md](modulation/modfit.md), the optimiser
+register grid. This guide assumes you know 6502 and the target player. The document is
+[format/document.md](format/document.md); the modulator machinery is [modfit.md](modulation/modfit.md), the optimiser
 [optimise.md](optimise.md), and each existing port's support and limits
 [playroutines/](playroutines/).
 
@@ -23,15 +23,15 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
 | where the generic document first differs, both grids side by side over a tick range | `tools/grid_diff.py out/porting/doc.yaml TUNE.sid --from T --to T` |
-| the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/firing_schedule.py SONG.yaml --cell pw:0 --ticks A:B` |
+| the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/firing_schedule.py TUNE.sid --cell pw:0 --ticks A:B` |
 | the verify verdict and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
 | proofs, closed forms, command composition, keyword signatures | `unitracker-modfit {exprs,command,keywords,fit,poly,generic,sweeps,orbit}` ([modfit.md](modulation/modfit.md)) |
-| the size of the lifter's song | `tools/token_report.py SONG.yaml` (the song's serialised text) |
+| the size of the generic document | `optimise.tokens(lift.document)` (its `cl100k_base` token count) |
 | how many tunes of the player lift, by failure cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |
 | a reference tune in the tests | `conftest.hvsc_tune(name, "MUSICIANS/...", doc)` |
 | a one-feature tune in the tests | `conftest.gt_tune`, `sw_fx`, `sw_table_byte` (patch a native module), `mini_song`, `table` (an IR song) |
-| iterating a playroutine's command variants | `format.codec.command_variants(spec)` |
+| iterating a playroutine's command variants | `playroutine.codec.command_variants(spec)` |
 
 ## 1. What a port is
 
@@ -40,7 +40,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | playroutine | `src/unitracker/playroutines/<name>.yaml` | the replay transcribed as cells, procs, records and a ghost ([The playroutine](playroutines/schema.md)) |
 | record types and codecs | the playroutine's `record_types` and `commands` | the native table layouts, and each row kind and command code as shared keys and back, rejecting what the player cannot play ([Record types](playroutines/schema.md#record-types), [Codecs](playroutines/schema.md#codecs)) |
 | modulator units | the playroutine's `modulators` | the cells the song drives by expressions ([Modulator declarations](playroutines/schema.md#modulator-declarations)) |
-| lifter | `src/unitracker/lift/<name>.py` | a `Lift` subclass: native module data to the internal representation ([Lifting](playroutines/lifting.md)) |
+| lifter | `src/unitracker/lift/<name>.py` | a `Lift` subclass: native module data to the lifter's song ([Lifting](playroutines/lifting.md)) |
 | backend entry | `src/unitracker/lift/backends.py` | detection, and dispatch to the lifter and the native player |
 | reference tune | `tests/conftest.py` | an HVSC tune fetched into `.tunecache/` and checked against the native replay |
 
@@ -74,7 +74,7 @@ order:
 |---|---|
 | build constants | `constants`, which the lifter sets per tune; `defaults` (clock, voices, tempo) where they are not PAL, 3 and none |
 | the initial tempo | the song's `tempo`, which the lifter sets per tune |
-| frequency and other lookup tables | `tables` (a song patches them, see [Document](format/document.md)); `note_offset` |
+| frequency and other lookup tables | `tables` (the document writes those its expressions read, see [Document](format/document.md)); `note_offset` |
 | zero-page and self-modified operands, per voice or shared | `voice` and `global` cells, each with the `width` of its 6502 location; a scratch value has no width |
 | jump tables (command dispatch) | playroutine-owned `records`, run with `run: {record, index, field}` |
 | module tables (instruments, wave, pulse, filter tables) | `record_types` and their templates (section 3), run with `run: {record, index, template}` |
@@ -171,7 +171,7 @@ with the builtins `s8` and `s16`.
 **Codec shapes.** Each `codec` entry is one row kind: `when` over the raw fields, the constants and,
 for a program row, its place (`first`, `last`); `keys` from raw fields to shared keys; `raw` back
 ([Codecs](playroutines/schema.md#codecs)). Write
-every row kind onto the shared keys ([Shared vocabulary](format/vocabulary.md)), each in its one
+every row kind onto the shared row keys ([Programs](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#programs)), each in its one
 meaning in chip units; a player that stores the 11-bit cutoff as its top byte writes the `cut` key
 as `{byte: f}` and the `cut` command as `{name: cut, byte: arg}`, and its `raw` reads `cut` as that
 byte; a note byte (bit 7 absolute, the rest a signed relative note, one byte no note) is
@@ -187,22 +187,22 @@ player cannot play has no shape, so the codec refuses it naming the key or comma
 player (`sidwizard: the player can't express !tempo:2`). Never add a key for one player: resolve
 the native row at lift time into a form that has shared keys (section 6), or fail the lift naming
 it. A shared form two players need and the generic document lacks is a change to
-unitracker-grammar and the shared vocabulary (`ROW_KEYS` and `COMMAND_NAMES` in `codec.py`), not
+unitracker-grammar and the shared vocabulary (`ROW_KEYS` and `COMMAND_NAMES` in `playroutine/codec.py`), not
 part of the port.
 
-**The vocabulary and command-table tests.** `tests/test_format_codec.py` runs over every
-playroutine in `playroutines/` (`PLAYERS`). `test_the_documented_tables_are_the_playroutines`
-generates each playroutine's command table and `ctrl` row key table from its YAML and checks them
-against `docs/playroutines/<name>.md`, so a new playroutine needs that file, laid out as the
-existing ones; the failing assertion prints the expected table to paste into it.
-`test_every_key_a_library_playroutine_uses_is_documented` checks each key the YAML uses against
-`docs/playroutines/schema.md`. Add the player's rows, restarts, refusals and commands to `ROWS`,
-`RESTARTS`, `REFUSALS`, `COMMAND_ROWS` and `COMMAND_REFUSALS`, and its frequency table to the
-parameters of `test_note_offsets_follow_the_frequency_tables`.
+**The vocabulary and command-table tests.** `tests/test_format_codec.py` runs over every playroutine
+in `playroutines/` (`PLAYERS`). `tests/test_playroutine_docs.py`'s
+`test_the_documented_tables_are_the_playroutines` generates each playroutine's command table and
+`ctrl` row key table from its YAML and checks them against `docs/playroutines/<name>.md`, so a new
+playroutine needs that file, laid out as the existing ones; the failing assertion prints the
+expected table to paste into it. `test_every_key_a_library_playroutine_uses_is_documented` checks
+each key the YAML uses against `docs/playroutines/schema.md`. Add the player's rows, restarts,
+refusals and commands to `ROWS`, `RESTARTS`, `REFUSALS`, `COMMAND_ROWS` and `COMMAND_REFUSALS`, and
+its frequency table to the parameters of `test_note_offsets_follow_the_frequency_tables`.
 `tests/test_reference.py`'s `test_the_players_share_only_the_shared_vocabulary` checks that the
 lifted reference documents use only the shared vocabulary, no two players sharing a key outside
-`ROW_KEYS`: add the reference tune to `TUNES`, its backend to `BACKEND` and its expected command
-set to `COMMANDS`.
+`ROW_KEYS`: add the reference tune to `TUNES`, its backend to `BACKEND` and its expected command set
+to `COMMANDS`.
 
 `unitracker-modfit keywords <name>` lists each command and record field with the shared key it is
 written via and its signature against the other playroutines'
@@ -210,15 +210,18 @@ written via and its signature against the other playroutines'
 different key is a vocabulary error.
 
 **Files:** the playroutine's `record_types` and `commands`; `tests/test_format_codec.py`;
-`tests/test_reference.py`; `docs/playroutines/<name>.md` (*Records*, the two generated tables).
-**Verify:**
-`PYTHONPATH=src .venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_reference.py`
-and `PYTHONPATH=src .venv/bin/unitracker-modfit --out out/porting/keywords.txt keywords <name>`.
+`tests/test_playroutine_docs.py`; `tests/test_reference.py`; `docs/playroutines/<name>.md`
+(*Records*, the two generated tables). **Verify:**
+
+```sh
+PYTHONPATH=src .venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_playroutine_docs.py tests/test_reference.py
+PYTHONPATH=src .venv/bin/unitracker-modfit --out out/porting/keywords.txt keywords <name>
+```
 
 ## 4. Modulators
 
 A unit is a cell the song drives by an integer expression in `v`, `φ` and `N`, evaluated at each of
-the unit's firings ([Modulators](modulation/expressions.md)). Declare one per native modulation the
+the unit's firings ([Expressions](modulation/modfit.md#expressions)). Declare one per native modulation the
 lifter converts: a pitch effect (`key: freq`), a pulse sweep (`pw`) or a filter sweep (`cut`). The
 unit keys are in [Modulator declarations](playroutines/schema.md#modulator-declarations):
 
@@ -256,7 +259,7 @@ SID-Wizard's pulse is `pwhi:pwlo` plus its keyboard-tracking term in the note (`
 negation), and `defmon`'s `acid
 B` is its whole accumulator, with the floor, the `dbl` shift and the offset in the ghost's `$D416`.
 A value the replay carries from earlier playback becomes a constant of the start's expression, which
-the lifter resolves ([Evaluation](modulation/expressions.md#evaluation)).
+the lifter resolves ([Expressions](modulation/modfit.md#expressions)).
 
 **Running `unitracker-modfit`.** The `exprs` report lifts the tune with native modulations, converts
 it, and gives per unit and label the occurrences, distinct starts, each start's phase, value update,
@@ -284,15 +287,15 @@ the existing ports do.
 
 | feature | shared form | declare | each player's codec constraints |
 |---|---|---|---|
-| hard restart | a `restart` program anchored to the note: lookahead rows with `hold`, `gate`, `ctrl`, `ad`, `sr`, then the note's first-tick row ([Hard restart](format/vocabulary.md#hard-restart)) | a `restart` record type with shapes on `first` and `last`; an instrument field `restart`, played by command `c` (`instrument: {event: {restart: c}}`) for a player whose notes arm it on the steps before them | each playroutine file's *Hard restart* |
-| chords and arpeggios | a `ctrl` program of relative-note rows, a different chord started with `!run` ([Chords](format/vocabulary.md#chords)) | `note: +n` in the wave or arp table's shapes; the lifter inlines a separate chord table into the program | sidwizard.md, *Control programs* |
-| filter | `res`, `route` (a mask, or the edit `+ m`, `-`), `mode`, `cut`, and `!vol` ([Filter](format/vocabulary.md#filter)) | filter program shapes; `rel` on `route` for an edit | each playroutine file's *Filter* or *Records* |
-| lifetime | `!pw`, `!filter` on the note ([Lifetime](format/vocabulary.md#lifetime)) | `lifetime: {pw: {field, flag}, filter: {field, flag}}` | each playroutine file's *Lifetime* |
-| relative control | `ctrl: ^n`, the exclusive-or mask the voice's control output keeps ([Shared vocabulary](format/vocabulary.md)) | `eor` on the `ctrl` key | `defmon` only; the others refuse it |
-| legato | `!legato` ([Legato](modulation/expressions.md#legato)) | `modulators.legato: {cell, command}` | each playroutine file's command table |
-| tempo | the tempo commands and the initial `tempo` ([Shared vocabulary](format/vocabulary.md)) | `commands` entries with `when`, `arg`, `raw` | each playroutine file's command table; a tempo command no entry declares is refused by name |
+| hard restart | a `restart` program anchored to the note: lookahead rows with `hold`, `gate`, `ctrl`, `ad`, `sr`, then the note's first-tick row ([Hard restart](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#hard-restart)) | a `restart` record type with shapes on `first` and `last`; an instrument field `restart`, played by command `c` (`instrument: {event: {restart: c}}`) for a player whose notes arm it on the steps before them ([Instrument columns](playroutines/schema.md#instrument-columns)) | each playroutine file's *Hard restart* |
+| chords and arpeggios | a `ctrl` program of relative-note rows, a different chord started with `!run` ([Programs](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#programs)) | `note: +n` in the wave or arp table's shapes; the lifter inlines a separate chord table into the program | sidwizard.md, *Control programs* |
+| filter | `res`, `route` (a mask, or the edit `+ m`, `-`), `mode`, `cut`, and `!vol` ([Programs](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#programs)) | filter program shapes; `rel` on `route` for an edit | each playroutine file's *Filter* or *Records* |
+| lifetime | `!pw`, `!filter` on the note ([Notes](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#notes)) | `lifetime: {pw: {field, flag}, filter: {field, flag}}` ([Lifetime](playroutines/schema.md#lifetime)) | each playroutine file's *Lifetime* |
+| relative control | `ctrl: ^n`, the exclusive-or mask the voice's control output keeps ([Programs](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#programs)) | `eor` on the `ctrl` key | `defmon` only; the others refuse it |
+| legato | `!legato` ([Notes](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#notes)) | `modulators.legato: {cell, command}` | each playroutine file's command table |
+| tempo | the tempo commands and the initial `tempo` ([Time](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#time)) | `commands` entries with `when`, `arg`, `raw` | each playroutine file's command table; a tempo command no entry declares is refused by name |
 
-The modules of `src/unitracker/format/events/` resolve the context these forms need by walking
+The modules of `src/unitracker/document/events/` resolve the context these forms need by walking
 each voice's plays: `lifetime.py` (the instrument a note plays), `envelope.py` (an
 envelope nibble command as the byte it writes), and the event folds `fold.py`, `instrument.py` (the
 record an event's columns arm) and `restart.py` (a restart run on the steps before its note), and
@@ -319,7 +322,7 @@ supplies the player:
 | `decode(raw, subtune)` | the native package's decoded module, kept as `self.tune` |
 | `native()` | a fresh native player of the tune; state its passes share, read from it once, is a `functools.cached_property` (GoatTracker's `start`, the tempo cells after init; defMON's `replay`, the build located and its calls timed) |
 | `check_build()` | raises `LiftError` naming the builds and features the playroutine does not cover |
-| `structure()` | the internal representation, below |
+| `structure()` | the lifter's song, below |
 | `normalisations` | the ordered player-specific passes `(lift, song) -> song`, each proved by a replay |
 | `convert(song)` | `modfit.convert.convert` by default; an override post-processes its song (GoatTracker's `snapped`) |
 
@@ -328,14 +331,14 @@ supplies the player:
 | key | content |
 |---|---|
 | `unitracker` | `"ir"` |
-| `meta` | `songio.song_meta(header, "<name> subtune N")` |
+| `meta` | `base.song_meta(header, "<name> subtune N")` |
 | `clock`, `voices` | from the PSID header and the build |
 | `tempo` | the initial tempo as written, `n` or `[a, b]`, for a playroutine that declares `tempo` |
 | `tables` | the module's tables the playroutine reads (the frequency table) |
 | `records` | `{record type: {index: {field: value}}}`, under the playroutine's own type names |
 | `tracks` | per voice `{"plays": [{"phrase": name, "transpose": t, "repeat": n}], "loop": k}` |
 | `phrases` | `{name: [event]}`; an event has `note` (the player's note index, `off` or `on`), `instrument`, `command: [code, arg]` or `commands: [[c, a], [c, a]]`, and `steps` (`vm.fold_empty`) |
-| `playroutine` | `songio.library("<name>")` with `constants` set from the build |
+| `playroutine` | `playroutine.library.library("<name>")` with `constants` set from the build |
 
 `run()` checks the build, runs `structure` and the normalisations, then, with `expressions`,
 `convert`, `canonical` and `verify`, which leaves the generic document in `document` and its
@@ -383,7 +386,7 @@ mismatch.
 | synthetic tunes | `tests/conftest.py` | a builder like `gt_tune`, returning `(decoded tune, native player)` for a one-feature tune, where the native package can build modules |
 | conformance | `tests/test_reference.py` | the `references` fixture lifts once per session and renders the native grid over `REFERENCE_TICKS[name]` (the intro and two loops, in `tests/conftest.py`); the tests check a non-trivial grid (`len(np.unique(ref.native, axis=0))`) and the generic document's verify verdict; add the tune to `TUNES` |
 | dispatch | `tests/test_reference.py` | `backends.detect` against `BACKEND[name]`; the CLI's lift equals the session's lift (a deterministic lift); the CLI's exit status and verdict line |
-| vocabulary, command tables | `tests/test_reference.py`, `tests/test_format_codec.py` | section 3 |
+| vocabulary, command tables | `tests/test_reference.py`, `tests/test_format_codec.py`, `tests/test_playroutine_docs.py` | section 3 |
 | lifter | `tests/test_lift_<name>.py` | each `LiftError`, with `pytest.raises(LiftError, match=...)`, as `tests/test_lift_goattracker.py`; the passes, as `tests/test_lift_base.py` |
 | exprs report | `unitracker-modfit exprs` | section 4 |
 | optimiser | `tests/conftest.py` `OPTIMISED` | the tune with a subset of passes that keeps the suite's time bounded |
@@ -418,7 +421,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |
 | 7 | lift with expressions; verify the generic document on unitracker-player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0 |
 | 8 | where the generic document first differs from the native grid | | `.venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 --to 0` |
-| 9 | vocabulary and command tables; the playroutine's doc | `tests/test_format_codec.py`, `tests/test_reference.py`, `docs/playroutines/<name>.md`, `docs/playroutines/lifting.md` | `.venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_reference.py` |
+| 9 | vocabulary and command tables; the playroutine's doc | `tests/test_format_codec.py`, `tests/test_reference.py`, `docs/playroutines/<name>.md`, `docs/playroutines/lifting.md` | `.venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_playroutine_docs.py tests/test_reference.py` |
 | 10 | conformance, dispatch and lifter tests | `tests/` | `.venv/bin/python -m pytest -n 4 tests/test_reference.py tests/test_lift_<name>.py` |
 | 11 | the optimiser on the lifted tune | `tests/conftest.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise` exits 0 |
 | 12 | verify verdicts and forbidden names | `tools/reference_check.py` | `.venv/bin/python tools/reference_check.py out/porting --forbid <native names>` |

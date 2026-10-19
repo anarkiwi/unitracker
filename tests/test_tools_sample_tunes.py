@@ -76,7 +76,7 @@ def test_run_refills_each_pool_until_its_quota_and_hands_an_empty_pool_on(tmp_pa
         attempts.append(row["path"])
         if row["md5"].endswith(("1", "3", "5", "7", "9")) or int(row["md5"], 16) >= 200:
             return "LiftError: refused"
-        Path(output).write_text("playroutine: x\n", encoding="utf-8")
+        Path(output).write_text("", encoding="utf-8")
         return ""
 
     monkeypatch.setattr(sample_tunes, "lift_one", lift_one)
@@ -113,3 +113,17 @@ def test_main_writes_the_sample_and_failure_tables(tmp_path, monkeypatch, capsys
     assert [f["path"] for f in failures] == ["d/t1.sid"]
     assert len(list(csv.DictReader((out / "sample.csv").open(encoding="utf-8")))) == 2
     assert sample_tunes.main(args[:-4] + ["--count", "1", "--jobs", "1"]) == 0
+
+
+def test_lift_one_writes_the_generic_document_or_returns_the_error(
+    references, tmp_path, monkeypatch
+):
+    """A tune that lifts writes its lift's generic document; one that does not names its error."""
+    monkeypatch.setenv("UNITRACKER_WORKERS", "1")
+    ref = references["metal_warrior"]
+    output = tmp_path / "mw.yaml"
+    assert sample_tunes.lift_one(str(ref.sid.parent), {"path": ref.sid.name}, str(output)) == ""
+    assert output.read_text(encoding="utf-8") == ref.generic
+    (tmp_path / "junk.sid").write_bytes(b"not a sid")
+    error = sample_tunes.lift_one(str(tmp_path), {"path": "junk.sid"}, str(tmp_path / "j.yaml"))
+    assert error.startswith("UnknownFormat: ") and not (tmp_path / "j.yaml").exists()

@@ -8,7 +8,7 @@ import functools
 
 import z3
 
-from unitracker.format.expr import with_builtins
+from unitracker.playroutine.expr import with_builtins
 from unitracker.modfit import playroutine, resolve
 from unitracker.modfit.fit import Fitter, src
 from unitracker.modfit.flow import NESTED, Writes, action_lists, cells_of, direct_writes, names

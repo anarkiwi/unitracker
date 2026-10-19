@@ -66,7 +66,7 @@ note, which clears it. There are no `pw` or
 
 ## Events
 
-The playroutine declares [Instrument columns](../format/vocabulary.md#instrument-columns):
+The playroutine declares [Instrument columns](schema.md#instrument-columns):
 `instrument: {type: sidtab, base: 1, event: {type: ins, column: ctrl, commands: {1: filter},
 restart: 1}}`.
 
@@ -155,10 +155,10 @@ expression replaces, and has no written form.
 
 defMON has no instrument restart: composers run a short sidTAB program on layer B on the empty
 steps before a note. The playroutine declares this with `event: {..., restart: 1}` (see
-[Hard restart](../format/vocabulary.md#hard-restart)): the `restart` of a note's instrument reads
+[Instrument columns](schema.md#instrument-columns)): the `restart` of a note's instrument reads
 as a layer-B start (the event command an instrument's `filter` is) of a sidTAB program of the
 lookahead rows, the last one frozen, holding until the note. The lifter folds such a start back
-before it names the events' instruments, as vocabulary.md says, when its program also sets no
+before it names the events' instruments when its program also sets no
 column but `dl`, `wgh`, `wgl`, `ad` and `sr`. The note's own sidTAB program starts on its first
 tick, so the restart's last row is empty.
 

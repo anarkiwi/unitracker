@@ -1,212 +1,230 @@
-"""Tally the written vocabulary of unitracker documents: events, commands, row keys, expressions.
+"""Tally the vocabulary of generic documents: events, commands, row keys, expression operators.
 
-    python tools/vocab_census.py SONG.yaml ... [--json OUT.json]
+    python tools/vocab_census.py DOC.yaml ... [--json OUT.json]
 
-Prints, per playroutine, how many songs use each event form, command (by name and argument shape),
-record type, row key, program ending and expression operator, with the total occurrences, so the
-format's vocabulary can be read against a corpus of exports.
+Over documents parsed with ``unitracker_grammar.parse``: each form's documents and occurrences.
 """
 
 import argparse
 import json
-import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from lark import Token, Tree
 from tqdm import tqdm
+from unitracker_grammar import parse
 
-from unitracker.format.yamlstyle import parse
+CHAINS = ("cmd_", "row_", "ins_")
+KINDS = {
+    "RESTART": "restart",
+    "INS": "ins",
+    "CTRL": "ctrl",
+    "PW": "pw",
+    "FILTER": "filter",
+    "X": "x",
+    "PHRASE": "phrase",
+}
+OPS = {
+    "MUL": "*",
+    "FLOORDIV": "//",
+    "MOD": "%",
+    "ABS": "abs(",
+    "MIN": "min(",
+    "MAX": "max(",
+    "F": "F(",
+    "NEG": "neg",
+    "V": "v",
+    "PHI": "φ",
+    "N": "N",
+}
+EXPRESSIONS = ("fexpr", "expr")
 
-EVENT = re.compile(
-    r"^(?P<note>[A-G]#?-?\d+|-|off|on)(?P<ins>\.i\d+)?(?P<cmds>(?:![^!*]+)*)(?P<rep>\*\d+)?$"
-)
-COMMAND = re.compile(r"!(?P<name>[a-z]+)(?::(?P<arg>[^!]*))?")
-NAME = re.compile(r"^(i|c|pw|f|r|x|p)\d+$")
-TOKENS = re.compile(r"min\(|max\(|abs\(|//|%|>=|<=|==|!=|>|<|\*\*|\*|[+-]|φ|\bv\b|\d+")
-RECORDS = ("ins", "ctrl", "pw", "filter", "restart", "x", "vinit", "ginit", "phrase")
+
+def _link(node) -> bool:
+    return isinstance(node, Tree) and node.data.startswith(CHAINS)
 
 
-def arg_shape(arg) -> str:
-    """The shape of a command argument: ``name:<prefix>``, ``int``, ``none``, ``a/b``, ``expr``."""
-    if arg is None:
-        return "bare"
-    if arg == "none":
-        return "none"
-    if NAME.match(arg):
-        return f"name:{NAME.match(arg).group(1)}"
-    if re.fullmatch(r"-?\d+", arg):
-        return "int"
-    if re.fullmatch(r"-?\d+/-?\d+", arg):
-        return "a/b"
-    return "expr"
+def _split(node: Tree) -> tuple:
+    """A chain link's own children and the next link, or None."""
+    own = [c for c in node.children if not _link(c)]
+    return own, next((c for c in node.children if _link(c)), None)
 
 
-def value_shape(value) -> str:
-    """How a program-valued field is written: ``ref``, ``inline``, ``expr``, ``int``, ``none``."""
-    if isinstance(value, list):
-        return "inline"
-    if isinstance(value, (int, float)):
-        return "int"
-    if value == "none":
-        return "none"
-    if isinstance(value, str) and NAME.match(value):
-        return "ref"
-    return "expr"
+def _tokens(node) -> list:
+    if isinstance(node, Token):
+        return [node]
+    return list(node.scan_values(lambda v: isinstance(v, Token)))
 
 
 class Census:
-    """Counts keyed by (section, item) for one playroutine, plus which songs used each."""
+    """Counts keyed by ``(section, item)``, and the documents that use each."""
 
     def __init__(self):
         self.count = Counter()
-        self.songs = defaultdict(set)
+        self.docs = defaultdict(set)
 
-    def add(self, song, section, item, n=1):
-        """Record ``n`` occurrences of ``item`` in ``section`` for ``song``."""
+    def add(self, doc: str, section: str, item: str, n: int = 1) -> None:
+        """Record ``n`` occurrences of ``item`` in ``section`` for ``doc``."""
         self.count[(section, item)] += n
-        self.songs[(section, item)].add(song)
+        self.docs[(section, item)].add(doc)
 
-    def expression(self, song, section, text):
-        """Tally an expression's operators and the names it uses."""
-        for tok in set(TOKENS.findall(str(text))):
-            if not tok.isdigit():
-                self.add(song, f"{section} ops", tok)
+    def document(self, doc: str, text: str) -> None:
+        """Tally document ``text``, named ``doc``."""
+        for node in parse(text).children:
+            if isinstance(node, Tree):
+                getattr(self, f"_{node.data}")(doc, node)
 
-    def row(self, song, rtype, row):
-        """Tally one row's keys and the forms of its note, route and expression values."""
-        for key, val in row.items():
-            self.add(song, f"{rtype} row key", key)
-            if key == "note":
-                self.add(song, f"{rtype} note", "relative" if isinstance(val, int) else "absolute")
-            elif key == "route" and isinstance(val, str):
-                self.add(song, f"{rtype} route", "edit")
-            elif key in ("pw", "cut", "freq") and isinstance(val, str) and val != "none":
-                self.expression(song, f"{rtype} row {key}", val)
+    def _meta(self, doc, node):
+        for item in node.children:
+            self.add(doc, "meta key", item.children[0].value)
 
-    def rows(self, song, rtype, program):
-        """Tally one program's rows, keys and ending."""
-        shape = value_shape(program)
-        if shape != "inline":
-            self.add(song, f"{rtype} program", shape)
-            if shape == "expr":
-                self.expression(song, f"{rtype} program", program)
-            return
-        self.add(song, f"{rtype} program", "rows")
-        self.add(song, f"{rtype} rows", "row", sum(isinstance(r, dict) for r in program))
-        for row in program:
-            if row == "end":
-                self.add(song, f"{rtype} program", "end")
-            elif isinstance(row, dict) and set(row) == {"loop"}:
-                self.add(song, f"{rtype} program", "loop")
-            elif isinstance(row, dict):
-                self.row(song, rtype, row)
+    def _clock(self, doc, _node):
+        self.add(doc, "header", "clock")
+
+    def _voices(self, doc, _node):
+        self.add(doc, "header", "voices")
+
+    def _tempo(self, doc, node):
+        self.add(doc, "header", "tempo swing" if len(node.children) == 2 else "tempo")
+
+    def _tables(self, doc, node):
+        for tok in node.children:
+            if isinstance(tok, Token):
+                self.add(doc, "table", tok.value)
+
+    def _init(self, doc, node):
+        self.add(doc, "header", "init")
+        for event in node.children:
+            self.event(doc, "init", event)
+
+    def _row(self, doc, node):
+        sections = [c for c in node.children if c.data == "section"]
+        self.add(doc, "timeline", "def row" if sections else "play row")
+        for section in sections:
+            self.section(doc, section)
+        for play in node.children[-1].children:
+            types = [t.type for t in play.children]
+            form = {"CONT": "~", "END": "end"}.get(types[0], "phrase")
+            self.add(doc, "play entry", "transposed" if "SIGNED" in types else form)
+
+    def _ending(self, doc, node):
+        self.add(doc, "timeline", "loop" if node.children else "end")
+
+    def section(self, doc: str, node: Tree) -> None:
+        """Tally one record type's definitions in a row."""
+        kind = KINDS[node.children[0].type]
+        values = node.children[1::2]
+        self.add(doc, "record type", kind, len(values))
+        for value in values:
+            if kind == "phrase":
+                for event in value.children:
+                    self.event(doc, "phrase", event)
+            elif kind == "ins":
+                self.chain(doc, "ins", _split(value)[1])
             else:
-                self.add(song, f"{rtype} row form", type(row).__name__)
+                self.value(doc, kind, [value])
 
-    def instrument(self, song, ins):
-        """Tally an instrument's keys and how each program field is written."""
-        for key, val in ins.items():
-            self.add(song, "ins key", key)
-            if key in ("ctrl", "pw", "filter", "restart", "freq"):
-                shape = value_shape(val)
-                self.add(song, f"ins {key}", shape)
-                if shape == "inline":
-                    self.rows(song, key if key != "restart" else "restart", val)
-                elif shape == "expr":
-                    self.expression(song, f"ins {key}", val)
+    def chain(self, doc: str, where: str, node) -> list:
+        """Tally ``(where key, key)`` and ``(where key, shape)`` of each key the chain of links
+        from ``node`` writes; the keys in order."""
+        keys = []
+        while node is not None:
+            own, nxt = _split(node)
+            if own:
+                key = node.data.split("_", 1)[1]
+                key = f"!{key}" if node.data.startswith("cmd_") else key
+                keys.append(key)
+                self.add(doc, f"{where} key", key)
+                self.add(doc, f"{where} {key}", self.value(doc, f"{where} {key}", own))
+            node = nxt
+        return keys
 
-    def phrase(self, song, events):
-        """Tally each event's note form, instrument naming, commands and repeat."""
-        for atom in events:
-            m = EVENT.match(str(atom))
-            if not m:
-                self.add(song, "event", "unparsed")
-                continue
-            note = m.group("note")
-            self.add(song, "event note", note if note in ("-", "off", "on") else "pitch")
-            self.add(song, "event", "names instrument" if m.group("ins") else "no instrument")
-            if m.group("rep"):
-                self.add(song, "event", "*steps")
-            cmds = list(COMMAND.finditer(m.group("cmds") or ""))
-            if len(cmds) > 1:
-                self.add(song, "event", f"{len(cmds)} commands")
-            if len(cmds) > 1:
-                self.add(song, "command pair", "+".join("!" + c.group("name") for c in cmds))
-            for cmd in cmds:
-                name, arg = cmd.group("name"), cmd.group("arg")
-                self.add(song, "command", f"!{name}:{arg_shape(arg)}")
-                if name == "freq" and arg_shape(arg) == "expr":
-                    self.expression(song, "command !freq", arg)
+    def value(self, doc: str, where: str, nodes: list) -> str:
+        """How ``nodes`` are written (token types, ``program``, ``int`` or ``expr``), tallying
+        the programs and expressions among them."""
+        shapes = []
+        for node in nodes:
+            if isinstance(node, Token):
+                shapes.append(node.type.lower())
+            elif node.data == "program":
+                self.program(doc, where.split()[-1], node)
+                shapes.append("program")
+            elif node.data in EXPRESSIONS:
+                shapes.append(self.expression(doc, where, node))
+            else:
+                shapes.append(self.value(doc, where, node.children))
+        return "/".join(shapes)
 
-    def record(self, song, rtype, value):
-        """Tally one defined record by its type."""
-        if rtype == "ins":
-            self.instrument(song, value)
-        elif rtype == "phrase":
-            self.phrase(song, value)
-        elif rtype == "x":
-            self.add(song, "x", "expression")
-            self.expression(song, "x", value)
-        elif rtype in ("vinit", "ginit"):
-            for key in value:
-                self.add(song, f"{rtype} key", key)
-        else:
-            self.rows(song, rtype, value)
+    def program(self, doc: str, kind: str, node: Tree) -> None:
+        """Tally a program's rows, their keys and its ending."""
+        rows = [c for c in node.children if isinstance(c, Tree)]
+        self.add(doc, f"{kind} program", "loop" if node.children[-1].type == "INT" else "end")
+        self.add(doc, f"{kind} rows", "row", len(rows))
+        for row in rows:
+            if not row.children:
+                self.add(doc, f"{kind} rows", "empty row")
+            self.chain(doc, f"{kind} row", next(iter(row.children), None))
 
-    def document(self, song, doc):
-        """Tally one document."""
-        pr = doc.get("playroutine")
-        self.add(song, "header", "playroutine ref" if isinstance(pr, dict) else "playroutine name")
-        for key in doc:
-            self.add(song, "document key", key)
-        for key in doc.get("meta") or {}:
-            self.add(song, "meta key", key)
-        if "tempo" in doc:
-            self.add(song, "tempo", "swing" if isinstance(doc["tempo"], list) else "ticks")
-        for entry in doc.get("song") or []:
-            for rtype, records in (entry.get("def") or {}).items():
-                self.add(song, "record type", rtype, len(records))
-                for value in records.values():
-                    self.record(song, rtype, value)
-            for play in entry.get("play") or []:
-                form = "~" if play is None else "phrase" if NAME.match(str(play)) else "transposed"
-                self.add(song, "play entry", form)
+    def expression(self, doc: str, where: str, node: Tree) -> str:
+        """Tally an expression's operators under ``where ops``; ``int`` for a constant."""
+        ops = Counter()
+        for tok in _tokens(node):
+            if tok.type in ("ADD", "CMP"):
+                ops[tok.value.strip()] += 1
+            elif tok.type == "XTABLE":
+                ops[f"{tok.value}[]"] += 1
+            elif tok.type in OPS:
+                ops[OPS[tok.type]] += 1
+        for op, n in ops.items():
+            self.add(doc, f"{where} ops", op, n)
+        return "expr" if ops else "int"
+
+    def event(self, doc: str, where: str, node: Tree) -> None:
+        """Tally an event's note form, instrument, commands, keep flags and repeat."""
+        tokens = [c for c in node.children if isinstance(c, Token)]
+        note = tokens[0].value
+        named = any(t.type == "INS" for t in tokens)
+        self.add(doc, f"{where} note", note if note in ("-", "off", "on") else "pitch")
+        self.add(doc, f"{where} event", "names instrument" if named else "no instrument")
+        if tokens[-1].type == "INT":
+            self.add(doc, f"{where} event", "*steps")
+        trees = [c for c in node.children if isinstance(c, Tree)]
+        keys = self.chain(doc, f"{where} command", trees[0])
+        for keep in trees[1:]:
+            if keep.children:
+                keys.append(keep.children[0].value)
+                self.add(doc, f"{where} command key", keys[-1])
+        if len(keys) > 1:
+            self.add(doc, f"{where} event", f"{len(keys)} commands")
+            self.add(doc, f"{where} command set", "+".join(keys))
 
 
-def report(name: str, census: Census, total: int) -> str:
-    """One table per section: item, songs using it, occurrences."""
-    lines = [f"\n## {name}: {total} songs"]
+def report(census: Census, total: int) -> str:
+    """One table per section: item, documents using it, occurrences."""
+    lines = [f"## {total} documents"]
     by_section = defaultdict(list)
     for (section, item), n in census.count.items():
-        by_section[section].append((item, len(census.songs[(section, item)]), n))
+        by_section[section].append((item, len(census.docs[(section, item)]), n))
     for section in sorted(by_section):
         lines.append(f"\n{section}:")
-        for item, songs, n in sorted(by_section[section], key=lambda t: (-t[1], -t[2], str(t[0]))):
-            lines.append(f"  {str(item):28s} {songs:4d} songs {n:8d}")
+        for item, docs, n in sorted(by_section[section], key=lambda t: (-t[1], -t[2], t[0])):
+            lines.append(f"  {item:28s} {docs:4d} docs {n:8d}")
     return "\n".join(lines)
 
 
 def main(argv=None) -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("songs", type=Path, nargs="+")
+    parser.add_argument("docs", type=Path, nargs="+")
     parser.add_argument("--json", type=Path)
     args = parser.parse_args(argv)
-    censuses, totals = defaultdict(Census), Counter()
-    for path in tqdm(args.songs, unit="song"):
-        doc = parse(path.read_text(encoding="utf-8"))
-        pr = doc.get("playroutine")
-        backend = pr.get("ref", "embedded") if isinstance(pr, dict) else str(pr)
-        totals[backend] += 1
-        censuses[backend].document(path.name, doc)
-    for backend in sorted(censuses):
-        print(report(backend, censuses[backend], totals[backend]))
+    census = Census()
+    for path in tqdm(args.docs, unit="doc"):
+        census.document(str(path), path.read_text(encoding="utf-8"))
+    print(report(census, len(args.docs)))
     if args.json:
-        out = {
-            b: {f"{s}|{i}": [n, len(c.songs[(s, i)])] for (s, i), n in c.count.items()}
-            for b, c in censuses.items()
-        }
+        out = {f"{s}|{i}": [n, len(census.docs[(s, i)])] for (s, i), n in census.count.items()}
         args.json.write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
     return 0
 

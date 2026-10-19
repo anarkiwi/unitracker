@@ -1,5 +1,6 @@
 """Shared fixtures: the HVSC reference tunes, each lifted once per session, and synthetic tunes."""
 
+import copy
 import os
 import pickle
 from dataclasses import dataclass
@@ -28,8 +29,6 @@ from pysidwizard import parse_sid_song
 from pysidwizard.player import INST_WF_TABLE_POS
 
 from unitracker import optimise
-from unitracker.format import songio
-from unitracker.format.yamlstyle import dump
 from unitracker.lift import backends
 
 CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
@@ -101,12 +100,6 @@ third_ninja = hvsc_tune(
     "MUSICIANS/S/Spiikki/Third_Ninja.sid",
     "Path to Spiikki's Third Ninja, SID-Wizard WF table jumps.",
 )
-
-
-def doc_text(doc: dict) -> str:
-    """Document ``doc`` (as :func:`unitracker.format.yamlstyle.parse` reads one) as YAML,
-    each scalar spelled as the writer spells it."""
-    return dump(doc)
 
 
 def table(*rows) -> Table:
@@ -204,9 +197,9 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
 
 
 OPTIMISED = {
-    "metal_warrior": ["hoist"],
+    "metal_warrior": ["programs"],
     "crosseyed": ["instruments", "programs"],
-    "csillag": ["instruments"],
+    "csillag": ["fields"],
 }
 REFERENCE_TICKS = {
     "metal_warrior": 2 * 3840,
@@ -230,18 +223,18 @@ def once(factory, key: str, make):
 
 @dataclass(frozen=True)
 class Reference:
-    """A reference tune lifted once: its path, bytes, canonical internal document, native grid
-    and the lift's generic document."""
+    """A reference tune lifted once: its path, bytes, the lifter's song, native grid and the
+    lift's generic document."""
 
     sid: Path
     raw: bytes
-    text: str
+    song: dict
     native: np.ndarray
     generic: str
 
     def ir(self) -> dict:
         """A fresh copy of the lifted song."""
-        return songio.loads(self.text)
+        return copy.deepcopy(self.song)
 
 
 class _Shared(dict):
@@ -263,8 +256,8 @@ def _reference(name, sid):
     raw = sid.read_bytes()
     grid = backends.native_player(raw).render_grid(REFERENCE_TICKS[name])
     lift = backends.lifter(raw)
-    text = songio.dumps(lift.run())
-    return Reference(sid, raw, text, np.asarray(grid, np.uint8), lift.document)
+    song = lift.run()
+    return Reference(sid, raw, song, np.asarray(grid, np.uint8), lift.document)
 
 
 @pytest.fixture(scope="session")

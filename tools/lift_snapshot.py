@@ -1,10 +1,10 @@
-"""Write each tune's lift as ``OUTDIR/<tune>.yaml`` (or its error as ``.err``), to ``diff -r``.
+"""Write each tune's generic document as ``OUTDIR/<tune>.yaml`` (or its error as ``.err``).
 
     python tools/lift_snapshot.py OUTDIR SID ... [@LIST] [--hvsc DIR] [--plain]
 
 A ``SID`` that is not a file is read under ``--hvsc`` (default ``$HVSC``); ``@LIST`` reads
-arguments one per line; ``--plain`` lifts without expressions and writes the internal song's
-``pprint`` text, as its native rows may have no written form.
+arguments one per line; ``--plain`` lifts without expressions and writes the lifter's song's
+``pprint`` text, as its native rows have no generic document. The outputs are for ``diff -r``.
 """
 
 import argparse
@@ -14,20 +14,24 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from unitracker.format import songio
 from unitracker.lift import backends
 
 
 def snapshot(sid: Path, out: Path, expressions: bool) -> bool:
-    """Write ``sid``'s lift under ``out``; whether it lifted."""
+    """Write ``sid``'s lift under ``out``; whether it lifted to a written text."""
     try:
-        song = backends.lift(sid.read_bytes(), expressions=expressions)
-        text = songio.dumps(song) if expressions else pprint.pformat(song, width=100)
+        lift = backends.lifter(sid.read_bytes(), expressions=expressions)
+        song = lift.run()
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        (out / f"{sid.stem}.err").write_text(f"{type(exc).__name__}: {exc}\n")
-        return False
-    (out / f"{sid.stem}.yaml").write_text(text)
-    return True
+        error = f"{type(exc).__name__}: {exc}"
+    else:
+        text = lift.document if expressions else pprint.pformat(song, width=100)
+        if text is not None:
+            (out / f"{sid.stem}.yaml").write_text(text)
+            return True
+        error = f"gap: {lift.gap}"
+    (out / f"{sid.stem}.err").write_text(f"{error}\n")
+    return False
 
 
 def main() -> None:

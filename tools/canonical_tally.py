@@ -1,9 +1,10 @@
-"""Run the canonical passes over documents or lifted tunes in parallel and tally them per pass.
+"""Run the canonical passes over lifted tunes in parallel and tally them per pass.
 
-    python tools/canonical_tally.py SONG.yaml|TUNE.sid [...] [--jobs J] [--workers N] [--out DIR]
+    python tools/canonical_tally.py TUNE.sid [...] [--jobs J] [--workers N] [--out DIR]
 
-Per pass: candidates found, refused (no written form, or the codec's reading refuses it) and
-proved; tokens before and after (``tools/token_report.py``'s count). ``--out`` writes each result.
+A tune that is not a local file is an HVSC-relative path resolved through the tune cache. Per
+pass: candidates found, refused (no generic document) and proved; the generic documents' tokens
+before and after. ``--out`` writes each result's generic document.
 """
 
 import argparse
@@ -17,10 +18,10 @@ for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ.setdefault(_var, "2")
 
 # pylint: disable=wrong-import-position
+from profile_optimise import tune
 from tqdm import tqdm
 
 from unitracker import optimise
-from unitracker.format import songio
 from unitracker.lift import backends
 from unitracker.lift.goattracker import GoatTrackerLift
 from unitracker.lift.sidwizard import SidWizardLift
@@ -36,9 +37,9 @@ def converted(raw: bytes) -> dict:
 
 
 def tally(path: str, out: Path | None, workers: int) -> tuple:
-    """``(path, per-pass tally, tokens before, after, error)`` of one document or tune."""
+    """``(path, per-pass tally, tokens before, after, error)`` of one tune."""
     try:
-        song = converted(Path(path).read_bytes()) if path.endswith(".sid") else songio.load(path)
+        song = converted(tune(path).read_bytes())
         result = optimise.optimise(song, list(optimise.CANONICAL), workers, progress=False)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         return path, {}, 0, 0, f"{type(exc).__name__}: {exc}"
@@ -50,7 +51,7 @@ def tally(path: str, out: Path | None, workers: int) -> tuple:
 def main(argv=None) -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("paths", nargs="+")
+    parser.add_argument("paths", nargs="+", metavar="TUNE.sid")
     parser.add_argument(
         "--workers", type=int, default=int(os.environ.get("UNITRACKER_WORKERS", 0)) or None
     )
@@ -66,7 +67,9 @@ def main(argv=None) -> int:
             path, counts, before, after, error = future.result()
             for name, count in counts.items():
                 totals[name].update(count)
-            tokens.update(before=before, after=after, changed=before != after, failed=bool(error))
+            tokens.update(
+                before=before, after=after, changed=int(before != after), failed=int(bool(error))
+            )
             if error or before != after:
                 print(f"{path}: {error or f'{before} -> {after} tokens'}", flush=True)
     print("| pass | found | refused | proved |\n|---|---|---|---|")

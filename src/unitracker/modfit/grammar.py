@@ -751,7 +751,7 @@ def _encoding():
 
 
 def tokens(s: str) -> int:
-    """Tokens of ``s`` with ``tools/token_report.py``'s tokenizer."""
+    """Tokens of ``s`` with the optimiser's tokenizer."""
     return len(_encoding().encode(s))
 
 

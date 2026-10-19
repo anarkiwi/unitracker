@@ -1,10 +1,33 @@
 # Modulation analysis (`unitracker.modfit`)
 
 `unitracker.modfit` derives each modulator occurrence of a song as phase and value
-expressions in the format's grammar (see [expressions.md](expressions.md)), proves
-them against the playroutine's own action lists with z3, and rewrites the song with them
-(`convert`). The `unitracker-modfit` command reports these derivations and the
+expressions, proves them against the playroutine's own action lists with z3, and rewrites the
+song with them (`convert`). The `unitracker-modfit` command reports these derivations and the
 playroutine-level analyses (accumulator fits, keyword composition and signatures).
+
+## Expressions
+
+An expression is the grammar's `expr`
+([`canonical.lark`](https://github.com/anarkiwi/unitracker-grammar/blob/main/src/unitracker_grammar/canonical.lark)),
+fired as unitracker-player's
+[Modulators](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#modulators)
+say: `v' = f(v, φ, N)` per firing of its unit, which drives one shared key, `freq` (a voice's
+frequency), `pw` (a voice's pulse width) or `cut` (the filter cutoff). The unit's `v` is its
+`chip` map's value, else its cell's ([Modulator
+declarations](../playroutines/schema.md#modulator-declarations)); each playroutine's file lists
+its units ([goattracker2](../playroutines/goattracker2.md#modulators),
+[sidwizard](../playroutines/sidwizard.md#modulators),
+[defmon](../playroutines/defmon.md#modulators)). In the lifter's song a frequency expression's `v`
+is the offset from the note's frequency; the generic writer rewrites it to the frequency word
+([Document](../format/document.md)).
+
+A start opens an occurrence at the unit's next firing, with `φ = 0` and `v` the unit's value
+then, running to the unit's next start. An expression with no `v` is a closed form in `φ`: the
+value after firing `φ`. Values a modulator carries from earlier playback (a slide's start
+frequency, a delay counter, an accumulator's direction) are constants of its expression, which
+the lifter resolves at the start. A start that selects no expression leaves the unit to the
+playroutine's own firing. In the generic document `φ` counts ticks from the modulator's start, and
+the writer re-times each expression to the ticks its native unit fires on.
 
 ## Inputs
 
@@ -17,8 +40,7 @@ playroutine-level analyses (accumulator fits, keyword composition and signatures
 How a declaration feeds the analysis:
 
 - `fire` is the action list of one firing; its first and last entries' functions bound a firing
-  in the compiled player (`unitracker.player.modulation`), and `hooks` mark a start, which opens an occurrence at the
-  unit's next firing and runs to its next start. `scope: global` makes one occurrence per unit.
+  in the compiled player (`unitracker.player.modulation`), and `hooks` mark a start. `scope: global` makes one occurrence per unit.
   A unit with an `init` also starts at the playroutine's init: its occurrence opens at the
   init's first call of the firing's first or last function (a global unit's is the first
   voice's), so a firing the init enters at its last function begins there.
@@ -130,7 +152,7 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
 Observations, derivations and conversions are cached in `$UNITRACKER_CACHE` (default
 `out/modfit/cache/`) under the sha256 of the song and the code identity
 (`convert.code_identity`): one sha256 per process over the contents of `convert.SOURCES`, which
-are every `modfit/*.py`, `modfit/specs.yaml`, the playroutine library and the player and format
+are every `modfit/*.py`, `modfit/specs.yaml`, the playroutine library and the player and playroutine
 modules a conversion reads. An entry is valid only for the code that wrote it, so a cache shared
 across commits or worktrees never serves another commit's result. Starts are derived in a pool of
 `$UNITRACKER_WORKERS` processes, else one per core the process may run on; the pool reads no other
@@ -180,7 +202,7 @@ two differ on a row with a note.
 ## `unitracker-modfit`
 
 `--out FILE` writes the report to a file instead of standard output (`exprs` defaults to
-`out/modfit/exprs.txt`). A `SONG` is a tune a backend lifts (`sweeps` also takes the lifter's song serialised as YAML); a pair cell
+`out/modfit/exprs.txt`). A `SONG` is a tune a backend lifts; a pair cell
 is `hi:lo` or `hi:lo:k`.
 
 | subcommand | arguments | output |
@@ -191,7 +213,7 @@ is `hi:lo` or `hi:lo:k`.
 | `keywords` | `[PLAYROUTINE ...]` | one row per keyword or field: playroutine, shared key, signature, matches, verdict, reason ([Signatures](#signatures)) |
 | `generic` | `[PLAYROUTINE ...] [--ticks N]` | each keyword and record row kind factorised as one generic accumulator (step, basis, hit, respond, gate, proof status), the rows grouped, timers, vibrato and bounce orbits |
 | `sweeps` | `[SONG ...]` | the specs' `bounces`, the `fit` lines of the specs' pair-cell fits and checks, and each song's table programs matched to one accumulator |
-| `exprs` | `[SONG ...] [--before DIR] [--after DIR] [--workers N]` (default: `cli.SONGS`) | per song: occurrences over the window, the converted song's serialisation replayed on the lifter's VM against the native grid, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; the converted song's token count beside those of the same-named files in `--before` and `--after` |
+| `exprs` | `[SONG ...] [--workers N]` (default: `cli.SONGS`) | per song: occurrences over the window, the converted song's generic document and its verify verdict on unitracker-player against the native grid, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; each generic document's token count |
 | `orbit` | `[PLAYROUTINE ...] [--ticks N]` (default: the specs' `orbits`) | per period, the reflect accumulator whose per-tick deltas equal the original's over the run, then the periods with none |
 
 ### Specs

@@ -115,7 +115,7 @@ def run(args) -> list:
         fused += [x for c in table["checks"] if ":" in c["cell"] for x in check_lines(*c.values())]
         return sweeps_report(args.units, fused)
     if args.command == "exprs":
-        return exprs_report(args.units or SONGS, Path(args.before), Path(args.after), args.workers)
+        return exprs_report(args.units or SONGS, args.workers)
     if args.command == "poly":
         units = [u.split(":") for u in args.units]
         return [x for u in tqdm(units, desc="poly", unit="op") for x in poly_lines(*u)]
@@ -152,8 +152,6 @@ def main(argv=None) -> None:
         "exprs", help="every song modulator as proved phase and value expressions"
     )
     exprs.add_argument("units", nargs="*", metavar="SONG")
-    exprs.add_argument("--before", default="out/modmigration/before", help="v1.3 documents")
-    exprs.add_argument("--after", default="out/modmigration/after", help="v1.4 documents")
     exprs.add_argument("--workers", type=int, help="processes (default: the host's cores)")
     orbit = sub.add_parser("orbit", help="test vibrato orbits as reflect accumulators")
     orbit.add_argument("units", nargs="*", metavar="PLAYROUTINE")

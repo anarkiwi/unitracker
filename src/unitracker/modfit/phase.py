@@ -16,7 +16,7 @@ import typing
 import sympy
 import z3
 
-from unitracker.format.codec import Evaluator
+from unitracker.playroutine.codec import Evaluator
 from unitracker.modfit import chipinv
 from unitracker.modfit import grammar as G
 from unitracker.modfit.flow import Writes, action_lists, walk

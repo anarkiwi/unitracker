@@ -70,7 +70,7 @@ names no instrument, `!run` on such an event) or `!legato`.
 - `!ad` and `!sr` are the envelope small FX ($2x attack, $3x decay, $5x sustain, $6x release;
   playroutine codes $12x-$16x from the instrument column), each setting one nibble's override, which
   clears the other nibble's of that register and lasts until the voice's next note start (see
-  [Envelope commands](../format/vocabulary.md#envelope-commands)). Each decodes as the byte it makes of
+  [Envelope commands](schema.md#envelope-commands)). Each decodes as the byte it makes of
   the instrument's. An FX-column one alone on a row that starts no note decodes into the first
   slot, which plays the same.
 - The tempo FX apply on the row's TICK_2 with its other FX: $10 (`!tempo:n`, playroutine code

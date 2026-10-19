@@ -1,8 +1,9 @@
-"""v1.20 expressions in documents and the lift-time conversion of native modulations to them."""
+"""Expressions in lifted songs and the lift-time conversion of native modulations to them."""
 
 import copy
 from types import SimpleNamespace
 
+import irs
 import numpy as np
 import pytest
 import sympy
@@ -10,9 +11,8 @@ import z3
 from pydefmon import DefmonPlayer
 from pysidtracker import SidImage
 
-from unitracker.format import songio, xexpr
-from unitracker.format.events.lifetime import selected
-from unitracker.format.songio import library
+from unitracker import document
+from unitracker.document.events.lifetime import selected
 from unitracker.lift import defmon
 from unitracker.modfit import convert
 from unitracker.modfit import exprs as modfit_exprs
@@ -21,24 +21,41 @@ from unitracker.modfit import phase
 from unitracker.modfit.form import Form
 from unitracker.player.modulation import INIT, Occurrence
 from unitracker.player.vm import SongError, SongPlayer
+from unitracker.playroutine import xexpr
+from unitracker.playroutine.atoms import note_index
+from unitracker.playroutine.library import SongFormatError, library
 
 V, PHI = G.V, G.PHI
 GT = library("goattracker2")["tables"]
 SW = library("sidwizard")["tables"]
 # A plain gated instrument whose hard restart turns the gate off two ticks ahead.
-INS = (
-    "{sr: 240, ctrl: [{ctrl: 65, note: +0}, end], "
-    "restart: [{hold: 2, gate: 0, ad: 15, sr: 0}, {ctrl: 9}, end]"
-)
+GT_RECORDS = {
+    "ins": {1: {"ctrl": 1, "restart": 1, "sr": 240}},
+    "ctrltab": {1: {"w": 65, "n": 0, "next": 0}},
+    "restart": {
+        1: {"hold": 2, "gate": 0, "ad": 15, "sr": 0, "ctrl": -1, "next": 2},
+        2: {"ctrl": 9, "gate": 1, "ad": -1, "sr": -1, "next": 0},
+    },
+}
+SW_RECORDS = {
+    "ins": {1: {"ctrl": 1, "sr": 240}},
+    "wftab": {1: {"w": 65, "a": 0, "d": 0, "h": 0, "next": 0}},
+}
+DM_ROW = dict.fromkeys(("ad", "af", "fv", "re", "sr", "tr", "wgh", "wgl"), -1)
+DM_INIT = {
+    "vinit": {v: {"pw": 0, "sacc": 0, "tbase": 0} for v in range(3)},
+    "ginit": {0: {}},
+}
+TEMPO = {"goattracker2": 7}
 
 
 def regs(ir, ticks):
     return SongPlayer(ir).render_grid(ticks).astype(int)
 
 
-def voice0(text, ticks):
+def voice0(ir, ticks):
     """Voice 0's frequency and pulse-width words and control register per tick."""
-    grid = regs(songio.loads(text), ticks)
+    grid = regs(ir, ticks)
     return grid[:, 0] | grid[:, 1] << 8, grid[:, 2] | grid[:, 3] << 8, grid[:, 4]
 
 
@@ -47,108 +64,139 @@ def moves(words):
     return [int(d) for d in np.diff(words) if d]
 
 
-TEMPO = ("\nsong:", "\ntempo: 7\nsong:")
+def edited(ir, old, new, whole=False) -> dict:
+    """``ir`` with ``old`` replaced by ``new`` in the one expression that holds it, or is it."""
+    [key] = [k for k, text in ir["exprs"].items() if (text == old if whole else old in text)]
+    ir["exprs"][key] = ir["exprs"][key].replace(old, new, 1)
+    return ir
 
 
-def doc(playroutine, defs, phrase, extra="", silent=False):
-    """A v1.20 document playing phrase ``p1`` on every voice, or on voice 0 alone (``silent``)."""
-    rest = "\n        p2: [off*8]" if silent else ""
-    play = "[p1, p2, p2]" if silent else "[p1, p1, p1]"
-    return f"""
-unitracker: 1.20
-playroutine: {{ref: {playroutine}}}
-song:
-  - def:
-{extra}{defs}
-      phrase:
-        p1: {phrase}{rest}
-    play: {play}
-  - end
-"""
+def generic(ir, ticks) -> str:
+    """The generic document of ``ir`` over ``ticks`` ticks, whether or not its state recurs: the
+    writer refuses a row that keeps a native field."""
+    return document.write(ir, document.native_state(ir, ticks, ticks))
 
 
-def gt_ir(phrase: str, ins: str = INS + "}"):
-    """A one-voice goattracker2 song, the other voices silent."""
-    defs = f"      ins:\n        i1: {ins}"
-    return songio.loads(doc("goattracker2", defs, phrase, silent=True).replace(*TEMPO))
-
-
-def sw_ir(phrase: str):
-    """A one-voice sidwizard song, the other voices silent."""
-    defs = "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end]}"
-    return songio.loads(doc("sidwizard", defs, phrase, silent=True))
-
-
-GT_SONG = doc(
-    "goattracker2",
-    """      ins:
-        i1: """
-    + INS
-    + """, pw: '1024 + 16*min(3, φ)'}
-      x:
-        x1: (v + 300) % 65536
-        x2: 0""",
-    "[C4.i1, -!freq:x1, -, D4!freq:x2!legato, -!freq:none]",
-).replace(*TEMPO)
-SW_INS = "freq: '(φ >= 2)*W[N + 25]'"
-SW_SONG = doc(
-    "sidwizard",
-    """      ins:
-        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], pw: '2048 + 2*min(4, φ)',
-          """ + SW_INS + "}",
-    "[C4.i1*4, -!freq:x1*4]",
-    "      x:\n        x1: (v - 7) % 65536\n",
-)
-DM_VOICES = "      vinit: {0: {}, 1: {}, 2: {}}\n      ginit: {0: {}}\n"
-DM_SONG = doc(
-    "defmon",
-    "      ins:\n        i1: {ctrl: [{ctrl: 65, pw: 256 + 10*φ, freq: (v - 139) % 65536}, end]}",
-    "[C4.i1*8]",
-    DM_VOICES,
-)
-DM_AF = doc(
-    "defmon",
-    """      ins:
-        i1: {ctrl: [{ctrl: 65, gate: 1, hold: 4}, {gate: 0}, end]}
-        i2: {ctrl: [{ctrl: 65, gate: 1, hold: 3}, {gate: 0}, end]}""",
-    "[C4.i1*12, E4*12, G4.i2*12, A4.i1*12]",
-    DM_VOICES,
-)
-
-
-# ---- expressions in documents ------------------------------------------------------------
-
-
-def test_swing_arguments_share_their_speed_table_rows():
-    text = doc(
-        "goattracker2", "      ins:\n        i1: {sr: 240}", "[C4.i1!tempo:6/9, -!tempo:6/9]"
+def unlegato(ir) -> dict:
+    """``ir`` with the legato dropped from the first legato note naming a freq expression."""
+    event = next(
+        e
+        for phrase in ir["phrases"].values()
+        for e in phrase
+        if "note" in e and len(e.get("commands", ())) == 2 and [17, 0] in e["commands"]
     )
-    song = songio.loads(text.replace("-!tempo:6/9]", "-!tempo:6/9, -!vtempo:3/4, -!tempo:7]"))
-    assert song["records"]["speedtab"] == {1: {"l": 6, "r": 9}, 2: {"l": 3, "r": 4}}
-    cmds = [e.get("command") or e["commands"][-1] for e in song["phrases"]["p1"]]
-    assert cmds == [[14, 1], [14, 1], [18, 2], [15, 7]]
-    assert "-!vtempo:3/4, -!tempo:7]" in songio.dumps(song)
-    with pytest.raises(songio.SongFormatError, match="can't express !tempo:none"):
-        songio.loads(text.replace("-!tempo:6/9]", "-!tempo:none]"))
+    [event["command"]] = [c for c in event.pop("commands") if c != [17, 0]]
+    return ir
+
+
+def notes(playroutine, *specs) -> list:
+    """Phrase events of ``(note, steps[, instrument])``: a note name, ``off`` or ``-``."""
+    offset = library(playroutine)["note_offset"]
+    out = []
+    for note, steps, *ins in specs:
+        event = {"instrument": ins[0]} if ins else {}
+        if note != "-":
+            event["note"] = note if note == "off" else note_index(note) + offset
+        if steps != 1:
+            event["steps"] = steps
+        out.append(event)
+    return out
+
+
+def song(playroutine, records, phrase, silent=True, **extra) -> dict:
+    """A song playing ``phrase`` on voice 0, the other voices silent, or on every voice."""
+    phrases = {"p1": phrase}
+    if silent:
+        phrases["p2"] = [{"note": "off", "steps": 8}]
+    play = ["p1", "p2", "p2"] if silent else ["p1"] * 3
+    if playroutine in TEMPO:
+        extra.setdefault("tempo", TEMPO[playroutine])
+    records = copy.deepcopy(records)
+    return irs.song(playroutine, records=records, phrases=phrases, play=play, **extra)
+
+
+def gt_ir(*specs, **extra):
+    """A one-voice goattracker2 song of :data:`GT_RECORDS`, the other voices silent."""
+    return song("goattracker2", GT_RECORDS, notes("goattracker2", *specs), **extra)
+
+
+def sw_ir(*specs, **extra):
+    """A one-voice sidwizard song of :data:`SW_RECORDS`, the other voices silent."""
+    return song("sidwizard", SW_RECORDS, notes("sidwizard", *specs), **extra)
+
+
+def with_filter(ir, row) -> dict:
+    """``ir`` with instrument 1 running the one-row filter program ``row``."""
+    ir["records"]["ins"][1]["filter"] = 1
+    ir["records"]["filttab"] = {1: {"l": 144, "r": 193, "next": 0, **row}}
+    return ir
+
+
+def gt_song():
+    """Voice 0's pulse expression, freq commands, a legato note and a freq reset, on every voice."""
+    records = copy.deepcopy(GT_RECORDS)
+    records["ins"][1]["pw"] = 1
+    records["pulsetab"] = {1: {"x": 1, "next": 0}}
+    phrase = [
+        {"instrument": 1, "note": 48},
+        {"command": [16, 2]},
+        {"command": [16, 2]},
+        {"note": 50, "commands": [[16, 3], [17, 0]]},
+        {"command": [16, 0]},
+    ]
+    exprs = {1: "1024 + 16*min(3, φ)", 2: "(v + 300) % 65536", 3: "0"}
+    return song("goattracker2", records, phrase, silent=False, exprs=exprs)
+
+
+def sw_song():
+    """An instrument freq and pulse expression and a freq command, on every voice."""
+    records = copy.deepcopy(SW_RECORDS)
+    records["ins"][1].update(pw=1, freq=3)
+    records["pwtab"] = {1: {"x": 2, "next": 0}}
+    phrase = [{"instrument": 1, "note": 49, "steps": 4}, {"command": [16, 1], "steps": 4}]
+    exprs = {1: "(v - 7) % 65536", 2: "2048 + 2*min(4, φ)", 3: "(φ >= 2)*W[N + 25]"}
+    return song("sidwizard", records, phrase, silent=False, exprs=exprs)
+
+
+def dm_song():
+    """A defMON row's pulse and pitch expressions, on every voice."""
+    row = {**DM_ROW, "af": 128, "dl": 128, "next": 0, "wgh": 64, "xf": 1, "xp": 2}
+    records = {"sidtab": {0: row}, **copy.deepcopy(DM_INIT)}
+    exprs = {1: "(v - 139) % 65536", 2: "256 + 10*φ"}
+    phrase = notes("defmon", ("C4", 8, 1))
+    return song("defmon", records, phrase, silent=False, exprs=exprs)
+
+
+def dm_af():
+    """Two gated defMON instruments, sidTAB rows 0 and 2, on every voice."""
+    gated = [{**DM_ROW, "wgh": 64, "wgl": 1}, {**DM_ROW, "dl": 128, "next": 0, "wgl": 0}]
+    sidtab = {
+        0: {**gated[0], "dl": 3, "next": 1},
+        1: gated[1],
+        2: {**gated[0], "dl": 2, "next": 3},
+        3: gated[1],
+    }
+    phrase = notes("defmon", ("C4", 12, 1), ("E4", 12), ("G4", 12, 3), ("A4", 12, 1))
+    return song("defmon", {"sidtab": sidtab, **copy.deepcopy(DM_INIT)}, phrase, silent=False)
+
+
+# ---- expressions in lifted songs --------------------------------------------------------
 
 
 def test_goattracker_freq_command_pulse_expression_and_legato():
-    freq, pulse, ctrl = voice0(GT_SONG, 34)
+    freq, pulse, ctrl = voice0(gt_song(), 34)
     c4, d4 = GT["ftab"][48], GT["ftab"][50]
     assert moves(freq) == [c4] + [300] * 12 + [d4 - c4 - 3600]
     assert moves(pulse)[:4] == [1024, 16, 16, 16]
     assert set(ctrl[9:34]) == {65}
-    assert sorted(songio.loads(GT_SONG)["exprs"].values()) == [
-        "(v + 300) % 65536",
-        "0",
-        "1024 + 16*min(3, φ)",
-    ]
-    dropped = GT_SONG.replace("D4!freq:x2!legato", "D4!freq:x2")
+    dropped = gt_song()
+    event = dropped["phrases"]["p1"][3]
+    event["command"] = event.pop("commands")[0]
     assert {64, 9} <= set(voice0(dropped, 34)[2][9:34])
 
 
 def test_sidwizard_instrument_freq_and_pulse_and_a_freq_command():
-    freq, pulse, _ = voice0(SW_SONG, 40)
+    freq, pulse, _ = voice0(sw_song(), 40)
     c4 = 48 + 1
     base = SW["freqlo"][c4] | SW["freqhi"][c4] << 8
     vib = SW["exptab"][c4 + 24] if c4 + 24 < 107 else 0
@@ -158,90 +206,21 @@ def test_sidwizard_instrument_freq_and_pulse_and_a_freq_command():
 
 
 def test_a_sidwizard_pulse_expression_reads_the_keyboard_track_table():
-    tracked = doc(
-        "sidwizard",
-        "      ins:\n        i1: {sr: 240, ctrl: [{ctrl: 65, note: +0}, end], "
-        "pw: '2048 + 256*(E[N + 6] - E[N + 5])'}",
-        "[C2.i1*8, C6*8]",
-    )
-    _, pulse, _ = voice0(tracked, 120)
+    records = copy.deepcopy(SW_RECORDS)
+    records["ins"][1]["pw"] = 1
+    records["pwtab"] = {1: {"x": 1, "next": 0}}
+    phrase = notes("sidwizard", ("C2", 8, 1), ("C6", 8))
+    exprs = {1: "2048 + 256*(E[N + 6] - E[N + 5])"}
+    _, pulse, _ = voice0(song("sidwizard", records, phrase, silent=False, exprs=exprs), 120)
     step = [SW["freqhi"][n + 6 - 11] - SW["freqhi"][n + 5 - 11] for n in (24, 72)]
     assert step[0] != step[1]
     assert {2048 + 256 * d for d in step} <= {int(p) for p in pulse}
 
 
 def test_defmon_row_expressions_drive_pulse_and_pitch():
-    freq, pulse, _ = voice0(DM_SONG, 10)
+    freq, pulse, _ = voice0(dm_song(), 10)
     assert moves(pulse)[1:5] == [10] * 4
     assert moves(freq)[1:5] == [-139] * 4
-
-
-@pytest.mark.parametrize(
-    "song,old,new,kept",
-    [
-        (GT_SONG, "", "", ["pw: '16*min(3, φ) + 1024'", "!freq:x2!legato"]),
-        (GT_SONG, "pw: '1024 + 16*min(3, φ)'", "pw: 2048", ["pw: 2048"]),
-        (
-            GT_SONG,
-            INS + ",",
-            INS + ", filter: [{cut: '1027', res: 12, route: 1, mode: 16}, {cut: 512}, end],",
-            ["cut: '1027'"],
-        ),
-    ],
-)
-def test_constant_and_text_expressions_read_back_as_written(song, old, new, kept):
-    song = songio.loads(song.replace(old, new, 1) if old else song)
-    text = songio.dumps(song)
-    assert all(k in text for k in kept) and songio.dumps(songio.loads(text)) == text
-
-
-MANY = "".join(f"        x{k}: {k}\n" for k in range(3, 303))
-
-
-@pytest.mark.parametrize(
-    "edits,match",
-    [
-        ([("unitracker: 1.20", "unitracker: 1.8")], "not a unitracker v1.20 document"),
-        ([("-!freq:x1, -,", "-!noteglide:0, -,")], "unknown command !noteglide"),
-        (
-            [("pw: '1024 + 16*min(3, φ)'", "pw: [{pw: 1024}, {step: 16, for: 3}, end]")],
-            "unknown key for in pw",
-        ),
-        ([("x1: (v + 300) % 65536", "x1: v / 2")], "outside the grammar"),
-        ([("x1: (v + 300) % 65536", "x1: W[N]")], "unknown table 'W'"),
-        ([("x1: (v + 300) % 65536", "x1: (0 < v < 9)")], "not one comparison"),
-        ([("x1: (v + 300) % 65536", "x1: '[v > 9]*v'")], r"a comparison is written \(a op b\)"),
-        ([("x1: (v + 300) % 65536", "x1: sqrt(v)")], "calls no grammar function"),
-        ([("x1: (v + 300) % 65536", "x1: (v + ")], "bad expression"),
-        ([("-!freq:x1, -,", "-!freq:x9, -,")], "unknown name 'x9'"),
-        (
-            [("-!freq:x1, -,", "-!tempo:6/9/7, -!freq:x1,")],
-            r"!tempo: the argument is 2 values",
-        ),
-        (
-            [("-!freq:x1, -,", "-!tempo:6/256, -!freq:x1,")],
-            r"!tempo: each value is a byte",
-        ),
-        (
-            [("-!freq:x1, -,", "-!run:6/9, -!freq:x1,")],
-            r"can't express !run:6/9 in",
-        ),
-        (
-            [
-                ("      x:\n", "      x:\n" + MANY),
-                ("-!freq:x1, -", "-!freq:x3, -!freq:x301"),
-            ],
-            "argument is a byte",
-        ),
-    ],
-)
-def test_the_reader_refuses_old_forms_bad_arguments_and_text_outside_the_grammar(edits, match):
-    text = GT_SONG
-    for old, new in edits:
-        assert old in text
-        text = text.replace(old, new, 1)
-    with pytest.raises(songio.SongFormatError, match=match):
-        songio.loads(text)
 
 
 def test_expressions_compile_to_the_grammar_semantics():
@@ -251,42 +230,50 @@ def test_expressions_compile_to_the_grammar_semantics():
     floor = xexpr.compile_expr("φ // 30 - v // 4", {"_T": {}})
     assert [floor(-5, phi, 0) for phi in (0, 29, 30, 61)] == [2, 2, 3, 4]
     assert xexpr.written("-5") == -5 and xexpr.written("v") == "v"
-    with pytest.raises(xexpr.ExpressionError, match="string or an integer"):
-        xexpr.text_of(True)
+    assert xexpr.canonical("1024 + 16*min(3, φ)") == "16*min(3, φ) + 1024"
     with pytest.raises(xexpr.ExpressionError, match="takes 2"):
         xexpr.source("min(v)")
 
 
+@pytest.mark.parametrize(
+    "text,match",
+    [
+        ("v //", "x1: bad expression"),
+        ("v / 2", "outside the grammar"),
+        ("W[N]", "unknown table 'W'"),
+        ("(0 < v < 9)", "not one comparison"),
+        ("[v > 9]*v", r"a comparison is written \(a op b\)"),
+        ("sqrt(v)", "calls no grammar function"),
+    ],
+)
+def test_the_player_refuses_an_expression_outside_the_grammar(text, match):
+    ir = gt_song()
+    ir["exprs"][1] = text
+    with pytest.raises(SongError, match=match):
+        SongPlayer(ir)
+
+
 def test_a_selected_expression_must_exist():
-    song = songio.loads(GT_SONG)
-    song["exprs"] = {1: "v"}
+    ir = gt_song()
+    ir["exprs"] = {1: "v"}
     with pytest.raises(SongError, match="undefined"):
-        SongPlayer(song).render_grid(20)
-    song["exprs"] = {1: "v //"}
-    with pytest.raises(SongError, match="x1"):
-        SongPlayer(song)
-
-
-CSILLAG_GATE = "(2*W[N + 33] - W[N + 33]*abs((φ + 3) % 8 - 4))*(φ >= 15)"
-ACID_STEP = "v % 32768 - 2048)*(v % 32768 >= 30208)"
+        SongPlayer(ir).render_grid(20)
 
 
 @pytest.mark.parametrize(
-    "name,ticks,old,new",
+    "name,ticks,edit",
     [
-        ("metal_warrior", 3840, "x1: v + 32", "x1: v + 33"),
-        ("metal_warrior", 3840, "C4!freq:x2!legato", "C4!freq:x2"),
-        ("csillag", 3 * 2304, CSILLAG_GATE, CSILLAG_GATE.replace("(φ >= 15)", "(φ >= 14)")),
-        ("crosseyed", None, ACID_STEP, ACID_STEP.replace("2048", "1792", 1)),
+        ("metal_warrior", 3840, lambda ir: edited(ir, "v + 32", "v + 33", whole=True)),
+        ("metal_warrior", 3840, unlegato),
+        ("csillag", 3 * 2304, lambda ir: edited(ir, "(φ >= 15)", "(φ >= 14)")),
+        ("crosseyed", None, lambda ir: edited(ir, "- 2048)*(v % 32768", "- 1792)*(v % 32768")),
     ],
 )
 def test_a_wrong_constant_or_a_dropped_flag_in_a_reference_breaks_its_grid(
-    references, name, ticks, old, new
+    references, name, ticks, edit
 ):
     ref = references[name]
-    assert old in ref.text
-    song = songio.loads(ref.text.replace(old, new, 1))
-    assert SongPlayer(song).mismatch(ref.native[:ticks]) is not None
+    assert SongPlayer(edit(ref.ir())).mismatch(ref.native[:ticks]) is not None
 
 
 # ---- conversion: chip units -------------------------------------------------------------
@@ -324,9 +311,6 @@ def test_a_phase_that_is_not_one_per_firing_is_refused():
         convert.checked(derived, sympy.Integer(2), V + PHI)
 
 
-FILTER = INS + ", filter: [{cut: 1024, res: 12, route: 1, mode: 16}, end]}"
-
-
 @pytest.mark.parametrize(
     "ramp,fall,text,wrong",
     [
@@ -345,20 +329,20 @@ FILTER = INS + ", filter: [{cut: 1024, res: 12, route: 1, mode: 16}, end]}"
     ],
 )
 def test_a_filter_sweep_is_written_in_cutoff_units(ramp, fall, text, wrong):
-    ir = gt_ir("[C4.i1*4, D4*4]", FILTER)
+    ir = with_filter(gt_ir(("C4", 4, 1), ("D4", 4)), {"cut": 128})
     ft = ir["records"]["filttab"]
     ft[1]["next"], ft[2], ft[3] = 2, {"l": ramp[0], "r": ramp[1], "next": 3}, fall
     want = regs(ir, 200)
     assert len(set(want[:, 22])) > 20
     out = convert.convert(ir, cache=None, workers=1)
     assert list(out["exprs"].values()) == [text]
-    written = songio.dumps(out)
-    assert np.array_equal(regs(songio.loads(written), 200), want)
-    assert not np.array_equal(regs(songio.loads(written.replace(*wrong)), 200), want)
+    assert np.array_equal(regs(out, 200), want)
+    assert generic(out, len(want))
+    assert not np.array_equal(regs(edited(out, *wrong), 200), want)
 
 
 def test_a_sweep_that_turns_at_a_row_boundary_plays_as_written():
-    ir = gt_ir("[C4.i1*16, D4*16]", FILTER)
+    ir = with_filter(gt_ir(("C4", 16, 1), ("D4", 16)), {"cut": 128})
     ft = ir["records"]["filttab"]
     ft[1]["next"], ft[2] = 2, {"l": 0, "r": 102, "next": 3}
     ft[3], ft[4], ft[5] = (
@@ -374,16 +358,14 @@ def test_a_sweep_that_turns_at_a_row_boundary_plays_as_written():
     out = convert.convert(ir, cache=None, workers=1)
     [text] = out["exprs"].values()
     assert "*((-(φ % 2) + 2*(φ // 2) - 17) % 256) - 96)*(φ >= 32)" in text
-    written = songio.dumps(out)
-    assert np.array_equal(regs(songio.loads(written), 200), want)
-    misread = written.replace("+ 2*(φ // 2)", "- 2*(φ // 2)")
-    assert misread != written
-    assert not np.array_equal(regs(songio.loads(misread), 200), want)
+    assert np.array_equal(regs(out, 200), want)
+    assert generic(out, len(want))
+    assert not np.array_equal(regs(edited(out, "+ 2*(φ // 2)", "- 2*(φ // 2)"), 200), want)
 
 
 def test_the_player_floors_a_scaled_expression_to_the_cell():
-    ins = INS + ", filter: [{cut: '1024 + 12*min(φ, 6)', res: 12, route: 1, mode: 16}, end]}"
-    cut = regs(gt_ir("[C4.i1*8]", ins), 40)[:, 22]
+    ir = with_filter(gt_ir(("C4", 8, 1), exprs={1: "1024 + 12*min(φ, 6)"}), {"cut": -1, "x": 1})
+    cut = regs(ir, 40)[:, 22]
     run = [int(x) for x in cut[np.argmax(cut > 0) :][:8]]
     assert run == [(1024 + 12 * min(phi, 6)) // 8 for phi in range(8)]
 
@@ -411,7 +393,7 @@ def pulse_clones(ir):
 
 
 def test_a_record_with_two_expressions_is_cloned_into_a_phrase_variant():
-    ir = gt_ir("[C4.i1*4, D4*4]")
+    ir = gt_ir(("C4", 4, 1), ("D4", 4))
     events = ir["phrases"]["p1"]
     events[0]["command"], events[1]["command"] = [9, 1], [9, 1]
     ramp, flat = "1024 + 16*min(4, φ)", "3000"
@@ -429,7 +411,7 @@ def test_a_record_with_two_expressions_is_cloned_into_a_phrase_variant():
 
 
 def test_an_instrument_with_two_expressions_is_cloned_and_its_event_names_the_clone():
-    ir = sw_ir("[C4.i1*4, D4*4]")
+    ir = sw_ir(("C4", 4, 1), ("D4", 4))
     start = {"svib": 0, "pnfx": 0, "ci": 1}
     occs = [occurrence("pitch", (0, 0, 0), start, 0), occurrence("pitch", (0, 0, 4), start, 1)]
     out = convert.Rewrite(ir, obs_of(occs), ["v + 1", "v + 2"]).run()
@@ -450,7 +432,7 @@ def filter_clones(ir):
 
 
 def test_a_program_copy_selects_the_instrument_the_event_inherits():
-    ir = sw_ir("[C4.i1*4, D4*4]")
+    ir = sw_ir(("C4", 4, 1), ("D4", 4))
     ramp, steep = "640 + 16*min(4, φ)", "1280 + 16*min(4, φ)"
     out = convert.Rewrite(ir, obs_of(filter_clones(ir)), [ramp, steep]).run()
     exprs = dict(out["exprs"].items())
@@ -467,7 +449,7 @@ def test_a_program_copy_selects_the_instrument_the_event_inherits():
 
 
 def test_a_program_copy_the_instrument_does_not_select_is_refused():
-    ir = sw_ir("[C4.i1*4, D4*4]")
+    ir = sw_ir(("C4", 4, 1), ("D4", 4))
     ir["records"]["flttab"] = {1: {"a": 0x90, "b": 0, "k": 0, "next": 0}}
     occs = [
         occurrence("filter", (0, 0, 0), {"fpos": 1}, 0),
@@ -478,7 +460,7 @@ def test_a_program_copy_the_instrument_does_not_select_is_refused():
 
 
 def test_one_event_playing_two_program_copies_is_refused():
-    ir = sw_ir("[C4.i1*4, D4*4]")
+    ir = sw_ir(("C4", 4, 1), ("D4", 4))
     occs = filter_clones(ir)
     occs[1].instance = (0, 0, 0)
     with pytest.raises(convert.ConversionError, match="one event plays two"):
@@ -486,7 +468,7 @@ def test_one_event_playing_two_program_copies_is_refused():
 
 
 def test_a_clone_without_a_naming_event_is_refused():
-    ir = gt_ir("[C4.i1*4, D4*4]")
+    ir = gt_ir(("C4", 4, 1), ("D4", 4))
     occs = pulse_clones(ir)
     with pytest.raises(convert.ConversionError, match="does not name"):
         convert.Rewrite(ir, obs_of(occs), ["1024 + φ", "3000 + φ"]).run()
@@ -514,12 +496,12 @@ def lifetime_freqs(ir: dict) -> list:
 @pytest.mark.parametrize(
     "phrase,texts,named",
     [
-        ("[C4.i1*4, D4*4, E4*4]", ["v + 2", "v + 1", "v + 1"], [2, 1, None]),
-        ("[C4*4, D4*4, E4*4]", ["v + 1", "v + 1", "v + 2"], [None, None, 2]),
+        ((("C4", 4, 1), ("D4", 4), ("E4", 4)), ["v + 2", "v + 1", "v + 1"], [2, 1, None]),
+        ((("C4", 4), ("D4", 4), ("E4", 4)), ["v + 1", "v + 1", "v + 2"], [None, None, 2]),
     ],
 )
 def test_a_command_on_a_note_naming_no_instrument_selects_its_lifetimes_copy(phrase, texts, named):
-    ir = gt_ir(phrase)
+    ir = gt_ir(*phrase)
     start = {"command": 0, "onset": 1, "fired": 0, "ii": 1}
     occs = [occurrence("command", (0, 0, 4 * k), start, k, (0, 0)) for k in range(3)]
     out = convert.Rewrite(ir, obs_of(occs), texts).run()
@@ -529,7 +511,12 @@ def test_a_command_on_a_note_naming_no_instrument_selects_its_lifetimes_copy(phr
 
 
 def test_a_start_without_modulation_plays_the_identity_where_its_site_holds_an_expression():
-    ir = gt_ir("[C4.i1*4, D4.i2*4, E4*4, F4*4]", INS + "}\n        i2: " + INS + "}")
+    ir = gt_ir(("C4", 4, 1), ("D4", 4, 2), ("E4", 4), ("F4", 4))
+    records = ir["records"]
+    records["ins"][2] = {"ctrl": 2, "restart": 3, "sr": 240}
+    records["ctrltab"][2] = dict(records["ctrltab"][1])
+    records["restart"][3] = {**records["restart"][1], "next": 4}
+    records["restart"][4] = dict(records["restart"][2])
     at_site = {"command": 0, "onset": 1, "fired": 0, "ii": 2}
     occs = [
         occurrence("command", (0, 0, 0), at_site, 0, (0, 5)),
@@ -551,7 +538,7 @@ def test_a_start_without_modulation_plays_the_identity_where_its_site_holds_an_e
 
 
 def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own():
-    ir = gt_ir("[C4.i1*4, D4*4, E4*4]")
+    ir = gt_ir(("C4", 4, 1), ("D4", 4), ("E4", 4))
     ir["phrases"]["p1"][2]["command"] = [16, 1]
     ir["exprs"] = {1: "(v + 300) % 65536"}
     ir["phrases"]["p1"][1]["commands"] = [[17, 0], [3, 1]]
@@ -577,38 +564,40 @@ def test_an_event_command_becomes_a_freq_expression_numbered_after_the_songs_own
 
 
 @pytest.mark.parametrize(
-    "ctrl, glides",
+    "ctrltab, glides",
     [
-        ("[{ctrl: 65, note: +0}, end]", True),
-        ("[{ctrl: 65, note: +0}, {ctrl: 65, note: +12}, {loop: 0}]", False),
+        ({1: {"w": 65, "n": 0, "next": 0}}, True),
+        ({1: {"w": 65, "n": 0, "next": 2}, 2: {"w": 65, "n": 12, "next": 1}}, False),
     ],
 )
-def test_a_command_its_unit_never_fires_on_is_the_identity(ctrl, glides):
-    ins = INS.replace("[{ctrl: 65, note: +0}, end]", ctrl) + "}"
-    ir = gt_ir("[C4.i1*4, D4*4, E4*4]", ins)
+def test_a_command_its_unit_never_fires_on_is_the_identity(ctrltab, glides):
+    ir = gt_ir(("C4", 4, 1), ("D4", 4), ("E4", 4))
+    ir["records"]["ctrltab"] = ctrltab
     ir["phrases"]["p1"][1]["commands"] = [[17, 0], [3, 1]]
     ir["records"]["speedtab"] = {1: {"l": 0, "r": 64}}
     got = convert.analyse(ir, None, 1)
     (variant,) = [p["phrase"] for p in got.out["tracks"][0]["plays"]]
     assert got.out["phrases"][variant][1]["commands"] == [[17, 0], [16, 1]]
     assert ("F(N)" in got.out["exprs"][1]) == glides and (got.out["exprs"][1] == "v") != glides
-    back = songio.loads(songio.dumps(got.out))
-    assert np.array_equal(regs(back, got.ticks), regs(ir, got.ticks))
+    want = regs(ir, got.ticks)
+    assert np.array_equal(regs(got.out, got.ticks), want)
+    assert generic(got.out, len(want))
 
 
 def test_a_phrase_every_play_of_which_plays_a_variant_is_dropped():
-    ir = gt_ir("[C4.i1*4, D4*4, E4*4]")
+    ir = gt_ir(("C4", 4, 1), ("D4", 4), ("E4", 4))
     ir["phrases"]["p1"][1]["command"] = [3, 0]
     ir["phrases"]["unplayed"] = copy.deepcopy(ir["phrases"]["p1"][:1])
     want = regs(ir, 80)
     out = convert.convert(ir, cache=None, workers=1)
     (variant,) = [p["phrase"] for p in out["tracks"][0]["plays"]]
     assert variant == "p1~1" and "p1" not in out["phrases"] and "unplayed" in out["phrases"]
-    assert np.array_equal(regs(songio.loads(songio.dumps(out)), 80), want)
+    assert np.array_equal(regs(out, 80), want)
+    assert generic(out, len(want))
 
 
 def test_a_started_event_without_a_command_gets_the_identity_and_legato():
-    ir = gt_ir("[C4.i1*4, D4*4]")
+    ir = gt_ir(("C4", 4, 1), ("D4", 4))
     occs = [occurrence("command", (0, 0, 4), {"legato": 1}, 0, (0, 0))]
     obs = obs_of(occs, {("command", (0, 0, 4)): 0})
     out = convert.Rewrite(ir, obs, [None]).run()
@@ -625,7 +614,7 @@ def test_a_started_event_without_a_command_gets_the_identity_and_legato():
 
 
 def test_a_referenced_program_no_start_proves_is_a_named_lift_error():
-    ir = gt_ir("[C4.i1*4, D4*4]")
+    ir = gt_ir(("C4", 4, 1), ("D4", 4))
     ir["phrases"]["p1"][0]["command"] = [9, 1]
     ir["records"]["pulsetab"] = {1: {"l": 0x88, "r": 0, "next": 2}, 2: {"l": 16, "r": 4}}
     with pytest.raises(convert.ConversionError, match=r"pulsetab program 1: row 1 .*'l': 16"):
@@ -635,7 +624,7 @@ def test_a_referenced_program_no_start_proves_is_a_named_lift_error():
 
 
 def test_a_program_looping_to_its_first_row_is_written_as_its_one_expression():
-    ir = gt_ir("[C4.i1*16, D4*16]")
+    ir = gt_ir(("C4", 16, 1), ("D4", 16))
     ir["records"]["ins"][1]["pw"] = 1
     ir["records"]["pulsetab"] = {
         1: {"l": 0x88, "r": 0, "next": 2},
@@ -653,7 +642,7 @@ def test_a_program_looping_to_its_first_row_is_written_as_its_one_expression():
 
 
 def test_an_unproved_start_names_its_program_and_start():
-    an = convert.Analysis(gt_ir("[C4.i1*4, D4*4]"))
+    an = convert.Analysis(gt_ir(("C4", 4, 1), ("D4", 4)))
     occ = occurrence("pulse", (0, 0, 0), {"pptr": 3}, 0, (3,))
     occ.tick, occ.key, occ.error = 40, None, "no phase"
     with pytest.raises(
@@ -666,7 +655,7 @@ def test_an_unproved_start_names_its_program_and_start():
 
 def pulse_ir():
     """A one-voice goattracker2 song with a looping pulse program, so a start is derived."""
-    ir = gt_ir("[C4.i1*16, D4*16]")
+    ir = gt_ir(("C4", 16, 1), ("D4", 16))
     ir["records"]["ins"][1]["pw"] = 1
     ir["records"]["pulsetab"] = {1: {"l": 0x88, "r": 0, "next": 1}}
     return ir
@@ -724,7 +713,7 @@ def test_only_a_selector_naming_its_site_falls_back_to_it(ref, unit, falls):
 def test_a_resumed_vibrato_is_each_steps_freq_only_where_a_step_reselects(
     make, unit, start, written
 ):
-    ir = make("[C4.i1*4, D4*4]")
+    ir = make(("C4", 4, 1), ("D4", 4))
     occs = [occurrence(unit, (0, 0, 1), start, 0)]
     events = {(unit, (0, 0, s)): 0 for s in (1, 2, 3)}
     out = convert.Rewrite(ir, obs_of(occs, events), ["v + 1"]).run()
@@ -735,7 +724,7 @@ def test_a_resumed_vibrato_is_each_steps_freq_only_where_a_step_reselects(
 
 @pytest.mark.parametrize("flags,cleared,driven", [(0x50, 0x50, True), (0x60, 0x50, False)])
 def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, cleared, driven):
-    ir = sw_ir("[C4.i1*8, -*4, -*4]")
+    ir = sw_ir(("C4", 8, 1), ("-", 4), ("-", 4))
     ir["records"]["ins"][1].update(vibrato=0x33, vibdelay=4, flags=flags)
     ir["phrases"]["p1"][2]["command"] = [0x260, 5]
     want = regs(ir, 120)
@@ -743,33 +732,33 @@ def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, 
     ins = out["records"]["ins"][1]
     assert (ins["vibrato"], ins["vibdelay"], ins["flags"]) == (0, 0, cleared)
     assert bool(ins.get("freq")) == driven
-    text = songio.dumps(out)
-    assert "flags" not in text and "vib" not in text
-    assert np.array_equal(regs(songio.loads(text), 120), want)
+    assert np.array_equal(regs(out, 120), want)
+    assert generic(out, len(want))
 
 
 @pytest.mark.parametrize("row,af", [(0, 12), (2, 1)])
 def test_defmon_fixed_pitch_offset_becomes_its_rows_freq_expression(row, af):
-    ir = songio.loads(DM_AF)
+    ir = dm_af()
     ir["records"]["sidtab"][row]["af"] = af
-    with pytest.raises(songio.SongFormatError, match="no shared-vocabulary form"):
-        songio.dumps(ir)
+    with pytest.raises(SongFormatError, match="no shared-vocabulary form"):
+        document.write(ir)
     want = regs(ir, 120)
-    text = songio.dumps(convert.convert(ir, cache=None, workers=1))
-    assert f"freq: 'S[N + {24 + af}]'" in text and "af" not in text
-    back = songio.loads(text)
-    assert np.array_equal(regs(back, 120), want)
-    assert {r.get("af", -1) for r in back["records"]["sidtab"].values()} == {-1, 0x80}
-    assert not np.array_equal(regs(songio.loads(DM_AF), 120), want)
+    out = convert.convert(ir, cache=None, workers=1)
+    rows = [r for r in out["records"]["sidtab"].values() if "xf" in r]
+    assert [out["exprs"][r["xf"]] for r in rows] == [f"S[N + {24 + af}]"]
+    assert [r["af"] for r in rows] == [0x80]
+    assert np.array_equal(regs(out, 120), want)
+    assert generic(out, len(want))
+    assert not np.array_equal(regs(dm_af(), 120), want)
 
 
 # ---- defMON's ACID accumulator and its offset cp -----------------------------------------
 
 
 def acid_ir(cp: int):
-    """:data:`DM_AF` with two ACID programs on layer B: one sets the accumulator (and offset
+    """:func:`dm_af` with two ACID programs on layer B: one sets the accumulator (and offset
     ``cp``) and then steps it down, looping; one steps it up and freezes."""
-    ir = songio.loads(DM_AF)
+    ir = dm_af()
     st = ir["records"]["sidtab"]
     st[4] = {"dl": 0, "next": 5, "re": 0xF7, "fv": 16, "acid": 0x4000, "cp": cp}
     st[5] = {"dl": 0, "next": 6, "acid": 0xC200}
@@ -777,8 +766,8 @@ def acid_ir(cp: int):
     st[7] = {"dl": 0xF0, "next": 8, "fv": 32, "acid": 0x8A00}
     st[8] = {"dl": 0x80}
     st[0].update(pw=8, ps=0)
-    events = ir["phrases"]["p1"]
-    events[0]["command"], events[2]["command"] = [1, 4], [1, 7]
+    steps = ir["phrases"]["p1"]
+    steps[0]["command"], steps[2]["command"] = [1, 4], [1, 7]
     return ir
 
 
@@ -809,15 +798,15 @@ def test_the_offset_is_folded_into_the_cut_expressions(acid):
     want = regs(acid.ir, 400)
     assert not np.array_equal(want[:, 22], regs(acid_ir(0), 400)[:, 22])
     assert len(np.unique(want[:, 22])) > 20
-    text = songio.dumps(acid.out)
-    assert "cp:" not in text and "acid:" not in text and "{cut: (" in text
-    song = songio.loads(text)
-    assert songio.dumps(song) == text and np.array_equal(regs(song, 400), want)
+    cuts = [r for r in acid.out["records"]["sidtab"].values() if "xc" in r]
+    assert cuts and all(r["cp"] == r["acid"] == -1 for r in cuts)
+    assert np.array_equal(regs(acid.out, 400), want)
+    assert generic(acid.out, len(want))
 
 
 def test_an_acid_sweep_without_an_offset_reads_the_accumulator_and_its_low_byte_only():
-    back = songio.loads(songio.dumps(convert.convert(acid_ir(0), cache=None, workers=1)))
-    cuts = [G.parse(x) for x in back["exprs"].values() if "v" in x]
+    out = convert.convert(acid_ir(0), cache=None, workers=1)
+    cuts = [G.parse(x) for x in out["exprs"].values() if "v" in x]
     assert len(cuts) == 2
     assert all({int(m.args[1]) for m in e.atoms(sympy.Mod)} == {256, 32768} for e in cuts)
     assert sorted(sympy.count_ops(e) for e in cuts) == [11, 23]
@@ -826,8 +815,8 @@ def test_an_acid_sweep_without_an_offset_reads_the_accumulator_and_its_low_byte_
 def test_an_offset_outside_the_acid_program_fails_naming_its_row():
     ir = acid_ir(0)
     ir["records"]["sidtab"][2]["cp"] = 0x10
-    with pytest.raises(songio.SongFormatError, match=r"ctrl: row \{.*'cp': 16.*\} has no shared"):
-        songio.dumps(convert.convert(ir, cache=None, workers=1))
+    with pytest.raises(SongFormatError, match=r"ctrl: row \{.*'cp': 16.*\} has no shared"):
+        generic(convert.convert(ir, cache=None, workers=1), 400)
 
 
 SUB = "(v % 32768 + 65535)*(v % 32768 >= 1) + 767*(v % 32768 < 1)"
@@ -835,7 +824,7 @@ SUB = "(v % 32768 + 65535)*(v % 32768 >= 1) + 767*(v % 32768 < 1)"
 
 @pytest.mark.parametrize("sub", [1, 0])
 def test_the_acid_direction_through_init_is_the_inits_cut_expression(sub):
-    ir = songio.loads(DM_AF)
+    ir = dm_af()
     ir["records"]["ginit"][0]["sub"] = sub
     want = regs(ir, 800)
     assert set(want[:, 22]) == ({2, 3} if sub else {2})
@@ -848,15 +837,12 @@ def test_the_acid_direction_through_init_is_the_inits_cut_expression(sub):
         0,
         sub,
     )
-    text = songio.dumps(conv.out)
-    back = songio.loads(text)
-    assert "sub" not in text and np.array_equal(regs(back, 800), want)
-    assert back["records"]["ginit"][0] == ({"xc": 1} if sub else {})
-    assert back.get("exprs", {}).get(1) == (SUB if sub else None)
-    with pytest.raises(songio.SongFormatError, match="ginit: row .* no shared-vocabulary form"):
-        songio.dumps({**ir, "records": {**ir["records"], "ginit": {0: {"sub": 1}}}})
-    with pytest.raises(songio.SongFormatError, match="unknown key sub in ginit"):
-        songio.loads(DM_AF.replace("ginit: {0: {}}", "ginit: {0: {sub: 1}}"))
+    assert np.array_equal(regs(conv.out, 800), want)
+    assert generic(conv.out, len(want))
+    assert conv.out["records"]["ginit"][0] == ({"sub": 0, "xc": 1} if sub else {"sub": 0})
+    assert conv.out["exprs"].get(1) == (SUB if sub else None)
+    with pytest.raises(SongFormatError, match="ginit: row .* no shared-vocabulary form"):
+        document.write({**ir, "records": {**ir["records"], "ginit": {0: {"sub": 1}}}})
 
 
 def row_body(fields: dict) -> bytes:
@@ -964,7 +950,7 @@ def test_an_offset_row_keeps_the_accumulator_and_its_carry_for_every_state():
 
 
 def test_a_derivation_is_cached_only_for_the_code_that_derived_it(tmp_path, monkeypatch):
-    ir, start, calls = gt_ir("[C4.i1*4]"), ("start",), []
+    ir, start, calls = gt_ir(("C4", 4, 1)), ("start",), []
 
     def derived(key):
         calls.append(key)

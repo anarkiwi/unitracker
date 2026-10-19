@@ -1,4 +1,7 @@
-"""The driver: screens each pass's candidates in parallel and keeps proved, smaller runs."""
+"""The driver: screens each pass's candidates in parallel and keeps proved, smaller runs.
+
+A candidate is proved when the lifter's VM replays it as the reference and its generic document
+plays on unitracker-player as the input's does."""
 
 import functools
 import multiprocessing
@@ -8,15 +11,18 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from unitracker.format import songio
+import numpy as np
+from unitracker_player import PlayError
+
+from unitracker import document
+from unitracker.playroutine.library import SongFormatError
 from unitracker.modfit.convert import CACHE, _load, _save, ir_key
 from unitracker.modfit.exprs import _cached, content_key, default_workers
-from unitracker.optimise.describe import describe
 from unitracker.optimise.edits import EDITS
 from unitracker.optimise.model import ERRORS
 from unitracker.optimise.passes import CANONICAL, LARGER_UNPROVED, PASSES
 from unitracker.optimise.proof import Trace, mismatch, tokens
-from unitracker.player import reach
+from unitracker.player import oracle, reach
 from unitracker.player.checkpoint import Baseline
 from unitracker.player.vm import SongPlayer
 
@@ -29,12 +35,12 @@ class Finding:
     edit: tuple
     delta: int
     kept: bool = False
-    forms: tuple = ()
 
 
 @dataclass
 class Result:
-    """The input song, the optimised song and its text, the token counts and every proved edit."""
+    """The input song, the optimised song and its generic document, the token counts and every
+    proved edit."""
 
     source: dict
     ir: dict
@@ -53,15 +59,29 @@ def _apply(ir: dict, edit: tuple) -> dict | None:
         return None
 
 
-def _written(ir: dict | None, embed: bool = False):
-    """``(text, tokens, read back)`` of a candidate, or None when it can't be written."""
+def _written(ir: dict | None, native: document.Native):
+    """``(generic text, tokens, ir)`` of a candidate, or None when it can't be written."""
     if ir is None:
         return None
     try:
-        text = songio.dumps(ir, embed)
-        return text, tokens(text), songio.loads(text)
-    except ERRORS:
+        text = document.write(ir, native)
+    except (*ERRORS, PlayError):
         return None
+    return text, tokens(text), ir
+
+
+def _plays(grid: np.ndarray, text: str) -> bool:
+    """Whether generic document ``text`` plays ``grid`` on unitracker-player."""
+    try:
+        ours = oracle.play(text, len(grid))[0]
+    except PlayError:
+        return False
+    return ours.shape == grid.shape and bool((ours == grid).all())
+
+
+def _proved(state: dict, written) -> bool:
+    """Whether a written candidate replays the reference and its document plays as the input's."""
+    return mismatch(state["ref"], written[2]) is None and _plays(state["grid"], written[0])
 
 
 _STATE = {}
@@ -74,20 +94,20 @@ def _init(state: dict) -> None:
 def _screen(job):
     """``(index, delta or None, proved)`` of one candidate edit of ``(base, text, tokens)``."""
     k, edit, (base, text, size) = job
-    written = _written(_apply(base, edit), _STATE["embed"])
+    written = _written(_apply(base, edit), _STATE["native"])
     if written is None or written[0] == text:
         return k, None, False
     delta = written[1] - size
     if delta >= 0 and edit[0] in LARGER_UNPROVED:
         return k, delta, False
-    return k, delta, mismatch(_STATE["ref"], written[2]) is None
+    return k, delta, _proved(_STATE, written)
 
 
 def _count(job):
     """``(index, token delta)`` of one candidate edit unproved: ``"refused"`` where the edit or
-    the written text's reading refuses it, ``"same"`` where the text is unchanged."""
+    its generic document refuses it, ``"same"`` where the text is unchanged."""
     k, edit, (base, text, size) = job
-    written = _written(_apply(base, edit), _STATE["embed"])
+    written = _written(_apply(base, edit), _STATE["native"])
     if written is None:
         return k, "refused"
     return k, "same" if written[0] == text else written[1] - size
@@ -130,7 +150,8 @@ class _Screener:
 
 
 class Optimiser:
-    """Runs the passes over a song to a fixpoint; every kept edit is proved on its written text."""
+    """Runs the passes over a song to a fixpoint; every kept edit is proved on its replay and
+    its generic document."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -138,17 +159,16 @@ class Optimiser:
         self.passes = list(passes or PASSES)
         self.workers = workers if workers is not None else default_workers()
         self.ref = Trace(ir)
-        self.source = ir
-        try:
-            self.embed, self.text = False, songio.dumps(ir)
-        except songio.SongFormatError:
-            self.embed, self.text = True, songio.dumps(ir, embed=True)
-        self.base, self.tokens = songio.loads(self.text), tokens(self.text)
-        if mismatch(self.ref, self.base) is None:
-            self.ref.baseline = Baseline(SongPlayer(self.base))
+        self.ref.baseline = Baseline(SongPlayer(ir))
+        self.source = self.base = ir
+        native = document.native_state(ir)
+        self.text = document.write(ir, native)
+        self.tokens = tokens(self.text)
+        state = {"ref": self.ref, "native": native, "grid": oracle.play(self.text, native.ticks)[0]}
+        self.state = state
         self.findings, self.tally = {}, {}
         self.settled = set()
-        self.screener = _Screener(self.workers, {"ref": self.ref, "embed": self.embed})
+        self.screener = _Screener(self.workers, state)
 
     def screen(self, name: str) -> list:
         """``(edit, finding key)`` of the pass's candidates the grid proves on the current song."""
@@ -157,17 +177,14 @@ class Optimiser:
         out = []
         for k, delta, proved in self.screener([(k, e, base) for k, e in enumerate(edits)], name):
             if proved:
-                forms = describe(self.base, edits[k])
-                self.findings.setdefault((name, forms), Finding(name, edits[k], delta, forms=forms))
-                out.append((edits[k], (name, forms)))
+                self.findings.setdefault((name, edits[k]), Finding(name, edits[k], delta))
+                out.append((edits[k], (name, edits[k])))
         return out
 
     def keep(self, name: str) -> bool:
-        """Apply the proved edits that shrink the text in order and keep the longest run whose
-        written text the grid proves, found by bisection; whether any edit was kept.
-
-        The current song is always its text read back, so screening is a function of the pass
-        and the text: a pass that kept nothing from a text keeps nothing from it again."""
+        """Apply the proved edits that shrink the text in order and keep the longest run that
+        proves, found by bisection; whether any edit was kept. A pass that kept nothing from a
+        text keeps nothing from it again."""
         if (name, self.text) in self.settled:
             return False
         if name in CANONICAL:
@@ -175,14 +192,14 @@ class Optimiser:
         steps, base, size = [], self.base, self.tokens
         for edit, key in self.screen(name):
             cand = _apply(base, edit)
-            written = _written(cand, self.embed)
+            written = _written(cand, self.state["native"])
             if written is not None and written[1] < size:
                 steps.append((key, cand, written, written[1] - size))
                 base, size = cand, written[1]
         good, high = min(1, len(steps)), len(steps)
         while good < high:
             mid = (good + high + 1) // 2
-            if mismatch(self.ref, steps[mid - 1][2][2]) is None:
+            if _proved(self.state, steps[mid - 1][2]):
                 good = mid
             else:
                 high = mid - 1
@@ -194,7 +211,7 @@ class Optimiser:
         return good > 0
 
     def settle(self, name: str) -> bool:
-        """Apply a canonical pass's candidates that read back no larger all at once and keep
+        """Apply a canonical pass's candidates that write no larger all at once and keep
         them where the composite proves, else each half in turn (``k`` refused of ``n`` cost
         ``O(k log n)`` proofs), a part of at most ``workers`` screened at once; whether any was
         kept."""
@@ -212,8 +229,8 @@ class Optimiser:
             if not subset:
                 return
             cand = functools.reduce(lambda s, k: _apply(s, edits[k]) or s, subset, song)
-            written = _written(cand, self.embed)
-            if written is not None and mismatch(self.ref, written[2]) is None:
+            written = _written(cand, self.state["native"])
+            if written is not None and _proved(self.state, written):
                 song = cand
                 kept.extend(subset)
             elif not screened and 1 < len(subset) <= self.workers:
@@ -229,36 +246,22 @@ class Optimiser:
             self.settled.add((name, self.text))
             return False
         for k in kept:
-            forms = describe(self.base, edits[k])
-            self.findings[(name, forms)] = Finding(name, edits[k], counted[k], True, forms)
-        self.text, self.tokens, self.base = _written(song, self.embed)
+            self.findings[(name, edits[k])] = Finding(name, edits[k], counted[k], True)
+        self.text, self.tokens, self.base = _written(song, self.state["native"])
         self.settled.add((name, self.text))
         return True
 
     def run(self, progress: bool = True) -> Result:
-        """Apply every pass until none keeps an edit; the text is written from its own reading,
-        so that it is canonical, and that reading is proved too."""
+        """Apply every pass until none keeps an edit."""
         try:
-            return self._run(progress)
+            before, changed = self.tokens, True
+            while changed:
+                changed = False
+                for name in tqdm(self.passes, desc="passes", unit="pass", disable=not progress):
+                    while self.keep(name):
+                        changed = True
         finally:
             self.screener.close()
-
-    def _run(self, progress: bool) -> Result:
-        before = self.tokens
-        changed = True
-        while changed:
-            changed = False
-            for name in tqdm(self.passes, desc="passes", unit="pass", disable=not progress):
-                while self.keep(name):
-                    changed = True
-            text = songio.dumps(self.base, self.embed)
-            if text != self.text:
-                back = songio.loads(text)
-                if mismatch(self.ref, back) is not None:
-                    raise songio.SongFormatError(
-                        "the optimised text does not read back canonically"
-                    )
-                self.base, self.text, self.tokens, changed = back, text, tokens(text), True
         findings = list(self.findings.values())
         return Result(self.source, self.base, self.text, before, self.tokens, findings, self.tally)
 
@@ -275,12 +278,13 @@ def _code() -> str:
 
 def canonical(ir: dict, workers: int | None = None, cache: Path | None = CACHE) -> dict:
     """``ir`` with the canonical passes kept, proved as every pass is, cached by content beside
-    the conversion's; ``ir`` itself where none keeps an edit or its state does not recur."""
+    the conversion's; ``ir`` itself where none keeps an edit, its state does not recur or it has
+    no generic document."""
 
     def compute() -> dict:
         try:
             result = optimise(ir, list(CANONICAL), workers, progress=False)
-        except reach.ReachabilityError:
+        except (reach.ReachabilityError, document.GenericError, SongFormatError, PlayError):
             return ir
         return result.ir if any(f.kept for f in result.findings) else ir
 

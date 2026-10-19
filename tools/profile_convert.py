@@ -36,7 +36,7 @@ KEYS = Path(__file__).resolve().parent.parent / "out" / "modfit" / "profile"
 
 
 def lifted(source: str, subtune) -> dict:
-    """The internal song of a tune lifted with its native modulations."""
+    """The lifter's song of a tune lifted with its native modulations."""
     path = Path(source)
     if not path.exists():
         from pysidtracker.testing import resolve_tune  # pylint: disable=import-outside-toplevel

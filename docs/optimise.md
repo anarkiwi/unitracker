@@ -1,8 +1,11 @@
 # The optimiser
 
-`unitracker.optimise` rewrites the lifter's song smaller with the same register grid, each edit
-proved by replaying the song on the lifter's VM against the input's grid. Size is the token count
-of the song's serialised text under `cl100k_base` (`tiktoken`). Its canonical passes are the
+`unitracker.optimise` rewrites the lifter's song so that its [generic
+document](format/document.md) is smaller and plays the same register grid. Each candidate is
+written with `document.write`; size is the generic document's token count under `cl100k_base`
+(`tiktoken`), and an edit is proved when the lifter's VM replays the candidate song as the input
+(see [The guarantee](#the-guarantee)) and its generic document plays on unitracker-player as the
+input's does. A song with no generic document (`document.write` raises) cannot be optimised. Its canonical passes are the
 `canonical` stage of `Lift` ([Lifting](playroutines/lifting.md)); `unitracker-lift TUNE.sid
 --optimise` runs every pass, in the order of the table below, before the verify stage.
 
@@ -65,7 +68,9 @@ its candidates is not run again on its own result. `Result.tally` counts each pa
 
 ## The guarantee
 
-The result plays the input's register grid in the song's own state: every voice's registers from
+`Result.text` is the generic document of `Result.ir`, the edited song itself; records an edit
+leaves unreached stay in it, and the document drops them. `Result.findings` holds a `Finding`
+per proved `(pass, edit)`. The result plays the input's register grid in the song's own state: every voice's registers from
 the tick its first note starts, the filter and volume registers from the earliest start
 (`first_mismatch`), and the voices' start ticks equal the input's.
 
@@ -78,6 +83,8 @@ The check (`proof.mismatch`) is exact, not sampled:
    `max(mu) + lcm(period)` ticks is agreement forever.
 4. A candidate that fails to play, whose state does not recur, or whose bound exceeds
    `reach.MAX_TICKS` is unproved and never kept.
+5. The candidate's generic document, played by unitracker-player over the input's ticks, equals
+   the input's document's grid; one the writer refuses or the player cannot play is never kept.
 
 ### Resuming from the input
 
@@ -102,9 +109,8 @@ else plays from tick 0. The verdict is the full replay's.
 | keep | the proved candidates are applied in candidate order, each kept in the run only if it shrinks the running song; the longest prefix of that run that proves is kept, found by bisection |
 | settle | a canonical pass instead keeps its candidates together, bisecting a refused composite (see [Canonical passes](#canonical-passes)) |
 | repeat | a pass repeats while it keeps an edit; the passes repeat until none does |
-| canonical | after each round the song is normalised to its serialised form; a song that changes is checked again (failure is an error) and starts another round |
 
-A pass's screen depends only on the current song. One pool of `workers` spawned processes (by
+A pass's screen depends only on the current song and its document. One pool of `workers` spawned processes (by
 default `$UNITRACKER_WORKERS`, else one per core the process may run on; `1` screens in-process),
 each holding the input's trace, screens every pass and is stopped when the optimiser finishes.
 Screening results are ordered by candidate index, so the result does not depend on `workers`.

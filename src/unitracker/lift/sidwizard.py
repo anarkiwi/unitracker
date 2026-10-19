@@ -10,10 +10,11 @@ from pysidwizard.constants import INST_WF_TABLE_POS, TABLE_END
 from pysidwizard.features import features_for_driver
 from pysidwizard.player import freq_tables
 
-from unitracker.format.codec import CodecError, CommandCodec
-from unitracker.format.records import chained, record_types
-from unitracker.format.songio import library, song_meta
-from unitracker.format.tempo import written
+from unitracker.playroutine.codec import CodecError, CommandCodec
+from unitracker.playroutine.records import chained, record_types
+from unitracker.lift.base import song_meta
+from unitracker.playroutine.library import library
+from unitracker.playroutine.tempo import written
 from unitracker.lift.base import Lift, LiftError
 from unitracker.player.vm import fold_empty
 

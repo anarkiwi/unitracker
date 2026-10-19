@@ -11,8 +11,8 @@ import re
 import z3
 from tqdm import tqdm
 
-from unitracker.format.events.instrument import written_as
-from unitracker.format.records import record_types
+from unitracker.document.events.instrument import written_as
+from unitracker.playroutine.records import record_types
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.fit import Fitter, src
 from unitracker.modfit.flow import Liveness, Writes, action_lists, flow_of

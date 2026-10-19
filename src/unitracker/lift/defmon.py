@@ -15,7 +15,8 @@ from pydefmon import DefmonPlayer
 from pysidtracker import CodePattern, SidImage, find_code_all
 from pysidtracker.mos6502 import OP_LEN, OPCODES
 
-from unitracker.format.songio import library, song_meta
+from unitracker.lift.base import song_meta
+from unitracker.playroutine.library import library
 from unitracker.lift.base import Lift, LiftError
 from unitracker.modfit.convert import window
 from unitracker.player.vm import SongPlayer, first_mismatch

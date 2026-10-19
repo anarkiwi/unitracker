@@ -8,8 +8,9 @@ The sample is drawn from the survey's ``tunes.csv``: ``--subtunes`` keeps tunes 
 many subtunes (default single-subtune tunes), then the count of *exported* songs is split evenly
 over the lifted players. Each player's shuffled pool is drawn in rounds until its quota has
 lifted; a pool that runs out gives its remaining quota to the others. Each tune's start subtune is
-lifted in its own process to ``OUTDIR/<md5 prefix>-<name>.yaml``; ``OUTDIR/sample.csv`` lists every
-attempt with its player, output path and error, and ``OUTDIR/failures.csv`` only the lift errors.
+lifted in its own process and its generic document written to ``OUTDIR/<md5 prefix>-<name>.yaml``;
+``OUTDIR/sample.csv`` lists every attempt with its player, output path and error (a tune with no
+document fails with its lifting gap), and ``OUTDIR/failures.csv`` only the failures.
 """
 
 import argparse
@@ -58,16 +59,19 @@ def output_name(outdir: Path, row: dict) -> Path:
 
 
 def lift_one(hvsc: str, row: dict, output: str) -> str:
-    """Lift ``row``'s start subtune to ``output``; return its error text or ``''``."""
+    """Write ``row``'s start subtune's generic document to ``output``; return its error text, its
+    lifting gap where it has no document, or ``''``."""
     os.environ["UNITRACKER_WORKERS"] = "1"
-    from unitracker.format import songio  # pylint: disable=import-outside-toplevel
     from unitracker.lift import backends  # pylint: disable=import-outside-toplevel
 
     try:
-        song = backends.lift((Path(hvsc) / row["path"]).read_bytes())
-        songio.dump(song, Path(output))
+        lift = backends.lifter((Path(hvsc) / row["path"]).read_bytes())
+        lift.run()
     except Exception as exc:  # pylint: disable=broad-exception-caught
         return f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}".strip()
+    if lift.document is None:
+        return f"gap: {lift.gap}"
+    Path(output).write_text(lift.document, encoding="utf-8")
     return ""
 
 

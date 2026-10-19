@@ -10,7 +10,7 @@ import functools
 
 from tqdm import tqdm
 
-from unitracker.format.records import record_types
+from unitracker.playroutine.records import record_types
 from unitracker.modfit import specs
 from unitracker.modfit.compose import ARG, can_differ, composer, keywords, leaves, tests
 from unitracker.modfit.fit import src
