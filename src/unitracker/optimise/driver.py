@@ -158,8 +158,10 @@ class Optimiser:
     def __init__(self, ir: dict, passes=None, workers: int | None = None):
         self.passes = list(passes or PASSES)
         self.workers = workers if workers is not None else default_workers()
-        self.ref = Trace(ir)
-        self.ref.baseline = Baseline(SongPlayer(ir))
+        player = SongPlayer(ir)
+        baseline = Baseline(player)
+        tick, period = baseline.found
+        self.ref = Trace.replayed(baseline.rows, player.starts, tick - period, period, baseline)
         self.source = self.base = ir
         native = document.native_state(ir)
         self.text = document.write(ir, native)

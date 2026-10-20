@@ -1,8 +1,8 @@
 """Lift-time conversion of a song's native modulations to the format's expressions.
 
-The song is replayed until its state recurs, and one period more. Each occurrence's start is
-derived and proved (in parallel, cached by content) and its expression written where its data
-lives: a record site (a program's first row, an instrument field) or the event's ``!freq``.
+One replay to the song's state recurrence and a period more yields its occurrences; each
+start is derived and proved (in parallel, cached) and its expression written where its
+data lives: a record site or the event's ``!freq``.
 """
 
 # pylint: disable=too-many-lines
@@ -15,6 +15,8 @@ import json
 import os
 import pickle
 from pathlib import Path
+
+import numpy as np
 
 import sympy
 
@@ -123,22 +125,66 @@ def ir_key(ir: dict) -> str:
     return content_key(json.dumps(ir, sort_keys=True, default=repr), code_identity())
 
 
-def window(ir: dict) -> int:
-    """Ticks that play every state the song reaches twice: to its recurrence and a period more."""
-    _, ticks, period = reach.table_reads(ir)
-    return ticks + period
+def observation(ir: dict, cache: Path | None = CACHE) -> dict:
+    """One native run of ``ir``, to its state's recurrence and one period more.
 
-
-def observe(ir: dict, ticks: int, cache: Path | None) -> Observer:
-    """The song's native occurrences and event attribution over ``ticks``, cached by content."""
+    The shared observation: the window (its tick count), the window's register grid, the
+    per-voice start ticks, and the occurrences with event attribution. ``window``, ``observe``
+    and ``analyse`` all read it, so the native replay is one run, cached by content and code.
+    """
 
     def compute():
         obs = Observer(ir)
-        obs.run(ticks, desc="starts")
-        return {k: getattr(obs, k) for k in ("occurrences", "events", "plays")}
+        rows: list = []
+        tick, period = reach.recurrence(
+            obs.player, progress=True, each=lambda p: rows.append(list(p.regs))
+        )
+        while obs.player.ticks < tick + period:
+            obs.player.play_frame()
+            rows.append(list(obs.player.regs))
+        return {
+            "occurrences": obs.occurrences,
+            "events": obs.events,
+            "plays": obs.plays,
+            "rows": rows,
+            "starts": list(obs.player.starts),
+            "tick": tick,
+            "period": period,
+            "ticks": tick + period,
+        }
 
-    where = cache / f"convert-observe-{ir_key(ir)}-{ticks}.pkl" if cache else None
+    where = cache / f"convert-observe-{ir_key(ir)}.pkl" if cache is not None else None
     return _cached(where, compute, _load, _save)
+
+
+def window(ir: dict) -> int:
+    """Ticks that play every state the song reaches twice: to its recurrence and a period more."""
+    return observation(ir)["ticks"]
+
+
+def grid(ir: dict, ticks: int | None = None) -> np.ndarray:
+    """The song's native register grid from the shared observation, ``ticks`` rows (the window).
+
+    Past the window the state already repeats, so longer grids extend by the period.
+    """
+    obs = observation(ir)
+    rows = np.asarray(obs["rows"], dtype=np.uint8)
+    base = obs["ticks"]
+    if ticks is None or ticks <= base:
+        return rows[:ticks]
+    a = obs["tick"] - obs["period"]
+    extra = rows[a + (np.arange(base, ticks) - a) % obs["period"]]
+    return np.concatenate((rows, extra))
+
+
+def starts(ir: dict) -> list:
+    """The song's per-voice start ticks, from the shared observation."""
+    return observation(ir)["starts"]
+
+
+def observe(ir: dict, cache: Path | None = CACHE) -> dict:
+    """The song's native occurrences and event attribution over its window, cached by content."""
+    return observation(ir, cache)
 
 
 def _load(path: Path):
@@ -158,13 +204,25 @@ def _analysis(ir: dict, key: str) -> Analysis:
     return _ANALYSES[key]
 
 
+def _start_sig(occ) -> tuple:
+    """The inputs of :meth:`Analysis.key`: the unit, its start cells, hook and first value."""
+    return (
+        occ.unit,
+        json.dumps(occ.start, sort_keys=True, default=repr),
+        repr(occ.hook),
+        occ.v,
+    )
+
+
 def keys_task(ir: dict, key: str, occurrences: list) -> list:
-    """``(start key, error)`` of a chunk of occurrences."""
+    """``(start key, error)`` of a chunk of occurrences, one derivation per distinct start."""
     an = _analysis(ir, key)
-    out = []
+    out, seen = [], {}
     for occ in occurrences:
-        start = an.key(an.unit(occ.unit), occ)
-        out.append((start, occ.error))
+        sig = _start_sig(occ)
+        if sig not in seen:
+            seen[sig] = (an.key(an.unit(occ.unit), occ), occ.error)
+        out.append(seen[sig])
     return out
 
 
@@ -310,9 +368,12 @@ def derive_all(ir: dict, obs: dict, cache: Path | None, workers=None) -> tuple:
         for chunk, keys in zip(chunks, got):
             for occ, (start, error) in zip(chunk, keys):
                 occ.key, occ.error = start, error
-        starts = list(dict.fromkeys(o.key for o in occs if o.key is not None))
+        distinct = list(dict.fromkeys(o.key for o in occs if o.key is not None))
         found = dict(
-            zip(starts, pool.map(derive_task, [(ir, key, s, cache) for s in starts], "derivations"))
+            zip(
+                distinct,
+                pool.map(derive_task, [(ir, key, s, cache) for s in distinct], "derivations"),
+            )
         )
     finally:
         pool.close()
@@ -1013,13 +1074,12 @@ def analyse(ir: dict, cache: Path | None = CACHE, workers=None) -> Conversion:
     each voice from its first note (see ``first_mismatch``), to its state's recurrence and one
     period more."""
     ir = expand_repeats(ir)
-    ticks = window(ir)
-    obs = observe(ir, ticks, cache)
+    obs = observation(ir, cache)
+    ticks = obs["ticks"]
     found, texts = derive_all(ir, obs, cache, workers)
     out = Rewrite(ir, obs, texts).run()
-    native = SongPlayer(ir)
-    want = native.render_grid(ticks)
-    bad = first_mismatch(SongPlayer(out).render_grid(ticks), want, native.starts)
+    want = np.asarray(obs["rows"], dtype=np.uint8)
+    bad = first_mismatch(SongPlayer(out).render_grid(ticks), want, obs["starts"])
     if bad is not None:
         raise ConversionError(f"the expressions play differently: tick {bad[0]}, register {bad[1]}")
     return Conversion(ir, ticks, obs, found, texts, out)

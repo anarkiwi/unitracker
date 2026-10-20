@@ -50,6 +50,15 @@ class Trace:
         self.starts = list(player.starts)
         self.mu, self.period = (0, 0) if found is None else (found[0] - found[1], found[1])
 
+    @classmethod
+    def replayed(cls, rows, starts, mu, period, baseline=None) -> "Trace":
+        """A trace from a run already played, its ``rows`` and recurrence, not playing the song."""
+        self = cls.__new__(cls)
+        self.rows, self.starts = list(rows), list(starts)
+        self.mu, self.period = mu, period
+        self.bad, self.baseline = None, baseline
+        return self
+
     def row(self, t: int) -> tuple:
         """The registers after tick ``t``."""
         return self.rows[t if t < self.mu else self.mu + (t - self.mu) % self.period]

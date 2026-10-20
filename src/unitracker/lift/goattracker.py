@@ -11,7 +11,7 @@ from unitracker.lift.base import song_meta
 from unitracker.playroutine.library import library
 from unitracker.lift import placed
 from unitracker.lift.base import Lift, LiftError
-from unitracker.modfit.convert import window
+from unitracker.modfit.convert import grid, window
 from unitracker.player.vm import SongPlayer, event_commands, fold_empty
 
 PAL_CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985248}
@@ -372,7 +372,7 @@ def snapped(ir: dict) -> dict:
         _set_commands(phrases[name][k], cmds)
     out = {**ir, "phrases": phrases, "exprs": exprs}
     ticks = window(ir)
-    diff = np.argwhere(SongPlayer(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
+    diff = np.argwhere(grid(ir, ticks) != SongPlayer(out).render_grid(ticks))
     if len(diff):
         tick, reg = (int(x) for x in diff[0])
         raise LiftError(
@@ -440,7 +440,7 @@ def unpause(_lift: "GoatTrackerLift", ir: dict) -> dict:
         return ir
     out = {**ir, "records": {**ir["records"], "ctrltab": {**rows, **new}}}
     ticks = window(ir)
-    diff = np.argwhere(SongPlayer(ir).render_grid(ticks) != SongPlayer(out).render_grid(ticks))
+    diff = np.argwhere(grid(ir, ticks) != SongPlayer(out).render_grid(ticks))
     if len(diff):
         tick, reg = (int(x) for x in diff[0])
         raise LiftError(
