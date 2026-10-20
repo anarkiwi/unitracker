@@ -26,6 +26,7 @@ def freq(k):
     return FREQ(k)  # pylint: disable=not-callable
 
 
+@functools.lru_cache(maxsize=None)
 def _normal(rel):
     """``(kind, e, negated)``: ``rel`` as ``[e >= 0]``/``[e == 0]``, or a constant 0/1."""
     e = sympy.expand(rel.lhs - rel.rhs)
@@ -187,6 +188,7 @@ def forced(context: tuple, b, domain: tuple = ()) -> int | None:
     return None
 
 
+@functools.lru_cache(maxsize=None)
 def denest(e, domain: tuple = ()):
     """``e`` with each bracket over another bracket ``g`` split as ``[g]*b1 + (1 - [g])*b0``."""
     for b in sorted(e.atoms(Iv), key=sympy.default_sort_key):
@@ -198,11 +200,13 @@ def denest(e, domain: tuple = ()):
     return e
 
 
+@functools.lru_cache(maxsize=None)
 def products(e, context: tuple = (), domain: tuple = ()):
     """``e`` where ``context`` holds, each term's implied brackets dropped, contradictions 0."""
     return canon(sympy.Add(*(_term(t, context, domain) for t in sympy.Add.make_args(canon(e)))))
 
 
+@functools.lru_cache(maxsize=None)
 def _term(term, context: tuple, domain: tuple):
     """One product with its implied brackets dropped and equalities substituted, or 0."""
     factors = list(sympy.Mul.make_args(term))
@@ -248,6 +252,7 @@ def display(e, context: tuple = (), domain: tuple = ()):
     return _split(e, context, domain)
 
 
+@functools.lru_cache(maxsize=None)
 def _split(e, context: tuple, domain: tuple):
     """``display`` of ``e`` without un-nesting its brackets first; a case ``b`` or ``1 - b`` is
     shown under the facts that decide its brackets (see :func:`_within`, :func:`_relevant`)."""
@@ -275,6 +280,7 @@ def _split(e, context: tuple, domain: tuple):
     return shortest(forms)
 
 
+@functools.lru_cache(maxsize=None)
 def _within(context: tuple, b, value: int, domain: tuple) -> tuple:
     """``context`` and ``b = value`` in sort order, without each earlier fact the others force:
     one key per set of facts, so a case nested in cases it implies is shown once."""
@@ -286,6 +292,7 @@ def _within(context: tuple, b, value: int, domain: tuple) -> tuple:
     return tuple(sorted(kept, key=lambda f: sympy.default_sort_key(f[0])))
 
 
+@functools.lru_cache(maxsize=None)
 def _relevant(context: tuple, e, domain: tuple) -> tuple:
     """``context`` without the facts that cut no cell of the ranges of ``e``.
 
@@ -344,11 +351,13 @@ def _holds(line, p: int) -> int:
     return int(p == c if kind == "eq" else p >= c)
 
 
+@functools.lru_cache(maxsize=None)
 def _case(e, context: tuple, domain: tuple):
     """``e`` where ``context`` holds: :func:`products`, then :func:`_folded`."""
     return _folded(products(e, context, domain), context, domain)
 
 
+@functools.lru_cache(maxsize=None)
 def _folded(e, context: tuple, domain: tuple):
     """``e`` where ``context`` holds, folded over each interval ``context`` bounds (see
     :func:`interval.bounds`, :func:`_fold`)."""
@@ -357,6 +366,7 @@ def _folded(e, context: tuple, domain: tuple):
     return canon(e)
 
 
+@functools.lru_cache(maxsize=None)
 def _fold(e, x, lo, hi):
     """``e`` with each ``%``, ``//``, ``min``, ``max``, ``abs`` and bracket of a linear function of
     ``x`` (for ``x = u % m``, also each remainder by a divisor of ``m`` of a linear function of
@@ -403,6 +413,7 @@ def _fold(e, x, lo, hi):
     return e.subs(t, lo if lo == hi else x)
 
 
+@functools.lru_cache(maxsize=None)
 def _cofactors(rest, full, context: tuple, domain: tuple) -> tuple:
     """``(rest, full)`` as shown: the cofactors ``e|b=0`` and ``e|b=1`` of a bracket ``b``.
 
@@ -420,12 +431,14 @@ def _cofactors(rest, full, context: tuple, domain: tuple) -> tuple:
     return rest, display(full, context, domain)
 
 
+@functools.lru_cache(maxsize=None)
 def _size(e) -> tuple:
     """``(products, bracket factors, sort key)`` of a canonical sum."""
     terms = sympy.Add.make_args(e)
     return len(terms), sum(len(t.atoms(Iv)) for t in terms), sympy.default_sort_key(e)
 
 
+@functools.lru_cache(maxsize=None)
 def _moved(form, x):
     """``form + x`` with bracket-free ``x`` summed into the bracket-free terms of ``form``."""
     terms = _addends(form) if form.is_Add else [form]
@@ -436,6 +449,7 @@ def _moved(form, x):
     return out
 
 
+@functools.lru_cache(maxsize=None)
 def _times(a, b):
     """``a*b`` unevaluated, with unit factors dropped."""
     if a == 0 or b == 0:
@@ -445,6 +459,7 @@ def _times(a, b):
     return sympy.Mul(a, b, evaluate=False)
 
 
+@functools.lru_cache(maxsize=None)
 def _plus(a, b):
     """``a + b`` unevaluated, with zero terms dropped."""
     if a == 0 or b == 0:
@@ -452,11 +467,13 @@ def _plus(a, b):
     return sympy.Add(a, b, evaluate=False)
 
 
+@functools.lru_cache(maxsize=None)
 def polar(e, domain: tuple = ()):
     """The display form of ``e`` over ``domain``."""
     return display(canon(e), (), tuple(domain))
 
 
+@functools.lru_cache(maxsize=None)
 def canon(e):
     """``e`` expanded with idempotent brackets."""
     e = sympy.expand(e)
@@ -598,6 +615,7 @@ def _compare(e, op: str) -> str:
     return f"({_text(pos)} {op} {_text(right)})"
 
 
+@functools.lru_cache(maxsize=None)
 def _nearest(e, size: int):
     """``e`` with its constant term the nearest to 0 that is alike modulo ``size``."""
     const, rest = e.as_coeff_Add()
@@ -607,6 +625,7 @@ def _nearest(e, size: int):
     return rest + (near - size if 2 * near >= size else near)
 
 
+@functools.lru_cache(maxsize=None)
 def _ring(e, size: int):
     """``e`` without each ``% m`` (``size`` dividing ``m``) reached through sums and products
     alone, which leave ``e`` modulo ``size`` alike; each sum it opens with its constant nearest
@@ -620,6 +639,7 @@ def _ring(e, size: int):
     return e
 
 
+@functools.lru_cache(maxsize=None)
 def unwrapped(e, width: int | None):
     """``e`` without the ``% m`` its unit's wrap to ``width`` bits repeats (``2**width``
     divides ``m``) through its sums and products (see :func:`_ring`)."""
@@ -818,6 +838,7 @@ def pysrc(e) -> str:
     raise ValueError(f"no Python source for {e!r}")
 
 
+@functools.lru_cache(maxsize=None)
 def compiled(e, names=("v", "phi", "N")):
     """A Python function of ``names`` (then any function callables by keyword) for ``e``."""
     funcs = sorted(

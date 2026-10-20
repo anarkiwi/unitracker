@@ -56,7 +56,7 @@ def starts(source: str, subtune) -> tuple:
         ir, counts = pickle.loads(where.read_bytes())
     else:
         ir = C.expand_repeats(lifted(source, subtune))
-        obs = C.observe(ir, C.window(ir), None)
+        obs = C.observe(ir, None)
         an = C.Analysis(ir)
         counts = {}
         for occ in tqdm(obs["occurrences"], desc="start keys", unit="occ"):

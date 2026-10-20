@@ -102,20 +102,20 @@ def _freq_units(ir: dict) -> set:
 
 def _observed(ir: dict) -> dict:
     names = _freq_units(ir)
+    if not names:
+        return {}
     song = convert.expand_repeats(ir)
     try:
-        ticks = convert.window(song) if names else 0
+        obs = convert.observation(song)
     except (reach.ReachabilityError, *ERRORS):
         return {}
-    obs = convert.Observer(song)
-    obs.run(ticks, desc="firings")
     per = {}
-    for occ in (o for o in obs.occurrences if o.unit in names and o.instance is not None):
+    for occ in (o for o in obs["occurrences"] if o.unit in names and o.instance is not None):
         per.setdefault(occ.instance, []).append(occ.firings)
     places = {name: _places(events) for name, events in song["phrases"].items()}
     seen = {}
     for (voice, count, step), fired in per.items():
-        name = song["tracks"][voice]["plays"][obs.plays[voice][count]]["phrase"]
+        name = song["tracks"][voice]["plays"][obs["plays"][voice][count]]["phrase"]
         for place in places[name][step : step + 1]:
             seen.setdefault((name, place[0]), set()).add(tuple(fired) if place[1] else ())
     return {at: _single(f) for at, f in seen.items()}

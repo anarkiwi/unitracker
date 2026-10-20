@@ -18,7 +18,7 @@ from pysidtracker.mos6502 import OP_LEN, OPCODES
 from unitracker.lift.base import song_meta
 from unitracker.playroutine.library import library
 from unitracker.lift.base import Lift, LiftError
-from unitracker.modfit.convert import window
+from unitracker.modfit.convert import grid, starts, window
 from unitracker.player.vm import SongPlayer, first_mismatch
 
 PAL_HZ = 985248
@@ -185,8 +185,8 @@ def region_builds(parts):
     canon = [len(opts[0][1].split()) for opts in options]
     for combo in itertools.product(*options):
         sizes = [len(code.split()) for _, code in combo]
-        starts = zip(itertools.accumulate([0, *canon]), itertools.accumulate([0, *sizes]), sizes)
-        yield {name for name, _ in combo if name}, " ".join(c for _, c in combo), list(starts)
+        layout = zip(itertools.accumulate([0, *canon]), itertools.accumulate([0, *sizes]), sizes)
+        yield {name for name, _ in combo if name}, " ".join(c for _, c in combo), list(layout)
 
 
 def locate(mem) -> tuple[dict, set]:
@@ -329,7 +329,7 @@ def unheard_init(lift, ir: dict) -> dict:
         player = SongPlayer(song)
         return first_mismatch(player.render_grid(ticks), theirs, player.starts)
 
-    found = mismatch(ir)
+    found = first_mismatch(grid(ir, ticks), theirs, starts(ir))
     if found is not None:
         raise LiftError(
             f"the init's frequency registers are heard: tick {found[0]}, register {found[1]}"
