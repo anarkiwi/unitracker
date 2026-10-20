@@ -145,11 +145,14 @@ def _firings(player, log: list, ticks: int) -> tuple:
     before ``ticks``."""
     fired: dict = {}
     keys: dict = {}
+    texts: dict = {}
     exprs = player.song.get("exprs") or {}
     for tick, cell, serial, key in log:
         if tick < ticks:
             fired.setdefault(cell, {})[tick] = serial
-            keys[serial] = _canonical(exprs[key])
+            if key not in texts:
+                texts[key] = _canonical(exprs[key])
+            keys[serial] = texts[key]
     return fired, keys
 
 
