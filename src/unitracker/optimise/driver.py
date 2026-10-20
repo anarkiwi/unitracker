@@ -158,12 +158,16 @@ class Optimiser:
     def __init__(self, ir: dict, passes=None, workers: int | None = None):
         self.passes = list(passes or PASSES)
         self.workers = workers if workers is not None else default_workers()
-        player = SongPlayer(ir)
+        player = SongPlayer(ir, record_reads=True)
+        log = document.fired_log(player)
         baseline = Baseline(player)
         tick, period = baseline.found
+        document.play_to(player, tick + period)
         self.ref = Trace.replayed(baseline.rows, player.starts, tick - period, period, baseline)
         self.source = self.base = ir
-        native = document.native_state(ir)
+        native = document.native_state_from(
+            player, ir, tick + period, baseline.rows[0] if baseline.rows else None, log
+        )
         self.text = document.write(ir, native)
         self.tokens = tokens(self.text)
         state = {"ref": self.ref, "native": native, "grid": oracle.play(self.text, native.ticks)[0]}
