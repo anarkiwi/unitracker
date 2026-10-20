@@ -413,8 +413,9 @@ def test_a_table_program_is_one_closed_form(ref, unit, records, start, freq, tex
 
 def _checked(fn):
     """``(fn(), z3 solver checks it ran)`` with the display caches cold."""
-    G.forced.cache_clear()
-    G.display.cache_clear()
+    for fn_ in vars(G).values():
+        if hasattr(fn_, "cache_clear"):
+            fn_.cache_clear()
     check, count = z3.Solver.check, [0]
 
     def counted(solver, *args):
