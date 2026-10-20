@@ -95,7 +95,7 @@ def _replay(ir: dict, max_ticks: int, ticks: int | None) -> tuple:
     state's recurrence and a period more, or ``ticks`` where it does not recur within
     ``max_ticks``: the player has played those ticks, logging its expressions' firings."""
     player = SongPlayer(ir, record_reads=True)
-    log = _log(player)
+    log = fired_log(player)
     first: list = []
     try:
         tick, period = reach.recurrence(
@@ -105,12 +105,17 @@ def _replay(ir: dict, max_ticks: int, ticks: int | None) -> tuple:
         if ticks is None:
             raise
         tick, period = ticks, 0
-    while player.ticks < tick + period:
-        player.play_frame()
+    play_to(player, tick + period)
     return player, tick + period, first[0] if first else None, log
 
 
-def _log(player) -> list:
+def play_to(player, ticks: int) -> None:
+    """Play ``player`` until it has played ``ticks`` frames."""
+    while player.ticks < ticks:
+        player.play_frame()
+
+
+def fired_log(player) -> list:
     """The list to which each firing of an expression the player's units play appends
     ``(tick, cell, occurrence, expression index)``: the cell ``(key, voice)`` (voice None for
     a global unit's), an occurrence numbered from 1 per start."""
@@ -148,12 +153,9 @@ def _firings(player, log: list, ticks: int) -> tuple:
     return fired, keys
 
 
-def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None = None) -> Native:
-    """The :class:`Native` of song ``ir``: one replay to its state's recurrence, recording the
-    frequency-table entries it reads and its registers after the first tick. ``ticks``, where
-    given, stands for the recurrence and a period of a song whose state does not recur within
-    ``max_ticks``."""
-    player, ticks, first, log = _replay(ir, max_ticks, ticks)
+def native_state_from(player, ir: dict, ticks: int, first, log: list) -> Native:
+    """The :class:`Native` of a song ``ir`` already played to ``ticks`` by ``player``: ``first``
+    is the registers after the first tick (or None) and ``log`` the expressed firings logged."""
     spec = declared(ir["playroutine"]) or {}
     ns, offset = player.namespace, int(ir["playroutine"].get("note_offset", 0))
     reads = (player.table_reads or {}).get
@@ -176,6 +178,15 @@ def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None =
         first if 0 not in player.starts else None,
         *_firings(player, log, ticks),
     )
+
+
+def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None = None) -> Native:
+    """The :class:`Native` of song ``ir``: one replay to its state's recurrence, recording the
+    frequency-table entries it reads and its registers after the first tick. ``ticks``, where
+    given, stands for the recurrence and a period of a song whose state does not recur within
+    ``max_ticks``."""
+    player, ticks, first, log = _replay(ir, max_ticks, ticks)
+    return native_state_from(player, ir, ticks, first, log)
 
 
 @dataclass
