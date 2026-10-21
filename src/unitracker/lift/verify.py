@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from unitracker.player import oracle
-from unitracker.player.vm import first_mismatch
+from unitracker.player.vm import carry_cells, first_mismatch
 
 
 @dataclass(frozen=True)
@@ -40,10 +40,14 @@ class Verdict:
 
 
 def compare(text: str, theirs: np.ndarray, progress: bool = False) -> Verdict:
-    """The :class:`Verdict` of generic document ``text`` against native grid ``theirs``."""
+    """The :class:`Verdict` of generic document ``text`` against native grid ``theirs``.
+
+    The native's 1-LSB freq and cutoff carry is not a difference (``carry_cells``).
+    """
     theirs = np.asarray(theirs, dtype=np.uint8)
     ours, starts = oracle.play(text, len(theirs), progress)
     head = theirs[: len(ours)]
-    bad = np.argwhere(ours != head)
+    carry = carry_cells(ours, head)
+    bad = np.argwhere((ours != head) & ~carry)
     whole = (int(bad[0][0]), int(bad[0][1])) if len(bad) else None
     return Verdict(len(theirs), len(ours), tuple(starts), first_mismatch(ours, head, starts), whole)

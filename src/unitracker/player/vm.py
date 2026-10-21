@@ -697,13 +697,34 @@ class SongPlayer:
         return render_wav(flushes, path, model=model, cycles_per_frame=cycles, clock_frequency=hz)
 
 
-def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[int, int] | None:
-    """The first ``(tick, register)`` where two register grids differ in the song's own state.
+def carry_cells(ours: np.ndarray, theirs: np.ndarray) -> np.ndarray:
+    """The ``(tick, register)`` cells the native's 1-LSB carry makes legitimately differ.
 
-    A voice's registers count from the tick its first note starts (``starts``, from
-    :attr:`SongPlayer.starts`; a voice that never starts has none), the filter and volume
-    registers from the earliest start. What a player writes before then is its own
-    initialisation, not the song's. None when the grids agree.
+    A waveride walk leaves the 6502 C flag set, adding 1 to a voice's 16-bit freq and to the
+    shared 11-bit cutoff (the pulse-width add clears it); a pair differing only by that 1 is the
+    carry, not a lift error.
+    """
+    tol = np.zeros(ours.shape, dtype=bool)
+    for v in range(ours.shape[1] // 7):
+        lo, hi = 7 * v, 7 * v + 1
+        o = ours[:, hi].astype(int) * 256 + ours[:, lo]
+        t = theirs[:, hi].astype(int) * 256 + theirs[:, lo]
+        ok = ((t - o) % 65536 == 1) | ((o - t) % 65536 == 1)
+        tol[ok, lo] = tol[ok, hi] = True
+    if ours.shape[1] > 22:
+        o = ours[:, 22].astype(int) * 8 + ours[:, 21]
+        t = theirs[:, 22].astype(int) * 8 + theirs[:, 21]
+        ok = ((t - o) % 2048 == 1) | ((o - t) % 2048 == 1)
+        tol[ok, 21] = tol[ok, 22] = True
+    return tol
+
+
+def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[int, int] | None:
+    """The first ``(tick, register)`` where two grids differ in the song's own state.
+
+    A voice's registers count from its first note (``starts``), the filter and volume registers
+    from the earliest start; the native's 1-LSB freq and cutoff carry is not a difference
+    (:func:`carry_cells`). None when they otherwise agree.
     """
     mask = np.zeros(ours.shape, dtype=bool)
     begun = [s for s in starts if s is not None]
@@ -712,7 +733,7 @@ def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[
             mask[start:, 7 * voice : 7 * voice + 7] = True
     if begun:
         mask[min(begun) :, 7 * len(starts) :] = True
-    bad = np.argwhere((ours != theirs) & mask)
+    bad = np.argwhere((ours != theirs) & mask & ~carry_cells(ours, theirs))
     return (int(bad[0][0]), int(bad[0][1])) if len(bad) else None
 
 
