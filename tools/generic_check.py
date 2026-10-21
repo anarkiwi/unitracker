@@ -1,17 +1,14 @@
 """Verify tunes' lifted generic documents on unitracker-player against their native grids.
 
-    python tools/generic_check.py [--csv CSV] [--hvsc DIR] [--jobs J] [--out DIR]
-        [--against RESULTS.csv]
+``--out`` keeps the documents and results.csv (rows count each tune's differing cells), ``--diff DIR`` each tune's machine-readable diff.
 
-Each tune of ``CSV`` (default ``out/sample128/tunes.csv``, else ``out/sample128/sample.csv``),
-its ``path`` under ``--hvsc``, is lifted in its own worker; the conversion cache is relative to
-the working directory, so run from the repository root. ``--out`` keeps each generic document
-and ``results.csv``; ``--against`` lists each document's first mismatch beside the one an earlier
-``--out`` kept.
+    python tools/generic_check.py [--csv CSV] [--hvsc DIR] [--jobs J] [--out DIR]
+        [--diff DIR] [--against RESULTS.csv]
 """
 
 import argparse
 import csv
+import json
 import os
 import re
 from collections import Counter
@@ -30,6 +27,7 @@ FIELDS = (
     "motion",
     "whole",
     "whole_reg",
+    "cells",
     "gap",
 )
 GROUPS = ("freq", "freq", "pw", "pw", "ctrl", "ad", "sr")
@@ -54,10 +52,10 @@ def motion(theirs, ours) -> str:
     return "document holds" if ours[0] == ours[1] else "both move"
 
 
-def check(doc: str, sid: str, out: str | None) -> dict:
+def check(doc: str, sid: str, out: str | None, diff: str | None = None) -> dict:
     """Tune ``sid``'s row, named ``doc``: its player, whether its lift's generic document plays
     the native grid, the first mismatch under the project criterion, which grid holds it, the
-    first from tick 0, or the lifting gap; an exception is its gap."""
+    first from tick 0, its differing cell count, or the lifting gap; an exception is its gap."""
     os.environ["UNITRACKER_WORKERS"] = "1"
     from unitracker.lift import backends  # pylint: disable=import-outside-toplevel
 
@@ -67,13 +65,13 @@ def check(doc: str, sid: str, out: str | None) -> dict:
         lift = backends.lifter(Path(sid).read_bytes())
         row["player"] = lift.playroutine
         lift.run()
-        return _check(lift, row, out)
+        return _check(lift, row, out, diff)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         row["gap"] = f"{type(exc).__name__}: {exc}"
         return row
 
 
-def _check(lift, row: dict, out: str | None) -> dict:
+def _check(lift, row: dict, out: str | None, diff: str | None) -> dict:
     from unitracker.player import oracle  # pylint: disable=import-outside-toplevel
 
     verdict, text = lift.verdict, lift.document
@@ -82,7 +80,13 @@ def _check(lift, row: dict, out: str | None) -> dict:
     if verdict is None:
         row["gap"] = lift.gap
         return row
-    row.update(verified="yes" if verdict.ok else "no", ticks=verdict.ticks)
+    row.update(
+        verified="yes" if verdict.ok else "no", ticks=verdict.ticks, cells=len(verdict.cells)
+    )
+    if diff is not None:
+        Path(diff, f"{row['doc']}.diff.json").write_text(
+            json.dumps(verdict.summary(), indent=2) + "\n", encoding="utf-8"
+        )
     for key, found in (("onset", verdict.onset), ("whole", verdict.whole)):
         if found is not None:
             row[key], row[f"{key}_reg"] = found[0], f"${found[1]:02X}"
@@ -150,18 +154,21 @@ def main(argv=None) -> int:
     parser.add_argument("--hvsc", type=Path, default=Path(os.environ.get("HVSC", ".")))
     parser.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) // 4))
     parser.add_argument("--out", type=Path, help="keep the generic documents and results.csv")
+    parser.add_argument("--diff", type=Path, help="keep each tune's machine-readable diff")
     parser.add_argument("--against", type=Path, help="an earlier results.csv to compare with")
     args = parser.parse_args(argv)
     sources = (CORPUS / "tunes.csv", CORPUS / "sample.csv")
     csv_path = args.csv or next((p for p in sources if p.is_file()), None)
     if csv_path is None:
         parser.error("no tunes.csv or sample.csv to read the tunes from")
-    if args.out:
-        args.out.mkdir(parents=True, exist_ok=True)
+    for path in (args.out, args.diff):
+        if path:
+            path.mkdir(parents=True, exist_ok=True)
     from unitracker.modfit.exprs import Pool  # pylint: disable=import-outside-toplevel
 
     out = str(args.out) if args.out else None
-    tasks = [(doc, str(args.hvsc / path), out) for doc, path in tunes(csv_path).items()]
+    diff = str(args.diff) if args.diff else None
+    tasks = [(doc, str(args.hvsc / path), out, diff) for doc, path in tunes(csv_path).items()]
     pool = Pool(args.jobs, len(tasks))
     try:
         rows = sorted(pool.map(check, tasks, "verify"), key=lambda r: (r["player"], r["doc"]))
