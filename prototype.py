@@ -54,15 +54,14 @@ def slew_to_zero(P, v, t, note=0):
 
 
 def triangle(P, v, t, note=0):
-    if t < P.get("delay", 0):
-        return note
+    t2 = max(1, t - P.get("delay", 0) + 1)
     amp = abs(P.get("step", 0)) or 1
     vcmp = P.get("extent", 128)
-    vib, out = 0, 0
-    for _ in range(t - P.get("delay", 0) + 1):
+    out = 0
+    for i in range(1, t2 + 1):
+        vib = (2 * i) & 0xFF
         if 0x80 > vib > vcmp:
             vib ^= 0xFF
-        vib += 2
         out += -amp if vib & 1 else amp
     return (note + (out & F16)) & F16
 
