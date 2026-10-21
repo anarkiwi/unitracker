@@ -6,9 +6,18 @@ import pytest
 from conftest import mini_song
 
 from unitracker.playroutine.expr import ExprError
+from unitracker.lift.verify import compare_grids
 from unitracker.player.canonical import CANONICAL_ORDER, canonical_frames
 from unitracker.player.reach import ReachabilityError, table_reads
-from unitracker.player.vm import Cursor, SongError, SongPlayer, compile_phrase, first_mismatch
+from unitracker.player.vm import (
+    Cursor,
+    SongError,
+    SongPlayer,
+    compile_phrase,
+    diff,
+    first_mismatch,
+    runs,
+)
 
 
 def run(playroutine, ticks=1, **kw):
@@ -255,9 +264,9 @@ def test_first_mismatch_counts_each_voice_from_its_start_and_globals_from_the_ea
         ({(0, 14), (7, 20)}, [0, 0, None], None),
         ({(0, 14), (7, 20)}, [0, 0, 5], (7, 20)),
         ({(0, 14), (7, 20)}, [None, None, None], None),
-        ({(1, 24), (3, 21)}, [6, 2, None], (3, 21)),
-        ({(1, 24), (3, 21)}, [6, 1, None], (1, 24)),
-        ({(1, 24), (3, 21)}, [None, None, None], None),
+        ({(1, 24), (3, 23)}, [6, 2, None], (3, 23)),
+        ({(1, 24), (3, 23)}, [6, 1, None], (1, 24)),
+        ({(1, 24), (3, 23)}, [None, None, None], None),
         (set(), [0, 3, 5], None),
     ]
     theirs = np.zeros((8, 25), dtype=np.uint8)
@@ -266,6 +275,105 @@ def test_first_mismatch_counts_each_voice_from_its_start_and_globals_from_the_ea
         for cell in cells:
             ours[cell] = 1
         assert first_mismatch(ours, theirs, starts) == expected, (cells, starts)
+
+
+def test_diff_lists_the_differing_cells_with_their_values_under_the_criterion():
+    zero = np.zeros((8, 25), dtype=np.uint8)
+    ours = zero.copy()
+    ours[1, 0] = 5
+    ours[2, 6] = 9
+    ours[4, 8] = 7
+    assert diff(ours, zero, [2, 3, None]) == [(2, 6, 9, 0), (4, 8, 7, 0)]
+    assert diff(ours, zero) == [(1, 0, 5, 0), (2, 6, 9, 0), (4, 8, 7, 0)]
+    assert diff(ours[:3], zero) == [(1, 0, 5, 0), (2, 6, 9, 0)]
+
+
+def test_diff_does_not_count_the_native_1_lsb_carry():
+    theirs = np.zeros((2, 25), dtype=np.uint8)
+    ours = np.zeros((2, 25), dtype=np.uint8)
+    ours[0, 0], ours[0, 1] = 0x40, 0x10  # $1040: the native's $1041, its waveride carry
+    theirs[0, 0], theirs[0, 1] = 0x41, 0x10
+    ours[1, 21], ours[1, 22] = 0x05, 0x01  # cutoff 0x15: the native's 0x16
+    theirs[1, 21], theirs[1, 22] = 0x06, 0x01
+    assert diff(ours, theirs) == []
+    ours[0, 0] = 0x44
+    assert diff(ours, theirs) == [(0, 0, 0x44, 0x41)]
+
+
+def test_runs_groups_the_cells_per_register_into_tick_runs_and_value_segments():
+    cells = [
+        (2, 0, 1, 0),
+        (3, 0, 1, 0),
+        (5, 0, 2, 0),
+        (5, 21, 5, 6),
+        (6, 21, 5, 6),
+        (7, 21, 9, 1),
+        (10, 0, 1, 3),
+        (11, 0, 4, 3),
+        (12, 0, 4, 3),
+        (13, 0, 4, 8),
+    ]
+    assert runs(cells) == [
+        {
+            "reg": 0,
+            "name": "v1 freq lo",
+            "from": 2,
+            "to": 13,
+            "cells": 7,
+            "runs": [
+                {"from": 2, "to": 3, "values": [[2, 3, 1, 0]]},
+                {"from": 5, "to": 5, "values": [[5, 5, 2, 0]]},
+                {
+                    "from": 10,
+                    "to": 13,
+                    "values": [[10, 10, 1, 3], [11, 12, 4, 3], [13, 13, 4, 8]],
+                },
+            ],
+        },
+        {
+            "reg": 21,
+            "name": "cut lo",
+            "from": 5,
+            "to": 7,
+            "cells": 3,
+            "runs": [{"from": 5, "to": 7, "values": [[5, 6, 5, 6], [7, 7, 9, 1]]}],
+        },
+    ]
+
+
+def test_the_verdict_carries_the_differing_cells_and_a_machine_readable_summary():
+    theirs = np.zeros((8, 25), dtype=np.uint8)
+    ours = np.zeros((8, 25), dtype=np.uint8)
+    ours[1, 0] = 5
+    ours[2, 6] = 9
+    verdict = compare_grids(ours, [2, 3, None], theirs)
+    assert verdict.onset == (2, 6) and verdict.whole == (1, 0)
+    assert verdict.cells == ((2, 6, 9, 0),)
+    assert not verdict.ok
+    assert verdict.summary() == {
+        "ok": False,
+        "ticks": 8,
+        "played": 8,
+        "ended": 0,
+        "starts": [2, 3, None],
+        "first": [2, 6],
+        "whole": [1, 0],
+        "registers": runs([(2, 6, 9, 0)]),
+        "cells": [[2, 6, 9, 0]],
+    }
+    assert compare_grids(theirs, [2, 3, None], theirs).summary() == {
+        "ok": True,
+        "ticks": 8,
+        "played": 8,
+        "ended": 0,
+        "starts": [2, 3, None],
+        "first": None,
+        "whole": None,
+        "registers": [],
+        "cells": [],
+    }
+    ended = compare_grids(ours, [2, 3, None], theirs[:4])
+    assert ended.ticks == 4 and ended.cells == ((2, 6, 9, 0),)
 
 
 def test_canonical_frames_cut_at_repeats_reorder_and_drop_unchanged():

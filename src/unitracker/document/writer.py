@@ -25,10 +25,10 @@ NOTE_TABLE = "G"
 FREQ_WIDTH = 1 << 16
 SECTIONS = ("restart", "ins", "ctrl", "pw", "filter", "x", "phrase")
 ROW_KEYS = tuple("wait hold ctrl gate note ad sr pw cut res route mode freq run filter vol".split())
-INS_KEYS = ("ad", "sr", "ctrl", "pw", "filter", "freq", "amp", "osc", "extent", "delay", "restart")
+INS_KEYS = ("ad", "sr", "ctrl", "pw", "filter", "freq", "mod", "restart")
 INIT_TYPES = ("vinit", "ginit")
 CMD_ORDER = tuple(
-    "run pw filter ad sr ctrl resfilt mode vol cut tempo vtempo freq osc legato".split()
+    "run pw filter ad sr ctrl resfilt mode vol cut tempo vtempo freq set legato".split()
 )
 PREFIX = {
     "ctrl": "c",
@@ -46,6 +46,8 @@ GATE_CLEARS_MASK = ("defmon",)  # a row that sets the gate without a mask clears
 FIRST_TICK_BEFORE = ("goattracker2", "sidwizard")  # first-tick row a tick before the programs
 NOTE_KEEPS_GATE = ("goattracker2",)  # a note keeps the gate its restart leaves
 ROUTED_BY_INSTRUMENT = ("sidwizard",)  # the filter routes each voice with a filter program
+# A routine's per-voice plain-note detune D, played as the note base plus D times the voice slot.
+DETUNE_ROUTINES = {"defmon": 1}
 NOTED = "note command"  # an origin (oracle.firings) whose note resets the frequency's offset
 COPY = "instrument copy"  # an instrument origin that only a copy of the instrument plays
 _NAME = re.compile(r"(c|pw|f|r|x|p|i)(\d+)")
@@ -465,6 +467,24 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             return self.expr(value, cell="pw" if key == "pw" else "cut")
         raise GenericError(f"{where}: {value!r} is not a program")
 
+    def _fields(self, value: dict, out: FlowMap, where: str) -> None:
+        """The instrument's keys respelled into ``out`` in ``INS_KEYS`` order."""
+        for key in INS_KEYS:
+            if key in ("ad", "sr") and (key in value or key in self.envelope):
+                out[key] = value.get(key, self.envelope.get(key))
+            elif key == "freq" and (key in value or self.g is not None):
+                cell = "freq" if key in value else None
+                out[key] = self.expr(value.get(key, 0), freq=True, note=True, cell=cell)
+            elif key == "mod" and key in value:
+                name, bag = value[key]
+                if bag:
+                    out[key] = Atom(f"{name} {{{', '.join(f'{k}: {v}' for k, v in bag.items())}}}")
+                else:
+                    out[key] = Atom(name)
+            elif key in value:
+                named = self._named(key, value[key])
+                out[key] = self.program(named, f"{where}.{key}", key, key == "ctrl")
+
     def instrument(self, value, where: str):
         """An instrument with its programs and ``freq`` respelled, ``freq: G[N]`` where it has
         none and the note table is the document's, and the envelope bytes its note sets."""
@@ -474,17 +494,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
         if unknown:
             raise GenericError(f"{where}: fields {unknown} have no generic form")
         out = FlowMap()
-        for key in INS_KEYS:
-            if key in ("ad", "sr") and (key in value or key in self.envelope):
-                out[key] = value.get(key, self.envelope.get(key))
-            elif key == "freq" and (key in value or self.g is not None):
-                cell = "freq" if key in value else None
-                out[key] = self.expr(value.get(key, 0), freq=True, note=True, cell=cell)
-            elif key in ("amp", "osc", "extent", "delay") and key in value:
-                out[key] = value[key]
-            elif key in value:
-                named = self._named(key, value[key])
-                out[key] = self.program(named, f"{where}.{key}", key, key == "ctrl")
+        self._fields(value, out, where)
         if self.name in ROUTED_BY_INSTRUMENT:
             out["filter"] = self._routed(out.get("filter"))
             out = _ordered(out, INS_KEYS)
@@ -493,6 +503,13 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             if self.name in NOTE_KEEPS_GATE and _gate_left(rows) == 0:
                 out["ctrl"] = self._gated(out.get("ctrl"), where)
             out["restart"] = self._restart(rows, out, where)
+        detune = DETUNE_ROUTINES.get(self.name)
+        freqed = "freq" in out or any(
+            isinstance(r, dict) and "freq" in r for r in (out.get("ctrl") or ())
+        )
+        if detune and not freqed and "mod" not in out:
+            out["mod"] = Atom(f"set {{detune: {detune}}}")
+            out = _ordered(out, INS_KEYS)
         return out
 
     def _gated(self, value, where: str) -> Flow:

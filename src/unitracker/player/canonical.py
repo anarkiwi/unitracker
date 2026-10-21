@@ -9,6 +9,16 @@ CANONICAL_ORDER = (0x15, 0x16, 0x17, 0x18) + tuple(
 )
 _RANK = {reg: i for i, reg in enumerate(CANONICAL_ORDER)}
 
+# Each voice's registers, low to high frequency, then the shared filter's word and controls.
+_VOICE = ("freq lo", "freq hi", "pw lo", "pw hi", "ctrl", "ad", "sr")
+REGISTERS = (
+    *[f"v{n} {name}" for n in range(1, 4) for name in _VOICE],
+    "cut lo",
+    "cut hi",
+    "res/route",
+    "mode/vol",
+)
+
 
 def canonical_frames(
     frames: Iterable[Iterable[tuple[int, int]]], regs=None

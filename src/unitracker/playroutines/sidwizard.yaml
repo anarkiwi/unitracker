@@ -122,6 +122,12 @@ record_types:
       - when: "a >= 0x80 and k == 0 and (x == 0 or b == 0)"
         keys: {mode: "a & 0x70", res: "res & 0x0F", cut: {byte: b, expr: x}}
         raw: {a: "0x80 | mode", b: cut, res: res}
+  # A voice's held FREQ (LO/HI) before its first note; the IR seeds its held FREQ from this so
+  # the onset's carried FREQ-LOW matches the native's, which plays an idle FREQ on note=0 frames.
+  vinit:
+    fixed: true
+    form: map
+    fields: {lo: 0, hi: 0}
 functions:
   # The row of restart program r on the note's first tick: its last.
   hrnote:
@@ -572,7 +578,7 @@ procs:
   write_regs:
     - {if: "not (trig or zpd)", then: [{return: true}]}
     - {if: "(ci == 0 and not zpd) or leg2", then: [{set: {r4: sctl}}, {return: true}]}
-    - {if: inhr, then: [{set: {r1: sfh, r5: sad, r6: ssr, r4: sctl}}, {return: true}]}
+    - {if: inhr, then: [{set: {r1: sfh, r5: sad, r6: ssr, r4: sctl, onset: started}}, {return: true}]}
     - set: {r0: sfl, r1: sfh, r2: spl, r3: sph, onset: started}
     - {if: adsrw, then: [{set: {r5: sad, r6: ssr}}]}
     - set: {r4: sctl}
@@ -589,6 +595,7 @@ procs:
 init:
   - for_voices:
       - set: {vi: nv}
+      - set: {r0: "vinit[vi].lo", r1: "vinit[vi].hi"}
       - set: {nv: "nv + 1"}
   - call: frame
 tick:

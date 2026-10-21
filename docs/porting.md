@@ -22,7 +22,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | the native replay's register grid | `lift.backends.native_player(raw).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
 | the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
-| where the generic document first differs, both grids side by side over a tick range | `tools/grid_diff.py out/porting/doc.yaml TUNE.sid --from T --to T` |
+| where the generic document differs, by register and value (exit 0 on agreement, `--json` the machine-readable diff) | `tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 [--from T --to T] [--json PATH]` |
 | the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/firing_schedule.py TUNE.sid --cell pw:0 --ticks A:B` |
 | the verify verdict and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
@@ -135,12 +135,16 @@ print(SongPlayer(backends.lift(raw, expressions=False)).mismatch(theirs))
 ```
 
 It prints `None`, or the first `(tick, register)` that differs. Once the lifter writes a generic
-document (section 6), `tools/grid_diff.py` prints its first mismatch and both grids over a tick
-range, marking differing registers:
+document (section 6), `tools/grid_diff.py` prints where it differs — each register, the tick
+runs, and the document's and the native's values over them — and both grids over a tick range:
 
 ```sh
-PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --from 94 --to 98 --ticks 100
+PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 100 --from 94 --to 98
 ```
+
+It exits 1 on a difference; `--json PATH` (or stdout on `--json`) writes the machine-readable
+diff, so a divergence is a parseable list of registers, runs and values rather than a one-line
+verdict.
 
 **Files:** `src/unitracker/playroutines/<name>.yaml`. **Verify:** the snippet above prints `None`.
 
@@ -375,8 +379,8 @@ PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid
 ```
 
 `unitracker-lift` exits 0 with `verified: 3007 ticks play the native grid` on its last line when
-the generic document plays the native grid on unitracker-player; `grid_diff.py` prints the first
-mismatch.
+the generic document plays the native grid on unitracker-player; `grid_diff.py` names the
+differing registers and values, and exits 1 on a difference.
 
 ## 7. Tests and acceptance
 
@@ -420,7 +424,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under
 | 5 | hard restart, chords, filter, lifetime, relative control in their shared forms | `playroutines/<name>.yaml` | `.venv/bin/python -m pytest -n 4 tests/test_format_events.py` |
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |
 | 7 | lift with expressions; verify the generic document on unitracker-player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0 |
-| 8 | where the generic document first differs from the native grid | | `.venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 --to 0` |
+| 8 | where the generic document first differs from the native grid, by register and value | | `.venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 --json out/porting/diff.json` |
 | 9 | vocabulary and command tables; the playroutine's doc | `tests/test_format_codec.py`, `tests/test_reference.py`, `docs/playroutines/<name>.md`, `docs/playroutines/lifting.md` | `.venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_playroutine_docs.py tests/test_reference.py` |
 | 10 | conformance, dispatch and lifter tests | `tests/` | `.venv/bin/python -m pytest -n 4 tests/test_reference.py tests/test_lift_<name>.py` |
 | 11 | the optimiser on the lifted tune | `tests/conftest.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise` exits 0 |

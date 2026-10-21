@@ -9,7 +9,7 @@ from unitracker.playroutine import tempo, xexpr
 from unitracker.playroutine.expr import ExprError, Resolver
 from unitracker.playroutine.records import EXPR, record_types
 from unitracker.player import modulation
-from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT
+from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT, REGISTERS
 
 IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
@@ -719,13 +719,9 @@ def carry_cells(ours: np.ndarray, theirs: np.ndarray) -> np.ndarray:
     return tol
 
 
-def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[int, int] | None:
-    """The first ``(tick, register)`` where two grids differ in the song's own state.
-
-    A voice's registers count from its first note (``starts``), the filter and volume registers
-    from the earliest start; the native's 1-LSB freq and cutoff carry is not a difference
-    (:func:`carry_cells`). None when they otherwise agree.
-    """
+def _criterion_mask(ours: np.ndarray, starts: list) -> np.ndarray:
+    """The cells that count: each voice's from its first note in ``starts``, the shared
+    registers' from the earliest."""
     mask = np.zeros(ours.shape, dtype=bool)
     begun = [s for s in starts if s is not None]
     for voice, start in enumerate(starts):
@@ -733,8 +729,64 @@ def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[
             mask[start:, 7 * voice : 7 * voice + 7] = True
     if begun:
         mask[min(begun) :, 7 * len(starts) :] = True
+    return mask
+
+
+def diff(ours: np.ndarray, theirs: np.ndarray, starts: list | None = None) -> list:
+    """The ``(tick, register, doc, native)`` cells where two grids differ, in ``(tick,
+    register)`` order: each voice from its first note in ``starts``, the shared registers from
+    the earliest, or every register from tick 0 when ``starts`` is None; the native's 1-LSB
+    freq and cutoff carry is not a difference (:func:`carry_cells`)."""
+    ours = np.asarray(ours, dtype=np.uint8)
+    theirs = np.asarray(theirs, dtype=np.uint8)
+    head = min(ours.shape[0], theirs.shape[0])
+    ours, theirs = ours[:head], theirs[:head]
+    mask = _criterion_mask(ours, starts) if starts is not None else np.ones(ours.shape, dtype=bool)
     bad = np.argwhere((ours != theirs) & mask & ~carry_cells(ours, theirs))
-    return (int(bad[0][0]), int(bad[0][1])) if len(bad) else None
+    return [(int(t), int(r), int(ours[t, r]), int(theirs[t, r])) for t, r in bad.tolist()]
+
+
+def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[int, int] | None:
+    """The first cell of :func:`diff`, ``(tick, register)``, or None when the grids agree on
+    the song's own state."""
+    cells = diff(ours, theirs, starts)
+    return (cells[0][0], cells[0][1]) if cells else None
+
+
+def runs(cells: list) -> list:
+    """The differing cells grouped by register, in register order: each register's maximal
+    tick runs and, in each run, the maximal segments of constant ``(doc, native)`` value,
+    ``{'reg', 'name', 'from', 'to', 'cells', 'runs': [{'from', 'to',
+    'values': [[from, to, doc, native], ...]}]}``."""
+    grouped: dict = {}
+    for tick, reg, doc, native in cells:
+        group = grouped.setdefault(reg, [])
+        run = group[-1] if group else None
+        if run is None or tick != run["to"] + 1:
+            run = {"from": tick, "to": tick, "values": [[tick, tick, doc, native]]}
+            group.append(run)
+        else:
+            run["to"] = tick
+            seg = run["values"][-1]
+            if seg[2] == doc and seg[3] == native:
+                seg[1] = tick
+            else:
+                seg = [tick, tick, doc, native]
+                run["values"].append(seg)
+    out = []
+    for reg in sorted(grouped):
+        group = grouped[reg]
+        out.append(
+            {
+                "reg": reg,
+                "name": REGISTERS[reg],
+                "from": group[0]["from"],
+                "to": group[-1]["to"],
+                "cells": sum(run["to"] - run["from"] + 1 for run in group),
+                "runs": group,
+            }
+        )
+    return out
 
 
 class _Stepper:

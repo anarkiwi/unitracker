@@ -1,25 +1,28 @@
 """The lift's proof: its generic document, played by unitracker-player, reproduces the native
-player's register grid, each voice from its first note (``first_mismatch``)."""
+player's register grid, each voice from its first note (``first_mismatch``), with the
+differing cells themselves on the :class:`Verdict` and as its machine-readable summary."""
 
 from dataclasses import dataclass
 
 import numpy as np
 
 from unitracker.player import oracle
-from unitracker.player.vm import carry_cells, first_mismatch
+from unitracker.player.vm import diff, runs
 
 
 @dataclass(frozen=True)
 class Verdict:
     """A document's grid against the native one over ``ticks``: the ticks it played (fewer
-    where it ends first), each voice's first note, and the first ``(tick, register)`` that
-    differs from the voices' first notes (``onset``) and from tick 0 (``whole``)."""
+    where it ends first), each voice's first note, the first ``(tick, register)`` that differs
+    from the voices' first notes (``onset``) and from tick 0 (``whole``), and the differing
+    cells (``cells``, as ``(tick, register, doc, native)``)."""
 
     ticks: int
     played: int
     starts: tuple
     onset: tuple | None
     whole: tuple | None
+    cells: tuple = ()
 
     @property
     def ok(self) -> bool:
@@ -38,16 +41,47 @@ class Verdict:
             f" (from tick 0: {whole})"
         )
 
+    def summary(self) -> dict:
+        """The machine-readable diff: ``{"ok", "ticks", "played", "ended", "starts",
+        "first", "whole", "registers", "cells"}``, the registers their runs and both grids'
+        values over each (``runs``), and a cell as ``[tick, register, doc, native]``."""
+        return {
+            "ok": self.ok,
+            "ticks": self.ticks,
+            "played": self.played,
+            "ended": self.ticks - self.played,
+            "starts": list(self.starts),
+            "first": list(self.onset) if self.onset is not None else None,
+            "whole": list(self.whole) if self.whole is not None else None,
+            "registers": runs(list(self.cells)),
+            "cells": [list(cell) for cell in self.cells],
+        }
+
+
+def compare_grids(ours: np.ndarray, starts: list, theirs: np.ndarray) -> Verdict:
+    """The :class:`Verdict` of a played grid ``ours`` (its voices' first notes in ``starts``)
+    over the native grid ``theirs``."""
+    theirs = np.asarray(theirs, dtype=np.uint8)
+    ours = np.asarray(ours, dtype=np.uint8)
+    head = theirs[: len(ours)]
+    cells = diff(ours, head, starts)
+    whole = diff(ours, head)
+    return Verdict(
+        len(theirs),
+        len(ours),
+        tuple(starts),
+        (cells[0][0], cells[0][1]) if cells else None,
+        (whole[0][0], whole[0][1]) if whole else None,
+        tuple(cells),
+    )
+
 
 def compare(text: str, theirs: np.ndarray, progress: bool = False) -> Verdict:
     """The :class:`Verdict` of generic document ``text`` against native grid ``theirs``.
 
-    The native's 1-LSB freq and cutoff carry is not a difference (``carry_cells``).
+    The differing cells the verdict counts are its ``cells``; the native's 1-LSB freq and
+    cutoff carry is not a difference (``carry_cells``).
     """
     theirs = np.asarray(theirs, dtype=np.uint8)
     ours, starts = oracle.play(text, len(theirs), progress)
-    head = theirs[: len(ours)]
-    carry = carry_cells(ours, head)
-    bad = np.argwhere((ours != head) & ~carry)
-    whole = (int(bad[0][0]), int(bad[0][1])) if len(bad) else None
-    return Verdict(len(theirs), len(ours), tuple(starts), first_mismatch(ours, head, starts), whole)
+    return compare_grids(ours, starts, theirs)

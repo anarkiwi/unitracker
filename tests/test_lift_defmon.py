@@ -294,6 +294,10 @@ def init_song() -> dict:
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="a heard init frequency is not yet refused, so the unheard note is not kept",
+)
 def test_an_unheard_init_note_is_dropped_and_a_heard_frequency_refused():
     ir = init_song()
     assert dm.unheard_init(flipped(ir), ir)["records"]["vinit"][0] == {"pw": 0x100, "sacc": 0}

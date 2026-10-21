@@ -30,10 +30,6 @@ ROW_KEYS = (
     "run",
     "filter",
     "vol",
-    "amp",
-    "osc",
-    "extent",
-    "delay",
 )
 EXPR = "x"
 RESTART = "restart"
@@ -51,7 +47,7 @@ COMMAND_NAMES = (
     "tempo",
     "vtempo",
     "freq",
-    "osc",
+    "set",
     "legato",
 )
 ARGLESS = ("legato",)
