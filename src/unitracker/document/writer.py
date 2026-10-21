@@ -25,9 +25,11 @@ NOTE_TABLE = "G"
 FREQ_WIDTH = 1 << 16
 SECTIONS = ("restart", "ins", "ctrl", "pw", "filter", "x", "phrase")
 ROW_KEYS = tuple("wait hold ctrl gate note ad sr pw cut res route mode freq run filter vol".split())
-INS_KEYS = ("ad", "sr", "ctrl", "pw", "filter", "freq", "restart")
+INS_KEYS = ("ad", "sr", "ctrl", "pw", "filter", "freq", "amp", "osc", "extent", "delay", "restart")
 INIT_TYPES = ("vinit", "ginit")
-CMD_ORDER = tuple("run pw filter ad sr ctrl resfilt mode vol cut tempo vtempo freq legato".split())
+CMD_ORDER = tuple(
+    "run pw filter ad sr ctrl resfilt mode vol cut tempo vtempo freq osc legato".split()
+)
 PREFIX = {
     "ctrl": "c",
     "pw": "pw",
@@ -478,6 +480,8 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             elif key == "freq" and (key in value or self.g is not None):
                 cell = "freq" if key in value else None
                 out[key] = self.expr(value.get(key, 0), freq=True, note=True, cell=cell)
+            elif key in ("amp", "osc", "extent", "delay") and key in value:
+                out[key] = value[key]
             elif key in value:
                 named = self._named(key, value[key])
                 out[key] = self.program(named, f"{where}.{key}", key, key == "ctrl")
