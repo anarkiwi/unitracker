@@ -41,6 +41,7 @@ unitracker = ["playroutines/*.yaml", "modfit/specs.yaml"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 timeout = 1200
+addopts = ["-rx"]
 
 [tool.pylint.format]
 max-line-length = 100

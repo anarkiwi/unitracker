@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import yaml
-from conftest import oracle, sw_fx, sw_table_byte
+from conftest import assert_plays, oracle, sw_fx, sw_table_byte
 from pysidwizard import (
     End,
     Loop,
@@ -27,7 +27,7 @@ from pysidwizard.features import features_for_driver
 from pysidwizard.model import Instrument, encode_sequence
 
 from unitracker import document
-from unitracker.lift import sidwizard
+from unitracker.lift import sidwizard, verify
 from unitracker.lift.sidwizard import NO_DETUNE as KEEP
 from unitracker.lift.sidwizard import LiftError
 from unitracker.playroutine.codec import Evaluator
@@ -567,7 +567,7 @@ STEP_TEMPOS = {
 
 
 @pytest.mark.xfail(strict=True, reason="kept programs' tempo FX do not yet play the native player")
-def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, monkeypatch):
+def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, monkeypatch, request):
     base = window(csillag.read_bytes())
     tracked = sw_table_byte(base, 7, "pw", 2, 0x05)
     swm = kept(sw_fx(tracked, STEP_TEMPOS))
@@ -583,7 +583,10 @@ def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, mon
         parse_sid_song(tracked, 1),
     ):
         assert not np.array_equal(swm_grid(one), plain)
-    assert SongPlayer(song).mismatch(swm_grid(swm)) is None
+    theirs = swm_grid(swm)
+    player = SongPlayer(song)
+    grid = player.render_grid(len(theirs))
+    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
 
 
 # A keyboard-track amount on the row that sets an instrument's pulse (7) or filter (4, 8), up
@@ -595,7 +598,7 @@ TRACKED = {(7, "pw"): 0xF4, (4, "filter"): 0x05, (8, "filter"): 0xF4}
 @pytest.mark.xfail(
     strict=True, reason="a tracked pulse or filter row does not yet play the native player"
 )
-def test_keyboard_tracked_pulse_and_filter_rows_play_the_player(csillag):
+def test_keyboard_tracked_pulse_and_filter_rows_play_the_player(csillag, request):
     base = raw = window(csillag.read_bytes())
     plain = oracle(base, WINDOW_TICKS)
     for (instrument, which), amount in TRACKED.items():
@@ -605,7 +608,10 @@ def test_keyboard_tracked_pulse_and_filter_rows_play_the_player(csillag):
         raw = sw_table_byte(raw, instrument, which, 2, amount)
     song, text = lifted(raw)
     assert "E[" in text and not re.search(r"\bk:", text)
-    assert SongPlayer(song).mismatch(oracle(raw, WINDOW_TICKS)) is None
+    theirs = oracle(raw, WINDOW_TICKS)
+    player = SongPlayer(song)
+    grid = player.render_grid(len(theirs))
+    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
 
 
 # Tempo FX on rows no voice plays in step: one voice's tempo and swing, every voice's tempo
@@ -625,7 +631,9 @@ TEMPO_ROWS = {
 @pytest.mark.xfail(
     strict=True, reason="an out-of-step tempo FX does not yet play the native player"
 )
-def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(csillag, monkeypatch):
+def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(
+    csillag, monkeypatch, request
+):
     raw = window(csillag.read_bytes())
     swm = sw_fx(raw, TEMPO_ROWS)
     swm.patterns[0].rows[0].instrument = len(swm.instruments) + 3
@@ -641,7 +649,9 @@ def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(csillag, 
         path.append({k: v for k, v in row.items() if k != "next"})
         entry = row["next"]
     assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9, "gate": 1}]
-    assert SongPlayer(ir).mismatch(theirs) is None
+    player = SongPlayer(ir)
+    grid = player.render_grid(len(theirs))
+    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
 
 
 def looped(records: dict) -> bool:
@@ -659,7 +669,9 @@ def test_table_jumps_loop_their_programs_and_play_the_player(tune, tables, reque
     ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
     assert all(looped(ir["records"][name]) for name in tables)
     theirs = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(TICKS), dtype=np.uint8)
-    assert SongPlayer(ir).mismatch(theirs) is None
+    player = SongPlayer(ir)
+    grid = player.render_grid(len(theirs))
+    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
 
 
 def test_the_tally_tool_lifts_checks_and_counts_a_tune_list(
@@ -689,7 +701,7 @@ JUMPS = [(1, "pw", 2, 1), (8, "filter", 3, 1), (4, "filter", 2, 0), (6, "wf", 2,
 
 
 @pytest.mark.xfail(strict=True, reason="a table-jumped program does not yet play the native player")
-def test_table_jumps_play_the_player(csillag):
+def test_table_jumps_play_the_player(csillag, request):
     raw = plain = window(csillag.read_bytes())
     for instrument, which, row, target in JUMPS:
         ins = parse_sid_song(raw, 1).instruments[instrument - 1]
@@ -701,8 +713,12 @@ def test_table_jumps_play_the_player(csillag):
     assert not np.array_equal(theirs, oracle(plain, WINDOW_TICKS))
     ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
     assert all(looped(ir["records"][name]) for name in ("wftab", "pwtab", "flttab"))
-    assert SongPlayer(ir).mismatch(theirs) is None
-    assert SongPlayer(ir).mismatch(swm_grid(parse_sid_song(raw, 1))) is None
+    player = SongPlayer(ir)
+    grid = player.render_grid(len(theirs))
+    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
+    assert_plays(
+        request, verify.compare_grids(grid, player.starts, swm_grid(parse_sid_song(raw, 1)))
+    )
 
 
 def test_a_subtune_needs_three_orderlists(csillag):
