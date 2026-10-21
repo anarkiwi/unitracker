@@ -7,6 +7,7 @@ import itertools
 import irs
 import numpy as np
 import pytest
+from conftest import grid_diff_of
 
 from unitracker import cli, document, optimise
 from unitracker.lift import backends
@@ -272,12 +273,13 @@ def kept(result) -> list:
     return [f.edit[0] for f in result.findings if f.kept]
 
 
-def plays_alike(source: dict, ir: dict, text: str) -> bool:
-    """Whether ``ir`` replays ``source`` on the VM and generic document ``text`` plays the
-    source's generic document's grid on unitracker-player from each voice's first note."""
+def plays_alike(source: dict, ir: dict, text: str) -> tuple[object, Verdict]:
+    """``(mismatch, verdict)``: whether ``ir`` replays ``source`` on the VM and document
+    ``text`` plays the source's grid on unitracker-player from each voice's first note;
+    ``verdict`` is the grids' diff (tools/grid_diff.py's report on it)."""
     native = document.native_state(source)
     grid, _ = oracle.play(document.write(source, native), native.ticks)
-    return optimise.mismatch(optimise.Trace(source), ir) is None and compare(text, grid).ok
+    return optimise.mismatch(optimise.Trace(source), ir), compare(text, grid)
 
 
 UNAPPLIED = [
@@ -334,14 +336,17 @@ UNPROVED = {
         for k in FIRES
     ],
 )
-def test_a_pass_keeps_the_edits_the_grid_proves(case):
+def test_a_pass_keeps_the_edits_the_grid_proves(case, request):
     name, ir, ops, edited = FIRES[case]
     opt = optimise.Optimiser(ir, [name], workers=1)
     before, text = opt.tokens, opt.text
     assert not edited(ir, text) and opt.keep(name)
     assert sorted(f.edit[0] for f in opt.findings.values() if f.kept) == ops
     assert opt.tokens < before and edited(opt.base, opt.text)
-    assert plays_alike(ir, opt.base, opt.text)
+    mismatch, verdict = plays_alike(ir, opt.base, opt.text)
+    if not verdict.ok:
+        grid_diff_of(request, verdict)
+    assert mismatch is None and verdict.ok
 
 
 @pytest.mark.parametrize("case", REFUSES)

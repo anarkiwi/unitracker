@@ -4,9 +4,11 @@ document's spelling of a pair of equal tempos."""
 import irs
 import numpy as np
 import pytest
+from conftest import grid_diff_of
 from unitracker_grammar import parse
 
 from unitracker import document
+from unitracker.lift import verify
 from unitracker.player import oracle
 from unitracker.player.vm import SongError, SongPlayer
 from unitracker.playroutine import tempo
@@ -116,7 +118,7 @@ def note_ticks(grid: np.ndarray) -> list[int]:
         pytest.param("sidwizard", 20, 0x00, "!vtempo:6", marks=LF185),
     ],
 )
-def test_a_pair_of_equal_tempos_is_written_as_one(player, code, arg, written):
+def test_a_pair_of_equal_tempos_is_written_as_one(player, code, arg, written, request):
     ir = scale_song(player)
     if isinstance(arg, tuple):
         ir["records"]["speedtab"] = {1: dict(zip("lr", arg))}
@@ -125,4 +127,8 @@ def test_a_pair_of_equal_tempos_is_written_as_one(player, code, arg, written):
     text = document.write(ir)
     parse(text)
     assert f"C4.i1{written}" in text and "/" not in written
-    assert note_ticks(oracle.play(text, 300)[0]) == note_ticks(SongPlayer(ir).render_grid(300))
+    doc, starts = oracle.play(text, 300)
+    vm = SongPlayer(ir).render_grid(300)
+    if note_ticks(doc) != note_ticks(vm):
+        grid_diff_of(request, verify.compare_grids(doc, starts, vm))
+    assert note_ticks(doc) == note_ticks(vm)

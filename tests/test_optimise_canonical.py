@@ -4,7 +4,7 @@ the composite proof's bisection, and the lift's ``canonical`` pass."""
 import copy
 
 import pytest
-from conftest import gt_tune
+from conftest import grid_diff_of, gt_tune
 from test_optimise import CUT, FREQ, LEGATO, codes, ev, plays_alike, song
 
 from unitracker import document, optimise
@@ -36,8 +36,12 @@ def canonical(ir: dict):
     return optimise.optimise(ir, list(optimise.CANONICAL), workers=1, progress=False)
 
 
-def alike(result) -> bool:
-    return plays_alike(result.source, result.ir, result.text)
+def alike(result, request) -> bool:
+    """Whether the pass's result plays the source's grid; the test's failure carries the diff."""
+    mismatch, verdict = plays_alike(result.source, result.ir, result.text)
+    if not verdict.ok:
+        grid_diff_of(request, verdict)
+    return mismatch is None and verdict.ok
 
 
 SHATTERED = [C4, *fq(1, 2, 3), ev("D4", 3)]
@@ -80,12 +84,12 @@ FIRES = {
         for k in FIRES
     ],
 )
-def test_a_canonical_pass_rewrites_the_shape_and_plays_the_grid(case):
+def test_a_canonical_pass_rewrites_the_shape_and_plays_the_grid(case, request):
     ir, rewritten = FIRES[case]
     result = canonical(ir)
     assert not rewritten(ir) and rewritten(result.ir)
     assert [f.pass_name for f in result.findings if f.kept] and result.tally[case]["proved"]
-    assert result.after < result.before and alike(result)
+    assert result.after < result.before and alike(result, request)
 
 
 def test_slides_fit_one_expression_in_the_firings():
@@ -116,10 +120,10 @@ def test_a_canonical_pass_keeps_nothing_the_grid_refuses(case):
     assert result.text == document.write(ir) and result.tally[name]["proved"] == 0
 
 
-def test_a_hold_the_voice_already_plays_is_left_out():
+def test_a_hold_the_voice_already_plays_is_left_out(request):
     result = canonical(song([C4, {}, held("C4", 1), ev("E4", 4)], exprs=("0",)))
     assert result.tally["holds"] == {"found": 1, "refused": 0, "proved": 1}
-    assert freqs(result.source) == {1} and freqs(result.ir) == {0} and alike(result)
+    assert freqs(result.source) == {1} and freqs(result.ir) == {0} and alike(result, request)
 
 
 def test_a_refused_composite_is_bisected_to_the_candidates_that_prove(monkeypatch):

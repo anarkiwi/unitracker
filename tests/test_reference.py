@@ -8,13 +8,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
+from conftest import assert_plays
 from pysidtracker.survey import load_render
 
 from unitracker import cli, document
 from unitracker.lift import backends, verify
 from unitracker.player import oracle
 from unitracker.playroutine.codec import COMMAND_NAMES, RESTART, ROW_KEYS
-from unitracker.player.vm import SongPlayer, first_mismatch
+from unitracker.player.vm import SongPlayer
 
 TUNES = ("metal_warrior", "crosseyed", "csillag")
 BACKEND = {"metal_warrior": "goattracker2", "crosseyed": "defmon", "csillag": "sidwizard"}
@@ -65,10 +66,12 @@ def test_elided_in():
 @pytest.mark.parametrize(
     "name", [n if n != "csillag" else pytest.param(n, marks=CSILLAG) for n in TUNES]
 )
-def test_the_lift_replays_its_native_player(references, name):
+def test_the_lift_replays_its_native_player(references, name, request):
     ref = references[name]
     assert len(np.unique(ref.native, axis=0)) > 500
-    assert SongPlayer(ref.ir()).mismatch(ref.native) is None
+    player = SongPlayer(ref.ir())
+    grid = player.render_grid(len(ref.native))
+    assert_plays(request, verify.compare_grids(grid, player.starts, ref.native))
 
 
 def test_the_format_example_is_the_metal_warrior_document(references):
@@ -185,10 +188,11 @@ def test_the_survey_renderer_plays_the_document_as_the_native_player(references)
 @pytest.mark.parametrize(
     "name", [n if n != "csillag" else pytest.param(n, marks=CSILLAG) for n in TUNES]
 )
-def test_the_optimised_tune_plays_its_native_player(references, optimised_tunes, name):
+def test_the_optimised_tune_plays_its_native_player(references, optimised_tunes, name, request):
     result = optimised_tunes[name][1]
     assert result.after < result.before and any(f.kept for f in result.findings)
     assert result.text == document.write(result.ir)
     player = SongPlayer(result.ir)
     native = references[name].native
-    assert first_mismatch(player.render_grid(len(native)), native, player.starts) is None
+    grid = player.render_grid(len(native))
+    assert_plays(request, verify.compare_grids(grid, player.starts, native))

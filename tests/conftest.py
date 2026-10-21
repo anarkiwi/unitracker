@@ -1,6 +1,9 @@
-"""Shared fixtures: the HVSC reference tunes, each lifted once per session, and synthetic tunes."""
+"""Shared fixtures: the HVSC reference tunes, each lifted once per session, and synthetic tunes;
+and the tests' grid diff, the porting tool's report on a mismatching verdict, carried on the
+test's expected failure."""
 
 import copy
+import importlib.util
 import os
 import pickle
 from dataclasses import dataclass
@@ -29,11 +32,16 @@ from pysidwizard import parse_sid_song
 from pysidwizard.player import INST_WF_TABLE_POS
 
 from unitracker import optimise
-from unitracker.lift import backends
+from unitracker.lift import backends, verify
 
-CACHE = Path(__file__).resolve().parent.parent / ".tunecache"
+ROOT = Path(__file__).resolve().parents[1]
+CACHE = ROOT / ".tunecache"
 os.environ.setdefault("UNITRACKER_WORKERS", str(max(2, min(8, len(os.sched_getaffinity(0)) // 8))))
 os.environ.setdefault("UNITRACKER_CACHE", str(CACHE / "modfit"))
+
+_spec = importlib.util.spec_from_file_location("grid_diff", ROOT / "tools" / "grid_diff.py")
+grid_diff = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(grid_diff)
 
 
 def hvsc_tune(name: str, tune: str, doc: str):
@@ -147,6 +155,19 @@ def sw_table_byte(raw: bytes, instrument: int, which: str, offset: int, value: i
 def oracle(raw: bytes, frames: int):
     """The 6502 oracle's register grid of tune ``raw``, cached by content under the tune cache."""
     return np.asarray(file_oracle(raw, 1, frames, work=CACHE / "oracle")[1], dtype=np.uint8)
+
+
+def grid_diff_of(request, ver: verify.Verdict) -> str:
+    """The grid diff of ``ver`` (tools/grid_diff.py's report), attached to the test's report."""
+    text = grid_diff.report(ver)
+    request.node.grid_diff = text
+    return text
+
+
+def assert_plays(request, ver: verify.Verdict) -> None:
+    """``assert ver.ok``; the test's failure carries the grids' diff from the porting tool."""
+    text = None if ver.ok else grid_diff_of(request, ver)
+    assert ver.ok, text
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
@@ -276,3 +297,13 @@ def optimised_tunes(request) -> dict:
 
     refs = request.getfixturevalue("references")
     return _Shared(request, "optimised", make, lambda name: (refs[name],))
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):  # pylint: disable=unused-argument
+    """The grid diff a test attached with :func:`grid_diff_of`, on its expected-failure line."""
+    report = yield
+    diff = getattr(item, "grid_diff", None)
+    if diff is not None and getattr(report, "wasxfail", None) is not None:
+        report.wasxfail = f"{report.wasxfail}\n\n{diff}"
+    return report
