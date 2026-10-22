@@ -587,13 +587,10 @@ def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, mon
 
 # A keyboard-track amount on the row that sets an instrument's pulse (7) or filter (4, 8), up
 # and down, adds a term of the note to the register until the next row's amount (0) replaces
-# it; pysidwizard's player does not model it for the filter, so the 6502 oracle plays these.
+# it.
 TRACKED = {(7, "pw"): 0xF4, (4, "filter"): 0x05, (8, "filter"): 0xF4}
 
 
-@pytest.mark.xfail(
-    strict=True, reason="a tracked pulse or filter row does not yet play the native player"
-)
 def test_keyboard_tracked_pulse_and_filter_rows_play_the_player(csillag, request):
     base = raw = window(csillag.read_bytes())
     plain = oracle(base, WINDOW_TICKS)
@@ -654,7 +651,6 @@ def looped(records: dict) -> bool:
     "tune,tables",
     [("addaraya", ("pwtab", "flttab")), ("civilization", ("pwtab",)), ("third_ninja", ("wftab",))],
 )
-@pytest.mark.xfail(strict=True, reason="a table-jumped program does not yet play the native player")
 def test_table_jumps_loop_their_programs_and_play_the_player(tune, tables, request):
     raw = request.getfixturevalue(tune).read_bytes()
     ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
@@ -687,7 +683,6 @@ def test_the_corpus_tool_lifts_replays_and_counts_a_tune_list(addaraya, tmp_path
 JUMPS = [(1, "pw", 2, 1), (8, "filter", 3, 1), (4, "filter", 2, 0), (6, "wf", 2, 1)]
 
 
-@pytest.mark.xfail(strict=True, reason="a table-jumped program does not yet play the native player")
 def test_table_jumps_play_the_player(csillag, request):
     raw = plain = window(csillag.read_bytes())
     for instrument, which, row, target in JUMPS:
@@ -710,6 +705,58 @@ def test_a_subtune_needs_three_orderlists(csillag):
     swm.sequences = swm.sequences[:2]
     with pytest.raises(LiftError, match="three orderlists"):
         sidwizard.SidWizardLift(sidwizard.Decoded(swm, None, 0)).structure()
+
+
+def header(row):
+    """An instrument whose header's first two 3-byte rows are the bytes ``row``."""
+    control, hr_ad, hr_sr, ad, sr, vibrato = row
+    names = ("attack", "decay", "sustain", "release")
+    nibbles = [b >> s & 15 for b in (hr_ad, hr_sr, ad, sr) for s in (4, 0)]
+    fields = dict(zip([f"hr_{n}" for n in names] + list(names), nibbles))
+    return Instrument(control=control, vibrato=vibrato, **fields)
+
+
+@pytest.mark.parametrize(
+    "row,rows",
+    [
+        ((0x1A, 0x0F, 0, 0, 0x8B, 0x33), [0x1A, 0x0F, 0, 0, 0x8B, 0x33, 0xFF]),
+        ((0, 0x0F, 0, 0x21, 0x81, 0x05), [0, 0x0F, 0, 0x21, 0x81, 0x05, 0xFF]),
+        ((0x02, 0x80, 0xF4, 0xFE, 0x7F, 0), [0x02, 0x80, 0xF4, 0xFF]),
+        ((0xFF, 0x7F, 0, 0, 0, 0), [0xFF]),
+        ((0x41, 0x0F, 0, 0xFF, 0x7F, 0), [0x41, 0x0F, 0, 0xFF]),
+    ],
+)
+def test_idle_rows_are_the_header_rows_a_voice_reads_before_its_first_instrument(row, rows):
+    ins = header(row)
+    assert ins.memory_image()[:6] == bytes(row)
+    assert sidwizard.idle_rows(ins) == rows
+
+
+@pytest.mark.parametrize(
+    "row,byte",
+    [
+        ((0xFE, 0, 0, 0, 0, 0), "$00"),
+        ((0x41, 0x7F, 0, 0, 0, 0), "$01"),
+        ((0x41, 0, 0, 0, 0x7F, 0), "$04"),
+    ],
+)
+def test_idle_rows_reject_a_jump_or_chord(row, byte):
+    with pytest.raises(LiftError, match=rf"header byte \{byte}, which a voice reads as a WF jump"):
+        sidwizard.idle_rows(header(row))
+
+
+def test_voices_before_their_first_note_play_the_native_idle_walk(csillag):
+    raw = window(csillag.read_bytes())
+    ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
+    assert ir["tables"]["idle"][:-1] == list(
+        parse_sid_song(raw, 1).instruments[0].memory_image()[:6]
+    )
+    player = SongPlayer(ir)
+    ours = player.render_grid(WINDOW_TICKS)
+    assert player.starts == [2, 2, 2]
+    assert np.array_equal(ours, oracle(raw, WINDOW_TICKS))
+    ir["tables"]["idle"] = [0xFF]
+    assert not np.array_equal(SongPlayer(ir).render_grid(3), ours[:3])
 
 
 def test_frequency_tables():
