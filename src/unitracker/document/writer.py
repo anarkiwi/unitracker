@@ -42,7 +42,7 @@ PREFIX = {
 }
 FIELD = {"pw": "pw", "cut": "filter", "freq": "freq"}  # the instrument field of a cell key
 # The ticks a note sounds after its onset cell is set (each playroutine's doc).
-ONSET_LAG = {"defmon": 1}
+ONSET_LAG = {"defmon": 1, "sidwizard": 1}
 GATE_CLEARS_MASK = ("defmon",)  # a row that sets the gate without a mask clears the mask
 FIRST_TICK_BEFORE = ("goattracker2", "sidwizard")  # first-tick row a tick before the programs
 NOTE_KEEPS_GATE = ("goattracker2",)  # a note keeps the gate its restart leaves

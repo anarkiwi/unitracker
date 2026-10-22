@@ -26,9 +26,6 @@ RECORDS = {
     },
 }
 SCALE = (0, 2, 4, 5, 7, 9, 11, 12)
-LF185 = pytest.mark.xfail(
-    strict=True, reason="the sidwizard tempo step still plays a tick after the native's"
-)
 
 
 def scale_song(player: str, value=None) -> dict:
@@ -114,8 +111,8 @@ def note_ticks(grid: np.ndarray) -> list[int]:
     [
         ("goattracker2", 14, (6, 6), "!tempo:6"),
         ("goattracker2", 18, (129, 129), "!vtempo:129"),
-        pytest.param("sidwizard", 17, 0x55, "!tempo:5", marks=LF185),
-        pytest.param("sidwizard", 20, 0x00, "!vtempo:6", marks=LF185),
+        ("sidwizard", 17, 0x55, "!tempo:5"),
+        ("sidwizard", 20, 0x00, "!vtempo:6"),
     ],
 )
 def test_a_pair_of_equal_tempos_is_written_as_one(player, code, arg, written, request):

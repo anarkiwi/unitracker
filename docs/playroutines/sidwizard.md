@@ -13,6 +13,7 @@ The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame,
 | step | one pattern row; the playroutine runs each voice's tempo counter, reads a row at TICK_0, applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking the voices in the player's reverse order |
 | notes | `note_offset` 1: SID-Wizard index 49 is `C4` |
 | first note | each voice's first note must select an instrument |
+| onset | the note's hard-restart tick, which sets its FREQ-HI: its programs sound on the next tick |
 
 ## Records
 

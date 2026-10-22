@@ -77,18 +77,18 @@ def test_main_diffs_the_diverging_reference_tune_for_the_eye_and_the_machine(
     out = tmp_path / "diff.json"
     assert grid_diff.main([str(doc), str(ref.sid), "--ticks", "64", "--json", str(out)]) == 1
     summary = json.loads(out.read_text(encoding="utf-8"))
-    assert summary["ok"] is False and summary["first"] == [2, 0]
-    assert summary["played"] == 64 and summary["ended"] == 0 and summary["starts"] == [2, 2, 2]
-    entry = next(e for e in summary["registers"] if e["reg"] == 0)
-    assert summary["cells"][0][0] == 2 and summary["cells"][0][1] == 0
-    assert entry["name"] == "v1 freq lo" and entry["cells"] == len(
-        [c for c in summary["cells"] if c[1] == 0]
+    assert summary["ok"] is False and summary["first"] == [26, 7]
+    assert summary["played"] == 64 and summary["ended"] == 0 and summary["starts"] == [3, 3, 3]
+    entry = next(e for e in summary["registers"] if e["reg"] == 7)
+    assert summary["cells"][0][0] == 26 and summary["cells"][0][1] == 7
+    assert entry["name"] == "v2 freq lo" and entry["cells"] == len(
+        [c for c in summary["cells"] if c[1] == 7]
     )
     assert grid_diff.main([str(doc), str(ref.sid), "--ticks", "64", "--json"]) == 1
-    assert json.loads(capsys.readouterr().out)["first"] == [2, 0]
+    assert json.loads(capsys.readouterr().out)["first"] == [26, 7]
     assert grid_diff.main([str(doc), str(ref.sid), "--ticks", "64"]) == 1
     text = capsys.readouterr().out
-    assert "mismatch: tick 2, register $00 v1 freq lo" in text
+    assert "mismatch: tick 26, register $07 v2 freq lo" in text
     assert "doc " in text and "native " in text
 
 
