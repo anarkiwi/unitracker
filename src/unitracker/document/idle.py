@@ -10,7 +10,7 @@ from unitracker.playroutine.xexpr import ExpressionError, source
 def holds(text) -> bool:
     """Whether expression ``text`` is ``v``, the value it drives held."""
     try:
-        return source(str(text))[0] == "v"
+        return source(str(text)) == "v"
     except ExpressionError:
         return False
 

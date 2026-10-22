@@ -9,7 +9,8 @@ import ast
 
 PHI = "φ"
 NAMES = {"v": "v", PHI: "phi", "N": "N"}
-CALLS = {"abs": 1, "min": 2, "max": 2}
+CALLS = {"abs": 1, "min": 2, "max": 2, "F": 1}
+_CALLED = {"F": "_F"}
 _BINARY = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.FloorDiv: "//", ast.Mod: "%"}
 _COMPARE = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
 
@@ -26,65 +27,53 @@ def written(text: str):
         return text
 
 
-class _Source:
-    """Python source of a parsed expression; names the tables and calls it reads."""
-
-    def __init__(self, tables):
-        self.tables = set(tables)
-        self.reads = set()
-
-    def __call__(self, node) -> str:
-        # pylint: disable=too-many-return-statements
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, int)
-            and not isinstance(node.value, bool)
-        ):
-            return str(node.value)
-        if isinstance(node, ast.Name) and node.id in NAMES:
-            self.reads.add(node.id)
-            return NAMES[node.id]
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-            return f"(-{self(node.operand)})"
-        if isinstance(node, ast.BinOp) and type(node.op) in _BINARY:
-            return f"({self(node.left)} {_BINARY[type(node.op)]} {self(node.right)})"
-        if isinstance(node, ast.Compare):
-            return self.compare(node)
-        if isinstance(node, ast.List):
-            raise ExpressionError(
-                f"{ast.unparse(node)!r} is outside the grammar: a comparison is written (a op b)"
-            )
-        if isinstance(node, ast.Call):
-            return self.call(node)
-        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
-            name = node.value.id
-            if name not in self.tables:
-                raise ExpressionError(f"unknown table {name!r}")
-            self.reads.add(name)
-            return f"_T[{name!r}]({self(node.slice)})"
-        raise ExpressionError(f"{ast.unparse(node)!r} is outside the grammar")
-
-    def compare(self, node) -> str:
-        """One comparison, 1 when it holds, else 0."""
-        if len(node.ops) != 1:
-            raise ExpressionError(f"({ast.unparse(node)}) is not one comparison")
-        op = _COMPARE.get(type(node.ops[0]))
-        if op is None:
-            raise ExpressionError(f"({ast.unparse(node)}) compares with no grammar operator")
-        return f"(1 if {self(node.left)} {op} {self(node.comparators[0])} else 0)"
-
-    def call(self, node) -> str:
-        """``abs``, ``min``, ``max`` or ``F``."""
+def _python(node, tables) -> str:
+    """Python source of a parsed expression reading ``tables``."""
+    # pylint: disable=too-many-return-statements
+    if (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, int)
+        and not isinstance(node.value, bool)
+    ):
+        return str(node.value)
+    if isinstance(node, ast.Name) and node.id in NAMES:
+        return NAMES[node.id]
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return f"(-{_python(node.operand, tables)})"
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY:
+        op = _BINARY[type(node.op)]
+        return f"({_python(node.left, tables)} {op} {_python(node.right, tables)})"
+    if isinstance(node, ast.Compare):
+        return _comparison(node, tables)
+    if isinstance(node, ast.List):
+        raise ExpressionError(
+            f"{ast.unparse(node)!r} is outside the grammar: a comparison is written (a op b)"
+        )
+    if isinstance(node, ast.Call):
         name = node.func.id if isinstance(node.func, ast.Name) else None
-        if node.keywords or name not in (*CALLS, "F"):
+        if node.keywords or name not in CALLS:
             raise ExpressionError(f"{ast.unparse(node)!r} calls no grammar function")
-        if len(node.args) != CALLS.get(name, 1):
-            raise ExpressionError(f"{name} takes {CALLS.get(name, 1)} argument(s)")
-        args = ", ".join(self(a) for a in node.args)
-        if name == "F":
-            self.reads.add("F")
-            return f"_F({args})"
-        return f"{name}({args})"
+        if len(node.args) != CALLS[name]:
+            raise ExpressionError(f"{name} takes {CALLS[name]} argument(s)")
+        args = ", ".join(_python(a, tables) for a in node.args)
+        return f"{_CALLED.get(name, name)}({args})"
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+        name = node.value.id
+        if name not in tables:
+            raise ExpressionError(f"unknown table {name!r}")
+        return f"_T[{name!r}]({_python(node.slice, tables)})"
+    raise ExpressionError(f"{ast.unparse(node)!r} is outside the grammar")
+
+
+def _comparison(node, tables) -> str:
+    """One comparison, 1 when it holds, else 0."""
+    if len(node.ops) != 1:
+        raise ExpressionError(f"({ast.unparse(node)}) is not one comparison")
+    op = _COMPARE.get(type(node.ops[0]))
+    if op is None:
+        raise ExpressionError(f"({ast.unparse(node)}) compares with no grammar operator")
+    left, right = _python(node.left, tables), _python(node.comparators[0], tables)
+    return f"(1 if {left} {op} {right} else 0)"
 
 
 def _tree(text: str) -> ast.expr:
@@ -94,10 +83,9 @@ def _tree(text: str) -> ast.expr:
         raise ExpressionError(f"bad expression {text!r}: {exc.msg}") from exc
 
 
-def source(text: str, tables=()) -> tuple[str, set]:
-    """``(Python source over v, phi, N, _F and _T, names read)`` of an expression text."""
-    src = _Source(tables)
-    return src(_tree(text)), src.reads
+def source(text: str, tables=()) -> str:
+    """Python source over ``v``, ``phi``, ``N``, ``_F`` and ``_T`` of an expression text."""
+    return _python(_tree(text), set(tables))
 
 
 def canonical(text: str) -> str:
@@ -223,5 +211,5 @@ def compile_expr(text: str, namespace: dict):
     ``namespace`` holds ``_F(k)``, the frequency of format note k, and ``_T``, each named
     table's function of its index.
     """
-    body, _ = source(text, namespace["_T"])
+    body = source(text, namespace["_T"])
     return eval(f"lambda v, phi, N: {body}", namespace)  # pylint: disable=eval-used
