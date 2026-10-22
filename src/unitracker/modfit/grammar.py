@@ -763,15 +763,18 @@ def parse(s: str, symbols=()) -> sympy.Expr:
     return walk(ast.parse(s, mode="eval").body)
 
 
-@functools.lru_cache(maxsize=1)
+ENCODING = "cl100k_base"
+
+
+@functools.cache
 def _encoding():
     import tiktoken  # pylint: disable=import-outside-toplevel
 
-    return tiktoken.get_encoding("cl100k_base")
+    return tiktoken.get_encoding(ENCODING)
 
 
 def tokens(s: str) -> int:
-    """Tokens of ``s`` with the optimiser's tokenizer."""
+    """The size of ``s``, a document or an expression: its token count under :data:`ENCODING`."""
     return len(_encoding().encode(s))
 
 

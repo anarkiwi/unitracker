@@ -2,7 +2,8 @@
 
 A tick runs the list on the concrete control state (pointer, row timer) with the swept cell
 symbolic, so it is a proved ``set c`` or ``add d``. The control state recurs; the moving ticks
-of the steady run are matched to one accumulator, run with ``vm._acc`` and compared tick by tick.
+of the steady run are matched to one accumulator, run with ``vm.bounded_step`` and compared
+tick by tick.
 """
 
 import dataclasses
@@ -10,7 +11,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from unitracker.modfit import exprs_report, resolve, specs
+from unitracker.modfit import resolve, specs
 from unitracker.modfit.bounce import bounce_lines
 from unitracker.modfit.fit import src
 from unitracker.modfit.flow import Writes
@@ -19,12 +20,7 @@ from unitracker.modfit.invariant import Slicer
 from unitracker.modfit.keywords import role_text, signer
 from unitracker.modfit.orbit import pingpong
 from unitracker.modfit.timer import runs
-from unitracker.player.vm import _acc
-
-
-def load(path: Path) -> dict:
-    """The lifter's song of a tune, lifted with its native modulations."""
-    return exprs_report.load(path).ir
+from unitracker.player.vm import bounded_step
 
 
 def entries(song: dict, record: str) -> dict:
@@ -150,14 +146,15 @@ class Stepper:
 
 
 def simulate(acc: dict, v: int, n: int, mask: int) -> list:
-    """The ``(value, direction)`` states of ``n`` moving ticks through ``vm._acc``, from ``v``."""
+    """The ``(value, direction)`` states of ``n`` moving ticks through ``vm.bounded_step``, from
+    ``v``."""
     vd = acc.get("vd", 0)
     out = [(v, vd)]
     signed = not 0 <= acc.get("min", 0) <= acc.get("max", mask) <= mask
     clamp = {True: 1, False: 0, "reflect": 2}[acc.get("clamp", True)]
     for _ in range(n):
         step = acc["step"] * (-1 if vd else 1)
-        v, hit = _acc(v, step, mask, acc.get("min"), acc.get("max"), None, clamp, signed)
+        v, hit = bounded_step(v, step, mask, acc.get("min"), acc.get("max"), None, clamp, signed)
         if hit and "reload" in acc:
             v = acc["reload"]
         if hit and clamp == 2:
@@ -286,9 +283,9 @@ def timing_text(prefix: list, cycle: list) -> str:
     return f"{head}cycle of {len(cycle)} ticks: {pattern(cycle)}"
 
 
-def song_lines(path: Path) -> list:
-    """Each sweep program of a song with its verdict."""
-    song = load(path)
+def song_lines(path: Path, song: dict) -> list:
+    """Each sweep program of a tune with its verdict, from its song lifted with native
+    modulations."""
     name = song["playroutine"]["name"]
     lines = [f"== {path.name} ({name})"]
     for spec in specs()["sweeps"].get(name, []):
@@ -315,9 +312,10 @@ def spec_lines(song: dict, spec: dict, label: str) -> list:
 
 
 def report(songs, fused=()) -> list:
-    """The sweeps report: bounce orbits, the given fused pair fit lines, each song's programs."""
+    """The sweeps report: bounce orbits, the given fused pair fit lines, and the programs of each
+    ``(path, song)``."""
     lines = ["# Bounce orbits", ""] + bounce_lines(tuple(u.values()) for u in specs()["bounces"])
     lines += ["", "# Fused pair fits", ""] + list(fused) + ["", "# Table programs", ""]
-    for path in songs:
-        lines += song_lines(Path(path))
+    for path, song in songs:
+        lines += song_lines(path, song)
     return lines

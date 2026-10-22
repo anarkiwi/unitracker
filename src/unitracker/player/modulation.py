@@ -12,6 +12,7 @@ import dataclasses
 
 from unitracker.playroutine.codec import command_code, evaluate
 from unitracker.playroutine.records import EXPR, record_types
+from unitracker.playroutine.schema import function, run_of
 
 VALUE = "value"
 # The hook of the start a playroutine's init makes (a unit's ``init``).
@@ -118,26 +119,6 @@ def declared(playroutine: dict) -> dict:
 def units(playroutine: dict) -> list:
     """A playroutine's declared modulator units."""
     return list(declared(playroutine).get("units") or [])
-
-
-def function(item) -> dict:
-    """The function a ``fire`` entry names: ``{proc}``, ``{type, template}`` or ``{record, field}``
-    (see the schema's modulator declarations); an entry that is no proc name or ``run`` is one."""
-    if isinstance(item, str):
-        return {"proc": item}
-    if "run" not in item:
-        return item
-    run = item["run"]
-    if "template" in run:
-        return {"type": run["record"], "template": run["template"]}
-    return {"record": run["record"], "field": run["field"]}
-
-
-def run_of(ref: dict) -> dict:
-    """The ``run`` spec, less its index, of a template or record function."""
-    if "type" in ref:
-        return {"record": ref["type"], "template": ref["template"]}
-    return {"record": ref["record"], "field": ref["field"]}
 
 
 def unit_command(playroutine: dict, unit: dict) -> int | None:

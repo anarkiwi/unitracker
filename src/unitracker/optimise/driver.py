@@ -16,12 +16,13 @@ from unitracker_player import PlayError
 
 from unitracker import document
 from unitracker.playroutine.library import SongFormatError
-from unitracker.modfit.convert import CACHE, _load, _save, ir_key
-from unitracker.modfit.exprs import _cached, content_key, default_workers
+from unitracker.cache import CACHE, cached, content_key, default_workers
+from unitracker.modfit.convert import ir_key
+from unitracker.modfit.grammar import tokens
 from unitracker.optimise.edits import EDITS
 from unitracker.optimise.model import ERRORS
 from unitracker.optimise.passes import CANONICAL, LARGER_UNPROVED, PASSES
-from unitracker.optimise.proof import Trace, mismatch, tokens
+from unitracker.optimise.proof import Trace, mismatch
 from unitracker.player import oracle, reach
 from unitracker.player.checkpoint import Baseline
 from unitracker.player.vm import SongPlayer
@@ -295,4 +296,4 @@ def canonical(ir: dict, workers: int | None = None, cache: Path | None = CACHE) 
         return result.ir if any(f.kept for f in result.findings) else ir
 
     where = cache / f"canonical-{content_key(ir_key(ir), _code())}.pkl" if cache else None
-    return _cached(where, compute, _load, _save)
+    return cached(where, compute)

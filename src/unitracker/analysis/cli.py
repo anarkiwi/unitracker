@@ -8,10 +8,10 @@ from pathlib import Path
 import z3
 from tqdm import tqdm
 
+from unitracker.analysis import exprs
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.arith import Arith
 from unitracker.modfit.compose import command_lines
-from unitracker.modfit.exprs_report import report as exprs_report
 from unitracker.modfit.generic import PLAYERS, report as generic_report
 from unitracker.modfit.keywords import table as keyword_table
 from unitracker.modfit.fit import Fitter, model_text, src
@@ -113,9 +113,9 @@ def run(args) -> list:
         table = specs()
         fused = [x for u in table["fits"] if ":" in u["cell"] for x in fit_lines(*u.values())]
         fused += [x for c in table["checks"] if ":" in c["cell"] for x in check_lines(*c.values())]
-        return sweeps_report(args.units, fused)
+        return sweeps_report(((Path(p), exprs.load(p).ir) for p in args.units), fused)
     if args.command == "exprs":
-        return exprs_report(args.units or SONGS, args.workers)
+        return exprs.report(args.units or SONGS, args.workers)
     if args.command == "poly":
         units = [u.split(":") for u in args.units]
         return [x for u in tqdm(units, desc="poly", unit="op") for x in poly_lines(*u)]
@@ -148,11 +148,11 @@ def main(argv=None) -> None:
     sub.add_parser(
         "sweeps", help="bounce orbits, fused pair fits and songs' table programs"
     ).add_argument("units", nargs="*", metavar="SONG")
-    exprs = sub.add_parser(
+    report_cmd = sub.add_parser(
         "exprs", help="every song modulator as proved phase and value expressions"
     )
-    exprs.add_argument("units", nargs="*", metavar="SONG")
-    exprs.add_argument("--workers", type=int, help="processes (default: the host's cores)")
+    report_cmd.add_argument("units", nargs="*", metavar="SONG")
+    report_cmd.add_argument("--workers", type=int, help="processes (default: the host's cores)")
     orbit = sub.add_parser("orbit", help="test vibrato orbits as reflect accumulators")
     orbit.add_argument("units", nargs="*", metavar="PLAYROUTINE")
     orbit.add_argument("--ticks", type=int, default=600)

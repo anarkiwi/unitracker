@@ -22,7 +22,8 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.flow import Writes, action_lists, walk
 from unitracker.modfit.form import INF, Form, Programs, atoms, lin, mk, record_data, show
 from unitracker.modfit.invariant import Slicer
-from unitracker.player.modulation import VALUE, function, run_of
+from unitracker.player.modulation import VALUE
+from unitracker.playroutine.schema import function, run_of
 
 PHI_BOUND = 1 << 20
 FIRE = "_fire"
@@ -809,7 +810,7 @@ def order(edges: list, lengths: list, values: list) -> Order | None:
         c = next(iter(out))
     loop = len(path) - 1 if g is None else [x for x, _, _ in path].index(c)
     prefix, period = shortest_lasso(tokens, [n for _, n, _ in path], loop)
-    runs = _clipped(path, prefix + period)
+    runs = clipped(path, prefix + period)
     return Order(
         "time" if time else "turn",
         [(c, n) for c, n, _ in runs],
@@ -820,7 +821,7 @@ def order(edges: list, lengths: list, values: list) -> Order | None:
     )
 
 
-def _clipped(path: list, length: int) -> list:
+def clipped(path: list, length: int) -> list:
     """The entries ``(class, positions, advance)`` of ``path`` over its first ``length``
     positions."""
     out, pos = [], 0
@@ -1033,7 +1034,7 @@ def closed_forms(values: list, o: Order, mask: int, v0) -> list:
     return [G.canon(e) for e in out]
 
 
-def _ramp(seq: Trace, x, window: bool = False) -> sympy.Expr:
+def ramp(seq: Trace, x, window: bool = False) -> sympy.Expr:
     """``seq[x]`` as its first value plus clamped ramps over runs of equal steps.
 
     With ``window``, ``0 <= x < len(seq)``: the first run needs no lower clamp, the last no upper.
@@ -1041,8 +1042,8 @@ def _ramp(seq: Trace, x, window: bool = False) -> sympy.Expr:
     out = seq[0]
     for d, i, j in seq.diffs():
         if d != 0:
-            ramp = x - i + 1 if window and i == 1 else sympy.Max(x - i + 1, 0)
-            out += d * (ramp if window and j == len(seq) - 1 else sympy.Min(ramp, j - i + 1))
+            rise = x - i + 1 if window and i == 1 else sympy.Max(x - i + 1, 0)
+            out += d * (rise if window and j == len(seq) - 1 else sympy.Min(rise, j - i + 1))
     return out
 
 
@@ -1054,11 +1055,11 @@ def _windows(trace: Trace, o: Order, k: int, drift) -> list:
     p, n = o.prefix, o.period
     start = p + (k - 1) % n
     if n == 1 and drift == 0:
-        forms = [_ramp(trace.cut(0, p + 1), G.PHI)]
+        forms = [ramp(trace.cut(0, p + 1), G.PHI)]
     else:
         t = G.PHI - start
         window = trace.cut(start, start + n)
-        tail = _ramp(window, sympy.Mod(t, n), True) + drift * sympy.floor(t / n)
+        tail = ramp(window, sympy.Mod(t, n), True) + drift * sympy.floor(t / n)
         kinks = {0} | {b for _, i, j in window.diffs() for b in (i - 1, j)}
         forms = [_gated(trace, tail, start, (n, kinks)) or _join(trace.cut(0, start), tail, start)]
     out = []
@@ -1100,7 +1101,7 @@ def _gated(trace: Trace, tail, start: int, window: tuple):
 
 def _join(head: Trace, tail, start: int):
     """``head[φ]`` before ``start``, ``tail`` from it."""
-    return _ramp(head, G.PHI) * G.lt(G.PHI, start) + tail * G.ge(G.PHI, start)
+    return ramp(head, G.PHI) * G.lt(G.PHI, start) + tail * G.ge(G.PHI, start)
 
 
 # ---- proof ----------------------------------------------------------------------------

@@ -1,6 +1,5 @@
 """The proof: a candidate plays the input's register grid over the joint recurrence bound."""
 
-import functools
 import math
 
 import numpy as np
@@ -8,20 +7,6 @@ import numpy as np
 from unitracker.optimise.model import ERRORS
 from unitracker.player import reach
 from unitracker.player.vm import SongPlayer, first_mismatch
-
-ENCODING = "cl100k_base"
-
-
-@functools.cache
-def _encoding():
-    import tiktoken  # pylint: disable=import-outside-toplevel
-
-    return tiktoken.get_encoding(ENCODING)
-
-
-def tokens(text: str) -> int:
-    """The document's size: its token count under :data:`ENCODING`."""
-    return len(_encoding().encode(text))
 
 
 class Trace:

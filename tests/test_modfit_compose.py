@@ -7,7 +7,8 @@ from unitracker.modfit import playroutine, resolve
 from unitracker.modfit.compose import Merge, bind, can_differ, composer, keywords
 from unitracker.modfit.factor import Factorer, basis, keyword_factors
 from unitracker.modfit.fit import Fitter
-from unitracker.modfit.flow import Composed, Flow, Liveness, Writes, flow_of, persistent
+from unitracker.modfit.composed import Composed
+from unitracker.modfit.flow import Flow, Liveness, Writes, flow_of, persistent
 from unitracker.modfit.form import Form
 from unitracker.modfit.generic import Report, Row, grouping, table
 from unitracker.modfit.invariant import Modular, Slicer, fit_under, inductive, invariants

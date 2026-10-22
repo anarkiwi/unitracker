@@ -1,7 +1,7 @@
 """Symbolic evaluator and normaliser of the playroutine action language.
 
 Sequential sets wrap to the cell width, expressions are unbounded integers and ``accumulate``
-expands exactly as ``vm._acc``; terms normalise to linear forms, brackets and intervals.
+expands exactly as ``vm.bounded_step``; terms normalise to linear forms, brackets and intervals.
 """
 
 import ast
@@ -753,7 +753,7 @@ class Form(Algebra):
         return out
 
     def acc_cases(self, a: dict, state) -> list:
-        """``[(guard, value, hit)]`` of one ``_acc`` step."""
+        """``[(guard, value, hit)]`` of one ``bounded_step`` step."""
         cell = a["accumulate"]
         v0, step = state.get(cell, cell), self.expr(a.get("step", 0), state)
         lo, hi = (self.expr(a[k], state) if k in a else None for k in ("min", "max"))
@@ -781,7 +781,8 @@ class Form(Algebra):
         return lambda x: self.sub(x, self.scale(1 << w, self.iv(self.ge(x, 1 << (w - 1)))))
 
     def bounds(self, cell, v0, s, lo, hi, mode, view) -> list:
-        """``[(guard, value, hit)]`` of ``v0 + s`` tested against the bounds, as ``_acc``."""
+        """``[(guard, value, hit)]`` of ``v0 + s`` tested against the bounds, as
+        ``vm.bounded_step``."""
         # pylint: disable=too-many-arguments,too-many-positional-arguments
         value = self.wrap(cell, self.add(v0, s))
         test = view(value)

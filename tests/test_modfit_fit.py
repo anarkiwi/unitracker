@@ -10,13 +10,14 @@ from unitracker.modfit import orbit as orbit_mod
 from unitracker.modfit import playroutine, resolve, specs
 from unitracker.modfit.arith import Arith
 from unitracker.modfit.bounce import Bounce, iv_values, phase_text, phase_value
-from unitracker.modfit.cli import check_lines, main
+from unitracker.analysis import exprs
+from unitracker.analysis.cli import check_lines, main
 from unitracker.modfit.fit import Fitter, model_text, src
 from unitracker.modfit.form import Form, atoms
 from unitracker.modfit.orbit import deltas, orbits, pingpong, reflector, report
 from unitracker.modfit.sweeps import Run, Stepper, entries, simulate, song_lines, verdict
 from unitracker.modfit.timer import Timers, affine, closed, grouped, signature, vibrato_signatures
-from unitracker.player.vm import CLAMPS, SongError, _acc
+from unitracker.player.vm import CLAMPS, SongError, bounded_step
 
 TOY = {"voice": {"x": {"width": 8}, "a": {"width": 8}, "b": {"width": 8}, "e": None}}
 
@@ -235,7 +236,8 @@ KINDS = [
 
 
 def edges(step: int, *bounds) -> set:
-    """Start bytes within one of each value where ``_acc``'s case, wrap or sign can change."""
+    """Start bytes within one of each value where ``bounded_step``'s case, wrap or sign can
+    change."""
     marks = {0, 128, *(b for b in bounds if b is not None)}
     return {(m + d - s) & 255 for m in marks for d in (-1, 0, 1) for s in (0, step, -step)}
 
@@ -250,7 +252,7 @@ def test_form_accumulate_is_vm_acc_on_bytes(clamp):
         lo, hi, toward = (bounds.get(k) for k in ("min", "max", "toward"))
         for v0 in edges(step, lo, hi, toward):
             [(_, st)] = form.paths([{**acc, "on_bound": on_bound}], (), {"x": v0, "h": 0})
-            expected = _acc(v0, step, 255, lo, hi, toward, CLAMPS[clamp], signed)
+            expected = bounded_step(v0, step, 255, lo, hi, toward, CLAMPS[clamp], signed)
             assert (st["x"], st["h"] == 1) == expected, (acc, v0)
     if clamp == "reflect":
         with pytest.raises(SongError):
@@ -489,7 +491,8 @@ def test_unsteppable_runs_and_simulation():
     ],
 )
 def test_reference_song_programs(request, name, expected):
-    text = "\n".join(song_lines(request.getfixturevalue(name)))
+    path = request.getfixturevalue(name)
+    text = "\n".join(song_lines(path, exprs.load(path).ir))
     assert all(e in text for e in expected), text
 
 
@@ -519,7 +522,7 @@ ORBITS = {"goattracker2": periods("goattracker2", 125, 127)}
         ),
         (
             ["orbit", "--ticks", "300"],
-            {"unitracker.modfit.cli.specs": lambda: {"orbits": ORBITS}},
+            {"unitracker.analysis.cli.specs": lambda: {"orbits": ORBITS}},
             [
                 "   125: ping-pong [-64, 63], first step +1, reflect {'accumulate': 'freq'",
                 "   126: no ping-pong",

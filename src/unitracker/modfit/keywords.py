@@ -13,11 +13,11 @@ from tqdm import tqdm
 from unitracker.playroutine.records import record_types
 from unitracker.modfit import specs
 from unitracker.modfit.compose import ARG, can_differ, composer, keywords, leaves, tests
+from unitracker.modfit.composed import Composed
 from unitracker.modfit.fit import src
 from unitracker.modfit.flow import (
     NAMED,
     REGISTERS,
-    Composed,
     Val,
     action_lists,
     names,

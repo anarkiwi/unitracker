@@ -164,7 +164,7 @@ def main(argv=None) -> int:
     for path in (args.out, args.diff):
         if path:
             path.mkdir(parents=True, exist_ok=True)
-    from unitracker.modfit.exprs import Pool  # pylint: disable=import-outside-toplevel
+    from unitracker.cache import Pool  # pylint: disable=import-outside-toplevel
 
     out = str(args.out) if args.out else None
     diff = str(args.diff) if args.diff else None

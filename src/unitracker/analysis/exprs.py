@@ -6,11 +6,12 @@ from pathlib import Path
 import numpy as np
 
 from unitracker import document
+from unitracker.cache import CACHE
 from unitracker.optimise.refs import references
 from unitracker.playroutine.records import EXPR
 from unitracker.lift import backends, verify
 from unitracker.modfit import grammar as G
-from unitracker.modfit.convert import CACHE, analyse, groups
+from unitracker.modfit.convert import analyse, groups
 from unitracker.modfit.exprs import Result
 from unitracker.modfit.inherit import inherit
 from unitracker.modfit.phase import unproved_functions
