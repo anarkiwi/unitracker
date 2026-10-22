@@ -15,6 +15,8 @@ from unitracker.playroutine.schema import run_of
 
 # ---- derivation --------------------------------------------------------------------------
 
+MISSING = ("<missing>",)
+
 
 def refusal(exc: BaseException) -> str:
     """The text of a failure to derive a start: the message, named when it is not a ValueError."""
@@ -49,6 +51,7 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         self.offset = int(ir["playroutine"].get("note_offset", 0))
         self.tables = next(iter(self.machines.values())).form.pr["tables"]
         self.cache = {}
+        self.laid, self.values, self.keys = {}, {}, {}
 
     def unit(self, name: str) -> dict:
         """The unit declaration named ``name``."""
@@ -64,9 +67,27 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         return ("lin", k, (("N", 1),)) if k else "N"
 
     def overlay(self, machine: Machine, hook: tuple, start: dict) -> dict:
-        """Cells the start hook writes from the note, as terms of ``N`` at the start's transpose."""
-        # pylint: disable=too-many-locals
+        """Cells the start hook writes from the note, as terms of ``N`` at the start's transpose.
+
+        Its symbolic paths run once per hook, note term and value of each cell they read.
+        """
         at, row, pre = hook
+        term = self.note_term(start)
+        state = {k: v for k, v in pre.items() if isinstance(v, int) and k not in machine.parts}
+        state.update(dict.fromkeys(self.spec["notes"], term))
+        known = self.laid.setdefault((machine.unit["name"], repr(at), row, term), {})
+        for cells, outs in known.items():
+            got = outs.get(tuple(state.get(c, MISSING) for c in cells))
+            if got is not None:
+                return got
+        with machine.form.tracking() as reads:
+            out = self._overlay(machine, at, row, state)
+        cells = tuple(sorted(reads))
+        known.setdefault(cells, {})[tuple(state.get(c, MISSING) for c in cells)] = out
+        return out
+
+    def _overlay(self, machine: Machine, at: dict, row, state: dict) -> dict:
+        """Uncached ``overlay`` from the hook's state."""
         if "proc" in at:
             actions = [{"call": at["proc"]}]
         else:
@@ -74,9 +95,6 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
             if not isinstance(index, int):
                 return {}
             actions = [{"run": {**run_of(at), "index": int(index)}}]
-        state = {k: v for k, v in pre.items() if isinstance(v, int) and k not in machine.parts}
-        for c in self.spec["notes"]:
-            state[c] = self.note_term(start)
         try:
             paths = machine.form.paths(dispatch(machine.form.pr, actions), (), state)
         except (ValueError, KeyError):
@@ -102,14 +120,46 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         """``(unit, start control, start value term)`` of an occurrence, or None (``occ.error``).
 
         The start hook's cells written from the note become terms of ``N`` where they still
-        hold their values at the first firing.
+        hold their values at the first firing. Computed once per hook overlay, start cells it
+        reads and first value.
         """
         try:
             machine = self.machines[unit["name"]]
-            values = dict(occ.start)
             lay = (
                 self.overlay(machine, occ.hook, occ.start) if occ.hook and occ.hook != INIT else {}
             )
+        except (ValueError, TypeError, RecursionError) as exc:
+            occ.error = refusal(exc)
+            return None
+        cells = self.start_cells(machine, unit)
+        sig = (
+            unit["name"],
+            frozenset(lay.items()),
+            tuple(occ.start.get(c, MISSING) for c in cells),
+        )
+        sig += (occ.v,)
+        if sig not in self.keys:
+            self.keys[sig] = self._key(unit, machine, lay, occ)
+        key, error = self.keys[sig]
+        if error:
+            occ.error = error
+        return key
+
+    def start_cells(self, machine: Machine, unit: dict) -> list:
+        """The start cells a key reads besides its hook's: those the unit's list reads or keeps,
+        the notes, the transpose and the relative cells."""
+        return sorted(
+            machine.reads
+            | set(machine.control)
+            | set(self.spec["notes"])
+            | set(unit.get("relative") or [])
+            | {self.spec.get("transpose")} - {None}
+        )
+
+    def _key(self, unit: dict, machine: Machine, lay: dict, occ) -> tuple:
+        """``(key, error)`` of an occurrence with its hook's overlay ``lay``."""
+        try:
+            values = dict(occ.start)
             for c in self.spec["notes"]:
                 values[c] = self.note_term(occ.start)
             n = occ.start.get(self.spec["notes"][0], 0) - self.shift(occ.start)
@@ -124,10 +174,9 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
             v0 = lay.get(machine.cell)
             if v0 is not None and self.evaluate(machine, v0, n) != occ.v:
                 v0 = None
-            return unit["name"], machine.start(values), v0
+            return (unit["name"], machine.start(values), v0), ""
         except (ValueError, TypeError, RecursionError) as exc:
-            occ.error = refusal(exc)
-            return None
+            return None, refusal(exc)
 
     def derived(self, key: tuple):
         """The proved expressions of a start key."""
@@ -160,7 +209,14 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         return res if res.stepper is not None else None
 
     def evaluate(self, machine: Machine, term, n: int):
-        """A term of ``N`` at note ``n``."""
+        """A term of ``N`` at note ``n``, once per term and note."""
+        key = (machine.unit["name"], term, n)
+        if key not in self.values:
+            self.values[key] = self._evaluate(machine, term, n)
+        return self.values[key]
+
+    def _evaluate(self, machine: Machine, term, n: int):
+        """Uncached ``evaluate``."""
         lift = Lift(machine.form, machine.cell, self.freq)
         e = lift.fold(lift.term(term))
         if e.free_symbols - {G.N}:

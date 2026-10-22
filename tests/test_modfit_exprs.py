@@ -17,7 +17,7 @@ from unitracker.lift import goattracker
 from unitracker.analysis import exprs as exprs_report
 from unitracker.analysis.cli import main
 from unitracker.cache import Pool, cached
-from unitracker.modfit import chipinv
+from unitracker.modfit import chipinv, convert
 from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import Analysis, Result
 from unitracker.modfit.form import Form
@@ -26,7 +26,7 @@ from unitracker.modfit.orbit import deltas
 from unitracker.modfit import phase as P
 from unitracker.modfit.phase import Machine, derive, unproved_functions
 from unitracker.modfit.replay import Replay
-from unitracker.player.modulation import declared
+from unitracker.player.modulation import INIT, declared
 
 PHI, V, N = G.PHI, G.V, G.N
 GT_FREQ, DM_FREQ = {"word": "ftab"}, {"hi": "note_hi", "lo": "note_lo"}
@@ -854,3 +854,45 @@ def test_a_fired_record_function_runs_at_the_index_of_its_call():
 )
 def test_a_wrap_the_unit_repeats_is_not_written(e, width, written):
     assert G.text(G.unwrapped(e, width)) == written
+
+
+def test_a_form_tracks_the_cells_it_reads_through_functions_and_accumulators():
+    pr = {
+        "voice": {c: {"width": 8} for c in "abcdx"},
+        "functions": {"twice": {"args": ["y"], "expr": "y + y + c"}},
+        "constants": {"K": 3},
+    }
+    form = Form(pr)
+    state = {"a": 1, "b": 2, "c": 4, "d": 5}
+    with form.tracking() as outer:
+        assert form.expr("twice(a) + K", state) == 9
+        with form.tracking() as inner:
+            form.paths([{"accumulate": "x", "step": "b", "max": 9}], (), state)
+    assert inner == {"x", "b"} and outer == {"a", "c", "x", "b"} and form.reads is None
+
+
+def test_a_start_key_is_computed_once_per_overlay_and_start_cells_it_reads(gt_song):
+    ir, _ = gt_song
+    occs = convert.observe(ir, None).occurrences
+    memo, fresh = Analysis(ir), Analysis(ir)
+    got = [memo.key(memo.unit(o.unit), o) for o in occs]
+    for occ, key in zip(occs, got):
+        fresh.laid, fresh.values, fresh.keys = {}, {}, {}
+        assert fresh.key(fresh.unit(occ.unit), occ) == key
+    runs = [len(outs) for site in memo.laid.values() for outs in site.values()]
+    assert 0 < sum(runs) < len(occs) and len(memo.keys) < len(occs)
+
+
+def test_an_overlay_is_reused_only_where_the_cells_it_read_agree(gt_song):
+    ir, _ = gt_song
+    occs = convert.observe(ir, None).occurrences
+    memo = Analysis(ir)
+    hooked = next(o for o in occs if o.hook and o.hook != INIT and memo.key(memo.unit(o.unit), o))
+    unit, (at, row, pre) = memo.machines[hooked.unit], hooked.hook
+    site = memo.laid[(hooked.unit, repr(at), row, memo.note_term(hooked.start))]
+    read = {c for cells in site for c in cells}
+    unread = next(c for c, v in pre.items() if isinstance(v, int) and c not in read)
+    for cell in (unread, *sorted(read)[:2]):
+        hook = (at, row, {**pre, cell: pre[cell] + 1})
+        fresh = Analysis(ir)
+        assert memo.overlay(unit, hook, hooked.start) == fresh.overlay(unit, hook, hooked.start)
