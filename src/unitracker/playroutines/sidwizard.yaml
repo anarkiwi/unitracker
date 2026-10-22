@@ -490,7 +490,8 @@ procs:
         - set: {voff: "t4 + t5 + 1"}
   tick_vibrato:
     - {if: "ci == 0", then: [{return: true}]}
-    - {if: "svib == 0x83", then: [{call: tick_porta}, {return: true}]}
+    # SLIDES: a pending note-FX portamento ($FF) runs PORTAME too (PORTAVIBRA_ON is off).
+    - {if: "svib == 0x83 or svib == 0xFF", then: [{call: tick_porta}, {return: true}]}
     - {if: "svib == 0x81", then: [{set: {voff: "voff + ((fmh << 8) | fml)"}}, {return: true}]}
     - {if: "svib == 0x82", then: [{set: {voff: "voff - ((fmh << 8) | fml)"}}, {return: true}]}
     - if: "svib == 0"

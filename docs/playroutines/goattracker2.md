@@ -27,6 +27,7 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 | `pw` | pulse table (`pulsetab`) | written as the program's `pw` expression |
 | `filter` | filter table (`filttab`) | see Filter |
 | `restart` | the instrument's gate timer and first wave | instruments with one gate timer and first wave share a restart program |
+| `vinit` | a voice's instrument after init (fixed) | `ins`, the instrument the init gives the voice (instrument 1), for a voice that plays a note or runs a table (commands $8-$A) before it names one: the init row names it, as unitracker-player runs a program only on a voice with an instrument |
 
 A jump row ($FF, target) chains the row before it to its target. The player follows one jump
 and reads the row it lands on as data, so a jump to a jump row runs that row's bytes: in the

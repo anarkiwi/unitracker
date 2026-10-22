@@ -637,10 +637,11 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
     def init(self, defs: dict) -> Flow | None:
         """The ``init`` row, one event per voice: the global registers the native player's
         init sets, the lead-in's tempo, and the fixed records of the state after init, a
-        legato note for the base note and the commands that set each key."""
+        legato note for the base note, the instrument and the commands that set each key."""
         fixed = {t: defs.pop(t) for t in INIT_TYPES if t in defs}
         cmds: list[dict] = [{} for _ in range(self.voices)]
         notes = ["-"] * self.voices
+        ins = [""] * self.voices
         cmds[0].update(self._after_init())
         if self.init_tempo is not None:
             cmds[0]["tempo"] = self.init_tempo
@@ -648,14 +649,18 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             for index, rec in (fixed.get(kind) or {}).items():
                 voice = int(index) if kind == "vinit" else 0
                 for key, value in rec.items():
+                    if kind == "vinit" and key == "ins":
+                        ins[voice] = f".{value}"
+                        continue
                     cmds[voice].update(self._init_command(kind, index, key, value))
                     if kind == "vinit" and key == "note":
                         notes[voice] = str(value)
-        if not any(cmds) and notes == ["-"] * self.voices:
+        if not any(cmds) and not any(ins) and notes == ["-"] * self.voices:
             return None
         return Flow(
             Atom(
                 notes[v]
+                + ins[v]
                 + "".join(
                     f"!{k}" if cmds[v][k] is None else f"!{k}:{cmds[v][k]}"
                     for k in CMD_ORDER

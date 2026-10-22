@@ -888,3 +888,8 @@ def test_the_tempo_counts_play_calls():
     assert cmds.encode(0x12, 4) == ("tempo", 12)
     assert cmds.decode("tempo", 12) == (0x12, 4)
     assert cmds.encode(0x11, 0x45) == ("tempo", (12, 15))
+def test_a_pending_note_fx_portamento_slides(doom_schlager):
+    lift = sidwizard.SidWizardLift.from_sid(doom_schlager.read_bytes(), expressions=False)
+    song = lift.run()
+    theirs = np.asarray(lift.native().render_grid(3000), np.uint8)
+    assert vm_mismatch(song, theirs) is None

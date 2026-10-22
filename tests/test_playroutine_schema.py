@@ -16,7 +16,9 @@ def test_expanding_is_idempotent(name):
 
 def test_library_record_types_take_the_defaults():
     gt, dm = library("goattracker2"), library("defmon")
-    types = gt["record_types"]
+    types = dict(gt["record_types"])
+    vinit = types.pop("vinit")
+    assert vinit["fixed"] and "none" not in vinit
     assert {n: (t.get("chain"), t["none"]) for n, t in types.items()} == {
         "ins": (None, 0),
         "restart": ("next", 0),
