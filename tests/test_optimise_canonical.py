@@ -46,7 +46,6 @@ def alike(result, request) -> bool:
 
 SHATTERED = [C4, *fq(1, 2, 3), ev("D4", 3)]
 HOLD = ("16*min(φ, 1) - 16", "0")
-WRITER = "the generic document plays a step-lasting !freq on the tick that fetches the next row"
 
 
 def freqs(ir: dict) -> set:
@@ -77,13 +76,7 @@ FIRES = {
 }
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        k if k == "holds" else pytest.param(k, marks=pytest.mark.xfail(strict=True, reason=WRITER))
-        for k in FIRES
-    ],
-)
+@pytest.mark.parametrize("case", FIRES)
 def test_a_canonical_pass_rewrites_the_shape_and_plays_the_grid(case, request):
     ir, rewritten = FIRES[case]
     result = canonical(ir)

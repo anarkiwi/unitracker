@@ -61,11 +61,12 @@ def _apply(ir: dict, edit: tuple) -> dict | None:
 
 
 def _written(ir: dict | None, native: document.Native):
-    """``(generic text, tokens, ir)`` of a candidate, or None when it can't be written."""
+    """``(generic text, tokens, ir)`` of a candidate, or None when it can't be written: its
+    expressions timed by its own firings over ``native``'s ticks."""
     if ir is None:
         return None
     try:
-        text = document.write(ir, native)
+        text = document.write(ir, document.native_over(ir, native.ticks))
     except (*ERRORS, PlayError):
         return None
     return text, tokens(text), ir
@@ -95,13 +96,16 @@ def _init(state: dict) -> None:
 def _screen(job):
     """``(index, delta or None, proved)`` of one candidate edit of ``(base, text, tokens)``."""
     k, edit, (base, text, size) = job
-    written = _written(_apply(base, edit), _STATE["native"])
+    cand = _apply(base, edit)
+    if cand is None or mismatch(_STATE["ref"], cand) is not None:
+        return k, None, False
+    written = _written(cand, _STATE["native"])
     if written is None or written[0] == text:
         return k, None, False
     delta = written[1] - size
     if delta >= 0 and edit[0] in LARGER_UNPROVED:
         return k, delta, False
-    return k, delta, _proved(_STATE, written)
+    return k, delta, _plays(_STATE["grid"], written[0])
 
 
 def _count(job):
