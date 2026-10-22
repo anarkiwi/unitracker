@@ -10,6 +10,7 @@ import sympy
 import z3
 from pydefmon import DefmonPlayer
 from pysidtracker import SidImage
+from unitracker_grammar import expr as xexpr
 
 from unitracker import document
 from unitracker.document.events.lifetime import selected
@@ -21,7 +22,6 @@ from unitracker.modfit import phase
 from unitracker.modfit.form import Form
 from unitracker.player.modulation import INIT, Occurrence
 from unitracker.player.vm import SongError, SongPlayer
-from unitracker.playroutine import xexpr
 from unitracker.playroutine.atoms import note_index
 from unitracker.playroutine.library import SongFormatError, library
 
@@ -221,18 +221,6 @@ def test_defmon_row_expressions_drive_pulse_and_pitch():
     freq, pulse, _ = voice0(dm_song(), 10)
     assert moves(pulse)[1:5] == [10] * 4
     assert moves(freq)[1:5] == [-139] * 4
-
-
-def test_expressions_compile_to_the_grammar_semantics():
-    ns = {"_F": lambda k: 1000 + k, "_T": {"W": lambda i: 2 * i}}
-    f = xexpr.compile_expr("(v >= 3)*(F(N) % 7) - abs(-φ) + max(W[2], 1) + min(v, -3)", ns)
-    assert f(3, 2, 4) == (1004 % 7) - 2 + 4 - 3 and f(2, 0, 4) == 4 - 3 + 1 - 1
-    floor = xexpr.compile_expr("φ // 30 - v // 4", {"_T": {}})
-    assert [floor(-5, phi, 0) for phi in (0, 29, 30, 61)] == [2, 2, 3, 4]
-    assert xexpr.written("-5") == -5 and xexpr.written("v") == "v"
-    assert xexpr.canonical("1024 + 16*min(3, φ)") == "16*min(3, φ) + 1024"
-    with pytest.raises(xexpr.ExpressionError, match="takes 2"):
-        xexpr.source("min(v)")
 
 
 @pytest.mark.parametrize(

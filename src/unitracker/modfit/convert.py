@@ -19,12 +19,12 @@ from pathlib import Path
 import numpy as np
 
 import sympy
+from unitracker_grammar.expr import ExpressionError, source
 
 from unitracker.playroutine.codec import command_code, command_variants, evaluate
 from unitracker.document.events.lifetime import selected
 from unitracker.playroutine.records import chained, program_path, record_types
 from unitracker.playroutine.codec import row_codecs
-from unitracker.playroutine.xexpr import ExpressionError, source
 from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper

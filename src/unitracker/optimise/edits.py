@@ -1,13 +1,13 @@
 """The edits: each a pure function of a song and its arguments, None where it does not apply."""
 
 import copy
+from unitracker_grammar.expr import canonical
 
 from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code
 from unitracker.document.events import column
 from unitracker.document.events.running import lasts_step
 from unitracker.playroutine.records import RowEval, chained, program_path, ref_type
 from unitracker.optimise.refs import put_slots, redirect, slots, view
-from unitracker.playroutine.xexpr import canonical
 from unitracker.optimise.model import (
     apart,
     copied,

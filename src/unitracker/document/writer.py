@@ -10,10 +10,11 @@ import re
 from dataclasses import dataclass, field
 
 from unitracker_grammar import PAL_HZ, CanonicalError, frequency, parse
+from unitracker_grammar import expr as xexpr
 
 from unitracker.document import retime
 from unitracker.document.tree import respelled, song_rows
-from unitracker.playroutine import tempo, xexpr
+from unitracker.playroutine import tempo
 from unitracker.playroutine.library import DEFAULTS
 from unitracker.playroutine.records import record_types
 from unitracker.document.yamlstyle import Atom, Flow, FlowMap

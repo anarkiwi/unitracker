@@ -4,9 +4,10 @@ timeline of definitions and plays, each record named and each row in the shared 
 import re
 
 import yaml
+from unitracker_grammar import expr as xexpr
 
 from unitracker.document import idle, refkeys, timeline
-from unitracker.playroutine import tempo, xexpr
+from unitracker.playroutine import tempo
 from unitracker.playroutine.atoms import format_atom, runs
 from unitracker.playroutine.codec import (
     CodecError,
