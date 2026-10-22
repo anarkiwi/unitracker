@@ -10,7 +10,7 @@ import keyword
 import re
 
 from unitracker.playroutine.atoms import AtomError, note_index, note_name
-from unitracker.playroutine.expr import ExprError, Resolver
+from unitracker.playroutine.expr import ExprError, Resolver, table_get
 from unitracker.playroutine.records import ABSENT, record_types
 
 ROW_KEYS = (
@@ -67,21 +67,8 @@ class _Env(Resolver):
     """Expressions over one mapping of names (a missing name reads as the playroutine's
     constant of that name, else 0) and the playroutine's tables and functions."""
 
-    def __init__(self, functions=None, tables=()):
-        super().__init__(functions)
-        self.tables = set(tables)
-
     def name(self, name):
         return f"E.get({name!r}, C.get({name!r}, 0))"
-
-    def table(self, name, index):
-        if name not in self.tables:
-            raise ExprError(f"unknown table {name!r}")
-        return f"_tg(T[{name!r}], {index})"
-
-
-def _tg(table, index):
-    return table[index] if 0 <= index < len(table) else 0
 
 
 class Evaluator:
@@ -105,7 +92,7 @@ class Evaluator:
             except ExprError as exc:
                 raise CodecError(str(exc)) from exc
             self.codes[text] = code
-        glob = {"E": env, "C": self.constants, "T": self.tables, "_tg": _tg}
+        glob = {"E": env, "C": self.constants, "T": self.tables, "_tg": table_get}
         return int(eval(code, glob))  # pylint: disable=eval-used
 
 

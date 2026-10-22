@@ -7,7 +7,7 @@ from pysidtracker import gridcmp
 from tqdm import tqdm
 
 from unitracker.playroutine import tempo, xexpr
-from unitracker.playroutine.expr import ExprError, Resolver
+from unitracker.playroutine.expr import ExprError, Resolver, table_get
 from unitracker.playroutine.records import EXPR, record_types
 from unitracker.player import modulation
 from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT, REGISTERS
@@ -154,7 +154,7 @@ class _Scope(Resolver):
     """Name resolution for code running in global or voice scope, with optional locals."""
 
     def __init__(self, gen, voice: bool, local=()):
-        super().__init__()
+        super().__init__(tables=gen.tables)
         self.functions = gen.resolver_functions
         self.gen = gen
         self.voice = voice
@@ -172,11 +172,6 @@ class _Scope(Resolver):
             return str(gen.constants[name])
         raise ExprError(f"unknown name {name!r}" + ("" if self.voice else " in global scope"))
 
-    def table(self, name, index):
-        if name not in self.gen.tables:
-            raise ExprError(f"unknown table {name!r}")
-        return f"_tg(T[{name!r}], {index})"
-
     def field(self, record, index, field):
         if record not in self.gen.records:
             raise ExprError(f"unknown record {record!r}")
@@ -189,10 +184,6 @@ class _Scope(Resolver):
             return super().row_field(field)
         default = self.gen.need_field(record, field)
         return f"F[{(record, field)!r}].get(_r, {default})"
-
-
-def _tg(table, index):
-    return table[index] if 0 <= index < len(table) else 0
 
 
 class _Codegen:
@@ -587,7 +578,7 @@ class SongPlayer:
             "VS": self.voice_cells,
             "T": gen.tables,
             "F": gen.fields,
-            "_tg": self._reader(gen.tables) if record_reads else _tg,
+            "_tg": self._reader(gen.tables) if record_reads else table_get,
             "_acc": _acc,
             "_fetch": _fetcher(gen),
             "_W": {},

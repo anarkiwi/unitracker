@@ -1,6 +1,7 @@
 """Restricted expression compiler: unitracker expression syntax to Python source."""
 
 import ast
+import copy
 
 
 class ExprError(ValueError):
@@ -81,8 +82,7 @@ class _Inline(ast.NodeTransformer):
             raise ExprError(f"{name} takes {len(args)} arguments")
         if self.depth > 16:
             raise ExprError(f"function {name!r} recurses")
-        bound = dict(zip(args, node.args))
-        out = _Bind(bound).visit(ast.parse(ast.unparse(body), mode="eval").body)
+        out = _Bind(dict(zip(args, node.args))).visit(copy.deepcopy(body))
         return _Inline(self.functions, self.depth + 1).visit(out)
 
 
@@ -91,8 +91,8 @@ class _Bind(ast.NodeTransformer):
         self.bound = bound
 
     def visit_Name(self, node):  # pylint: disable=invalid-name
-        """Replace an argument name by its value expression."""
-        return self.bound.get(node.id, node)
+        """Replace an argument name by a copy of its value expression."""
+        return copy.deepcopy(self.bound[node.id]) if node.id in self.bound else node
 
 
 BUILTINS = {
@@ -110,14 +110,40 @@ def with_builtins(functions) -> dict:
     return {**BUILTINS, **(functions or {})}
 
 
-class Resolver:
-    """Maps the names an expression uses to Python source for the generated code."""
+def _body(spec) -> tuple:
+    return list(spec.get("args", [])), parse(spec["expr"])
 
-    def __init__(self, functions=None):
+
+_BUILTIN_BODIES = {name: _body(spec) for name, spec in BUILTINS.items()}
+
+
+def table_get(table, index):
+    """``table[index]``, 0 outside the table."""
+    return table[index] if 0 <= index < len(table) else 0
+
+
+def _source(node) -> str:
+    return f"({ast.unparse(node)})"
+
+
+def _node(source: str) -> ast.expr:
+    return ast.parse(source, mode="eval").body
+
+
+def _truth(node) -> ast.Call:
+    return ast.Call(ast.Name("int"), [node], [])
+
+
+class Resolver(ast.NodeTransformer):
+    """Maps the names an expression uses to Python source for the generated code; ``tables``
+    are read through ``_tg`` (:func:`table_get`) from ``T``."""
+
+    def __init__(self, functions=None, tables=()):
         self.functions = {
-            name: (list(spec.get("args", [])), parse(spec["expr"]))
+            name: _BUILTIN_BODIES[name] if name in BUILTINS else _body(spec)
             for name, spec in with_builtins(functions).items()
         }
+        self.tables = set(tables)
 
     def name(self, name: str) -> str:
         """Source for a bare name."""
@@ -125,7 +151,9 @@ class Resolver:
 
     def table(self, name: str, index: str) -> str:
         """Source for ``name[index]``."""
-        raise ExprError(f"unknown table {name!r}")
+        if name not in self.tables:
+            raise ExprError(f"unknown table {name!r}")
+        return f"_tg(T[{name!r}], {index})"
 
     def field(self, record: str, index: str, field: str) -> str:
         """Source for ``record[index].field``."""
@@ -137,61 +165,35 @@ class Resolver:
 
     def compile(self, text) -> str:
         """Python source for expression ``text``."""
-        tree = _Inline(self.functions).visit(parse(text))
-        return self._emit(tree)
+        return _source(self.visit(_Inline(self.functions).visit(parse(text))))
 
-    def _emit(self, node) -> str:
-        return getattr(self, f"_emit_{type(node).__name__}")(node)
+    def visit_Name(self, node):  # pylint: disable=invalid-name
+        """A bare name."""
+        return _node(self.name(node.id))
 
-    def _emit_Constant(self, node):  # pylint: disable=invalid-name
-        return str(int(node.value))
+    def visit_Subscript(self, node):  # pylint: disable=invalid-name
+        """A table read."""
+        return _node(self.table(node.value.id, _source(self.visit(node.slice))))
 
-    def _emit_Name(self, node):  # pylint: disable=invalid-name
-        return self.name(node.id)
-
-    def _emit_Subscript(self, node):  # pylint: disable=invalid-name
-        return self.table(node.value.id, self._emit(node.slice))
-
-    def _emit_Attribute(self, node):  # pylint: disable=invalid-name
+    def visit_Attribute(self, node):  # pylint: disable=invalid-name
+        """A record or row field."""
         sub = node.value
         if isinstance(sub, ast.Name):
-            return self.row_field(node.attr)
+            return _node(self.row_field(node.attr))
         if not isinstance(sub.value, ast.Name):
             raise ExprError("record access must be name[index].field")
-        return self.field(sub.value.id, self._emit(sub.slice), node.attr)
+        return _node(self.field(sub.value.id, _source(self.visit(sub.slice)), node.attr))
 
-    def _emit_BinOp(self, node):  # pylint: disable=invalid-name
-        op = ast.unparse(ast.BinOp(ast.Constant(0), node.op, ast.Constant(0)))[2:-2]
-        return f"({self._emit(node.left)} {op} {self._emit(node.right)})"
+    def visit_IfExp(self, node):  # pylint: disable=invalid-name
+        """A conditional, its branches resolved before its test."""
+        node.body, node.test, node.orelse = map(self.visit, (node.body, node.test, node.orelse))
+        return node
 
-    def _emit_UnaryOp(self, node):  # pylint: disable=invalid-name
-        if isinstance(node.op, ast.Not):
-            return f"int(not {self._emit(node.operand)})"
-        op = {ast.USub: "-", ast.UAdd: "+", ast.Invert: "~"}[type(node.op)]
-        return f"({op}{self._emit(node.operand)})"
+    def visit_Compare(self, node):  # pylint: disable=invalid-name
+        """A comparison as 1 or 0."""
+        return _truth(self.generic_visit(node))
 
-    def _emit_BoolOp(self, node):  # pylint: disable=invalid-name
-        op = " and " if isinstance(node.op, ast.And) else " or "
-        return "(" + op.join(self._emit(v) for v in node.values) + ")"
-
-    def _emit_Compare(self, node):  # pylint: disable=invalid-name
-        parts = [self._emit(node.left)]
-        for op, right in zip(node.ops, node.comparators):
-            parts += [_CMP_SRC[type(op)], self._emit(right)]
-        return f"int({' '.join(parts)})"
-
-    def _emit_IfExp(self, node):  # pylint: disable=invalid-name
-        return (
-            f"({self._emit(node.body)} if {self._emit(node.test)} "
-            f"else {self._emit(node.orelse)})"
-        )
-
-
-_CMP_SRC = {
-    ast.Eq: "==",
-    ast.NotEq: "!=",
-    ast.Lt: "<",
-    ast.LtE: "<=",
-    ast.Gt: ">",
-    ast.GtE: ">=",
-}
+    def visit_UnaryOp(self, node):  # pylint: disable=invalid-name
+        """``not`` as 1 or 0."""
+        node = self.generic_visit(node)
+        return _truth(node) if isinstance(node.op, ast.Not) else node
