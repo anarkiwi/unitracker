@@ -339,6 +339,75 @@ def test_the_timeline_rows_play_each_track(lengths, tracks, check):
     assert played == [expand(track, 400, lengths) for track in tracks]
 
 
+def tempo_text(pair) -> str:
+    return str(pair[0]) if pair[0] == pair[1] else f"{pair[0]}/{pair[1]}"
+
+
+def timeline_document(rows, loop, lengths, tempo, retimes) -> str:
+    """A two-voice document of ``timeline.to_rows``'s rows: each phrase ``-`` steps carrying
+    its retimes."""
+    names = {name: f"p{k}" for k, name in enumerate(sorted(lengths), start=1)}
+    phrases = {
+        names[name]: ", ".join(
+            "-"
+            + "".join(
+                f"!{cmd}:{tempo_text(pair)}"
+                for cmd, pair in zip(("tempo", "vtempo"), retimes.get(name, {}).get(k, ()))
+                if pair
+            )
+            for k in range(length)
+        )
+        for name, length in lengths.items()
+    }
+    entry = {None: "~", END: "end"}
+    plays = [
+        "play: [" + ", ".join(entry[e] if e in entry else names[e[0]] for e in row) + "]"
+        for row in rows
+    ]
+    return "\n".join(
+        ["unitracker: 1.20", "meta: {title: t}", "voices: 2", f"tempo: {list(tempo)}", "song:"]
+        + ["  - def:", "      phrase:"]
+        + [f"        {n}: [{atoms}]" for n, atoms in phrases.items()]
+        + [f"    {plays[0]}"]
+        + [f"  - {p}" for p in plays[1:]]
+        + ["  - end" if loop is None else f"  - {{loop: {loop}}}", ""]
+    )
+
+
+@pytest.mark.parametrize(
+    "lengths,tempo,retimes,steps_play",
+    [
+        ({"a": 2, "b": 3}, (2, 3), {"a": {0: (None, (3, 3))}}, False),
+        ({"a": 2, "b": 1}, (1, 3), {"a": {1: (None, (1, 3))}}, False),
+        ({"a": 2, "b": 3}, (2, 2), {"b": {1: ((1, 4), None)}}, True),
+    ],
+    ids=["vtempo", "swing-phase", "tempo"],
+)
+def test_the_timeline_rows_are_timed_in_ticks(lengths, tempo, retimes, steps_play):
+    tracks = [{"plays": [play("a")], "loop": 0}, {"plays": [play("b")], "loop": 0}]
+
+    def plays(rows, loop) -> bool:
+        try:
+            return (
+                len(oracle.play(timeline_document(rows, loop, lengths, tempo, retimes), 400)[0])
+                == 400
+            )
+        except ValueError:
+            return False
+
+    assert plays(*timeline.to_rows(tracks, lengths, tempo, retimes))
+    assert plays(*timeline.to_rows(tracks, lengths)) == steps_play
+
+
+def test_a_voice_tempo_plays_on_unitracker_player():
+    ir = gt_song()
+    ir["phrases"]["p2"] = [{"instrument": 1, "note": 36, "command": [15, 0x84]}, {}, {}]
+    ir["tracks"][1]["plays"] = [{"phrase": "p2"}]
+    native, text = written(ir)
+    assert "!vtempo:4" in text
+    assert np.array_equal(oracle.play(text, native.ticks)[0][:300], SongPlayer(ir).render_grid(300))
+
+
 def test_unaligned_loops_beyond_the_row_limit(monkeypatch):
     monkeypatch.setattr(timeline, "MAX_ROWS", 3)
     with pytest.raises(TimelineError, match="align"):

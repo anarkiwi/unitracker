@@ -672,10 +672,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
 
     def _tempo_pair(self) -> tuple[int, int]:
         """The song's initial tempo ``(a, b)``; a playroutine without a tempo steps each tick."""
-        value = self.ir.get(tempo.NAME, tempo.default(self.pr))
-        if value is None:
-            value = 6 if self.pr.get(tempo.NAME) else 1
-        return tempo.pair(value)
+        return tempo.initial(self.ir)
 
     def _lead_in(self, rows: list) -> dict:
         """The row before the song's first that delays it ``lead`` ticks, the native player's
