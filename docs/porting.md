@@ -23,6 +23,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
 | where the generic document differs, by register and value (exit 0 on agreement, `--json` the machine-readable diff) | `tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 [--from T --to T] [--json PATH]` |
+| why the lifter's song diverges: its VM tick beside the native's (a Python player traced, or the raw tune's 6502 on jennings), each with the diverging value's dataflow | `verify.explain(verdict, song, (grid, theirs), native).text()` (pysidtracker's `whydiff`) |
 | the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/firing_schedule.py TUNE.sid --cell pw:0 --ticks A:B` |
 | the verify verdict and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
 | a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
@@ -394,6 +395,7 @@ differing registers and values, and exits 1 on a difference.
 | lifter | `tests/test_lift_<name>.py` | each `LiftError`, with `pytest.raises(LiftError, match=...)`, as `tests/test_lift_goattracker.py`; the passes, as `tests/test_lift_base.py` |
 | exprs report | `unitracker-modfit exprs` | section 4 |
 | optimiser | `tests/conftest.py` `OPTIMISED` | the tune with a subset of passes that keeps the suite's time bounded |
+| a song against a native grid | `tests/conftest.py` | `assert_plays(request, song, theirs, native)`, `native` a player factory or the raw tune: its failure, and a strict xfail's `-rx` line, carry `verify.explain`'s report; a document's verdict carries the grid diff (`grid_diff_of`) |
 
 **Acceptance:** `unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0, and so does
 `unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise`, which runs every pass of the

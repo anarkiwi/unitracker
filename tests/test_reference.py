@@ -69,9 +69,7 @@ def test_elided_in():
 def test_the_lift_replays_its_native_player(references, name, request):
     ref = references[name]
     assert len(np.unique(ref.native, axis=0)) > 500
-    player = SongPlayer(ref.ir())
-    grid = player.render_grid(len(ref.native))
-    assert_plays(request, verify.compare_grids(grid, player.starts, ref.native))
+    assert_plays(request, ref.ir(), ref.native, lambda: backends.native_player(ref.raw))
 
 
 def test_the_format_example_is_the_metal_warrior_document(references):
@@ -192,7 +190,5 @@ def test_the_optimised_tune_plays_its_native_player(references, optimised_tunes,
     result = optimised_tunes[name][1]
     assert result.after < result.before and any(f.kept for f in result.findings)
     assert result.text == document.write(result.ir)
-    player = SongPlayer(result.ir)
-    native = references[name].native
-    grid = player.render_grid(len(native))
-    assert_plays(request, verify.compare_grids(grid, player.starts, native))
+    ref = references[name]
+    assert_plays(request, result.ir, ref.native, lambda: backends.native_player(ref.raw))
