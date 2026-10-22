@@ -18,7 +18,7 @@ from unitracker.document.events.lifetime import starts
 from unitracker.optimise.refs import entries, slots, view
 from unitracker.modfit import convert
 from unitracker.modfit import grammar as G
-from unitracker.modfit.phase import Order, _clipped, _ramp, by_phase, shortest_lasso
+from unitracker.modfit.phase import Order, clipped, ramp, by_phase, shortest_lasso
 from unitracker.modfit.phase import Trace as Segments
 from unitracker.optimise.model import ERRORS, currents, incoming, play_order
 from unitracker.player import reach
@@ -212,10 +212,10 @@ def fit(items: list, sizes: list):
     in turn: the grammar's step and ramp forms of the sequence, or None."""
     want = [c for c, n in zip(items, sizes) for _ in range(n)]
     tokens = [str(c) for c in items]
-    forms = [_ramp(Segments([(sympy.Integer(c), 0, n) for c, n in zip(items, sizes)]), G.PHI)]
+    forms = [ramp(Segments([(sympy.Integer(c), 0, n) for c, n in zip(items, sizes)]), G.PHI)]
     for loop in range(len(items)):
         prefix, period = shortest_lasso(tokens, sizes, loop)
-        path = _clipped([(k, n, 1) for k, n in enumerate(sizes)], prefix + period)
+        path = clipped([(k, n, 1) for k, n in enumerate(sizes)], prefix + period)
         o = Order("time", [(k, n) for k, n, _ in path], prefix, period, [1] * len(path), {})
         forms += by_phase([sympy.Integer(items[k]) for k, _ in o.runs], o)
     exact = [f for f in forms if [_numeric(f)(0, p, 0) for p in range(len(want))] == want]

@@ -461,7 +461,8 @@ class _Codegen:
         return f"_t{self.counter}"
 
     def accumulate(self, action, scope, voice, out, pad, depth):
-        """Append the bounded accumulator, a call to the ``_acc`` runtime helper."""
+        """Append the bounded accumulator, a call to the ``_acc`` runtime
+        helper (:func:`bounded_step`)."""
         # pylint: disable=too-many-arguments,too-many-positional-arguments
         store, mask = self.target(action["accumulate"], voice)
         args = [store, scope.compile(action.get("step", 0)), str(mask)]
@@ -490,7 +491,7 @@ def acc_mode(action: dict, has_width: bool) -> tuple:
     return CLAMPS[clamp], signed
 
 
-def _acc(v0, step, mask, lo, hi, toward, clamp, signed):
+def bounded_step(v0, step, mask, lo, hi, toward, clamp, signed):
     """One bounded accumulation: ``(value, hit)``, bounds tested after wrapping.
 
     ``clamp`` is 0 (wrap), 1 (clamp) or 2 (reflect); ``signed`` reads values as two's complement.
@@ -581,7 +582,7 @@ class SongPlayer:
             "T": gen.tables,
             "F": gen.fields,
             "_tg": self._reader(gen.tables) if record_reads else table_get,
-            "_acc": _acc,
+            "_acc": bounded_step,
             "_fetch": _fetcher(gen),
             "_W": {},
         }

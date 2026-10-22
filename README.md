@@ -81,7 +81,12 @@ record types, codecs, tempo, expressions), `document/` (the generic document wri
 event folds), `player/` (the lifter's VM, its analysis engine, and `oracle`: unitracker-player
 with each voice's first note), `lift/` (detection, the `Lift` stages and the three lifters),
 `modfit/` (proved modulation conversion), `optimise/` (the optimiser), `analysis/` (format
-studies), `playroutines/` (the playroutine YAMLs).
+studies, the `exprs` report and `unitracker-modfit`), `cache.py` (content-keyed caching and the
+process pool), `playroutines/` (the playroutine YAMLs).
+
+Each layer imports only those below it, `cli | analysis` > `lift` > `optimise` > `modfit` >
+`document` > `player` > `playroutine` > `cache`, with no cycles between sibling modules;
+`lint-imports` checks both contracts (`[tool.importlinter]` in `pyproject.toml`).
 
 ## Test
 

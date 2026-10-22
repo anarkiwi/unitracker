@@ -9,7 +9,6 @@ import re
 
 from unitracker.playroutine.codec import ROW_KEYS, command_variants
 from unitracker.playroutine.records import EXPR, META_KEYS
-from unitracker.player.modulation import function
 
 NEXT = "next"
 INS = "ins"
@@ -18,6 +17,26 @@ _PAIR = re.compile(r"^([A-Za-z_]\w*):([A-Za-z_]\w*)$")
 
 class SchemaError(ValueError):
     """A playroutine key whose convention does not apply."""
+
+
+def function(item) -> dict:
+    """The function a ``fire`` entry names: ``{proc}``, ``{type, template}`` or ``{record, field}``
+    (see the schema's modulator declarations); an entry that is no proc name or ``run`` is one."""
+    if isinstance(item, str):
+        return {"proc": item}
+    if "run" not in item:
+        return item
+    run = item["run"]
+    if "template" in run:
+        return {"type": run["record"], "template": run["template"]}
+    return {"record": run["record"], "field": run["field"]}
+
+
+def run_of(ref: dict) -> dict:
+    """The ``run`` spec, less its index, of a template or record function."""
+    if "type" in ref:
+        return {"record": ref["type"], "template": ref["template"]}
+    return {"record": ref["record"], "field": ref["field"]}
 
 
 def expand(pr: dict) -> dict:

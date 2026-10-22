@@ -213,7 +213,7 @@ is `hi:lo` or `hi:lo:k`.
 | `keywords` | `[PLAYROUTINE ...]` | one row per keyword or field: playroutine, shared key, signature, matches, verdict, reason ([Signatures](#signatures)) |
 | `generic` | `[PLAYROUTINE ...] [--ticks N]` | each keyword and record row kind factorised as one generic accumulator (step, basis, hit, respond, gate, proof status), the rows grouped, timers, vibrato and bounce orbits |
 | `sweeps` | `[SONG ...]` | the specs' `bounces`, the `fit` lines of the specs' pair-cell fits and checks, and each song's table programs matched to one accumulator |
-| `exprs` | `[SONG ...] [--workers N]` (default: `cli.SONGS`) | per song: occurrences over the window, the converted song's generic document and its verify verdict on unitracker-player against the native grid, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; each generic document's token count |
+| `exprs` | `[SONG ...] [--workers N]` (default: `unitracker.analysis.cli.SONGS`) | per song: occurrences over the window, the converted song's generic document and its verify verdict on unitracker-player against the native grid, unproved named-table functions; per unit and label: occurrences, distinct starts, each start's phase, value update, closed form, proof and invariant, each written text and where, the general form; each generic document's token count |
 | `orbit` | `[PLAYROUTINE ...] [--ticks N]` (default: the specs' `orbits`) | per period, the reflect accumulator whose per-tick deltas equal the original's over the run, then the periods with none |
 
 ### Specs

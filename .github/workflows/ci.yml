@@ -29,6 +29,7 @@ jobs:
           restore-keys: tunecache-
       - run: pip install -e ".[dev]"
       - run: black --check src tests
+      - run: lint-imports
       - run: pylint src
       - run: pylint --disable=missing-function-docstring tests
       - run: pytest -n auto --cov=unitracker --cov-fail-under=85

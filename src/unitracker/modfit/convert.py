@@ -12,8 +12,6 @@ import dataclasses
 import functools
 import importlib.util
 import json
-import os
-import pickle
 from pathlib import Path
 
 import numpy as np
@@ -21,18 +19,19 @@ import numpy as np
 import sympy
 from unitracker_grammar.expr import ExpressionError, source
 
+from unitracker.cache import CACHE, Pool, cached, content_key
+
 from unitracker.playroutine.codec import command_code, command_variants, evaluate
 from unitracker.document.events.lifetime import selected
 from unitracker.playroutine.records import chained, program_path, record_types
 from unitracker.playroutine.codec import row_codecs
 from unitracker.modfit import grammar as G
-from unitracker.modfit.exprs import Analysis, Pool, _cached, content_key
+from unitracker.modfit.exprs import Analysis
 from unitracker.modfit.replay import Replay, Stepper
 from unitracker.player import reach
 from unitracker.player.modulation import INIT, declared, unit_command, unit_width
 from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
 
-CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
 IDENTITY = "v"
 CHUNK = 256
 _HERE = Path(__file__).resolve().parent
@@ -42,7 +41,13 @@ SOURCES = (
     + sorted((_HERE.parent / "playroutines").glob("*.yaml"))
     + [
         Path(importlib.util.find_spec(f"unitracker.{m}").origin)
-        for m in ("player.modulation", "player.vm", "playroutine.records", "playroutine.codec")
+        for m in (
+            "player.modulation",
+            "player.vm",
+            "playroutine.records",
+            "playroutine.codec",
+            "playroutine.schema",
+        )
     ]
 )
 
@@ -155,7 +160,7 @@ def observation(ir: dict, cache: Path | None = CACHE) -> dict:
         }
 
     where = cache / f"convert-observe-{ir_key(ir)}.pkl" if cache is not None else None
-    return _cached(where, compute, _load, _save)
+    return cached(where, compute)
 
 
 def window(ir: dict) -> int:
@@ -186,14 +191,6 @@ def starts(ir: dict) -> list:
 def observe(ir: dict, cache: Path | None = CACHE) -> dict:
     """The song's native occurrences and event attribution over its window, cached by content."""
     return observation(ir, cache)
-
-
-def _load(path: Path):
-    return pickle.loads(path.read_bytes())
-
-
-def _save(path: Path, obj) -> None:
-    path.write_bytes(pickle.dumps(obj))
 
 
 _ANALYSES = {}
@@ -230,7 +227,7 @@ def keys_task(ir: dict, key: str, occurrences: list) -> list:
 def derive_task(ir: dict, key: str, start: tuple, cache: Path | None):
     """The proved expressions of one start, cached by content."""
     where = cache / "derived" / f"{content_key(key, repr(start))}.pkl" if cache else None
-    return _cached(where, lambda: _analysis(ir, key).derived(start), _load, _save)
+    return cached(where, lambda: _analysis(ir, key).derived(start))
 
 
 def checked(derived, a, f, width=None) -> str:
@@ -1050,7 +1047,7 @@ def convert(ir: dict, cache: Path | None = CACHE, workers=None) -> dict:
         return ir
     ir = expand_repeats(ir)
     where = cache / f"convert-{ir_key(ir)}.pkl" if cache else None
-    return _cached(where, lambda: _converted(ir, cache, workers), _load, _save)
+    return cached(where, lambda: _converted(ir, cache, workers))
 
 
 @dataclasses.dataclass

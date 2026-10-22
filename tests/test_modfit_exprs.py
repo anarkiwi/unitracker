@@ -14,10 +14,12 @@ from conftest import gt_tune
 
 from unitracker.playroutine.library import library
 from unitracker.lift import goattracker
-from unitracker.modfit import chipinv, exprs_report
+from unitracker.analysis import exprs as exprs_report
+from unitracker.analysis.cli import main
+from unitracker.cache import Pool, cached
+from unitracker.modfit import chipinv
 from unitracker.modfit import grammar as G
-from unitracker.modfit.cli import main
-from unitracker.modfit.exprs import Analysis, Pool, Result, _cached
+from unitracker.modfit.exprs import Analysis, Result
 from unitracker.modfit.form import Form
 from unitracker.modfit.inherit import DELAY, guarded, inherit
 from unitracker.modfit.orbit import deltas
@@ -770,7 +772,7 @@ def test_the_pool_maps_in_order_and_the_cache_reads_an_entry_written_while_it_wa
         pool.close()
     seen = iter([False, True])
     monkeypatch.setattr(Path, "exists", lambda self: next(seen))
-    got = _cached(tmp_path / "entry.pkl", lambda: pytest.fail("computed"), lambda p: p.name, None)
+    got = cached(tmp_path / "entry.pkl", lambda: pytest.fail("computed"), lambda p: p.name, None)
     assert got == "entry.pkl"
 
 

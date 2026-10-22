@@ -28,14 +28,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tokenizers>=0.20", "zstandard>=0.21", "filelock>=3.12", "pytest-timeout>=2.2"]
+dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tokenizers>=0.20", "zstandard>=0.21", "filelock>=3.12", "pytest-timeout>=2.2", "import-linter>=2.15"]
 
 [project.urls]
 Homepage = "https://github.com/anarkiwi/unitracker"
 
 [project.scripts]
 unitracker-lift = "unitracker.cli:lift_main"
-unitracker-modfit = "unitracker.modfit.cli:main"
+unitracker-modfit = "unitracker.analysis.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -53,3 +53,26 @@ max-line-length = 100
 
 [tool.black]
 line-length = 100
+
+[tool.importlinter]
+root_package = "unitracker"
+
+[[tool.importlinter.contracts]]
+name = "Layers"
+type = "layers"
+containers = ["unitracker"]
+layers = [
+    "cli | analysis",
+    "lift",
+    "optimise",
+    "modfit",
+    "document",
+    "player",
+    "playroutine",
+    "cache",
+]
+
+[[tool.importlinter.contracts]]
+name = "Acyclic siblings"
+type = "acyclic_siblings"
+ancestors = ["unitracker"]

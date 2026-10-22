@@ -40,7 +40,8 @@ from unitracker.optimise.passes import (
     programs,
     shared_runs,
 )
-from unitracker.optimise.proof import ENCODING, Trace, mismatch, tokens
+from unitracker.modfit.grammar import ENCODING, tokens
+from unitracker.optimise.proof import Trace, mismatch
 from unitracker.player import reach
 
 __all__ = [
