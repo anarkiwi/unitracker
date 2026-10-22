@@ -38,9 +38,9 @@ def canonical(ir: dict):
 
 def alike(result, request) -> bool:
     """Whether the pass's result plays the source's grid; the test's failure carries the diff."""
-    mismatch, verdict = plays_alike(result.source, result.ir, result.text)
+    mismatch, verdict, reference = plays_alike(result.source, result.ir, result.text)
     if not verdict.ok:
-        grid_diff_of(request, verdict)
+        grid_diff_of(request, verdict, result.text, reference)
     return mismatch is None and verdict.ok
 
 

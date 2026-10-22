@@ -274,13 +274,14 @@ def kept(result) -> list:
     return [f.edit[0] for f in result.findings if f.kept]
 
 
-def plays_alike(source: dict, ir: dict, text: str) -> tuple[object, gridcmp.Verdict]:
-    """``(mismatch, verdict)``: whether ``ir`` replays ``source`` on the VM and document
-    ``text`` plays the source's grid on unitracker-player from each voice's first note;
-    ``verdict`` is the grids' diff (``gridcmp.runs_report``)."""
+def plays_alike(source: dict, ir: dict, text: str) -> tuple[object, gridcmp.Verdict, str]:
+    """``(mismatch, verdict, reference)``: whether ``ir`` replays ``source`` on the VM and
+    document ``text`` plays the grid of the source's document ``reference`` on unitracker-player
+    from each voice's first note; ``verdict`` is the grids' diff (``gridcmp.runs_report``)."""
     native = document.native_state(source)
-    grid, _ = oracle.play(document.write(source, native), native.ticks)
-    return optimise.mismatch(optimise.Trace(source), ir), compare(text, grid)
+    reference = document.write(source, native)
+    grid, _ = oracle.play(reference, native.ticks)
+    return optimise.mismatch(optimise.Trace(source), ir), compare(text, grid), reference
 
 
 UNAPPLIED = [
@@ -327,9 +328,9 @@ def test_a_pass_keeps_the_edits_the_grid_proves(case, request):
     assert not edited(ir, text) and opt.keep(name)
     assert sorted(f.edit[0] for f in opt.findings.values() if f.kept) == ops
     assert opt.tokens < before and edited(opt.base, opt.text)
-    mismatch, verdict = plays_alike(ir, opt.base, opt.text)
+    mismatch, verdict, reference = plays_alike(ir, opt.base, opt.text)
     if not verdict.ok:
-        grid_diff_of(request, verdict)
+        grid_diff_of(request, verdict, opt.text, reference)
     assert mismatch is None and verdict.ok
 
 
@@ -372,7 +373,8 @@ def test_the_driver_is_canonical_and_deterministic():
     assert kept(one) == ["merge"]
     assert [(f.edit, f.kept) for f in one.findings] == [(f.edit, f.kept) for f in two.findings]
     assert one.source is ir and {e.get("instrument") for e in heard(one.ir)} == {1, None}
-    assert plays_alike(ir, one.ir, one.text)
+    mismatch, verdict, _ = plays_alike(ir, one.ir, one.text)
+    assert mismatch is None and verdict.ok
 
 
 def test_lift_optimise_flag(tmp_path, monkeypatch):

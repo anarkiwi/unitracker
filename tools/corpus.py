@@ -27,7 +27,7 @@ import shared
 from unitracker import optimise
 from unitracker.cache import Pool
 from unitracker.lift import backends, verify
-from unitracker.lift.base import LiftError
+from unitracker.lift.base import LiftError, start_song
 from unitracker.player import oracle
 from unitracker.player.canonical import REGISTERS
 from unitracker.player.vm import SongPlayer, event_commands, runs
@@ -566,8 +566,10 @@ def census(args) -> int:
 def grid(args) -> int:
     """The ``grid`` command: a document on unitracker-player against its tune's native player,
     the onset diff and the grids around it, or the JSON diff; ``--grids`` keeps both grids as
-    gridcmp files. 1 when they differ."""
-    ours, starts = oracle.play(args.doc.read_text(encoding="utf-8"), args.ticks, progress=True)
+    gridcmp files; ``--explain`` adds whydiff's report of the onset against the native player,
+    the 6502 or the lift's VM (:func:`verify.explain`). 1 when they differ."""
+    doc = args.doc.read_text(encoding="utf-8")
+    ours, starts = oracle.play(doc, args.ticks, progress=True)
     raw = shared.tune(args.sid).read_bytes()
     theirs = np.asarray(find_format(raw).play(raw, args.subtune).render_grid(args.ticks))
     verdict = gridcmp.verdict_onset(ours, starts, theirs)
@@ -585,7 +587,24 @@ def grid(args) -> int:
     print(f"starts: {starts}\n{gridcmp.runs_report(verdict, **verify.REPORT)}")
     if verdict.onset is not None:
         print(gridcmp.window_report(theirs, ours, verdict.onset[0], args.context))
+    if args.explain:
+        print(explain(args, doc, raw, (ours, starts, theirs)).rstrip())
     return int(not verdict.ok)
+
+
+def explain(args, doc: str, raw: bytes, played: tuple) -> str:
+    """``grid --explain``: :func:`verify.explain`'s report of document ``doc`` (``played`` its
+    grid, voices' first notes and the native grid) against ``args.explain``; the VM is judged
+    by its own onset."""
+    ours, starts, theirs = played
+    subtune = start_song(raw) if args.subtune is None else args.subtune
+    other = raw if args.explain == "6502" else lambda: find_format(raw).play(raw, subtune)
+    if args.explain == "vm":
+        other = backends.lift(raw, subtune)
+        theirs = SongPlayer(other).render_grid(args.ticks)
+    verdict = gridcmp.verdict_onset(ours, starts, theirs)
+    why = verify.explain(verdict, doc, (ours, theirs), other, args.doc.stem, subtune=subtune)
+    return f"\n{args.explain}: no difference" if why is None else "\n" + why.text()
 
 
 def render(data, song, nframes):
@@ -641,6 +660,9 @@ def main(argv=None) -> int:
     p.add_argument("--context", type=int, default=3, help="ticks either side of the onset")
     p.add_argument("--json", nargs="?", const="-", metavar="PATH", help="the JSON diff")
     p.add_argument("--grids", type=Path, help="write both grids as gridcmp files here")
+    p.add_argument(
+        "--explain", choices=("native", "6502", "vm"), help="why the onset differs (whydiff)"
+    )
     args = ap.parse_args(argv)
     commands = {"check": check, "canonical": canonical, "census": census, "grid": grid}
     return commands[args.command](args)
