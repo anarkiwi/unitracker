@@ -40,15 +40,15 @@ lift.verdict                         # unitracker-player against the native grid
 backends.verify(text, raw, subtune)  # the verdict of any generic document
 ```
 
-`tools/oracle_hvsc.py` holds the renderers for pysidtracker's survey: `render` lifts each subtune
+`tools/corpus.py` holds the renderers for pysidtracker's survey: `render` lifts each subtune
 and plays its generic document on unitracker-player, `native` plays the backend's player; both
 are compared with the sidtrace oracle (lift failures are `library_error` rows):
 
 ```sh
 python -m pysidtracker.survey find $HVSC --out out/survey/tunes.csv --player 'goattracker|wizard|defmon'
-PYTHONPATH=tools python -m pysidtracker.survey run $HVSC out/survey/tunes.csv --work out/survey --render oracle_hvsc:render
+PYTHONPATH=tools python -m pysidtracker.survey run $HVSC out/survey/tunes.csv --work out/survey --render corpus:render
 python -m pysidtracker.survey report out/survey/results.csv
-python -m pysidtracker.survey file tools/oracle_hvsc.py:native TUNE.sid --frames 3007   # one tune; :render for its document
+python -m pysidtracker.survey file tools/corpus.py:native TUNE.sid --frames 3007   # one tune; :render for its document
 ```
 
 ## Triage
@@ -57,21 +57,22 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 
 | question | tool |
 |---|---|
-| does each tune of a survey or sample csv lift to a generic document that plays its native player on unitracker-player? | `python tools/generic_check.py [--csv sample.csv] [--hvsc DIR] [--jobs J] [--out DIR] [--diff DIR] [--against RESULTS.csv]` |
-| on which ticks does the native unit hold each expression its generic modulators play? | `python tools/firing_schedule.py TUNE.sid [--cell pw:0] [--ticks A:B] [--timed]` |
-| where (on which ticks, registers and values) does a generic document differ from the native grid? | `python tools/grid_diff.py DOC.yaml TUNE.sid [--ticks N] [--from T --to T] [--json PATH]` (exit 1 on a difference) |
-| each reference tune's verify verdict, its differing registers and the machine-readable diff | `python tools/reference_check.py OUTDIR [--forbid KEY ...] [--json PATH]` |
+| does each tune lift to a generic document that plays its native player on unitracker-player, and why not (by cause; `--against` an earlier run) | `python tools/corpus.py check [TUNE.sid\|LIST.csv ...] [--out DIR] [--forbid WORD ...] [--diff] [--against RESULTS.csv] [--only CAUSE]` (default: the reference tunes) |
+| does the lifter's song replay its native grid on the VM, without expressions | `python tools/corpus.py check LIST.csv --plain --ticks 3007 [--registers 2,3]` |
+| does a lifter change alter any tune's output? | `python tools/corpus.py check ... --out DIR [--plain]` before and after, then `diff -r` |
+| a random lifted sample of generic documents, balanced over the three players | `python tools/corpus.py check tunes.csv --sample N [--seed S] [--subtunes 1] --out DIR` (from the survey's `find` csv) |
+| where (on which ticks, registers and values) does a generic document differ from the native grid? | `python tools/corpus.py grid DOC.yaml TUNE.sid [--ticks N] [--json [PATH]] [--grids DIR]` (exit 1 on a difference; `--grids` for `python -m pysidtracker.gridcmp`) |
+| what the canonical passes find, prove and refuse over many tunes | `python tools/corpus.py canonical TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
+| how documents use the vocabulary, and which native commands tunes play | `python tools/corpus.py census DOC.yaml\|TUNE.sid ... [--codes 14,15] [--json OUT.json]` |
+| lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
 | the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
-| why did a modulator not become an expression? | `python tools/occurrences.py TUNE.sid [--unit freq\|pw\|cut]`, `unitracker-modfit exprs` |
-| what writes a unit's cell, and which starts inherit its value | `python tools/cell_writers.py goattracker2 sidwizard defmon` |
+| why did a modulator not become an expression? | `python tools/modulators.py occurrences TUNE.sid [--unit U] [--cells c1,c2]`, `unitracker-modfit exprs` |
+| on which ticks does the native unit hold each expression its generic modulators play? | `python tools/modulators.py firings TUNE.sid [--cell pw:0] [--ticks A:B] [--timed]` |
+| what writes a unit's cell, and which starts inherit its value | `python tools/modulators.py writers goattracker2 sidwizard defmon` |
+| which expressions two runs write differently, proved equal or not | `python tools/modulators.py exprs OLD_DIR NEW_DIR [--bits B]`; display forms: `modulators.py display record\|compare` |
 | does a playroutine's modulation prove? | `unitracker-modfit {fit,poly,command,keywords,generic,sweeps,orbit}` ([docs/modulation/modfit.md](docs/modulation/modfit.md)) |
-| what the canonical passes find, prove and refuse over many tunes | `python tools/canonical_tally.py TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
-| does a lifter change alter any tune's generic document? | `python tools/lift_snapshot.py OUTDIR SID ... [--plain]` before and after, then `diff -r` |
-| do the docs' relative links resolve? | `python tools/doc_links.py` |
-| lift failures over HVSC, by cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (above) |
-| lift a tune list in parallel, results by cause (`--check`: the lifter's song replayed on its VM against the native grid) | `python tools/lift_tally.py TUNES.csv --root $HVSC --player SidWizard [--check 3007] [--registers 2,3]` |
-| a random lifted sample of generic documents, balanced over the three players | `python tools/sample_tunes.py $HVSC tunes.csv OUTDIR [--count N --seed S]` (from the survey's `find` csv; `sample.csv` records each attempt) |
-| how generic documents use the vocabulary over a corpus (events, commands, row keys, expression operators) | `python tools/vocab_census.py out/sample128/*.yaml [--json OUT.json]` |
+| where does a lift, conversion or optimisation spend its time? | `python tools/profiling.py {lift,convert,optimise} TUNE.sid [--profile OUT.prof]` |
+| do the docs' links resolve; do the playroutine docs' tables match; which lines did coverage lose? | `python tools/maint.py {links,tables [--write],coverage BEFORE.json AFTER.json}` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `sw_fx`, `sw_table_byte`, `mini_song`, `table`, `hvsc_tune` |
 
 ## Layout

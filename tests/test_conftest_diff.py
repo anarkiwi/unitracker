@@ -1,5 +1,5 @@
 """The tests' failure reports: whydiff's explanation of the VM beside a native player or a raw
-tune's 6502, the porting tool's grid diff, and their xfail line."""
+tune's 6502, the verdict's grid diff, and their xfail line."""
 
 import struct
 from functools import partial
@@ -26,10 +26,51 @@ def mismatched_verdict() -> verify.Verdict:
     return ver
 
 
-def test_grid_diff_of_carries_the_porting_tools_report(request):
+def test_grid_diff_of_carries_the_verdicts_report(request):
     ver = mismatched_verdict()
-    assert conftest.grid_diff_of(request, ver) == conftest.grid_diff.report(ver)
-    assert request.node.failure_report == conftest.grid_diff.report(ver)
+    assert conftest.grid_diff_of(request, ver) == ver.report()
+    assert request.node.failure_report == ver.report()
+
+
+def test_the_report_names_each_differing_register_its_runs_and_both_grids_values():
+    ver = verify.Verdict(
+        ticks=12,
+        played=12,
+        starts=(1, 4, None),
+        onset=(3, 5),
+        whole=(2, 11),
+        cells=(
+            (2, 11, 0, 7),
+            (3, 11, 5, 7),
+            (3, 5, 1, 9),
+            (7, 5, 8, 0),
+            (7, 8, 0, 2),
+            (8, 8, 4, 2),
+        ),
+    )
+    assert ver.report() == (
+        "mismatch: tick 3, register $05 v1 ad (from tick 0: tick 2, $0B v2 ctrl)\n"
+        "  $05 v1 ad: 2 cells, ticks 3-7\n"
+        "    3: doc 01, native 09\n"
+        "    7: doc 08, native 00\n"
+        "  $08 v2 freq hi: 2 cells, ticks 7-8\n"
+        "    7: doc 00, native 02\n"
+        "    8: doc 04, native 02\n"
+        "  $0B v2 ctrl: 2 cells, ticks 2-3\n"
+        "    2: doc 00, native 07\n"
+        "    3: doc 05, native 07"
+    )
+
+
+def test_the_report_counts_the_value_lines_it_omits_and_names_a_verified_or_ended_document():
+    cells = tuple((t, 0, 1 if t % 2 else 2, 0) for t in range(10))
+    text = verify.Verdict(10, 10, (0,), (0, 0), (0, 0), cells).report()
+    assert "  $00 v1 freq lo: 10 cells, ticks 0-9" in text
+    assert "    0: doc 02, native 00" in text and "    ... 4 more value lines" in text
+    verified = verify.Verdict(8, 8, (0, 0, 0), None, None, ())
+    assert verified.report() == "verified: 8 ticks play the native grid"
+    ended = verify.Verdict(8, 4, (0, 0, 0), None, (2, 0), ())
+    assert ended.report() == "mismatch: the document ends at tick 4 of 8"
 
 
 def counting(step: int) -> dict:

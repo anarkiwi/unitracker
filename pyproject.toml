@@ -15,7 +15,7 @@ dependencies = [
     "pyyaml>=6",
     "numpy>=1.23",
     "tqdm>=4",
-    "pysidtracker>=0.20.1",
+    "pysidtracker>=0.20.2",
     "jennings>=0.2.0",
     "pygoattracker>=0.6.0",
     "pydefmon>=0.10.0",
@@ -45,8 +45,12 @@ unitracker = ["playroutines/*.yaml", "modfit/specs.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tools"]
 timeout = 1200
 addopts = ["-rx"]
+
+[tool.pylint.main]
+init-hook = "import sys; sys.path.insert(0, 'tools')"
 
 [tool.pylint.format]
 max-line-length = 100
