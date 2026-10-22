@@ -50,16 +50,6 @@ def names(src) -> set:
     return {n.id for n in ast.walk(parse(str(src))) if isinstance(n, ast.Name)}
 
 
-def descendants(edges: dict, start) -> set:
-    """Every node reachable from ``start``, itself included."""
-    seen, todo = {start}, [start]
-    while todo:
-        for nxt in edges.get(todo.pop(), set()) - seen:
-            seen.add(nxt)
-            todo.append(nxt)
-    return seen
-
-
 def shifted(n) -> tuple | None:
     """``(x, k)`` when node ``n`` is ``x << k`` for a name ``x`` and a constant ``k``."""
     if isinstance(n, ast.BinOp) and isinstance(n.op, ast.LShift) and isinstance(n.left, ast.Name):

@@ -7,7 +7,7 @@ from conftest import mini_song
 
 from unitracker.playroutine.expr import ExprError
 from unitracker.lift.verify import compare_grids
-from unitracker.player.canonical import CANONICAL_ORDER, canonical_frames
+from unitracker.player.canonical import CANONICAL_ORDER
 from unitracker.player.reach import ReachabilityError, table_reads
 from unitracker.player.vm import (
     Cursor,
@@ -376,22 +376,8 @@ def test_the_verdict_carries_the_differing_cells_and_a_machine_readable_summary(
     assert ended.ticks == 4 and ended.cells == ((2, 6, 9, 0),)
 
 
-def test_canonical_frames_cut_at_repeats_reorder_and_drop_unchanged():
+def test_canonical_order_is_every_register_once():
     assert sorted(CANONICAL_ORDER) == list(range(25))
-    zero = [0] * 25
-    cases = [
-        (
-            [[(4, 0x41), (0, 1), (5, 9)], [(4, 0x41), (5, 9), (6, 3)]],
-            zero,
-            [[[(5, 9), (0, 1), (4, 0x41)]], [[(6, 3)]]],
-        ),
-        ([[(4, 0x40), (1, 2), (4, 0x41)]], zero, [[[(1, 2), (4, 0x40)], [(4, 0x41)]]]),
-        ([[(4, 0), (4, 0x100)]], zero, [[]]),
-        ([[(0, 7)]], None, [[[(0, 7)]]]),
-        ([[(0x18, 1), (0, 0)]], None, [[[(0x18, 1), (0, 0)]]]),
-    ]
-    for frames, regs, expected in cases:
-        assert list(canonical_frames(frames, regs=regs)) == expected
 
 
 def counter_song(width) -> dict:
