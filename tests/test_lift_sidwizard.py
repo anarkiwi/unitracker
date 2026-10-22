@@ -27,7 +27,7 @@ from pysidwizard.features import features_for_driver
 from pysidwizard.model import Instrument, encode_sequence
 
 from unitracker import document
-from unitracker.lift import sidwizard, verify
+from unitracker.lift import sidwizard
 from unitracker.lift.sidwizard import NO_DETUNE as KEEP
 from unitracker.lift.sidwizard import LiftError
 from unitracker.playroutine.codec import Evaluator
@@ -583,10 +583,7 @@ def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, mon
         parse_sid_song(tracked, 1),
     ):
         assert not np.array_equal(swm_grid(one), plain)
-    theirs = swm_grid(swm)
-    player = SongPlayer(song)
-    grid = player.render_grid(len(theirs))
-    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
+    assert_plays(request, song, swm_grid(swm), lambda: SWMPlayer(swm))
 
 
 # A keyboard-track amount on the row that sets an instrument's pulse (7) or filter (4, 8), up
@@ -608,10 +605,7 @@ def test_keyboard_tracked_pulse_and_filter_rows_play_the_player(csillag, request
         raw = sw_table_byte(raw, instrument, which, 2, amount)
     song, text = lifted(raw)
     assert "E[" in text and not re.search(r"\bk:", text)
-    theirs = oracle(raw, WINDOW_TICKS)
-    player = SongPlayer(song)
-    grid = player.render_grid(len(theirs))
-    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
+    assert_plays(request, song, oracle(raw, WINDOW_TICKS), raw)
 
 
 # Tempo FX on rows no voice plays in step: one voice's tempo and swing, every voice's tempo
@@ -649,9 +643,7 @@ def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(
         path.append({k: v for k, v in row.items() if k != "next"})
         entry = row["next"]
     assert path == [{"hold": 2, "gate": 0, "ad": 0x0F, "sr": 0}, {"ctrl": 9, "gate": 1}]
-    player = SongPlayer(ir)
-    grid = player.render_grid(len(theirs))
-    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
+    assert_plays(request, ir, theirs, lambda: SWMPlayer(swm))
 
 
 def looped(records: dict) -> bool:
@@ -668,10 +660,8 @@ def test_table_jumps_loop_their_programs_and_play_the_player(tune, tables, reque
     raw = request.getfixturevalue(tune).read_bytes()
     ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
     assert all(looped(ir["records"][name]) for name in tables)
-    theirs = np.asarray(SWMPlayer(parse_sid_song(raw, 1)).render_grid(TICKS), dtype=np.uint8)
-    player = SongPlayer(ir)
-    grid = player.render_grid(len(theirs))
-    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
+    swm = parse_sid_song(raw, 1)
+    assert_plays(request, ir, np.asarray(SWMPlayer(swm).render_grid(TICKS)), lambda: SWMPlayer(swm))
 
 
 def test_the_tally_tool_lifts_checks_and_counts_a_tune_list(
@@ -713,12 +703,9 @@ def test_table_jumps_play_the_player(csillag, request):
     assert not np.array_equal(theirs, oracle(plain, WINDOW_TICKS))
     ir = sidwizard.SidWizardLift.from_sid(raw, expressions=False).run()
     assert all(looped(ir["records"][name]) for name in ("wftab", "pwtab", "flttab"))
-    player = SongPlayer(ir)
-    grid = player.render_grid(len(theirs))
-    assert_plays(request, verify.compare_grids(grid, player.starts, theirs))
-    assert_plays(
-        request, verify.compare_grids(grid, player.starts, swm_grid(parse_sid_song(raw, 1)))
-    )
+    assert_plays(request, ir, theirs, raw)
+    swm = parse_sid_song(raw, 1)
+    assert_plays(request, ir, swm_grid(swm), lambda: SWMPlayer(swm))
 
 
 def test_a_subtune_needs_three_orderlists(csillag):

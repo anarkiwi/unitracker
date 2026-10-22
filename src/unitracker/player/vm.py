@@ -559,7 +559,8 @@ def _fetcher(gen):
 
 
 class SongPlayer:
-    """Plays a unitracker song dict, one tick per call."""
+    """Plays a unitracker song dict, one tick per call; ``sources`` maps the compiled
+    playroutine's pseudo-filename to its text."""
 
     # pylint: disable=too-many-instance-attributes
 
@@ -592,7 +593,9 @@ class SongPlayer:
             "_fetch": _fetcher(gen),
             "_W": {},
         }
-        code = compile(gen.build(), f"<playroutine {pr.get('name', '')}>", "exec")
+        name = f"<playroutine {pr.get('name', '')}>"
+        self.sources = {name: gen.build()}
+        code = compile(self.sources[name], name, "exec")
         exec(code, namespace)  # pylint: disable=exec-used
         self.namespace = namespace
         self._masks = (

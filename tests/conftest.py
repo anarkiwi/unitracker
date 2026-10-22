@@ -1,6 +1,6 @@
 """Shared fixtures: the HVSC reference tunes, each lifted once per session, and synthetic tunes;
-and the tests' grid diff, the porting tool's report on a mismatching verdict, carried on the
-test's expected failure."""
+and the tests' failure reports, whydiff's or the porting tool's grid diff of a mismatching
+verdict, carried on the test's expected failure."""
 
 import copy
 import importlib.util
@@ -33,6 +33,7 @@ from pysidwizard.player import INST_WF_TABLE_POS
 
 from unitracker import optimise
 from unitracker.lift import backends, verify
+from unitracker.player.vm import SongPlayer
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / ".tunecache"
@@ -157,16 +158,25 @@ def oracle(raw: bytes, frames: int):
     return np.asarray(file_oracle(raw, 1, frames, work=CACHE / "oracle")[1], dtype=np.uint8)
 
 
-def grid_diff_of(request, ver: verify.Verdict) -> str:
-    """The grid diff of ``ver`` (tools/grid_diff.py's report), attached to the test's report."""
-    text = grid_diff.report(ver)
-    request.node.grid_diff = text
+def attach(request, text: str) -> str:
+    """``text``, attached to the test's report for its expected-failure line."""
+    request.node.failure_report = text
     return text
 
 
-def assert_plays(request, ver: verify.Verdict) -> None:
-    """``assert ver.ok``; the test's failure carries the grids' diff from the porting tool."""
-    text = None if ver.ok else grid_diff_of(request, ver)
+def grid_diff_of(request, ver: verify.Verdict) -> str:
+    """The grid diff of ``ver`` (tools/grid_diff.py's report), attached to the test's report."""
+    return attach(request, grid_diff.report(ver))
+
+
+def assert_plays(request, song: dict, theirs, native) -> None:
+    """``song`` plays grid ``theirs`` on the VM from its voices' first notes; the test's failure
+    carries :func:`verify.explain`'s report of ``native``."""
+    player = SongPlayer(song)
+    grid = player.render_grid(len(theirs))
+    ver, text = verify.compare_grids(grid, player.starts, theirs), None
+    if not ver.ok:
+        text = attach(request, verify.explain(ver, song, (grid, theirs), native).text())
     assert ver.ok, text
 
 
@@ -301,9 +311,9 @@ def optimised_tunes(request) -> dict:
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item, call):  # pylint: disable=unused-argument
-    """The grid diff a test attached with :func:`grid_diff_of`, on its expected-failure line."""
+    """The report a test attached with :func:`attach`, on its expected-failure line."""
     report = yield
-    diff = getattr(item, "grid_diff", None)
+    diff = getattr(item, "failure_report", None)
     if diff is not None and getattr(report, "wasxfail", None) is not None:
         report.wasxfail = f"{report.wasxfail}\n\n{diff}"
     return report
