@@ -79,8 +79,9 @@ def test_explain_traces_the_native_player_on_the_tick_it_last_stored_the_registe
     assert ver.onset == (2, 0x18)
     why = verify.explain(ver, song, grids, native, name="counter")
     left, right = why.left, why.right
-    assert (left.frame, right.frame) == (2, 1) and why.values == {"generic": 6, "native": 4}
-    assert left.events[left.root].text == "out[24] = (((2 * g[0]) + 2)) & 0xFF"
+    assert (left.traced, right.frame, right.traced) == (2, 2, 1)
+    assert why.values == {"generic": 6, "native": 4}
+    assert left.events[left.root].text == "out[24] = ((2 * g[0] + 2)) & 0xFF"
     assert "g[0] = (g[0] + 1)" in {left.events[i].text for i in left.keep}
     assert right.events[right.root].text == "self._mem[addr & 0xFFFF] = val & 0xFF"
     assert {"self.n += 1", "if self.n % 3:"} <= {right.events[i].text for i in right.keep}
@@ -94,8 +95,8 @@ def test_explain_runs_a_raw_tune_on_jennings_and_is_none_without_an_onset():
     ver, grids = verdict(counting(3), theirs)
     why = verify.explain(ver, counting(3), grids, raw)
     cpu = why.right
-    assert ver.onset == (1, 0x18) and why.values == {"generic": 5, "6502": 4}
-    assert "jennings agrees with the reference" in why.notes
+    assert ver.onset == (1, 0x18) and why.values == {"generic": 5, "6502": 4, "reference": 4}
+    assert "jennings agrees with the reference to here" in why.notes
     assert "STA $d418" in cpu.lines[cpu.root]
     assert [cpu.events[i].text.split()[0] for i in cpu.keep] == ["INC", "LDA", "ASL", "STA"]
     ok, grids = verdict(counting(2), theirs)

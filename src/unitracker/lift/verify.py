@@ -4,11 +4,9 @@ differing cells themselves on the :class:`Verdict` and as its machine-readable s
 the generic VM's grid diverges (``explain``)."""
 
 from dataclasses import dataclass
-from functools import partial
 
 import numpy as np
 from pysidtracker import whydiff
-from pysidtracker.oracle import register_grid
 
 from unitracker.player import oracle
 from unitracker.player.vm import SongPlayer, diff, runs
@@ -93,32 +91,31 @@ def compare(text: str, theirs: np.ndarray, progress: bool = False) -> Verdict:
 
 def explain(verdict: Verdict, song: dict, grids: tuple, native, name: str = ""):
     """Why ``song`` diverges at ``verdict``'s onset, a :class:`~pysidtracker.whydiff.Divergence`
-    (None without one): the VM's tick of it beside ``native``'s, a player factory's traced in
-    Python or a raw tune's play call on jennings, on that tick or, where the native does not
-    store the register on it, on the tick it last changed it; ``grids`` are the VM's and the
-    native's."""
+    (None without one): the VM's tick beside ``native``'s, a player factory's traced in Python
+    or a raw tune's play call on jennings; ``grids`` are the VM's and the native's."""
     if verdict.onset is None:
         return None
     tick, register = verdict.onset
-    player = SongPlayer(song)
-    vm = whydiff.python_side(
-        lambda: player,
-        tick,
-        register,
-        label="generic",
-        cell=lambda p, r: (p.regs, r),
-        sources=player.sources,
-    )
-    if callable(native):
-        trace, notes = partial(whydiff.python_side, native, register=register, label="native"), ()
-    else:
-        agrees = np.array_equal(register_grid(native, tick + 1), grids[1][: tick + 1])
-        trace = partial(whydiff.cpu_side, native, register=register, label="6502")
-        notes = (f"jennings {'agrees' if agrees else 'DOES NOT agree'} with the reference",)
-    side = trace(tick)
-    if side.root is None:
-        held = np.asarray(grids[1][: tick + 1, register], np.int16)
-        side = trace(int(np.flatnonzero(np.diff(held, prepend=-1))[-1]))
+    generic = {
+        "label": "generic",
+        "cell": lambda p, r: (p.regs, r),
+        "sources": SongPlayer(song).sources,
+    }
+    if not callable(native):
+        return whydiff.explain_divergence(
+            native,
+            lambda _: SongPlayer(song),
+            grids[1],
+            frame=tick,
+            register=register,
+            name=name,
+            **generic,
+        )
     return whydiff.explain_cell(
-        vm, side, grids, frame=tick, register=register, name=name, notes=notes
+        whydiff.python_side(lambda: SongPlayer(song), tick, register, grid=grids[0], **generic),
+        whydiff.python_side(native, tick, register, label="native", grid=grids[1]),
+        grids,
+        frame=tick,
+        register=register,
+        name=name,
     )
