@@ -30,9 +30,6 @@ GENERIC = {
     "crosseyed": (5, 0x15),  # the filter's first cutoff step (its detune plays as set {detune: 1})
     "csillag": (26, 0x07),  # voice 2's hard restart, where the native sets its next note's FREQ-HI
 }
-CSILLAG = pytest.mark.xfail(
-    strict=True, reason="csillag's first note still lands a tick before the native's"
-)
 ROOT = Path(__file__).resolve().parents[1]
 ELIDED = "..."
 
@@ -63,9 +60,7 @@ def test_elided_in():
     assert not elided_in("b: [2, ...]", text)
 
 
-@pytest.mark.parametrize(
-    "name", [n if n != "csillag" else pytest.param(n, marks=CSILLAG) for n in TUNES]
-)
+@pytest.mark.parametrize("name", TUNES)
 def test_the_lift_replays_its_native_player(references, name, request):
     ref = references[name]
     assert len(np.unique(ref.native, axis=0)) > 500
@@ -183,9 +178,7 @@ def test_the_survey_renderer_plays_the_document_as_the_native_player(references)
     assert info == {"backend": "goattracker2"} and (grid == ref.native[:100]).all()
 
 
-@pytest.mark.parametrize(
-    "name", [n if n != "csillag" else pytest.param(n, marks=CSILLAG) for n in TUNES]
-)
+@pytest.mark.parametrize("name", TUNES)
 def test_the_optimised_tune_plays_its_native_player(references, optimised_tunes, name, request):
     result = optimised_tunes[name][1]
     assert result.after < result.before and any(f.kept for f in result.findings)

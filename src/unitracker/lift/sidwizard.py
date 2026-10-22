@@ -48,6 +48,8 @@ HR_TIMER, HR_STACCATO, HR_FIRSTCTRL, FLAGS = 0x03, 0x04, 0x08, 0xF0
 STACCATO = 0x18
 # The player's empty instrument: its control byte and first waveform.
 EMPTY_CONTROL, EMPTY_FIRST = 0x1A, 0x09
+# The ticks before a voice's first note applies (its TICK_2), each reading a WF row.
+SETUP_TICKS = 2
 
 
 class Tables:
@@ -115,6 +117,27 @@ def table_rows(name: str, ins) -> tuple[list[bytes], int | None]:
             return rows, seen[target]
         pos = target
     return rows, None
+
+
+def idle_rows(ins) -> list[int]:
+    """The WF rows a voice reads on its first note's set-up ticks, before it has an instrument,
+    ending in $FF: the player's instrument 0 is linked to ``ins`` (instrument 1), and the cursor
+    init zeroes reads its header from the control byte. A hold row's count keeps the next tick
+    from reading a row."""
+    image, out = ins.memory_image(), []
+    for pos in range(0, 3 * SETUP_TICKS, 3):
+        row = image[pos : pos + 3]
+        if row[0] == TABLE_END:
+            break
+        if row[0] == TABLE_JUMP or row[1] == CHORD_ROW:
+            raise LiftError(
+                f"instrument 1's header byte ${pos + (row[0] != TABLE_JUMP):02X}, which a voice"
+                " reads as a WF jump or chord before its first note, is not covered"
+            )
+        out += row
+        if 0 < row[0] < WAVEFORM:
+            break
+    return [*out, TABLE_END]
 
 
 def pw_record(row: bytes) -> dict:
@@ -666,6 +689,7 @@ class SidWizardLift(Lift):
                 "freqlo": list(lo),
                 "freqhi": list(hi),
                 "exptab": list(playroutine["tables"]["exptab"]),
+                "idle": idle_rows(swm.instruments[0]),
             },
             "records": {
                 "ins": instruments.records,
