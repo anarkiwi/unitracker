@@ -565,7 +565,6 @@ STEP_TEMPOS = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason="kept programs' tempo FX do not yet play the native player")
 def test_kept_programs_tempo_fx_and_a_tracked_pulse_play_the_player(csillag, monkeypatch, request):
     base = window(csillag.read_bytes())
     tracked = sw_table_byte(base, 7, "pw", 2, 0x05)
@@ -618,9 +617,6 @@ TEMPO_ROWS = {
 }
 
 
-@pytest.mark.xfail(
-    strict=True, reason="an out-of-step tempo FX does not yet play the native player"
-)
 def test_out_of_step_tempo_fx_and_the_empty_instrument_play_the_player(
     csillag, monkeypatch, request
 ):
