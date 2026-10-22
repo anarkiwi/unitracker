@@ -10,7 +10,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from unitracker.playroutine import xexpr
+from unitracker_grammar import expr as xexpr
 
 PHI = xexpr.PHI
 RUN, STEPS = 3, 3  # the fewest skips a run part and a periodic part spell

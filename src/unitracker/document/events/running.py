@@ -2,11 +2,11 @@
 it. A command that sets what is already set changes nothing: the writer leaves it out. ``!freq``
 lasts until a note starts the instrument."""
 
+from unitracker_grammar.expr import ExpressionError, canonical
 from unitracker.playroutine import tempo
 from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code, command_variants
 from unitracker.document.events import context, restart
 from unitracker.document.events.lifetime import order, starts
-from unitracker.playroutine.xexpr import ExpressionError, canonical
 from unitracker.player.vm import event_commands
 
 NAME = "freq"

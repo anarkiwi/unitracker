@@ -5,8 +5,9 @@ from collections.abc import Iterator
 import numpy as np
 from pysidtracker import gridcmp
 from tqdm import tqdm
+from unitracker_grammar import expr as xexpr
 
-from unitracker.playroutine import tempo, xexpr
+from unitracker.playroutine import tempo
 from unitracker.playroutine.expr import ExprError, Resolver, table_get
 from unitracker.playroutine.records import EXPR, record_types
 from unitracker.player import modulation

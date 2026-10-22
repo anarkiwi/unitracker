@@ -3,8 +3,8 @@ whose only key is ``key`` sets nothing and lasts ``key + k`` ticks): rows of it 
 are one row as long as it can last, a program's last row before ``end`` is none of them, and an
 expression that holds the value it drives is none on a program whose rows set none."""
 
+from unitracker_grammar.expr import ExpressionError, source
 from unitracker.playroutine.codec import KEY_DEFAULTS, CodecError, is_expr, row_place
-from unitracker.playroutine.xexpr import ExpressionError, source
 
 
 def holds(text) -> bool:

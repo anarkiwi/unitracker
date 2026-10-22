@@ -11,11 +11,11 @@ import itertools
 import sympy
 import z3
 from sympy.core.function import AppliedUndef
+from unitracker_grammar.expr import ExpressionError, canonical
 
 from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code
 from unitracker.document.events.lifetime import starts
 from unitracker.optimise.refs import entries, slots, view
-from unitracker.playroutine.xexpr import ExpressionError, canonical
 from unitracker.modfit import convert
 from unitracker.modfit import grammar as G
 from unitracker.modfit.phase import Order, _clipped, _ramp, by_phase, shortest_lasso

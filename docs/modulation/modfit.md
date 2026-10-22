@@ -167,7 +167,7 @@ cap, so set it to bound a lift.
 | start key | a cell the slice reads has no start value |
 | derivation | control reads the value; a pair's value reads its parts beyond their sum; a chip value is not its pair plus an offset; a term the grammar has no form for (`reads ...`); more than one phase |
 | proof | an obligation of [What is proved](#what-is-proved) is refuted (`not proved`, with a witness) |
-| text | the phase is not one per firing (a `turn` phase written as a recurrence); the text is outside the fixed grammar (`xexpr.source`) |
+| text | the phase is not one per firing (a `turn` phase written as a recurrence); the text is outside the fixed grammar (`unitracker_grammar.expr.source`) |
 | site | two units at one site each need several texts; a `row` site needs several; a record type runs out of rows; no event selects (or names) the site |
 | event | an expression index above a byte; three commands on one event; a track's later loop passes differ |
 | program | a referenced program of a site type keeps no shared form and no start proves its expression |

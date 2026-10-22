@@ -11,12 +11,12 @@ import pytest
 from conftest import gt_tune
 from test_document import HARD_RESTART
 from unitracker_player import play
+from unitracker_grammar import expr as xexpr
 
 from unitracker.document import retime, tree, writer
 from unitracker.document.retime import Part, Schedule
 from unitracker.lift.goattracker import GoatTrackerLift
 from unitracker.player import oracle
-from unitracker.playroutine import xexpr
 
 TABLES = {"_T": {}, "_F": lambda k: 0}
 
