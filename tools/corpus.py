@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 from lark import Token, Tree
 from pysidtracker import find_format, gridcmp
-from pysidtracker.survey import deadline
+from pysidtracker.jobs import deadline
 from tqdm import tqdm
 from unitracker_grammar import parse
 
@@ -118,7 +118,7 @@ def check_one(row: dict, opts: dict) -> dict:
     res = dict.fromkeys(FIELDS, "")
     res.update(doc=shared.name(row), path=row["path"], md5=row.get("md5", ""), verified="no")
     try:
-        with deadline(opts["timeout"]):
+        with deadline(opts["timeout"], dict(res, gap=f"TimeoutError: exceeded {opts['timeout']}s")):
             lift, text, verdict = lifted(shared.tune(row["path"], opts["hvsc"]), opts)
             res["player"] = lift.playroutine
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -255,6 +255,15 @@ def documented(res: dict) -> bool:
     return bool(res["player"]) and not res["gap"].startswith(("gap: ", "unverified: "))
 
 
+def failed(task: tuple, error: BaseException) -> dict:
+    """The result row of a ``check_one`` task whose worker raised or died."""
+    row = task[0]
+    res = dict.fromkeys(FIELDS, "")
+    res.update(doc=shared.name(row), path=row["path"], md5=row.get("md5", ""), verified="no")
+    res["gap"] = f"{type(error).__name__}: {error}"
+    return res
+
+
 def check(args) -> int:
     """The ``check`` command; 1 when a sample falls short of its count."""
     args.out.mkdir(parents=True, exist_ok=True)
@@ -264,11 +273,13 @@ def check(args) -> int:
     tunes = [t for t in tunes if "verified" not in t or re.search(args.only, category(t))]
 
     def run(batch: list) -> list:
-        pool = Pool(args.jobs, len(batch))
-        try:
-            return pool.map(check_one, [(row, opts) for row in batch], "check")
-        finally:
-            pool.close()
+        pool = Pool(args.jobs, len(batch), isolated=bool(args.timeout))
+        rows = pool.map(check_one, [(row, opts) for row in batch], "check", failed)
+        for res in rows:
+            err = Path(args.out, f"{res['doc']}.err")
+            if res["gap"].startswith("TimeoutError") and not err.exists():
+                err.write_text(res["gap"] + "\n", encoding="utf-8")
+        return rows
 
     if args.sample:
         rows = sample(pools(tunes), args.sample, random.Random(args.seed), run)
@@ -639,7 +650,12 @@ def main(argv=None) -> int:
     p.add_argument("--forbid", nargs="*", default=[], help="words a document must not hold")
     p.add_argument("--diff", action="store_true", help="keep each verdict's JSON diff")
     p.add_argument("--against", type=Path, help="an earlier results.csv to compare with")
-    p.add_argument("--timeout", type=float, default=0, help="seconds per tune (0: none)")
+    p.add_argument(
+        "--timeout",
+        type=float,
+        default=0,
+        help="seconds per tune, its worker killed then (0: none)",
+    )
     p.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) // 4))
     p = sub.add_parser("canonical", help="tally the canonical passes over tunes")
     p.add_argument("tunes", nargs="+", metavar="TUNE.sid")
