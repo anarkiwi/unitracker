@@ -114,7 +114,7 @@ A `commands` entry maps a native command code to a shared command. It has a `nam
 (raw to shared) and `raw` (shared to raw), checked the same way, or for `cut` `byte` in place of
 `arg` (`{name: cut, byte: arg}`: the value is `arg << 3`, and `raw` reads `arg` as `cut >> 3`);
 `args` (`{a: expr, b: expr}`) maps the argument to several values joined by `/`, which `raw`
-reads by those names (`!tempo:5/7`).
+reads by those names (`!tempo:5/7`). These expressions also read the playroutine's constants.
 
 | entry key | meaning |
 |---|---|
@@ -132,8 +132,9 @@ playroutine's functions.
 
 A song's tempo is `n` ticks per step or a swing pair `[a, b]`. The playroutine's `tempo` gives
 the cells that hold it, `cells` (`{cell: expr}`), each expression over `a` and `b` (`b` is `a` for
-one tempo): the lifter reads the tune's tempo from them after its init, and the VM assigns them
-over the cells' `init` before the first tick. A playroutine without `tempo` has none.
+one tempo) and the playroutine's constants: the lifter reads the tune's tempo from them after
+its init, and the VM assigns them over the cells' `init` before the first tick. A playroutine
+without `tempo` has none.
 
 ## Lifter declarations
 

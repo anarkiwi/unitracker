@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import yaml
 from conftest import assert_plays, oracle, sw_fx, sw_table_byte, vm_mismatch
+from pysidtracker import SidImage
 from pysidwizard import (
     End,
     Loop,
@@ -30,7 +31,8 @@ from unitracker import document
 from unitracker.lift import sidwizard
 from unitracker.lift.sidwizard import NO_DETUNE as KEEP
 from unitracker.lift.sidwizard import LiftError
-from unitracker.playroutine.codec import Evaluator
+from unitracker.playroutine import tempo as tempos
+from unitracker.playroutine.codec import CommandCodec, Evaluator
 from unitracker.playroutine.library import library
 from unitracker.player.vm import SongPlayer
 
@@ -408,12 +410,12 @@ def test_phrases_fold_emptytable_rows():
     [((0x86, 0x83), 6), ((5, 7), [5, 7]), ((0, 6), 6), ((6, 0x86), 6), ((0x84, 9), [4, 9])],
 )
 def test_the_subtune_tempo_is_the_initial_tempo(pair, tempo):
-    assert sidwizard.tempo(SimpleNamespace(subtune_tempos=[pair])) == tempo
+    assert sidwizard.tempo(SimpleNamespace(subtune_tempos=[pair], frame_speed=1)) == tempo
 
 
 def test_a_subtune_tempo_the_player_never_applies_a_row_at_is_not_covered():
     with pytest.raises(LiftError, match=r"subtune's tempo \$02 \$06"):
-        sidwizard.tempo(SimpleNamespace(subtune_tempos=[(2, 6)]))
+        sidwizard.tempo(SimpleNamespace(subtune_tempos=[(2, 6)], frame_speed=1))
 
 
 def test_first_note_must_select_aninstrument_record():
@@ -429,8 +431,7 @@ def test_build_and_header_checks():
     sidwizard.SidWizardLift(sidwizard.Decoded(good, None, 0)).check_build()
     bad = SimpleNamespace(frame_speed=2, sid_init=bytes([1] + [0] * 24), instruments=[])
     lift = sidwizard.SidWizardLift(sidwizard.Decoded(bad, None, 0))
-    lift.features = SimpleNamespace(name="light")
-    with pytest.raises(LiftError, match="light player build, multispeed, init-routine"):
+    with pytest.raises(LiftError, match="playroutine yet: init-routine voice-register writes, no"):
         lift.check_build()
     marked = SimpleNamespace(filter_table=bytes([0xFF]))
     with pytest.raises(LiftError, match="unfiltered"):
@@ -460,7 +461,8 @@ def test_restart_rows_follow_the_control_byte(control, rows):
 def test_the_reference_lift_holds_the_subtune_tempo(references):
     ir = references["csillag"].ir()
     assert ir["playroutine"]["name"] == "sidwizard"
-    assert not ir["playroutine"].get("constants") and ir["tempo"] == 6
+    assert ir["playroutine"]["constants"] == library("sidwizard")["constants"]
+    assert ir["tempo"] == 6
 
 
 def voice_instrument(ir: dict, voice: int) -> int:
@@ -785,3 +787,104 @@ def test_a_pre_18_driver_reads_the_first_frame_freq_hi_by_track(doom_schlager):
     assert vm_mismatch(song, theirs) is None
     song["tables"]["build"] = [0]
     assert vm_mismatch(song, theirs) is not None
+
+
+BARE, LIGHT, EXTRA = (features_for_driver(d) for d in (4, 2, 3))
+
+
+@pytest.mark.parametrize("name", ["lykia_boss", "mega_run", "awakening", "snowballed", "samwise"])
+def test_a_player_build_plays_the_6502(request, name):
+    raw = request.getfixturevalue(name).read_bytes()
+    lift = sidwizard.SidWizardLift.from_sid(raw, expressions=False)
+    song = lift.run()
+    assert lift.features.name != "normal"
+    assert song["playroutine"]["constants"]["detunesupport"] == lift.features.detunesupport
+    assert_plays(request, song, oracle(raw, TICKS), lift.native)
+
+
+def as_built(raw: bytes, driver: int, speed: int):
+    """Tune ``raw``'s first subtune decoded as exported for player build ``driver`` at
+    ``speed`` calls per frame."""
+    swm = parse_sid_song(raw, 1)
+    swm.driver_type, swm.frame_speed = driver, speed
+    return swm
+
+
+@pytest.mark.parametrize(
+    "driver,speed", [(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (0, 2), (3, 3), (4, 4)]
+)
+def test_each_build_and_speed_plays_its_native_player(request, csillag, driver, speed):
+    raw = window(csillag.read_bytes())
+    psid = SidImage.from_bytes(raw).header
+    lift = sidwizard.SidWizardLift(
+        sidwizard.Decoded(as_built(raw, driver, speed), psid, 0), expressions=False
+    )
+    song = lift.run()
+    assert song["playroutine"]["constants"]["speed"] == speed
+    assert song["clock"]["cycles_per_tick"] * speed == sidwizard.PAL_CLOCK["cycles_per_tick"]
+    grid = SWMPlayer(as_built(raw, driver, speed)).render_grid(TICKS)
+    assert_plays(request, song, grid, lambda: SWMPlayer(as_built(raw, driver, speed)))
+
+
+def test_a_build_without_hard_restart_types_restarts_from_tick_0_with_the_default_envelope():
+    assert sidwizard.build_restart(0x1D, 0x12, 0x34, 0x41, features_for_driver(0)) == (
+        0x1D,
+        0x12,
+        0x34,
+        0x41,
+    )
+    control, hrad, hrsr, first = sidwizard.build_restart(0x1D, 0x12, 0x34, 0x41, BARE)
+    assert (control & 0x0F, hrad, hrsr, first) == (0x0A, 0x0F, 0x00, 0x09)
+    rows = sidwizard.restart_rows(control, hrad, hrsr, first)
+    assert dict(rows[0])["hold"] == 2 and "ctrl" not in dict(rows[0])
+    assert dict(rows[1])["ctrl"] == 0x09
+
+
+def test_a_build_without_keyboard_tracking_reads_no_third_byte():
+    assert sidwizard.pw_record(bytes([0x88, 0, 5]), LIGHT)["k"] == 0
+    assert sidwizard.pw_record(bytes([0x88, 0, 5]))["k"] == 5
+    assert sidwizard.filter_record(bytes([0x04, 0xE0, 0x83]), LIGHT)["k"] == 0
+    with pytest.raises(LiftError, match="routing"):
+        sidwizard.filter_record(bytes([0x04, 0xE0, 0x83]))
+
+
+def test_a_build_without_arp_speeds_or_detune_reads_a_wf_row_every_tick():
+    ins = Instrument(arp_speed=3, wf_table=bytes([0x41, 0x7F, 5, 0x02, 0x80, 0xFB]))
+    rows, _ = sidwizard.wf_rows(ins, None, BARE)
+    assert rows == [
+        {"w": 0x41, "a": 0x7F, "d": 0, "h": 0},
+        {"w": 0x02, "a": 0x80, "d": 0, "h": 0},
+    ]
+    with pytest.raises(LiftError, match="chord the instrument does not have"):
+        sidwizard.wf_rows(ins, None)
+
+
+def test_a_build_ignores_the_header_fields_it_does_not_assemble():
+    ins = Instrument(control=0xC0, octave_shift=12, arp_speed=0x43)
+    light = sidwizard.instrument_record(ins, sidwizard.Tables(), 0, sidwizard.Restarts(), LIGHT)
+    normal = sidwizard.instrument_record(ins, sidwizard.Tables(), 0, sidwizard.Restarts())
+    assert (light["flags"], light["octave"], light["mul"]) == (0, 0, 0x40)
+    assert (normal["flags"], normal["octave"]) == (0xC0, 12)
+
+
+def test_multispeed_idle_rows_follow_the_walk_to_the_voices_first_note():
+    ins = Instrument(control=0x41, wf_table=bytes([0x21, 0x80, 0, 0xFE, 15]))
+    image = ins.memory_image()
+    assert sidwizard.idle_rows(ins, reads=8) == [*image[: 7 * 3], 0xFF]
+    jumped = header((0xFE, 3, 0, 0x21, 0x80, 0))
+    assert sidwizard.idle_rows(jumped) == [*jumped.memory_image()[3:9], 0xFF]
+    held = Instrument(control=0x02)
+    assert len(sidwizard.idle_rows(held, reads=3)) == 3 + 1
+    assert len(sidwizard.idle_rows(held, BARE, reads=3)) == 3 * 3 + 1
+
+
+def test_the_tempo_counts_play_calls():
+    swm = SimpleNamespace(subtune_tempos=[(0x05, 0x07)], frame_speed=3)
+    assert sidwizard.tempo(swm) == [15, 21]
+    pr = library("sidwizard")
+    pr["constants"]["speed"] = 3
+    assert tempos.cells(pr, [15, 21]) == {"tl": 5, "tr": 7}
+    cmds = CommandCodec(pr["commands"], sidwizard.rtypes(), pr["constants"])
+    assert cmds.encode(0x12, 4) == ("tempo", 12)
+    assert cmds.decode("tempo", 12) == (0x12, 4)
+    assert cmds.encode(0x11, 0x45) == ("tempo", (12, 15))

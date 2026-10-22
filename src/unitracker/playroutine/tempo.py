@@ -45,15 +45,15 @@ def default(pr: dict):
 
 
 def cells(pr: dict, tempo) -> dict:
-    """``{cell: value}`` the initial tempo ``tempo`` (default: the playroutine's) sets."""
+    """``{cell: value}`` the initial tempo ``tempo`` (default: the playroutine's) sets, its
+    expressions reading the playroutine's constants too."""
     spec = pr.get(NAME)
     tempo = default(pr) if tempo is None else tempo
     if not spec or tempo is None:
         return {}
     a, b = pair(tempo)
-    return {
-        cell: evaluate(expr, {"a": a, "b": b}) for cell, expr in (spec.get("cells") or {}).items()
-    }
+    env = {**(pr.get("constants") or {}), "a": a, "b": b}
+    return {cell: evaluate(expr, env) for cell, expr in (spec.get("cells") or {}).items()}
 
 
 def initial(ir: dict) -> tuple[int, int]:

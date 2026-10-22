@@ -1,14 +1,14 @@
 """Lift a SID-Wizard 1.x tune (pysidwizard's decoded .sid) to a unitracker song."""
 
 import copy
-from functools import cache, cached_property
+from functools import cache, cached_property, partial
 from typing import NamedTuple
 
 from pysidtracker import SidImage
 from pysidwizard import End, Loop, PlayPattern, SWMPlayer, parse_sid_song
 from pysidwizard.constants import INST_WF_TABLE_POS, TABLE_END
-from pysidwizard.features import features_for_driver
-from pysidwizard.player import freq_tables
+from pysidwizard.features import PlayerFeatures, features_for_driver
+from pysidwizard.player import DEFAULT_HR_ADSR, freq_tables
 
 from unitracker.playroutine.codec import CodecError, CommandCodec
 from unitracker.playroutine.records import chained, record_types
@@ -50,6 +50,9 @@ STACCATO = 0x18
 EMPTY_CONTROL, EMPTY_FIRST = 0x1A, 0x09
 # The ticks before a voice's first note applies (its TICK_2), each reading a WF row.
 SETUP_TICKS = 2
+NORMAL = features_for_driver(0)
+# The arp speed's bits that also run the pulse and filter programs on multispeed calls.
+MUL_TABLES = 0xC0
 
 
 class Tables:
@@ -119,35 +122,44 @@ def table_rows(name: str, ins) -> tuple[list[bytes], int | None]:
     return rows, None
 
 
-def idle_rows(ins) -> list[int]:
-    """The WF rows a voice reads on its first note's set-up ticks, before it has an instrument,
-    ending in $FF: the player's instrument 0 is linked to ``ins`` (instrument 1), and the cursor
-    init zeroes reads its header from the control byte. A hold row's count keeps the next tick
-    from reading a row."""
-    image, out = ins.memory_image(), []
-    for pos in range(0, 3 * SETUP_TICKS, 3):
+def idle_rows(ins, features: PlayerFeatures = NORMAL, reads: int = SETUP_TICKS) -> list[int]:
+    """The WF rows a voice reads on the ``reads`` ticks before its first note applies, before it
+    has an instrument, ending in $FF: the player's instrument 0 is linked to ``ins``
+    (instrument 1), and the cursor init zeroes reads its memory from the control byte, following
+    its jumps. A hold row's count keeps that many ticks from reading a row, in a build with arp
+    speeds."""
+    image, out, pos = ins.memory_image() + bytes([TABLE_END]), [], 0
+    while reads > 0:
+        jump = image[pos] == TABLE_JUMP
+        if jump and image[pos + 1] < len(image) - 1 and image[image[pos + 1]] != TABLE_JUMP:
+            pos = image[pos + 1]
         row = image[pos : pos + 3]
         if row[0] == TABLE_END:
             break
-        if row[0] == TABLE_JUMP or row[1] == CHORD_ROW:
+        if row[0] == TABLE_JUMP or (row[1] == CHORD_ROW and features.chordsupport):
             raise LiftError(
                 f"instrument 1's header byte ${pos + (row[0] != TABLE_JUMP):02X}, which a voice"
                 " reads as a WF jump or chord before its first note, is not covered"
             )
         out += row
-        if 0 < row[0] < WAVEFORM:
-            break
+        pos, reads = pos + 3, reads - 1 - (row[0] if 0 < row[0] < WAVEFORM else 0)
+        if 0 < row[0] < WAVEFORM and not features.arpspeedsupp:
+            reads += row[0]
     return [*out, TABLE_END]
 
 
-def pw_record(row: bytes) -> dict:
-    """A pulse row's two bytes and keyboard-track amount."""
-    return {"a": row[0], "b": row[1], "k": row[2]}
+def pw_record(row: bytes, features: PlayerFeatures = NORMAL) -> dict:
+    """A pulse row's two bytes and keyboard-track amount, which a build without pulse keyboard
+    tracking never reads."""
+    return {"a": row[0], "b": row[1], "k": row[2] if features.pwkeybtrack else 0}
 
 
-def filter_record(row: bytes) -> dict:
+def filter_record(row: bytes, features: PlayerFeatures = NORMAL) -> dict:
     """A filter row; a set row's first byte splits into its mode bits and resonance. A third
-    byte of $80-$8F sets the routing nibble, which has no shared form here."""
+    byte of $80-$8F sets the routing nibble, which has no shared form here; a build without
+    filter keyboard tracking reads neither."""
+    if not features.filtkbtrack:
+        row = bytes([row[0], row[1], 0])
     if ROUTING <= row[2] < ROUTING + 0x10:
         raise LiftError(f"filter row routing byte ${row[2]:02X} is not covered")
     if row[0] >= 0x80:
@@ -213,44 +225,55 @@ def restart_rows(control: int, hrad: int, hrsr: int, first: int) -> tuple:
     return tuple(tuple(sorted(row.items())) for row in rows)
 
 
-def wf_rows(ins, chord) -> tuple[list, int | None]:
+def build_wf(ins, features: PlayerFeatures) -> tuple[list[bytes], int | None, int]:
+    """An instrument's WF rows and loop (:func:`table_rows`) and the ticks each holds after its
+    first, as the build plays them: without arp speeds a row is read every tick, and without
+    detune no row sets one."""
+    rows, loop = table_rows("wftab", ins)
+    if not features.detunesupport:
+        rows = [bytes([wave, arp, 0]) for wave, arp, _ in rows]
+    return rows, loop, ins.arp_speed & ARP_SPEED if features.arpspeedsupp else 0
+
+
+def wf_rows(ins, chord, features: PlayerFeatures = NORMAL) -> tuple[list, int | None]:
     """An instrument's WF rows with ``chord`` (from :func:`chords`) inlined at each $7F row,
     and the row a looping chord returns to.
 
     Every row holds for the instrument's arp speed. A chord step writes the $7F row's waveform
     and the next offset, so each chord row carries both; it leaves the detune, which a row
-    clears unless the program sets none.
+    clears unless the program sets none. A build without arp speeds reads a row every tick, and
+    one without detune plays none.
     """
-    rows, loop = table_rows("wftab", ins)
-    hold = ins.arp_speed & ARP_SPEED
+    rows, loop, hold = build_wf(ins, features)
     detune = 0 if all(row[2] in (0, NO_DETUNE) for row in rows) else NO_DETUNE
     out, index = [], []
     for k, (wave, arp, det) in enumerate(rows):
         index.append(len(out))
-        if arp != CHORD_ROW:
+        if arp != CHORD_ROW or not features.chordsupport:
             out.append({"w": wave, "a": arp, "d": det, "h": hold})
             continue
         if chord is None:
             raise LiftError("a WF row plays a chord the instrument does not have")
-        offsets, loops = chord
+        offsets = chord[0]
         if max(offsets) >= 0x80:
             raise LiftError(f"chord offset ${max(offsets):02X} is not covered")
         after = k + 1 if k + 1 < len(rows) else loop
-        if not loops and (wave < WAVEFORM or (after is not None and rows[after][0] < WAVEFORM)):
+        if not chord[1] and (wave < WAVEFORM or (after is not None and rows[after][0] < WAVEFORM)):
             raise LiftError("a chord returning to or from a WF hold row is not covered")
         out += [{"w": wave, "a": n, "d": detune, "h": hold} for n in offsets]
-        if loops:
-            return settled(out, index[-1]), index[-1]
+        if chord[1]:
+            return settled(out, index[-1], features.arpspeedsupp), index[-1]
     loop = None if loop is None else index[loop]
-    return settled(out, loop), loop
+    return settled(out, loop, features.arpspeedsupp), loop
 
 
-def settled(rows: list, loop: int | None) -> list:
+def settled(rows: list, loop: int | None, holds: bool = True) -> list:
     """WF rows with each detune a row keeps written as the one it keeps, and each hold row's
     reload equal to its count.
 
     A note starts the program with no detune. A row below $10 lasts its count whatever its
-    reload, which paces the program only after a last row that ends it.
+    reload, which paces the program only after a last row that ends it; without ``holds`` (arp
+    speeds) it is a waveform row.
     """
     kept, detune = {}, 0
     again = range(loop, len(rows)) if loop is not None else range(0)
@@ -266,7 +289,7 @@ def settled(rows: list, loop: int | None) -> list:
             if len(kept[k]) > 1:
                 raise LiftError(f"WF row {k} keeps a detune that differs between loop passes")
             (row["d"],) = kept[k]
-        if row["w"] < WAVEFORM and row["h"] != row["w"]:
+        if holds and row["w"] < WAVEFORM and row["h"] != row["w"]:
             if loop is None and k + 1 == len(rows):
                 raise LiftError(
                     "a WF hold row that ends its program with an arp speed other than its"
@@ -282,8 +305,10 @@ class Waves:
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, instruments, chord_table: bytes, tables: Tables):
-        self.instruments = instruments
+    def __init__(
+        self, instruments, chord_table: bytes, tables: Tables, features: PlayerFeatures = NORMAL
+    ):
+        self.instruments, self.features = instruments, features
         self.chords = chords(chord_table)
         self.tables = tables
         self.entries = {}
@@ -297,33 +322,55 @@ class Waves:
             return 0
         native = self.instruments[ins - 1]
         chosen = None
-        if any(row[1] == CHORD_ROW for row in table_rows("wftab", native)[0]):
+        rows = table_rows("wftab", native)[0]
+        if self.features.chordsupport and any(row[1] == CHORD_ROW for row in rows):
             chosen = self.chords.get(chord, self.chords.get(native.default_chord))
         key = (ins, chosen)
         if key not in self.entries:
-            self.entries[key] = self.tables.allocate("wftab", *wf_rows(native, chosen))
+            self.entries[key] = self.tables.allocate(
+                "wftab", *wf_rows(native, chosen, self.features)
+            )
         return self.entries[key]
 
 
-def instrument_record(ins, tables: Tables, wave: int, restarts: Restarts) -> dict:
+def build_restart(control: int, hrad: int, hrsr: int, first: int, features: PlayerFeatures):
+    """``restart_rows``' arguments as the build plays them: without hard-restart types every
+    restart fires from TICK_0 with the default envelope and none is staccato, and without the
+    first-frame switch the first tick always writes control $09."""
+    if not features.hardrestypes:
+        control = (control & ~(HR_TIMER | HR_STACCATO)) | 2
+        hrad, hrsr = DEFAULT_HR_ADSR >> 8, DEFAULT_HR_ADSR & 0xFF
+    if not features.frame1switch:
+        control, first = control | HR_FIRSTCTRL, EMPTY_FIRST
+    return control, hrad, hrsr, first
+
+
+def instrument_record(
+    ins, tables: Tables, wave: int, restarts: Restarts, features: PlayerFeatures = NORMAL
+) -> dict:
     """An instrument's header fields and its table and restart programs, ``wave`` its WF
-    program."""
+    program, each as the player build plays it: a build without octave shifts, or without the
+    pulse or filter reset switch, ignores that field or flag."""
     if ins.filter_table and ins.filter_table[0] == TABLE_END:
         raise LiftError("instruments marked unfiltered ($FF filter table) are not covered")
     hrad = (ins.hr_attack << 4) | ins.hr_decay
     hrsr = (ins.hr_sustain << 4) | ins.hr_release
-    rows = restart_rows(ins.control, hrad, hrsr, ins.effective_first_waveform)
+    rows = restart_rows(
+        *build_restart(ins.control, hrad, hrsr, ins.effective_first_waveform, features)
+    )
+    kept = FLAGS & ~(0x40 * (not features.pwresetsw) | 0x80 * (not features.filtresetsw))
     rec = {
-        "flags": ins.control & FLAGS,
+        "flags": ins.control & kept,
         "ad": (ins.attack << 4) | ins.decay,
         "sr": (ins.sustain << 4) | ins.release,
         "vibrato": ins.vibrato,
         "vibdelay": ins.vibrato_delay,
-        "octave": ins.octave_shift,
+        "octave": ins.octave_shift if features.octaveshift else 0,
         "ctrl": wave,
-        "pw": tables.program("pwtab", ins, pw_record),
-        "filter": tables.program("flttab", ins, filter_record),
+        "pw": tables.program("pwtab", ins, partial(pw_record, features=features)),
+        "filter": tables.program("flttab", ins, partial(filter_record, features=features)),
         "restart": restarts.program(rows),
+        "mul": ins.arp_speed & MUL_TABLES,
     }
     return rec
 
@@ -337,7 +384,8 @@ def rtypes() -> dict:
 @cache
 def shared_commands() -> CommandCodec:
     """The sidwizard playroutine's commands."""
-    return CommandCodec(library("sidwizard")["commands"], rtypes())
+    playroutine = library("sidwizard")
+    return CommandCodec(playroutine["commands"], rtypes(), playroutine["constants"])
 
 
 def tempo_command(fx: int, value: int) -> tuple[int, int]:
@@ -575,12 +623,12 @@ class Instruments:
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, swm, tables: Tables):
-        self.restarts = Restarts()
-        self.waves = Waves(swm.instruments, swm.chord_table, tables)
+    def __init__(self, swm, tables: Tables, features: PlayerFeatures = NORMAL):
+        self.restarts, self.features = Restarts(), features
+        self.waves = Waves(swm.instruments, swm.chord_table, tables, features)
         self.records = {
             num: instrument_record(
-                ins, tables, self.waves.entry(num, ins.default_chord), self.restarts
+                ins, tables, self.waves.entry(num, ins.default_chord), self.restarts, features
             )
             for num, ins in enumerate(swm.instruments, start=1)
         }
@@ -592,7 +640,9 @@ class Instruments:
             return ref
         empty = self.count + 1
         if empty not in self.records:
-            rows = restart_rows(EMPTY_CONTROL, 0x0F, 0x00, EMPTY_FIRST)
+            rows = restart_rows(
+                *build_restart(EMPTY_CONTROL, 0x0F, 0x00, EMPTY_FIRST, self.features)
+            )
             self.records[empty] = {
                 "flags": EMPTY_CONTROL & FLAGS,
                 "sr": 0xF0,
@@ -602,13 +652,15 @@ class Instruments:
 
 
 def tempo(swm):
-    """The subtune's initial tempo as written: both bytes of its pair when neither has bit 7
-    clear (the player's single tempo, the first byte), each a tempo byte (0 plays 6)."""
+    """The subtune's initial tempo as written, in play calls: both bytes of its pair when
+    neither has bit 7 clear (the player's single tempo, the first byte), each a tempo byte (0
+    plays 6) of player ticks, ``frame_speed`` calls each."""
     left, right = swm.subtune_tempos[0] if swm.subtune_tempos else (6, 6)
     if left & 0x80 and right & 0x80:
         right = left
     try:
-        return written(*(shared_commands().encode(0x12, b & 0x7F)[1] for b in (left, right)))
+        pair = (shared_commands().encode(0x12, b & 0x7F)[1] for b in (left, right))
+        return written(*(swm.frame_speed * t for t in pair))
     except CodecError as exc:
         raise LiftError(f"the subtune's tempo ${left:02X} ${right:02X} is not covered") from exc
 
@@ -618,6 +670,28 @@ def freq(swm, features) -> tuple[bytes, bytes]:
     if swm.freq_lo_image and swm.freq_hi_image:
         return swm.freq_lo_image, swm.freq_hi_image
     return freq_tables(features, swm.freq_table_tail)
+
+
+def first_notes(swm, frames: int = 1 << 14) -> list[tuple[int, int, int]]:
+    """Each voice's ``(call, pulse word, pulse sweep count)`` as the native player starts its
+    first note (``frames`` and 0s for a voice that plays none within ``frames``): the play calls
+    before it, and the 12-bit pulse its set-up ticks leave."""
+    player, out = SWMPlayer(swm), [None] * 3
+    for call in range(frames):
+        player.play_frame()
+        for k, voice in enumerate(player.voices[:3]):
+            if out[k] is None and voice.instrument is not None:
+                pulse = (voice.pw_hi & 0x0F) << 8 | voice.pw_lo
+                out[k] = (call, pulse, voice.pw_sweep_count)
+        if None not in out:
+            break
+    return [first or (frames, 0, 0) for first in out]
+
+
+def idle_reads(swm, firsts: list) -> int:
+    """The ticks a voice may read a WF row before its first note: its set-up ticks, and with
+    multispeed every call before the latest voice's first note."""
+    return SETUP_TICKS if swm.frame_speed == 1 else max(call for call, _, _ in firsts) + 1
 
 
 class Decoded(NamedTuple):
@@ -651,10 +725,8 @@ class SidWizardLift(Lift):
         return features_for_driver(self.tune.swm.driver_type)
 
     def check_build(self) -> None:
-        swm, features = self.tune.swm, self.features
+        swm = self.tune.swm
         unsupported = {
-            f"the {features.name} player build": features.name != "normal",
-            "multispeed": swm.frame_speed != 1,
             "init-routine voice-register writes": any(swm.sid_init[:21]),
             "no instruments": not swm.instruments,
         }
@@ -667,8 +739,9 @@ class SidWizardLift(Lift):
     def structure(self) -> dict:
         swm = self.tune.swm
         lo, hi = freq(swm, self.features)
+        firsts = first_notes(swm)
         tables = Tables()
-        instruments = Instruments(swm, tables)
+        instruments = Instruments(swm, tables, self.features)
         self.waves = instruments.waves
         events = Events(instruments.index)
         tracks = [track(seq, len(swm.patterns)) for seq in swm.sequences[:3]]
@@ -679,23 +752,31 @@ class SidWizardLift(Lift):
             for name in sorted({p["phrase"] for t in tracks for p in t["plays"]})
         }
         playroutine = library(self.playroutine)
+        playroutine["constants"] = {
+            name: int(getattr(self.features, name, False)) for name in playroutine["constants"]
+        } | {"speed": swm.frame_speed}
         return {
             "unitracker": "ir",
             "tempo": tempo(swm),
+            "clock": {
+                **PAL_CLOCK,
+                "cycles_per_tick": PAL_CLOCK["cycles_per_tick"] // swm.frame_speed,
+            },
             "meta": song_meta(self.tune.header, f"{self.playroutine} subtune {self.tune.subtune}"),
-            "clock": PAL_CLOCK,
             "voices": 3,
             "tables": {
                 "freqlo": list(lo),
                 "freqhi": list(hi),
                 "exptab": list(playroutine["tables"]["exptab"]),
-                "idle": idle_rows(swm.instruments[0]),
+                "idle": idle_rows(swm.instruments[0], self.features, idle_reads(swm, firsts)),
+                "pwcount": [count for _, _, count in firsts],
                 "build": [int(swm.first_frame_freq_by_track)],
             },
             "records": {
                 "ins": instruments.records,
                 **{name: dict(rows) for name, rows in tables.records.items()},
                 "restart": instruments.restarts.records,
+                "vinit": {v: {"pw": pw} for v, (_, pw, _) in enumerate(firsts) if pw},
             },
             "tracks": tracks,
             "phrases": phrases,

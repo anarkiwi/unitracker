@@ -564,8 +564,10 @@ class CommandCodec:
     entry with ``inline`` writes the row its reference names in place (see :func:`inline_text`).
     """
 
-    def __init__(self, spec: dict, rtypes: dict):
+    def __init__(self, spec: dict, rtypes: dict, constants: dict | None = None):
+        # The constants an entry's expressions read beside its argument.
         self.entries, self.unnamed = [], {}
+        self.constants = {k: int(v) for k, v in (constants or {}).items()}
         for code, var in command_variants(spec):
             name = str(var.get("name", f"command {code}"))
             ref = var.get("ref")
@@ -621,15 +623,15 @@ class CommandCodec:
         ``(type, index)`` for a reference, ``none``, or None for a command of :data:`ARGLESS`."""
         for ecode, name, ref, var in self.entries:
             if ecode != code or (
-                "when" in var and not var.get("inline") and not evaluate(var["when"], {"arg": arg})
+                "when" in var and not var.get("inline") and not self._ev(var["when"], arg=arg)
             ):
                 continue
             if name in ARGLESS:
                 return name, None
             if "args" in var:
-                return name, tuple(evaluate(e, {"arg": arg}) for e in var["args"].values())
+                return name, tuple(self._ev(e, arg=arg) for e in var["args"].values())
             if ref is None:
-                return name, evaluate(var["arg"], {"arg": arg}) if "arg" in var else arg
+                return name, self._ev(var["arg"], arg=arg) if "arg" in var else arg
             if arg != self.rtypes[ref].none:
                 return name, (ref, arg)
             if var.get("inline"):
@@ -656,13 +658,17 @@ class CommandCodec:
             return evaluate(var.get("raw", 0), {}) if value is None else none
         if "args" in var:
             fits = is_values(value) and len(value) == len(var["args"])
-            return evaluate(var["raw"], dict(zip(var["args"], value))) if fits else None
+            return self._ev(var["raw"], **dict(zip(var["args"], value))) if fits else None
         if ref is not None:
             return value[1] if isinstance(value, tuple) and value[0] == ref else None
         if not isinstance(value, int) or isinstance(value, bool):
             return None
         arg = value >> BYTE_SHIFT[name] if "byte" in var else value
-        return evaluate(var["raw"], {"arg": arg}) if "raw" in var else arg
+        return self._ev(var["raw"], arg=arg) if "raw" in var else arg
+
+    def _ev(self, text, **env) -> int:
+        """Expression ``text`` over the playroutine's constants and ``env``."""
+        return evaluate(text, {**self.constants, **env})
 
     def decode(self, name: str, value) -> tuple[int, int]:
         """``(code, arg)`` for a written command; ``value`` as :meth:`encode` returns it."""
@@ -690,7 +696,7 @@ def codec_set(pr: dict, rtypes: dict, tables) -> tuple:
     offset = int(pr.get("note_offset", 0))
     ev = Evaluator(pr.get("functions"), tables, pr.get("constants"))
     rows = {n: RowCodec(rt, rt.codec, offset, ev) for n, rt in rtypes.items() if rt.codec}
-    return offset, rows, CommandCodec(pr.get("commands"), rtypes)
+    return offset, rows, CommandCodec(pr.get("commands"), rtypes, pr.get("constants"))
 
 
 def row_codecs(pr: dict, tables) -> dict:
