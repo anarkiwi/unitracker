@@ -72,7 +72,8 @@ its candidates is not run again on its own result. `Result.tally` counts each pa
 leaves unreached stay in it, and the document drops them. `Result.findings` holds a `Finding`
 per proved `(pass, edit)`. The result plays the input's register grid in the song's own state: every voice's registers from
 the tick its first note starts, the filter and volume registers from the earliest start
-(`first_mismatch`), and the voices' start ticks equal the input's.
+(`gridcmp.first_mismatch` under the playroutine's `tolerance`), and the voices' start ticks equal
+the input's.
 
 The check (`proof.mismatch`) is exact, not sampled:
 

@@ -176,12 +176,25 @@ def grid_diff_of(request, ver: gridcmp.Verdict, subject=None, against=None) -> s
     return attach(request, text)
 
 
+def vm_mismatch(song: dict, theirs) -> tuple[int, int] | None:
+    """The first ``(tick, register)`` where ``song`` on the VM departs from grid ``theirs``, each
+    voice from its first note, under its playroutine's ``tolerance``."""
+    player = SongPlayer(song)
+    grid = player.render_grid(len(theirs))
+    return gridcmp.first_mismatch(grid, theirs, player.starts, tol=tolerance(song))
+
+
+def tolerance(song: dict):
+    """The gridcmp tolerance ``song``'s playroutine declares, or None."""
+    return song["playroutine"].get("tolerance")
+
+
 def assert_plays(request, song: dict, theirs, native) -> None:
     """``song`` plays grid ``theirs`` on the VM from its voices' first notes; the test's failure
     carries :func:`verify.explain`'s report of ``native``."""
     player = SongPlayer(song)
     grid = player.render_grid(len(theirs))
-    ver, text = gridcmp.verdict_onset(grid, player.starts, theirs), None
+    ver, text = gridcmp.verdict_onset(grid, player.starts, theirs, tol=tolerance(song)), None
     if not ver.ok:
         text = attach(request, verify.explain(ver, song, (grid, theirs), native).text())
     assert ver.ok, text

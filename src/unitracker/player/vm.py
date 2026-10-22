@@ -3,7 +3,6 @@
 from collections.abc import Iterator
 
 import numpy as np
-from pysidtracker import gridcmp
 from tqdm import tqdm
 from unitracker_grammar import expr as xexpr
 
@@ -11,7 +10,7 @@ from unitracker.playroutine import tempo
 from unitracker.playroutine.expr import ExprError, Resolver, table_get
 from unitracker.playroutine.records import EXPR, record_types
 from unitracker.player import modulation
-from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT, REGISTERS
+from unitracker.player.canonical import CANONICAL_ORDER, REG_COUNT
 
 IR_VERSION = "ir"
 NOTE_KINDS = {None: 0, "off": 2, "on": 3}
@@ -676,10 +675,6 @@ class SongPlayer:
             grid[i] = self.regs
         return grid
 
-    def mismatch(self, theirs: np.ndarray) -> tuple[int, int] | None:
-        """Render as many ticks as ``theirs`` has; the first mismatch (see ``first_mismatch``)."""
-        return first_mismatch(self.render_grid(len(theirs)), theirs, self.starts)
-
     def render_wav(self, path, seconds: float, model: str = "8580", progress: bool = False):
         """Render ``seconds`` to a WAV file through an emulated SID."""
         from pysidtracker.audio import render_wav  # pylint: disable=import-outside-toplevel
@@ -692,42 +687,6 @@ class SongPlayer:
             self.iter_flushes(n), total=n, desc="render", unit="tick", disable=not progress
         )
         return render_wav(flushes, path, model=model, cycles_per_frame=cycles, clock_frequency=hz)
-
-
-def carry_cells(ours: np.ndarray, theirs: np.ndarray) -> np.ndarray:
-    """The ``(tick, register)`` cells the native's 1-LSB carry makes legitimately differ."""
-    return gridcmp.carry(ours, theirs)
-
-
-def _criterion_mask(ours: np.ndarray, starts: list) -> np.ndarray:
-    """The cells that count: each voice's from its first note in ``starts``, the shared
-    registers' from the earliest."""
-    return gridcmp.onset_mask(ours, starts)
-
-
-def diff(ours: np.ndarray, theirs: np.ndarray, starts: list | None = None) -> list:
-    """The ``(tick, register, doc, native)`` cells where two grids differ, in ``(tick,
-    register)`` order, each voice from its first note in ``starts`` (or every register from
-    tick 0 when ``starts`` is None), the 1-LSB carry not a difference."""
-    return [
-        tuple(int(x) for x in cell)
-        for cell in gridcmp.cell_diff(ours, theirs, starts=starts, tol="carry")
-    ]
-
-
-def first_mismatch(
-    ours: np.ndarray, theirs: np.ndarray, starts: list, carry: bool = True
-) -> tuple[int, int] | None:
-    """The first cell of :func:`diff`, ``(tick, register)``, or None when the grids agree on
-    the song's own state; without ``carry`` the 1-LSB carry is a difference too."""
-    cells = gridcmp.cell_diff(ours, theirs, starts=starts, tol="carry" if carry else None)
-    return (int(cells[0, 0]), int(cells[0, 1])) if len(cells) else None
-
-
-def runs(cells: list) -> list:
-    """The differing cells grouped by register: each register's maximal tick runs and, in
-    each run, the maximal segments of constant ``(doc, native)`` value."""
-    return gridcmp.runs(cells, REGISTERS)
 
 
 class _Stepper:

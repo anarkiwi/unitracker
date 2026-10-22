@@ -19,6 +19,9 @@ lifetime:
   pw: {flag: {flags: 0x40}}
   filter: {flag: {flags: 0x80}}
 note_offset: 1
+# A grid compares with gridcmp's 1-LSB carry exempt in each voice's frequency and the cutoff:
+# the player's carry flag reaches the frequency add along code paths no modulator states (#185).
+tolerance: carry
 # Each command's column: the FX column, or the instrument column ($100 + class for small FX);
 # !run plays in the instrument column on a row that names no instrument, else in the FX column.
 # !ad and !sr: small FX $2x/$3x/$5x/$6x set the envelope register's nibble at shift `nibble` (see

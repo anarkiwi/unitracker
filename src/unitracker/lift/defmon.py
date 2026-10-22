@@ -12,14 +12,14 @@ from typing import NamedTuple
 import numpy as np
 import yaml
 from pydefmon import DefmonPlayer
-from pysidtracker import CodePattern, SidImage, find_code_all
+from pysidtracker import CodePattern, SidImage, find_code_all, gridcmp
 from pysidtracker.mos6502 import OP_LEN, OPCODES
 
 from unitracker.lift.base import song_meta
 from unitracker.playroutine.library import library
 from unitracker.lift.base import Lift, LiftError
 from unitracker.modfit.convert import grid, starts, window
-from unitracker.player.vm import SongPlayer, first_mismatch
+from unitracker.player.vm import SongPlayer
 
 PAL_HZ = 985248
 NTSC_HZ = 1022727
@@ -328,9 +328,10 @@ def unheard_init(lift, ir: dict) -> dict:
 
     def mismatch(song):
         player = SongPlayer(song)
-        return first_mismatch(player.render_grid(ticks), theirs, player.starts, carry=False)
+        return gridcmp.first_mismatch(player.render_grid(ticks), theirs, player.starts, tol=tol)
 
-    found = first_mismatch(grid(ir, ticks), theirs, starts(ir), carry=False)
+    tol = ir["playroutine"].get("tolerance")
+    found = gridcmp.first_mismatch(grid(ir, ticks), theirs, starts(ir), tol=tol)
     if found is not None:
         raise LiftError(
             f"the init's frequency registers are heard: tick {found[0]}, register {found[1]}"

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import yaml
-from conftest import gt_tune, table
+from conftest import gt_tune, table, tolerance, vm_mismatch
 from pygoattracker import Player
 from pygoattracker import constants as C
 from pygoattracker.model import (
@@ -18,6 +18,7 @@ from pygoattracker.model import (
     Song,
     Transpose,
 )
+from pysidtracker import gridcmp
 
 from unitracker.lift import goattracker as gt
 from unitracker.lift import verify
@@ -253,7 +254,8 @@ def lifted(dec, native, ticks=400) -> tuple[str, dict, SongPlayer, np.ndarray]:
     song = lift.run()
     theirs = np.asarray(native.render_grid(ticks), dtype=np.uint8)
     player = SongPlayer(song)
-    assert player.mismatch(theirs) is None
+    grid = player.render_grid(len(theirs))
+    assert gridcmp.first_mismatch(grid, theirs, player.starts, tol=tolerance(song)) is None
     assert lift.document is not None, lift.gap
     return lift.document, song, player, theirs
 
@@ -508,7 +510,7 @@ def test_a_toneporta_of_speed_0_is_freq_at_the_notes_frequency():
     (index,) = [a for c, a in cmds if c == gt.FREQ]
     assert out["exprs"][index] == gt.AT_NOTE
     theirs = np.asarray(native.render_grid(400), dtype=np.uint8)
-    assert SongPlayer(out).mismatch(theirs) is None
+    assert vm_mismatch(out, theirs) is None
     assert gt.snapped(out) is out
 
 

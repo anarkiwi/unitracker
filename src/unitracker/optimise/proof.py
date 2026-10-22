@@ -3,10 +3,11 @@
 import math
 
 import numpy as np
+from pysidtracker import gridcmp
 
 from unitracker.optimise.model import ERRORS
 from unitracker.player import reach
-from unitracker.player.vm import SongPlayer, first_mismatch
+from unitracker.player.vm import SongPlayer
 
 
 class Trace:
@@ -88,4 +89,5 @@ def mismatch(reference: Trace, ir: dict):
     n = max(reference.mu, cand.mu) + math.lcm(reference.period, cand.period)
     if n > reach.MAX_TICKS:
         return ("unproved", f"bound {n}")
-    return first_mismatch(cand.grid(n), reference.grid(n), reference.starts)
+    tol = ir["playroutine"].get("tolerance")
+    return gridcmp.first_mismatch(cand.grid(n), reference.grid(n), reference.starts, tol=tol)

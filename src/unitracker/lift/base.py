@@ -101,7 +101,9 @@ class Lift(abc.ABC):
             self.gap = str(exc)
             return None
         try:
-            self.verdict = verify.compare(self.document, self.native().render_grid(self.ticks))
+            theirs = self.native().render_grid(self.ticks)
+            tol = song["playroutine"].get("tolerance")
+            self.verdict = verify.compare(self.document, theirs, tol=tol)
         except PlayError as exc:
             self.gap = f"unitracker-player refuses the document: {exc}"
             return None

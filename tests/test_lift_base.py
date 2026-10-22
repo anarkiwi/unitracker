@@ -5,7 +5,7 @@ import struct
 
 import numpy as np
 import pytest
-from conftest import gt_tune, sw_fx
+from conftest import gt_tune, sw_fx, vm_mismatch
 from pydefmon import DefmonPlayer
 from pysidtracker import find_format
 from pysidwizard import SWMPlayer, parse_sid_song
@@ -14,7 +14,6 @@ from unitracker.lift import backends, base, defmon
 from unitracker.lift.defmon import DefmonLift
 from unitracker.lift.goattracker import GoatTrackerLift
 from unitracker.lift.sidwizard import Decoded, SidWizardLift
-from unitracker.player.vm import SongPlayer
 
 REST = (None, 0, 0, 0)
 NORMALISATIONS = ("unpause", "explicit_swing", "unmark")
@@ -47,7 +46,7 @@ def test_each_normalisation_rewrites_the_song_before_it_and_the_lift_plays_the_p
     assert [name for name, _ in stages] == ["structure", *NORMALISATIONS]
     assert all(before != after for (_, before), (_, after) in zip(stages, stages[1:]))
     theirs = np.asarray(native.render_grid(400), dtype=np.uint8)
-    assert SongPlayer(stages[-1][1]).mismatch(theirs) is None
+    assert vm_mismatch(stages[-1][1], theirs) is None
 
 
 def test_a_lift_without_expressions_ends_on_the_last_normalisation(monkeypatch):

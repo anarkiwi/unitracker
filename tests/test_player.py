@@ -4,20 +4,14 @@ order, and the table entries a song can reach."""
 import numpy as np
 import pytest
 from conftest import mini_song
+from pysidtracker import gridcmp
 from pysidtracker.gridcmp import verdict_onset
 
 from unitracker.playroutine.expr import ExprError
 from unitracker.player.canonical import CANONICAL_ORDER, REGISTERS
 from unitracker.player.reach import ReachabilityError, table_reads
-from unitracker.player.vm import (
-    Cursor,
-    SongError,
-    SongPlayer,
-    compile_phrase,
-    diff,
-    first_mismatch,
-    runs,
-)
+from unitracker.player.vm import Cursor, SongError, SongPlayer, compile_phrase
+from unitracker.playroutine.library import library
 
 
 def run(playroutine, ticks=1, **kw):
@@ -256,6 +250,11 @@ def test_a_malformed_song_or_playroutine_is_refused():
             SongPlayer(song)
 
 
+def cell_rows(ours, theirs, starts=None) -> list:
+    """The carry-tolerant ``[tick, register, ours, theirs]`` cells of ``gridcmp.cell_diff``."""
+    return gridcmp.cell_diff(ours, theirs, starts=starts, tol="carry").tolist()
+
+
 def test_first_mismatch_counts_each_voice_from_its_start_and_globals_from_the_earliest():
     cases = [
         ({(1, 0), (4, 8)}, [2, 3, None], (4, 8)),
@@ -274,7 +273,7 @@ def test_first_mismatch_counts_each_voice_from_its_start_and_globals_from_the_ea
         ours = theirs.copy()
         for cell in cells:
             ours[cell] = 1
-        assert first_mismatch(ours, theirs, starts) == expected, (cells, starts)
+        assert gridcmp.first_mismatch(ours, theirs, starts) == expected, (cells, starts)
 
 
 def test_diff_lists_the_differing_cells_with_their_values_under_the_criterion():
@@ -283,9 +282,9 @@ def test_diff_lists_the_differing_cells_with_their_values_under_the_criterion():
     ours[1, 0] = 5
     ours[2, 6] = 9
     ours[4, 8] = 7
-    assert diff(ours, zero, [2, 3, None]) == [(2, 6, 9, 0), (4, 8, 7, 0)]
-    assert diff(ours, zero) == [(1, 0, 5, 0), (2, 6, 9, 0), (4, 8, 7, 0)]
-    assert diff(ours[:3], zero) == [(1, 0, 5, 0), (2, 6, 9, 0)]
+    assert cell_rows(ours, zero, [2, 3, None]) == [[2, 6, 9, 0], [4, 8, 7, 0]]
+    assert cell_rows(ours, zero) == [[1, 0, 5, 0], [2, 6, 9, 0], [4, 8, 7, 0]]
+    assert cell_rows(ours[:3], zero) == [[1, 0, 5, 0], [2, 6, 9, 0]]
 
 
 def test_diff_does_not_count_the_native_1_lsb_carry():
@@ -295,11 +294,27 @@ def test_diff_does_not_count_the_native_1_lsb_carry():
     theirs[0, 0], theirs[0, 1] = 0x41, 0x10
     ours[1, 21], ours[1, 22] = 0x05, 0x01  # cutoff 0x15: the native's 0x16
     theirs[1, 21], theirs[1, 22] = 0x06, 0x01
-    assert diff(ours, theirs) == [] and first_mismatch(ours, theirs, [0, 0, 0]) is None
-    assert first_mismatch(ours, theirs, [0, 0, 0], carry=False) == (0, 0)
-    assert first_mismatch(ours, theirs, [None, 0, 0], carry=False) == (1, 21)
+    assert not cell_rows(ours, theirs) and gridcmp.first_mismatch(ours, theirs, [0, 0, 0]) is None
+    assert gridcmp.first_mismatch(ours, theirs, [0, 0, 0], tol=None) == (0, 0)
+    assert gridcmp.first_mismatch(ours, theirs, [None, 0, 0], tol=None) == (1, 21)
     ours[0, 0] = 0x44
-    assert diff(ours, theirs) == [(0, 0, 0x44, 0x41)]
+    assert cell_rows(ours, theirs) == [[0, 0, 0x44, 0x41]]
+
+
+def test_only_a_playroutine_that_declares_the_carry_tolerance_passes_a_1_lsb_difference():
+    theirs = np.zeros((2, 25), dtype=np.uint8)
+    ours = theirs.copy()
+    ours[1, 0], theirs[1, 0] = 0x40, 0x41
+    verdicts = {
+        name: gridcmp.verdict_onset(ours, [0, 0, 0], theirs, tol=library(name).get("tolerance"))
+        for name in ("goattracker2", "defmon", "sidwizard")
+    }
+    assert {name: v.ok for name, v in verdicts.items()} == {
+        "goattracker2": False,
+        "defmon": False,
+        "sidwizard": True,
+    }
+    assert verdicts["goattracker2"].onset == (1, 0)
 
 
 def test_runs_groups_the_cells_per_register_into_tick_runs_and_value_segments():
@@ -315,7 +330,7 @@ def test_runs_groups_the_cells_per_register_into_tick_runs_and_value_segments():
         (12, 0, 4, 3),
         (13, 0, 4, 8),
     ]
-    assert runs(cells) == [
+    assert gridcmp.runs(cells, REGISTERS) == [
         {
             "reg": 0,
             "name": "v1 freq lo",
@@ -361,7 +376,7 @@ def test_the_verdict_carries_the_differing_cells_and_a_machine_readable_summary(
         "onset": [2, 6],
         "whole": [1, 0],
         **lead_fields,
-        "registers": runs([(2, 6, 9, 0)]),
+        "registers": gridcmp.runs([(2, 6, 9, 0)], REGISTERS),
         "cells": [[2, 6, 9, 0]],
     }
     assert verdict_onset(theirs, [2, 3, None], theirs).summary(REGISTERS) == {

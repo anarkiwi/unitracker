@@ -15,12 +15,14 @@ REPORT = {"names": REGISTERS, "subject": "document", "a": "doc", "b": "native"}
 """``gridcmp.runs_report`` keywords naming a verdict's registers and grids."""
 
 
-def compare(text: str, theirs: np.ndarray, progress: bool = False) -> gridcmp.Verdict:
+def compare(text: str, theirs: np.ndarray, progress: bool = False, *, tol=None) -> gridcmp.Verdict:
     """The onset :class:`~pysidtracker.gridcmp.Verdict` of generic document ``text`` played by
-    unitracker-player against native grid ``theirs``, in ticks (``gridcmp.verdict_onset``)."""
+    unitracker-player against native grid ``theirs``, in ticks (``gridcmp.verdict_onset``),
+    exempting the cells gridcmp tolerance ``tol`` names: the native playroutine's
+    ``tolerance``, as the document names none."""
     theirs = np.asarray(theirs, dtype=np.uint8)
     ours, starts = oracle.play(text, len(theirs), progress)
-    return gridcmp.verdict_onset(ours, starts, theirs)
+    return gridcmp.verdict_onset(ours, starts, theirs, tol=tol)
 
 
 class DocumentPlayer(Player):

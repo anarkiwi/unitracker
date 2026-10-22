@@ -20,7 +20,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | need | tool |
 |---|---|
 | the native replay's register grid | `pysidtracker.find_format(raw).play(raw, subtune).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
-| the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
+| the first differing `(tick, register)` of the lifter's song on its VM | `pysidtracker.gridcmp.first_mismatch(ours, theirs, starts, tol=pr.get("tolerance"))`; in tests, `conftest.vm_mismatch(song, theirs)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
 | where the generic document differs, by register and value (exit 0 on agreement, `--json` the machine-readable diff) | `tools/corpus.py grid out/porting/doc.yaml TUNE.sid --ticks 3007 [--context N] [--json PATH]` |
 | why a document or the lifter's song diverges: its tick beside a document's, the VM's, the native player's (traced in Python) or the raw tune's 6502 on jennings, each with the diverging value's dataflow | `verify.explain(verdict, subject, (ours, theirs), against).text()` (pysidtracker's `whydiff`); `tools/corpus.py grid DOC TUNE.sid --explain native\|6502\|vm` |
