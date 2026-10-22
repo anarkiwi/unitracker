@@ -4,6 +4,7 @@ import dataclasses
 from pathlib import Path
 
 import numpy as np
+from pysidtracker import find_format
 
 from unitracker import document
 from unitracker.cache import CACHE
@@ -44,7 +45,7 @@ def load(path: Path) -> Song:
 
 def native_grid(song: Song, ticks: int) -> np.ndarray:
     """The native player's register grid of a tune."""
-    return np.asarray(backends.native_player(song.raw).render_grid(ticks), dtype=np.uint8)
+    return np.asarray(find_format(song.raw).play(song.raw).render_grid(ticks), dtype=np.uint8)
 
 
 def start_lines(r: Result, tag: str) -> list:

@@ -110,8 +110,8 @@ def test_a_tune_that_does_not_lift_is_a_gap(tmp_path):
     sid = tmp_path / "junk.sid"
     sid.write_bytes(b"not a sid")
     row = corpus.check_one({"path": str(sid)}, {**OPTS, "out": str(tmp_path)})
-    assert row["verified"] == "no" and row["gap"].startswith("UnknownFormat")
-    assert corpus.category(row).startswith("gap: UnknownFormat")
+    assert row["verified"] == "no" and row["gap"].startswith("SidParseError")
+    assert corpus.category(row).startswith("gap: SidParseError")
 
 
 def test_a_reference_tune_is_checked_reported_and_compared(references, tmp_path, capsys):

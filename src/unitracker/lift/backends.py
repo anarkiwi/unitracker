@@ -1,50 +1,32 @@
-"""Format detection and dispatch to each backend's lifter and native player."""
+"""Dispatch to the lifter of the installed ``pysidtracker`` format that recognises a tune."""
 
-from pysidtracker import SidError, SidImage, gridcmp
+import importlib
+
+from pysidtracker import SidParseError, find_format, gridcmp
 
 from unitracker.lift import verify as proof
-from unitracker.lift.base import start_song
 
-
-class UnknownFormat(ValueError):
-    """No backend recognises the tune."""
+LIFTS = {
+    "defmon": ("unitracker.lift.defmon", "DefmonLift"),
+    "goattracker2": ("unitracker.lift.goattracker", "GoatTrackerLift"),
+    "sidwizard": ("unitracker.lift.sidwizard", "SidWizardLift"),
+}
+"""Each lifted format's lifter, by its ``pysidtracker.formats`` name."""
 
 
 def detect(raw: bytes) -> str:
-    """The backend that recognises ``raw``: ``defmon``, ``sidwizard`` or ``goattracker2``."""
-    from pydefmon import DefmonSidParser  # pylint: disable=import-outside-toplevel
-    from pygoattracker import decompile_sid  # pylint: disable=import-outside-toplevel
-    from pysidwizard import SidWizardSidParser  # pylint: disable=import-outside-toplevel
-
-    try:
-        image = SidImage.from_bytes(raw)
-        if DefmonSidParser().recognize(image) is not None:
-            return "defmon"
-        if SidWizardSidParser().recognize(image) is not None:
-            return "sidwizard"
-        decompile_sid(raw)
-    except SidError as exc:
-        raise UnknownFormat(f"no backend recognises this tune: {exc}") from exc
-    return "goattracker2"
+    """The name of the installed format that recognises ``raw`` (``pysidtracker.find_format``)."""
+    return find_format(raw).name
 
 
 def lifter(raw: bytes, subtune=None, expressions: bool = True):
     """The :class:`~unitracker.lift.base.Lift` of ``raw``'s ``subtune`` (by default the one its
-    header starts on) by the backend that recognises it."""
-    if subtune is None:
-        subtune = start_song(raw)
-    backend = detect(raw)
-    if backend == "defmon":
-        from unitracker.lift import defmon  # pylint: disable=import-outside-toplevel
-
-        return defmon.DefmonLift.from_sid(raw, subtune, expressions)
-    if backend == "sidwizard":
-        from unitracker.lift import sidwizard  # pylint: disable=import-outside-toplevel
-
-        return sidwizard.SidWizardLift.from_sid(raw, subtune, expressions)
-    from unitracker.lift import goattracker  # pylint: disable=import-outside-toplevel
-
-    return goattracker.GoatTrackerLift.from_sid(raw, subtune, expressions)
+    header starts on) by the lifter of the format that recognises it."""
+    name = detect(raw)
+    if name not in LIFTS:
+        raise SidParseError(f"no lifter for the {name} format")
+    module, cls = LIFTS[name]
+    return getattr(importlib.import_module(module), cls).from_sid(raw, subtune, expressions)
 
 
 def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
@@ -55,12 +37,8 @@ def lift(raw: bytes, subtune=None, expressions: bool = True) -> dict:
     return lifter(raw, subtune, expressions).run()
 
 
-def native_player(raw: bytes, subtune=None):
-    """The native player for ``raw``, a ``pysidtracker.MemPlayer``."""
-    return lifter(raw, subtune).native()
-
-
 def verify(document_text: str, raw_sid: bytes, subtune=None, ticks: int = 3007) -> gridcmp.Verdict:
     """The :class:`~pysidtracker.gridcmp.Verdict` of a generic document against ``ticks``
     ticks of the native player of ``raw_sid``'s ``subtune`` (by default its header's)."""
-    return proof.compare(document_text, native_player(raw_sid, subtune).render_grid(ticks))
+    native = find_format(raw_sid).play(raw_sid, subtune)
+    return proof.compare(document_text, native.render_grid(ticks))
