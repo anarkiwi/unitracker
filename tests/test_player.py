@@ -295,7 +295,9 @@ def test_diff_does_not_count_the_native_1_lsb_carry():
     theirs[0, 0], theirs[0, 1] = 0x41, 0x10
     ours[1, 21], ours[1, 22] = 0x05, 0x01  # cutoff 0x15: the native's 0x16
     theirs[1, 21], theirs[1, 22] = 0x06, 0x01
-    assert diff(ours, theirs) == []
+    assert diff(ours, theirs) == [] and first_mismatch(ours, theirs, [0, 0, 0]) is None
+    assert first_mismatch(ours, theirs, [0, 0, 0], carry=False) == (0, 0)
+    assert first_mismatch(ours, theirs, [None, 0, 0], carry=False) == (1, 21)
     ours[0, 0] = 0x44
     assert diff(ours, theirs) == [(0, 0, 0x44, 0x41)]
 
