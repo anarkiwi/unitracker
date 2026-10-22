@@ -181,12 +181,32 @@ class Trace:  # pylint: disable=too-many-instance-attributes
         return set() if got is None else set(got[got[:, 1] < frames, 0].tolist())
 
 
+def unlogged(mod: Modulation) -> Modulation:
+    """``mod`` with its reads of the units' values and notes kept out of the player's logged
+    table reads: an observer's reads are not the song's."""
+    ns = mod.ns
+    plain = ns["_tg"]
+
+    def quiet(fn):
+        def call(*args):
+            logged, ns["_tg"] = ns["_tg"], plain
+            try:
+                return fn(*args)
+            finally:
+                ns["_tg"] = logged
+
+        return call
+
+    mod.read, mod.note_of = quiet(mod.read), quiet(mod.note_of)
+    return mod
+
+
 def record(ir: dict, limit: int = reach.MAX_TICKS, progress: bool = True) -> Trace:
     """Play ``ir`` once to its state's recurrence and a period more, or ``limit + 1`` ticks
     where it does not recur by ``limit``, recording its :class:`Trace`; the occurrences are an
     observing modulation's, which snapshots every cell at each start."""
     player = SongPlayer(ir, watch=True)
-    seen = Attribution(Modulation(player, lambda unit, occ: None))
+    seen = Attribution(unlogged(Modulation(player, lambda unit, occ: None)))
     fired, log = fired_log(player), {}
     base = Baseline(player, limit, log, progress)
     rows = list(base.rows)

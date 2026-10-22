@@ -18,10 +18,11 @@ def occurrences(occs) -> list:
 
 def test_a_trace_is_the_songs_own_play_to_its_recurrence():
     run = trace.record(LATE_DOC)
-    player = SongPlayer(LATE_DOC)
+    player = SongPlayer(LATE_DOC, record_reads=True)
     log = trace.fired_log(player)
     assert (run.tick, run.period) == reach.recurrence(player)
     document.play_to(player, run.ticks)
+    assert {t: run.read(t, run.frames) for t in player.table_reads} == player.table_reads
     assert run.frames == run.ticks == player.ticks
     assert run.starts == tuple(player.starts)
     assert run.firings(run.ticks) == log and len(log) > 0
