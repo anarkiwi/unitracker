@@ -785,3 +785,10 @@ def test_a_pre_18_driver_reads_the_first_frame_freq_hi_by_track(doom_schlager):
     assert vm_mismatch(song, theirs) is None
     song["tables"]["build"] = [0]
     assert vm_mismatch(song, theirs) is not None
+
+
+def test_a_pending_note_fx_portamento_slides(doom_schlager):
+    lift = sidwizard.SidWizardLift.from_sid(doom_schlager.read_bytes(), expressions=False)
+    song = lift.run()
+    theirs = np.asarray(lift.native().render_grid(3000), np.uint8)
+    assert vm_mismatch(song, theirs) is None
