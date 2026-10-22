@@ -6,14 +6,11 @@ Integer literals, ``+ - *``, ``//`` (floor division), ``%`` (floor modulo), ``ab
 """
 
 import ast
-import re
 
 PHI = "φ"
 NAMES = {"v": "v", PHI: "phi", "N": "N"}
 CALLS = {"abs": 1, "min": 2, "max": 2}
 _BINARY = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.FloorDiv: "//", ast.Mod: "%"}
-_DECIMAL = re.compile(r"0|[1-9][0-9]*")
-_DIVIDE = {ast.FloorDiv: "//", ast.Mod: "%"}
 _COMPARE = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
 
 
@@ -90,116 +87,114 @@ class _Source:
         return f"{name}({args})"
 
 
-def source(text: str, tables=()) -> tuple[str, set]:
-    """``(Python source over v, phi, N, _F and _T, names read)`` of an expression text."""
+def _tree(text: str) -> ast.expr:
     try:
-        tree = ast.parse(text.strip(), mode="eval")
+        return ast.parse(text.strip(), mode="eval").body
     except SyntaxError as exc:
         raise ExpressionError(f"bad expression {text!r}: {exc.msg}") from exc
+
+
+def source(text: str, tables=()) -> tuple[str, set]:
+    """``(Python source over v, phi, N, _F and _T, names read)`` of an expression text."""
     src = _Source(tables)
-    return src(tree.body), src.reads
+    return src(_tree(text)), src.reads
 
 
 def canonical(text: str) -> str:
-    """The one text of expression ``text`` (see :class:`_Printer`)."""
-    try:
-        tree = ast.parse(text.strip(), mode="eval")
-    except SyntaxError as exc:
-        raise ExpressionError(f"bad expression {text!r}: {exc.msg}") from exc
-    return _Printer().text(tree.body)
+    """The one text of expression ``text`` (see :func:`printed`)."""
+    return printed(_tree(text))
 
 
-class _Printer:
-    """One text per expression: sums and products as linear forms (constant terms and factors
-    folded, like terms merged), terms in one order, parentheses only where the grammar needs
-    them, and decimal literals."""
+def printed(node) -> str:
+    """The one text of expression node ``node``: sums and products as linear forms (constant
+    terms and factors folded, like terms merged), terms in one order, parentheses only where the
+    grammar needs them, and decimal literals."""
+    return _sum(*_linear(node))
 
-    # pylint: disable=too-few-public-methods
 
-    def text(self, node) -> str:
-        """The text of expression node ``node``."""
-        return self._sum(*self._linear(node))
+def _linear(node) -> tuple[int, dict]:
+    """``(constant, {factors: coefficient})`` of ``node`` as a sum of products."""
+    if isinstance(node, ast.Constant):
+        return int(node.value), {}
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        const, terms = _linear(node.operand)
+        return -const, {f: -c for f, c in terms.items()}
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
+        sign = 1 if isinstance(node.op, ast.Add) else -1
+        (a, at), (b, bt) = _linear(node.left), _linear(node.right)
+        terms = dict(at)
+        for f, c in bt.items():
+            terms[f] = terms.get(f, 0) + sign * c
+        return a + sign * b, {f: c for f, c in terms.items() if c}
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _product(_linear(node.left), _linear(node.right))
+    return 0, {(_factor(node),): 1}
 
-    def _linear(self, node) -> tuple[int, dict]:
-        """``(constant, {factors: coefficient})`` of ``node`` as a sum of products."""
-        if isinstance(node, ast.Constant):
-            return int(node.value), {}
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-            const, terms = self._linear(node.operand)
-            return -const, {f: -c for f, c in terms.items()}
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
-            sign = 1 if isinstance(node.op, ast.Add) else -1
-            (a, at), (b, bt) = self._linear(node.left), self._linear(node.right)
-            terms = dict(at)
-            for f, c in bt.items():
-                terms[f] = terms.get(f, 0) + sign * c
-            return a + sign * b, {f: c for f, c in terms.items() if c}
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
-            return self._product(self._linear(node.left), self._linear(node.right))
-        return 0, {(self._factor(node),): 1}
 
-    def _product(self, left: tuple, right: tuple) -> tuple[int, dict]:
-        (a, at), (b, bt) = left, right
-        if not at or not bt:
-            const, terms, k = (b, bt, a) if not at else (a, at, b)
-            return const * k, {f: c * k for f, c in terms.items() if c * k}
-        factors = []
-        coef = 1
-        for const, terms in (left, right):
-            if not const and len(terms) == 1:
-                ((f, c),) = terms.items()
-                factors += f
-                coef *= c
-            else:
-                factors.append(f"({self._sum(const, terms)})")
-        return 0, {tuple(sorted(factors, key=_order)): coef}
+def _product(left: tuple, right: tuple) -> tuple[int, dict]:
+    (a, at), (b, bt) = left, right
+    if not at or not bt:
+        const, terms, k = (b, bt, a) if not at else (a, at, b)
+        return const * k, {f: c * k for f, c in terms.items() if c * k}
+    factors = []
+    coef = 1
+    for const, terms in (left, right):
+        if not const and len(terms) == 1:
+            ((f, c),) = terms.items()
+            factors += f
+            coef *= c
+        else:
+            factors.append(f"({_sum(const, terms)})")
+    return 0, {tuple(sorted(factors, key=_order)): coef}
 
-    def _factor(self, node) -> str:
-        """The text of a node that is no sum or product, as a factor."""
-        # pylint: disable=too-many-return-statements
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Compare):
-            op = _COMPARE[type(node.ops[0])]
-            return f"({self.text(node.left)} {op} {self.text(node.comparators[0])})"
-        if isinstance(node, ast.Call):
-            args = [self.text(a) for a in node.args]
-            if node.func.id in ("min", "max"):
-                args.sort(key=_order)
-            return f"{node.func.id}({', '.join(args)})"
-        if isinstance(node, ast.Subscript):
-            return f"{node.value.id}[{self.text(node.slice)}]"
-        if isinstance(node, ast.BinOp):
-            left, right = self._linear(node.left), self._linear(node.right)
-            return f"{self._operand(*left, True)} {_DIVIDE[type(node.op)]} {self._operand(*right)}"
-        raise ExpressionError(f"{ast.unparse(node)!r} is outside the grammar")
 
-    def _operand(self, const: int, terms: dict, left: bool = False) -> str:
-        """An operand of ``%`` or ``//``: a term on the left, a factor on the right."""
-        text = self._sum(const, terms)
-        if not terms or (len(terms) == 1 and not const and (left or _atomic(terms))):
-            return text
-        return f"({text})"
+def _factor(node) -> str:
+    """The text of a node that is no sum or product, as a factor."""
+    # pylint: disable=too-many-return-statements
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Compare):
+        op = _COMPARE[type(node.ops[0])]
+        return f"({printed(node.left)} {op} {printed(node.comparators[0])})"
+    if isinstance(node, ast.Call):
+        args = [printed(a) for a in node.args]
+        if node.func.id in ("min", "max"):
+            args.sort(key=_order)
+        return f"{node.func.id}({', '.join(args)})"
+    if isinstance(node, ast.Subscript):
+        return f"{node.value.id}[{printed(node.slice)}]"
+    if isinstance(node, ast.BinOp):
+        left, right = _linear(node.left), _linear(node.right)
+        return f"{_operand(*left, True)} {_BINARY[type(node.op)]} {_operand(*right)}"
+    raise ExpressionError(f"{ast.unparse(node)!r} is outside the grammar")
 
-    def _sum(self, const: int, terms: dict) -> str:
-        out = []
-        for factors, coef in sorted(terms.items(), key=lambda t: _order("*".join(t[0]))):
-            body = "*".join(
-                f"({f})" if _divides(f) and (len(factors) > 1 or abs(coef) != 1) else f
-                for f in factors
-            )
-            if abs(coef) != 1:
-                body = f"{abs(coef)}*{body}"
-            if not out:
-                lead = "-" if coef < 0 else ""
-                if coef == -1 and len(factors) == 1 and _divides(factors[0]):
-                    body = f"({body})"
-                out.append(lead + body)
-            else:
-                out.append((" - " if coef < 0 else " + ") + body)
-        if const or not out:
-            out.append(str(const) if not out else (" - " if const < 0 else " + ") + str(abs(const)))
-        return "".join(out)
+
+def _operand(const: int, terms: dict, left: bool = False) -> str:
+    """An operand of ``%`` or ``//``: a term on the left, a factor on the right."""
+    text = _sum(const, terms)
+    if not terms or (len(terms) == 1 and not const and (left or _atomic(terms))):
+        return text
+    return f"({text})"
+
+
+def _sum(const: int, terms: dict) -> str:
+    out = []
+    for factors, coef in sorted(terms.items(), key=lambda t: _order("*".join(t[0]))):
+        body = "*".join(
+            f"({f})" if _divides(f) and (len(factors) > 1 or abs(coef) != 1) else f for f in factors
+        )
+        if abs(coef) != 1:
+            body = f"{abs(coef)}*{body}"
+        if not out:
+            lead = "-" if coef < 0 else ""
+            if coef == -1 and len(factors) == 1 and _divides(factors[0]):
+                body = f"({body})"
+            out.append(lead + body)
+        else:
+            out.append((" - " if coef < 0 else " + ") + body)
+    if const or not out:
+        out.append(str(const) if not out else (" - " if const < 0 else " + ") + str(abs(const)))
+    return "".join(out)
 
 
 def _divides(factor: str) -> bool:
