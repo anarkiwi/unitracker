@@ -28,7 +28,7 @@ KINDS = {"ins", "ctrl", "pw", "filter", "restart", "x", "phrase"}
 GENERIC = {
     "metal_warrior": (1550, 0x0E),  # voice 3's frequency word
     "crosseyed": (5, 0x15),  # the filter's first cutoff step (its detune plays as set {detune: 1})
-    "csillag": (2, 0x00),  # voice 1's first note, its registers land one tick before the native's
+    "csillag": (26, 0x07),  # voice 2's hard restart, where the native sets its next note's FREQ-HI
 }
 CSILLAG = pytest.mark.xfail(
     strict=True, reason="csillag's first note still lands a tick before the native's"

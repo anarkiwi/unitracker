@@ -111,10 +111,6 @@ def test_the_lead_in_starts_each_voice_on_its_native_tick():
     assert oracle.play(text, 40)[1] == list(native.starts) == [10, 10, 10]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a lead shorter than a step does not yet restore the tempo on the first step",
-)
 def test_a_lead_shorter_than_a_step_restores_the_tempo_on_the_first_step(references):
     text = references["csillag"].generic
     assert "init: [-!vol:15!tempo:3, -, -]" in text
