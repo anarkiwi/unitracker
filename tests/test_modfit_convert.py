@@ -678,6 +678,7 @@ def test_a_failure_in_the_start_key_is_a_named_conversion_error(monkeypatch):
         raise RecursionError("maximum recursion depth")
 
     monkeypatch.setattr(phase.Machine, "start", boom)
+    monkeypatch.setattr(convert, "_ANALYSES", {})
     with pytest.raises(convert.ConversionError) as err:
         convert.analyse(pulse_ir(), None, 1)
     assert "RecursionError" in str(err.value)

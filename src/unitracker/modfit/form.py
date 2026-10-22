@@ -5,6 +5,7 @@ expands exactly as ``vm.bounded_step``; terms normalise to linear forms, bracket
 """
 
 import ast
+import contextlib
 
 import z3
 
@@ -551,6 +552,18 @@ class Form(Algebra):
         self.procs = pr.get("procs") or {}
         self.translation = Translation(self.rng)
         self.feasibility = {}
+        self.reads: set | None = None
+
+    @contextlib.contextmanager
+    def tracking(self):
+        """The set of the names this form reads from a state meanwhile."""
+        outer, self.reads = self.reads, set()
+        try:
+            yield self.reads
+        finally:
+            got, self.reads = self.reads, outer
+            if outer is not None:
+                outer |= got
 
     # expressions ------------------------------------------------------------
     BINOPS = {
@@ -584,6 +597,8 @@ class Form(Algebra):
             return env[n.id]
         if n.id in self.consts:
             return int(self.consts[n.id])
+        if self.reads is not None:
+            self.reads.add(n.id)
         return state.get(n.id, n.id)
 
     def _binop(self, n, state, env):
@@ -755,6 +770,8 @@ class Form(Algebra):
     def acc_cases(self, a: dict, state) -> list:
         """``[(guard, value, hit)]`` of one ``bounded_step`` step."""
         cell = a["accumulate"]
+        if self.reads is not None:
+            self.reads.add(cell)
         v0, step = state.get(cell, cell), self.expr(a.get("step", 0), state)
         lo, hi = (self.expr(a[k], state) if k in a else None for k in ("min", "max"))
         mode, signed = acc_mode(a, self.width.get(cell) is not None)
@@ -896,6 +913,8 @@ class Programs(Form):
             return super().opaque(a, rest, conds, state)
         row = ("rec", run["record"], self.num(self.expr(run["index"], state)))
         out = []
+        if self.reads is not None:
+            self.reads.add("row")
         for cs, st in self.paths(template, conds, {**state, "row": row}):
             st = {**st, "row": state.get("row", "row")}
             out += self.paths(rest, cs, st)

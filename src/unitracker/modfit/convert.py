@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 import sympy
 from pysidtracker import gridcmp
@@ -34,7 +35,6 @@ from unitracker.player.trace import Trace, trace
 from unitracker.player.vm import ONSET, fold_empty
 
 IDENTITY = "v"
-CHUNK = 256
 
 
 class ConversionError(ValueError):
@@ -101,28 +101,6 @@ def _analysis(ir: dict, key: str) -> Analysis:
     if key not in _ANALYSES:
         _ANALYSES[key] = Analysis(ir)
     return _ANALYSES[key]
-
-
-def _start_sig(occ) -> tuple:
-    """The inputs of :meth:`Analysis.key`: the unit, its start cells, hook and first value."""
-    return (
-        occ.unit,
-        json.dumps(occ.start, sort_keys=True, default=repr),
-        repr(occ.hook),
-        occ.v,
-    )
-
-
-def keys_task(ir: dict, key: str, occurrences: list) -> list:
-    """``(start key, error)`` of a chunk of occurrences, one derivation per distinct start."""
-    an = _analysis(ir, key)
-    out, seen = [], {}
-    for occ in occurrences:
-        sig = _start_sig(occ)
-        if sig not in seen:
-            seen[sig] = (an.key(an.unit(occ.unit), occ), occ.error)
-        out.append(seen[sig])
-    return out
 
 
 def derive_task(ir: dict, key: str, start: tuple, cache: Path | None):
@@ -260,14 +238,12 @@ def derive_all(ir: dict, obs: Trace, cache: Path | None, workers=None) -> tuple:
     # pylint: disable=too-many-locals
     key = ir_key(ir)
     occs = obs.occurrences
-    chunks = [occs[i : i + CHUNK] for i in range(0, len(occs), CHUNK)]
-    pool = Pool(workers, max(len(chunks), 1))
+    an = _analysis(ir, key)
+    for occ in tqdm(occs, desc="start keys", unit="occ", leave=False):
+        occ.key = an.key(an.unit(occ.unit), occ)
+    distinct = list(dict.fromkeys(o.key for o in occs if o.key is not None))
+    pool = Pool(workers, max(len(distinct), 1))
     try:
-        got = pool.map(keys_task, [(ir, key, c) for c in chunks], "start keys")
-        for chunk, keys in zip(chunks, got):
-            for occ, (start, error) in zip(chunk, keys):
-                occ.key, occ.error = start, error
-        distinct = list(dict.fromkeys(o.key for o in occs if o.key is not None))
         found = dict(
             zip(
                 distinct,
@@ -276,7 +252,7 @@ def derive_all(ir: dict, obs: Trace, cache: Path | None, workers=None) -> tuple:
         )
     finally:
         pool.close()
-    return found, group_texts(_analysis(ir, key), occs, found)
+    return found, group_texts(an, occs, found)
 
 
 # ---- rewriting -----------------------------------------------------------------------
