@@ -5,6 +5,7 @@ import importlib
 from pysidtracker import SidParseError, find_format, gridcmp
 
 from unitracker.lift import verify as proof
+from unitracker.playroutine.library import library
 
 LIFTS = {
     "defmon": ("unitracker.lift.defmon", "DefmonLift"),
@@ -41,4 +42,10 @@ def verify(document_text: str, raw_sid: bytes, subtune=None, ticks: int = 3007) 
     """The :class:`~pysidtracker.gridcmp.Verdict` of a generic document against ``ticks``
     ticks of the native player of ``raw_sid``'s ``subtune`` (by default its header's)."""
     native = find_format(raw_sid).play(raw_sid, subtune)
-    return proof.compare(document_text, native.render_grid(ticks))
+    return proof.compare(document_text, native.render_grid(ticks), tol=tolerance(raw_sid, subtune))
+
+
+def tolerance(raw: bytes, subtune=None):
+    """The gridcmp tolerance the playroutine of ``raw``'s lifter declares (``tolerance``), or
+    None: its grids compare exactly."""
+    return library(lifter(raw, subtune).playroutine).get("tolerance")

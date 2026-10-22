@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 import sympy
+from pysidtracker import gridcmp
 from unitracker_grammar.expr import ExpressionError, source
 
 from unitracker.cache import CACHE, Pool, cached, content_key
@@ -30,7 +31,7 @@ from unitracker.modfit.exprs import Analysis
 from unitracker.modfit.replay import Replay, Stepper
 from unitracker.player import reach
 from unitracker.player.modulation import INIT, declared, unit_command, unit_width
-from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
+from unitracker.player.vm import ONSET, SongPlayer, fold_empty
 
 IDENTITY = "v"
 CHUNK = 256
@@ -1069,15 +1070,16 @@ class Conversion:
 
 def analyse(ir: dict, cache: Path | None = CACHE, workers=None) -> Conversion:
     """A song's conversion, verified: its expressions play its native register grid exactly,
-    each voice from its first note (see ``first_mismatch``), to its state's recurrence and one
-    period more."""
+    each voice from its first note (``gridcmp.first_mismatch`` under the playroutine's
+    ``tolerance``), to its state's recurrence and one period more."""
     ir = expand_repeats(ir)
     obs = observation(ir, cache)
     ticks = obs["ticks"]
     found, texts = derive_all(ir, obs, cache, workers)
     out = Rewrite(ir, obs, texts).run()
     want = np.asarray(obs["rows"], dtype=np.uint8)
-    bad = first_mismatch(SongPlayer(out).render_grid(ticks), want, obs["starts"])
+    tol = ir["playroutine"].get("tolerance")
+    bad = gridcmp.first_mismatch(SongPlayer(out).render_grid(ticks), want, obs["starts"], tol=tol)
     if bad is not None:
         raise ConversionError(f"the expressions play differently: tick {bad[0]}, register {bad[1]}")
     return Conversion(ir, ticks, obs, found, texts, out)

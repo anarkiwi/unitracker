@@ -147,7 +147,8 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
    go into phrase variants (`p3~1`); a track's loop is unrolled where its passes differ.
    `retire` fields are cleared in every row of their record.
 5. **Verify.** The rewritten song's register grid must equal the native song's over the whole
-   window, each voice from its first note (`vm.first_mismatch`).
+   window, each voice from its first note (`gridcmp.first_mismatch` under the playroutine's
+   `tolerance`).
 
 Observations, derivations and conversions are cached in `$UNITRACKER_CACHE` (default
 `out/modfit/cache/`) under the sha256 of the song and the code identity

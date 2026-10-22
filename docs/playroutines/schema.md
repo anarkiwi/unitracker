@@ -10,6 +10,7 @@ constants: {name: int}
 defaults: {clock: {cycles_per_tick: 19656, clock_hz: 985248}, voices: 3, tempo: 6}   # optional; the lifted song's unless the tune gives its own (no tempo by default)
 tables: {name: [ints]}                    # player-build data; reads out of range give 0
 note_offset: 0                            # frequency-table index of format note 0; default 0
+tolerance: carry                          # a gridcmp tolerance its grids compare under; default none (exact)
 instrument: {type: ins, base: 0}          # the record type .name refers to; index = value - base
                                           # default: the type decoded as ins, base 0
                                           # event: {type, column, commands, restart}: see Instrument columns

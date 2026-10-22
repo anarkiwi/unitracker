@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import sympy
 import z3
-from conftest import gt_tune
+from conftest import gt_tune, vm_mismatch
 
 from unitracker.playroutine.library import library
 from unitracker.lift import goattracker
@@ -27,7 +27,6 @@ from unitracker.modfit import phase as P
 from unitracker.modfit.phase import Machine, derive, unproved_functions
 from unitracker.modfit.replay import Replay
 from unitracker.player.modulation import declared
-from unitracker.player.vm import SongPlayer
 
 PHI, V, N = G.PHI, G.V, G.N
 GT_FREQ, DM_FREQ = {"word": "ftab"}, {"hi": "note_hi", "lo": "note_lo"}
@@ -787,7 +786,7 @@ def test_a_tune_loads_with_its_native_modulations_and_plays_its_native_player(me
     song = exprs_report.load(metal_warrior)
     assert song.player == "goattracker2"
     assert not song.ir.get("exprs")
-    assert SongPlayer(song.ir).mismatch(exprs_report.native_grid(song, 600)) is None
+    assert vm_mismatch(song.ir, exprs_report.native_grid(song, 600)) is None
 
 
 def test_driven_replay_matches_and_a_wrong_expression_does_not(gt_song):

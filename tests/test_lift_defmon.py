@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from pydefmon import DefmonPlayer
-from conftest import CACHE
+from conftest import CACHE, vm_mismatch
 from pysidtracker.testing import resolve_tune
 from irs import song as ir_song
 
@@ -314,7 +314,7 @@ def test_a_build_plays_its_replay(request, tune, variants, period):
     song = dm.DefmonLift.from_sid(raw, expressions=False).run()
     assert song["playroutine"]["constants"]["trabs"] == int("absolute" in variants)
     native = np.asarray(DefmonPlayer(raw).render_grid(500), dtype=np.uint8)
-    assert SongPlayer(song).mismatch(native) is None
+    assert vm_mismatch(song, native) is None
 
 
 @pytest.mark.parametrize(

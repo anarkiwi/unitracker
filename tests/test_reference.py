@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
-from conftest import assert_plays
+from conftest import assert_plays, tolerance
 from pysidtracker import SidParseError, find_format
 from pysidtracker.survey import load_render, renderer
 
@@ -141,7 +141,7 @@ def test_the_players_share_only_the_shared_vocabulary(references):
 @pytest.mark.parametrize("name", TUNES)
 def test_the_generic_document_plays_unitracker_player_to_its_known_difference(references, name):
     ref = references[name]
-    verdict = verify.compare(ref.generic, ref.native)
+    verdict = verify.compare(ref.generic, ref.native, tol=tolerance(ref.song))
     assert verdict.onset == GENERIC[name] and not verdict.ok
     assert verdict.played == len(ref.native) and verdict.whole[0] <= verdict.onset[0]
     assert verdict.line().startswith(f"mismatch: tick {GENERIC[name][0]}, register $")

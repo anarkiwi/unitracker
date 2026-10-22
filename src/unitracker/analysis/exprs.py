@@ -128,7 +128,8 @@ def song_lines(song: Song, workers) -> tuple:
     an = conv.analysis
     text = document.write(conv.out)
     ticks = TICKS[song.player]
-    verdict = verify.compare(text, native_grid(song, ticks))
+    tol = song.ir["playroutine"].get("tolerance")
+    verdict = verify.compare(text, native_grid(song, ticks), tol=tol)
     lines = [f"## {song.path.stem} ({song.player})"]
     occs = conv.obs["occurrences"]
     lines.append(f"  occurrences {len(occs)} over {conv.ticks} ticks (to the state's recurrence "

@@ -30,7 +30,7 @@ from unitracker.lift import backends, verify
 from unitracker.lift.base import LiftError, start_song
 from unitracker.player import oracle
 from unitracker.player.canonical import REGISTERS
-from unitracker.player.vm import SongPlayer, event_commands, runs
+from unitracker.player.vm import SongPlayer, event_commands
 
 FIELDS = (
     "doc",
@@ -67,7 +67,7 @@ def span(a: int, b: int) -> str:
 
 def brief(verdict, shown: int = 6) -> str:
     """A mismatch's differing registers on one line: each, its span, and its first values."""
-    entries = runs(list(verdict.cells))
+    entries = gridcmp.runs(list(verdict.cells), REGISTERS)
     parts = [
         f"${e['reg']:02X} {e['name']}: {e['cells']} {'tick' if e['cells'] == 1 else 'ticks'} "
         f"{span(e['from'], e['to'])} (doc {e['runs'][0]['values'][0][2]:02x}, "
@@ -96,7 +96,9 @@ def vm_verdict(lift, song: dict, ticks: int, registers: str) -> gridcmp.Verdict:
         other = np.ones(theirs.shape[1], dtype=bool)
         other[[int(r, 0) for r in registers.split(",")]] = False
         ours[:, other] = theirs[: len(ours), other]
-    return gridcmp.verdict_onset(ours, player.starts, theirs)
+    return gridcmp.verdict_onset(
+        ours, player.starts, theirs, tol=song["playroutine"].get("tolerance")
+    )
 
 
 def lifted(path: Path, opts: dict) -> tuple:
@@ -583,7 +585,7 @@ def grid(args) -> int:
     ours, starts = oracle.play(doc, args.ticks, progress=True)
     raw = shared.tune(args.sid).read_bytes()
     theirs = np.asarray(find_format(raw).play(raw, args.subtune).render_grid(args.ticks))
-    verdict = gridcmp.verdict_onset(ours, starts, theirs)
+    verdict = gridcmp.verdict_onset(ours, starts, theirs, tol=backends.tolerance(raw, args.subtune))
     if args.grids:
         gridcmp.write_grid(ours, args.grids / "doc.csv.zst")
         gridcmp.write_grid(theirs, args.grids / "native.csv.zst")
@@ -613,7 +615,7 @@ def explain(args, doc: str, raw: bytes, played: tuple) -> str:
     if args.explain == "vm":
         other = backends.lift(raw, subtune)
         theirs = SongPlayer(other).render_grid(args.ticks)
-    verdict = gridcmp.verdict_onset(ours, starts, theirs)
+    verdict = gridcmp.verdict_onset(ours, starts, theirs, tol=backends.tolerance(raw, subtune))
     why = verify.explain(verdict, doc, (ours, theirs), other, args.doc.stem, subtune=subtune)
     return f"\n{args.explain}: no difference" if why is None else "\n" + why.text()
 

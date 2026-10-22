@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import sympy
 import z3
+from conftest import vm_mismatch
 from pydefmon import DefmonPlayer
 from pysidtracker import SidImage
 from unitracker_grammar import expr as xexpr
@@ -262,7 +263,7 @@ def test_a_wrong_constant_or_a_dropped_flag_in_a_reference_breaks_its_grid(
     references, name, ticks, edit
 ):
     ref = references[name]
-    assert SongPlayer(edit(ref.ir())).mismatch(ref.native[:ticks]) is not None
+    assert vm_mismatch(edit(ref.ir()), ref.native[:ticks]) is not None
 
 
 # ---- conversion: chip units -------------------------------------------------------------
@@ -887,7 +888,7 @@ def test_the_transcription_plays_the_replays_offset(references):
     assert not np.array_equal(ref.native[:, 0x16], native[:, 0x16])
     ir = defmon.DefmonLift.from_sid(raw, expressions=False).run()
     assert {r.get("cp") for r in ir["records"]["sidtab"].values()} == {None, 5, 0xD0}
-    assert SongPlayer(ir).mismatch(native) is None
+    assert vm_mismatch(ir, native) is None
 
 
 def replay(z: dict, wrap: bool = True) -> tuple:
