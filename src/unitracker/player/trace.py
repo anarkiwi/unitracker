@@ -9,12 +9,14 @@ import itertools
 from pathlib import Path
 
 import numpy as np
+from unitracker_grammar import table as frequencies
 
 from unitracker.cache import CACHE, cached, ir_key
 from unitracker.player import reach
 from unitracker.player.checkpoint import Baseline
 from unitracker.player.modulation import Modulation, declared
 from unitracker.player.vm import SongPlayer
+from unitracker.playroutine.library import DEFAULTS
 
 KEPT = 4
 
@@ -118,7 +120,9 @@ class Trace:  # pylint: disable=too-many-instance-attributes
         fired: ``(tick, cell, voice, occurrence, expression)`` per expression firing, ``cell``
             indexing ``cells``, ``voice`` -1 for a global unit's.
         reads: each table's in-range entries read, ``(index, first tick)`` rows.
-        words: the frequency word of each internal note read (None for the format's ``F``).
+        words: the frequency word of each internal note over ``F``'s span and every note read
+            (None for the format's ``F``).
+        end: the ticks played when every voice had ended, None while one plays on.
         tables: the modulator tables.
         baseline: the :class:`Baseline` a candidate resumes from.
     """
@@ -133,9 +137,10 @@ class Trace:  # pylint: disable=too-many-instance-attributes
     fired: np.ndarray
     cells: tuple
     reads: dict
-    words: dict | None
+    words: list | None
     tables: dict
     baseline: Baseline | None
+    end: int | None
 
     @property
     def frames(self) -> int:
@@ -201,49 +206,73 @@ def unlogged(mod: Modulation) -> Modulation:
     return mod
 
 
+def _reads(player, log: dict) -> dict:
+    """Each table's in-range entries ``log`` notes, ``(index, first tick)`` rows."""
+    tables, out = player.codegen.tables, {}
+    for (kind, name, index), at in log.items():
+        if kind == "T" and 0 <= index < len(tables[name]):
+            out.setdefault(name, []).append((index, at))
+    return {n: np.asarray(r, dtype=np.int64) for n, r in out.items()}
+
+
+def _words(ir: dict, player, reads: dict) -> list | None:
+    """The player's frequency word of each internal note over ``F``'s span and every note
+    read, or None where the player has no ``_F``."""
+    word = player.namespace.get("_F")
+    if word is None:
+        return None
+    spec = declared(ir["playroutine"]) or {}
+    offset = int(ir["playroutine"].get("note_offset", 0))
+    read = [reads[t][:, 0] - offset for t in (spec.get("freq") or {}).values() if t in reads]
+    top = max((int(r.max()) for r in read if len(r)), default=-1)
+    clock = int((ir.get("clock") or DEFAULTS["clock"])["clock_hz"])
+    return [int(word(k)) for k in range(max(len(frequencies(clock)), top + 1))]
+
+
+def _fired(log: list) -> tuple:
+    """``(rows, cells)`` of a :func:`fired_log` as :attr:`Trace.fired` holds it."""
+    cells = tuple(dict.fromkeys(cell[0] for _, cell, _, _ in log))
+    index = {c: i for i, c in enumerate(cells)}
+    rows = [(t, index[c[0]], -1 if c[1] is None else c[1], s, x) for t, c, s, x in log]
+    return np.asarray(rows, dtype=np.int64).reshape(len(rows), 5), cells
+
+
 def record(ir: dict, limit: int = reach.MAX_TICKS, progress: bool = True) -> Trace:
     """Play ``ir`` once to its state's recurrence and a period more, or ``limit + 1`` ticks
     where it does not recur by ``limit``, recording its :class:`Trace`; the occurrences are an
     observing modulation's, which snapshots every cell at each start."""
     player = SongPlayer(ir, watch=True)
     seen = Attribution(unlogged(Modulation(player, lambda unit, occ: None)))
-    fired, log = fired_log(player), {}
-    base = Baseline(player, limit, log, progress)
+    fired, log, ended = fired_log(player), {}, []
+
+    def watch(p):
+        if not ended and all(cells[-1].ended for cells in p.voice_cells):
+            ended.append(p.ticks)
+
+    base = Baseline(player, limit, log, progress, watch)
     rows = list(base.rows)
     if base.found is not None:
         while player.ticks < sum(base.found):
             player.play_frame()
             rows.append(tuple(player.regs))
-    tick, period = base.found or (None, None)
     for occ in seen.occurrences:
         occ.derived = occ.derived if occ.derived is None else True
-    tables = player.codegen.tables
-    reads: dict = {}
-    for (kind, name, index), at in log.items():
-        if kind == "T" and 0 <= index < len(tables[name]):
-            reads.setdefault(name, []).append((index, at))
-    spec = declared(ir["playroutine"]) or {}
-    offset, word = int(ir["playroutine"].get("note_offset", 0)), player.namespace.get("_F")
-    notes = {i - offset for t in (spec.get("freq") or {}).values() for i, _ in reads.get(t, ())}
-    cells = tuple(dict.fromkeys(cell[0] for _, cell, _, _ in fired))
-    index = {c: i for i, c in enumerate(cells)}
+    reads, (rows_fired, cells) = _reads(player, log), _fired(fired)
     return Trace(
         rows=np.asarray(rows, dtype=np.uint8).reshape(len(rows), -1),
         starts=tuple(player.starts),
-        tick=tick,
-        period=period,
+        tick=base.found[0] if base.found else None,
+        period=base.found[1] if base.found else None,
         occurrences=seen.occurrences,
         events=seen.events,
         plays=seen.plays,
-        fired=np.asarray(
-            [(t, index[c[0]], -1 if c[1] is None else c[1], s, x) for t, c, s, x in fired],
-            dtype=np.int64,
-        ).reshape(len(fired), 5),
+        fired=rows_fired,
         cells=cells,
-        reads={n: np.asarray(r, dtype=np.int64) for n, r in reads.items()},
-        words=None if word is None else {k: int(word(k)) for k in notes if k >= 0},
+        reads=reads,
+        words=_words(ir, player, reads),
         tables=spec_tables(player),
         baseline=base if base.found is not None else None,
+        end=ended[0] if ended else None,
     )
 
 

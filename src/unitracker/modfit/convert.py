@@ -19,7 +19,7 @@ import sympy
 from pysidtracker import gridcmp
 from unitracker_grammar.expr import ExpressionError, source
 
-from unitracker.cache import CACHE, Pool, cached, code_identity, content_key, ir_key
+from unitracker.cache import CACHE, Pool, cached, content_key, ir_key
 
 from unitracker.playroutine.codec import command_code, command_variants, evaluate
 from unitracker.document.events.lifetime import selected

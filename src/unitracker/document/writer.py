@@ -5,7 +5,6 @@ native note table that differs from ``F`` where the song reads it is the documen
 """
 
 import ast
-import itertools
 import re
 from dataclasses import dataclass, field
 
@@ -193,7 +192,10 @@ def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None =
     most ``max_ticks + 1`` where given, stands for that of a song that does neither within
     ``max_ticks``, read over those played."""
     run = trace.trace(ir, max_ticks)
-    if run.end is not None and run.end <= min(max_ticks, max_ticks if run.tick is None else run.tick) + 1:
+    if (
+        run.end is not None
+        and run.end <= min(max_ticks, max_ticks if run.tick is None else run.tick) + 1
+    ):
         return native_from(ir, run, run.end)
     if run.recurs(max_ticks):
         return native_from(ir, run)
