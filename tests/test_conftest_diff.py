@@ -2,6 +2,7 @@
 tune's 6502, the porting tool's grid diff, and their xfail line."""
 
 import struct
+from functools import partial
 from types import SimpleNamespace
 
 import conftest
@@ -73,7 +74,7 @@ def verdict(song: dict, theirs) -> tuple:
 
 
 def test_explain_traces_the_native_player_on_the_tick_it_last_stored_the_register():
-    song, native = counting(2), lambda: Counter(b"", 0)
+    song, native = counting(2), partial(Counter, b"", 0)
     ver, grids = verdict(song, np.asarray(native().render_grid(6), np.uint8))
     assert ver.onset == (2, 0x18)
     why = verify.explain(ver, song, grids, native, name="counter")
