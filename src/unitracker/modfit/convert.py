@@ -26,7 +26,7 @@ from unitracker.playroutine.records import chained, program_path, record_types
 from unitracker.playroutine.codec import row_codecs
 from unitracker.playroutine.xexpr import ExpressionError, source
 from unitracker.modfit import grammar as G
-from unitracker.modfit.exprs import CHUNK, Analysis, Pool, _cached, content_key
+from unitracker.modfit.exprs import Analysis, Pool, _cached, content_key
 from unitracker.modfit.replay import Replay, Stepper
 from unitracker.player import reach
 from unitracker.player.modulation import INIT, declared, unit_command, unit_width
@@ -34,6 +34,7 @@ from unitracker.player.vm import ONSET, SongPlayer, first_mismatch, fold_empty
 
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
 IDENTITY = "v"
+CHUNK = 256
 _HERE = Path(__file__).resolve().parent
 SOURCES = (
     sorted(_HERE.glob("*.py"))
