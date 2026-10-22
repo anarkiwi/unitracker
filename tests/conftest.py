@@ -3,7 +3,6 @@ and the tests' failure reports, whydiff's or the porting tool's grid diff of a m
 verdict, carried on the test's expected failure."""
 
 import copy
-import importlib.util
 import os
 import pickle
 from dataclasses import dataclass
@@ -39,10 +38,6 @@ ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / ".tunecache"
 os.environ.setdefault("UNITRACKER_WORKERS", str(max(2, min(8, len(os.sched_getaffinity(0)) // 8))))
 os.environ.setdefault("UNITRACKER_CACHE", str(CACHE / "modfit"))
-
-_spec = importlib.util.spec_from_file_location("grid_diff", ROOT / "tools" / "grid_diff.py")
-grid_diff = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(grid_diff)
 
 
 def hvsc_tune(name: str, tune: str, doc: str):
@@ -165,8 +160,8 @@ def attach(request, text: str) -> str:
 
 
 def grid_diff_of(request, ver: verify.Verdict) -> str:
-    """The grid diff of ``ver`` (tools/grid_diff.py's report), attached to the test's report."""
-    return attach(request, grid_diff.report(ver))
+    """The grid diff of ``ver`` (:meth:`verify.Verdict.report`), attached to the test's report."""
+    return attach(request, ver.report())
 
 
 def assert_plays(request, song: dict, theirs, native) -> None:

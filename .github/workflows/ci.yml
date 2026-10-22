@@ -28,8 +28,8 @@ jobs:
           key: tunecache-${{ hashFiles('tests/conftest.py', 'src/unitracker/modfit/**') }}
           restore-keys: tunecache-
       - run: pip install -e ".[dev]"
-      - run: black --check src tests
+      - run: black --check src tests tools
       - run: lint-imports
       - run: pylint src
-      - run: pylint --disable=missing-function-docstring tests
+      - run: pylint --disable=missing-function-docstring tests tools
       - run: pytest -n auto --cov=unitracker --cov-fail-under=85

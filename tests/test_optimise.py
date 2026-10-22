@@ -276,7 +276,7 @@ def kept(result) -> list:
 def plays_alike(source: dict, ir: dict, text: str) -> tuple[object, Verdict]:
     """``(mismatch, verdict)``: whether ``ir`` replays ``source`` on the VM and document
     ``text`` plays the source's grid on unitracker-player from each voice's first note;
-    ``verdict`` is the grids' diff (tools/grid_diff.py's report on it)."""
+    ``verdict`` is the grids' diff (its :meth:`~verify.Verdict.report`)."""
     native = document.native_state(source)
     grid, _ = oracle.play(document.write(source, native), native.ticks)
     return optimise.mismatch(optimise.Trace(source), ir), compare(text, grid)

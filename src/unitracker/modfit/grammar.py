@@ -170,6 +170,17 @@ def _z3_free(e, env: dict, facts: list):
     return to_z3(e, env)
 
 
+def equivalent(a, b, bounds: tuple = (), wrap: int | None = None) -> bool:
+    """Whether terms ``a`` and ``b`` agree, modulo ``2**wrap`` when given, for every value of
+    their symbols within ``bounds``, each ``(name, lo, hi)`` inclusive (z3)."""
+    env, facts = {}, []
+    za, zb = _z3_free(a, env, facts), _z3_free(b, env, facts)
+    facts += [z3.And(env[n] >= lo, env[n] <= hi) for n, lo, hi in bounds if n in env]
+    solver = z3.Solver()
+    solver.add(*facts, za != zb if wrap is None else (za - zb) & ((1 << wrap) - 1) != 0)
+    return solver.check() == z3.unsat
+
+
 @functools.lru_cache(maxsize=None)
 def forced(context: tuple, b, domain: tuple = ()) -> int | None:
     """The value bracket ``b`` must take where every ``(bracket, value)`` of ``context`` holds.

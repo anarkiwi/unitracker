@@ -174,7 +174,7 @@ def test_an_unknown_format_is_refused(references):
 
 
 def test_the_survey_renderer_plays_the_document_as_the_native_player(references):
-    ref, tool = references["metal_warrior"], str(ROOT / "tools" / "oracle_hvsc.py")
+    ref, tool = references["metal_warrior"], str(ROOT / "tools" / "corpus.py")
     grid, info = load_render(tool)(ref.raw, 1, 300)
     assert grid.shape == (300, 25) and grid.dtype.name == "int16"
     assert info == {"backend": "goattracker2", "chars": len(ref.generic)}

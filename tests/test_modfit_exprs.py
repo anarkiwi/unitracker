@@ -143,6 +143,13 @@ def test_a_text_that_does_not_read_back_is_refused(monkeypatch):
         G.parse("v << 2")
 
 
+def test_terms_are_equivalent_within_their_bounds_and_modulo_a_wrap():
+    v, shifted = G.parse("abs(v)"), G.parse("v + 256")
+    assert G.equivalent(v, G.parse("v"), (("v", 0, 100),))
+    assert not G.equivalent(v, G.parse("v"))
+    assert not G.equivalent(shifted, G.parse("v")) and G.equivalent(shifted, G.parse("v"), wrap=8)
+
+
 def test_a_closed_form_is_proved_as_its_text_reads():
     m = machine("goattracker2", "filter", filttab=GT_TURN)
     start = m.start({"fptr": 1, "ftime": 0})

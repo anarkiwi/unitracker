@@ -6,9 +6,10 @@ the generic VM's grid diverges (``explain``)."""
 from dataclasses import dataclass
 
 import numpy as np
-from pysidtracker import whydiff
+from pysidtracker import gridcmp, whydiff
 
 from unitracker.player import oracle
+from unitracker.player.canonical import REGISTERS
 from unitracker.player.vm import SongPlayer, diff, runs
 
 
@@ -42,6 +43,21 @@ class Verdict:
             f"mismatch: tick {self.onset[0]}, register ${self.onset[1]:02X}"
             f" (from tick 0: {whole})"
         )
+
+    def report(self) -> str:
+        """The human-readable diff: :meth:`line`'s verdict, then each differing register's tick
+        runs and both grids' values over them (gridcmp's onset report)."""
+        grid = gridcmp.Verdict(
+            n=self.ticks,
+            unit="tick",
+            ok=self.ok,
+            played=self.played,
+            starts=self.starts,
+            onset=self.onset,
+            whole=self.whole,
+            cells=tuple(self.cells),
+        )
+        return gridcmp.runs_report(grid, names=REGISTERS, subject="document", a="doc", b="native")
 
     def summary(self) -> dict:
         """The machine-readable diff: ``{"ok", "ticks", "played", "ended", "starts",

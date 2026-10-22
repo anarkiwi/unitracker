@@ -22,14 +22,14 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | the native replay's register grid | `lift.backends.native_player(raw).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
 | the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
-| where the generic document differs, by register and value (exit 0 on agreement, `--json` the machine-readable diff) | `tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 [--from T --to T] [--json PATH]` |
+| where the generic document differs, by register and value (exit 0 on agreement, `--json` the machine-readable diff) | `tools/corpus.py grid out/porting/doc.yaml TUNE.sid --ticks 3007 [--context N] [--json PATH]` |
 | why the lifter's song diverges: its VM tick beside the native's (a Python player traced, or the raw tune's 6502 on jennings), each with the diverging value's dataflow | `verify.explain(verdict, song, (grid, theirs), native).text()` (pysidtracker's `whydiff`) |
-| the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/firing_schedule.py TUNE.sid --cell pw:0 --ticks A:B` |
-| the verify verdict and forbidden native names for every reference tune | `tools/reference_check.py OUT --forbid NAME ...` (add the tune to `TUNES`) |
-| a modulator's occurrences and derived expressions | `tools/occurrences.py TUNE.sid --unit U --cells c1,c2` |
+| the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/modulators.py firings TUNE.sid --cell pw:0 --ticks A:B` |
+| the verify verdict and forbidden native names for every reference tune | `tools/corpus.py check --out OUT --forbid NAME ...` (add the tune to `tools/shared.py`'s `REFERENCES`) |
+| a modulator's occurrences and derived expressions | `tools/modulators.py occurrences TUNE.sid --unit U --cells c1,c2` |
 | proofs, closed forms, command composition, keyword signatures | `unitracker-modfit {exprs,command,keywords,fit,poly,generic,sweeps,orbit}` ([modfit.md](modulation/modfit.md)) |
 | the size of the generic document | `optimise.tokens(lift.document)` (its `cl100k_base` token count) |
-| how many tunes of the player lift, by failure cause | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |
+| how many tunes of the player lift, by failure cause | `pysidtracker.survey` with `corpus:render` (README) |
 | a reference tune in the tests | `conftest.hvsc_tune(name, "MUSICIANS/...", doc)` |
 | a one-feature tune in the tests | `conftest.gt_tune`, `sw_fx`, `sw_table_byte` (patch a native module), `mini_song`, `table` (an IR song) |
 | iterating a playroutine's command variants | `playroutine.codec.command_variants(spec)` |
@@ -59,8 +59,8 @@ Start from the existing port closest to the target player:
 | [`defmon`](playroutines/defmon.md) | no native instrument: sidTAB programs armed per step on two layers; one step per tick | `instrument: event` with the notes' restarts (`event: {restart}`), `fixed` init records, a `global` unit |
 
 **Files:** none yet. **Verify** the toolchain and the existing ports:
-`PYTHONPATH=src .venv/bin/python tools/reference_check.py out/porting` prints a `verified`
-verdict and `forbidden: none` for each reference tune.
+`PYTHONPATH=src .venv/bin/python tools/corpus.py check --out out/porting` prints a `verified`
+row for each reference tune.
 
 ## 2. Transcribing the replay
 
@@ -136,11 +136,12 @@ print(SongPlayer(backends.lift(raw, expressions=False)).mismatch(theirs))
 ```
 
 It prints `None`, or the first `(tick, register)` that differs. Once the lifter writes a generic
-document (section 6), `tools/grid_diff.py` prints where it differs — each register, the tick
-runs, and the document's and the native's values over them — and both grids over a tick range:
+document (section 6), `tools/corpus.py grid` prints where it differs — each register, the tick
+runs, and the document's and the native's values over them — and both grids around the first
+difference:
 
 ```sh
-PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 100 --from 94 --to 98
+PYTHONPATH=src .venv/bin/python tools/corpus.py grid out/porting/doc.yaml TUNE.sid --ticks 100 --context 2
 ```
 
 It exits 1 on a difference; `--json PATH` (or stdout on `--json`) writes the machine-readable
@@ -271,13 +272,13 @@ it, and gives per unit and label the occurrences, distinct starts, each start's 
 closed form, proof and the invariant it is proved under, the chip map, and where each text is
 written ([modfit.md](modulation/modfit.md#phase-and-value-expressions)). A start that does not prove
 fails the lift, naming the unit, its program and the start ([Lifting](playroutines/lifting.md)).
-`tools/occurrences.py` lists the occurrences one per line with the start cells asked for, and
+`tools/modulators.py occurrences` lists the occurrences one per line with the start cells asked for, and
 `unitracker-modfit command <name>` composes each command's setup and per-tick effect, which checks a
 dispatch transcription before any tune uses it:
 
 ```sh
 PYTHONPATH=src .venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid
-PYTHONPATH=src .venv/bin/python tools/occurrences.py TUNE.sid --unit "pulse A" --cells rowA
+PYTHONPATH=src .venv/bin/python tools/modulators.py occurrences TUNE.sid --unit "pulse A" --cells rowA
 PYTHONPATH=src .venv/bin/unitracker-modfit command <name>
 ```
 
@@ -376,18 +377,18 @@ native package, the description), `docs/playroutines/lifting.md` (its table),
 
 ```sh
 PYTHONPATH=src .venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.yaml
-PYTHONPATH=src .venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid
+PYTHONPATH=src .venv/bin/python tools/corpus.py grid out/porting/doc.yaml TUNE.sid
 ```
 
 `unitracker-lift` exits 0 with `verified: 3007 ticks play the native grid` on its last line when
-the generic document plays the native grid on unitracker-player; `grid_diff.py` names the
+the generic document plays the native grid on unitracker-player; `corpus.py grid` names the
 differing registers and values, and exits 1 on a difference.
 
 ## 7. Tests and acceptance
 
 | test | file | shape |
 |---|---|---|
-| reference tune | `tests/conftest.py` | a session fixture `hvsc_tune(name, "MUSICIANS/.../Tune.sid", doc)` (local `$HVSC`, `.tunecache/`, or the mirror; skipped when unavailable); the path also goes in `tools/reference_check.py`'s `TUNES` |
+| reference tune | `tests/conftest.py` | a session fixture `hvsc_tune(name, "MUSICIANS/.../Tune.sid", doc)` (local `$HVSC`, `.tunecache/`, or the mirror; skipped when unavailable); the path also goes in `tools/shared.py`'s `REFERENCES` |
 | synthetic tunes | `tests/conftest.py` | a builder like `gt_tune`, returning `(decoded tune, native player)` for a one-feature tune, where the native package can build modules |
 | conformance | `tests/test_reference.py` | the `references` fixture lifts once per session and renders the native grid over `REFERENCE_TICKS[name]` (the intro and two loops, in `tests/conftest.py`); the tests check a non-trivial grid (`len(np.unique(ref.native, axis=0))`) and the generic document's verify verdict; add the tune to `TUNES` |
 | dispatch | `tests/test_reference.py` | `backends.detect` against `BACKEND[name]`; the CLI's lift equals the session's lift (a deterministic lift); the CLI's exit status and verdict line |
@@ -399,19 +400,19 @@ differing registers and values, and exits 1 on a difference.
 
 **Acceptance:** `unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0, and so does
 `unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise`, which runs every pass of the
-[optimiser](optimise.md) on the lifter's song before verify; `tools/reference_check.py`, with the
-native table and column names as `--forbid`, prints a `verified` verdict and `forbidden: none`;
+[optimiser](optimise.md) on the lifter's song before verify; `tools/corpus.py check`, with the
+native table and column names as `--forbid`, prints a `verified` row with no forbidden word;
 coverage stays above 85% and the lint is clean. Run `pylint` without `-j`: the parallel run misses cross-module checks such as
 W0621. Then run the HVSC survey over the player's tunes (README) to see which builds and
 features the lifter still refuses.
 
 **Files:** `tests/conftest.py`, `tests/test_reference.py`, `tests/test_lift_<name>.py`,
-`tools/reference_check.py`. **Verify:**
+`tools/shared.py`. **Verify:**
 
 ```sh
 PYTHONPATH=src .venv/bin/black --check src tests tools
 PYTHONPATH=src .venv/bin/pylint src
-PYTHONPATH=src .venv/bin/pylint --disable=missing-function-docstring tests
+PYTHONPATH=src .venv/bin/pylint --disable=missing-function-docstring tests tools
 PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under=85
 ```
 
@@ -419,17 +420,17 @@ PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under
 
 | # | step | files | command (each with `PYTHONPATH=src`) |
 |---|---|---|---|
-| 1 | pick the closest port; fetch the reference tunes | `tests/conftest.py` | `.venv/bin/python tools/reference_check.py out/porting` |
+| 1 | pick the closest port; fetch the reference tunes | `tests/conftest.py` | `.venv/bin/python tools/corpus.py check --out out/porting` |
 | 2 | transcribe the replay: cells, tables, procs, `init`, `tick`, ghost, `onset` | `playroutines/<name>.yaml` | the `expressions=False` snippet of section 2 prints `None` |
 | 3 | a first lifter (a `Lift` subclass) and its registration | `lift/<name>.py`, `lift/backends.py`, `pyproject.toml` | the same snippet, through `backends.lift` and `backends.native_player` |
 | 4 | record types, codec shapes and commands on the shared keys | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit keywords <name>` |
 | 5 | hard restart, chords, filter, lifetime, relative control in their shared forms | `playroutines/<name>.yaml` | `.venv/bin/python -m pytest -n 4 tests/test_format_events.py` |
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |
 | 7 | lift with expressions; verify the generic document on unitracker-player | `<name>.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0 |
-| 8 | where the generic document first differs from the native grid, by register and value | | `.venv/bin/python tools/grid_diff.py out/porting/doc.yaml TUNE.sid --ticks 3007 --json out/porting/diff.json` |
+| 8 | where the generic document first differs from the native grid, by register and value | | `.venv/bin/python tools/corpus.py grid out/porting/doc.yaml TUNE.sid --ticks 3007 --json out/porting/diff.json` |
 | 9 | vocabulary and command tables; the playroutine's doc | `tests/test_format_codec.py`, `tests/test_reference.py`, `docs/playroutines/<name>.md`, `docs/playroutines/lifting.md` | `.venv/bin/python -m pytest -n 4 tests/test_format_codec.py tests/test_playroutine_docs.py tests/test_reference.py` |
 | 10 | conformance, dispatch and lifter tests | `tests/` | `.venv/bin/python -m pytest -n 4 tests/test_reference.py tests/test_lift_<name>.py` |
 | 11 | the optimiser on the lifted tune | `tests/conftest.py` | `.venv/bin/unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise` exits 0 |
-| 12 | verify verdicts and forbidden names | `tools/reference_check.py` | `.venv/bin/python tools/reference_check.py out/porting --forbid <native names>` |
+| 12 | verify verdicts and forbidden names | `tools/shared.py` | `.venv/bin/python tools/corpus.py check --out out/porting --forbid <native names>` |
 | 13 | lint and the full suite | | the four commands of section 7 |
-| 14 | the player's tunes over HVSC | | `pysidtracker.survey` with `tools/oracle_hvsc.py` (README) |
+| 14 | the player's tunes over HVSC | | `pysidtracker.survey` with `corpus:render` (README) |
