@@ -424,7 +424,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             tree = ast.BinOp(base, ast.Add(), tree)
         else:
             tree = _Swap(self._note).visit(tree)
-        text = xexpr._Printer().text(tree)  # pylint: disable=protected-access
+        text = xexpr.printed(tree)
         self.read.update(_TABLE.findall(text))
         written = xexpr.written(text)
         return written if isinstance(written, int) and not freq else text

@@ -22,8 +22,6 @@ from unitracker.player.modulation import INIT, declared, run_of
 
 # ---- derivation --------------------------------------------------------------------------
 
-CHUNK = 256
-
 
 def refusal(exc: BaseException) -> str:
     """The text of a failure to derive a start: the message, named when it is not a ValueError."""
@@ -87,7 +85,7 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         for c in self.spec["notes"]:
             state[c] = self.note_term(start)
         try:
-            paths = machine.form.paths(_dispatched(machine, actions), (), state)
+            paths = machine.form.paths(dispatch(machine.form.pr, actions), (), state)
         except (ValueError, KeyError):
             return {}
         if len(paths) != 1:
@@ -174,19 +172,9 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
         e = lift.fold(lift.term(term))
         if e.free_symbols - {G.N}:
             return None
-        return _eval(e, n, self.tables, self.freq, self.offset)
-
-
-def _eval(e, n: int, tables: dict, freq: dict, offset: int):
-    """``e`` at ``N = n``."""
-    st = Stepper(0, e, tables, freq, offset)
-    st.note = n
-    return st.step(0, 0)[0]
-
-
-def _dispatched(machine: Machine, actions: list) -> list:
-    """``actions`` with playroutine record runs as ``if`` chains."""
-    return dispatch(machine.form.pr, actions)
+        st = Stepper(0, e, self.tables, self.freq, self.offset)
+        st.note = n
+        return st.step(0, 0)[0]
 
 
 # ---- caching and parallel work -----------------------------------------------------

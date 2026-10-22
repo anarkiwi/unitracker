@@ -1,6 +1,4 @@
-"""The canonical SID write order and the normalizer for native write streams."""
-
-from collections.abc import Iterable, Iterator
+"""The canonical SID write order and the register names."""
 
 REG_COUNT = 25
 
@@ -18,31 +16,3 @@ REGISTERS = (
     "res/route",
     "mode/vol",
 )
-
-
-def canonical_frames(
-    frames: Iterable[Iterable[tuple[int, int]]], regs=None
-) -> Iterator[list[list[tuple[int, int]]]]:
-    """Normalize per-frame ordered ``(reg, value)`` writes to canonical flushes.
-
-    A frame is cut at each register written twice in its current segment; each
-    segment keeps its changed registers in canonical order, and empty ones drop.
-    """
-    state = list(regs) if regs is not None else [None] * REG_COUNT
-    for writes in frames:
-        flushes = []
-        segment = {}
-        for reg, value in [*writes, (None, None)]:
-            if reg is None or reg in segment:
-                flush = sorted(
-                    ((r, v) for r, v in segment.items() if state[r] != v),
-                    key=lambda w: _RANK[w[0]],
-                )
-                for r, v in flush:
-                    state[r] = v
-                if flush:
-                    flushes.append(flush)
-                segment = {}
-            if reg is not None:
-                segment[reg] = value & 0xFF
-        yield flushes

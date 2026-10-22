@@ -175,7 +175,7 @@ def _spelled(text: str, found: list, hold: str | None, zero: bool) -> str:
 def _compiles(text: str) -> bool:
     """Whether a player that nests each operation in parentheses compiles ``text``."""
     try:
-        compile(xexpr.source(text, set(_TABLE.findall(text)))[0], "<expression>", "eval")
+        compile(xexpr.source(text, _TABLE.findall(text)), "<expression>", "eval")
     except (SyntaxError, RecursionError, MemoryError):
         return False
     return True

@@ -139,17 +139,3 @@ def solve(words: list, base: int) -> tuple[str, dict] | None:
             if _fit(name, candidate, words, base):
                 return name, candidate
     return None
-
-
-def emit(bags: list[dict]) -> tuple[dict, list[dict]]:
-    """The instrument's first note's bag and each later note's ``!set`` difference, empty for
-    a bag equal to the first's."""
-    first = bags[0]
-    out = []
-    for bag in bags[1:]:
-        diff = {k: v for k, v in first.items() if bag.get(k) != v}
-        for k, v in bag.items():
-            if k not in first and v is not None:
-                diff[k] = v
-        out.append(diff)
-    return first, out
