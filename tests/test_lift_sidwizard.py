@@ -1,13 +1,13 @@
 """SID-Wizard lifting: tables, chords, orderlists, events, the playroutine's limits, and
 Csillag (its reference lift, and patched cuts of it) playing its native player."""
 
+import csv
 import dataclasses
-import importlib
 import itertools
 import re
-from pathlib import Path
 from types import SimpleNamespace
 
+import corpus
 import numpy as np
 import pytest
 import yaml
@@ -35,7 +35,6 @@ from unitracker.playroutine.library import library
 from unitracker.player.vm import SongPlayer
 
 TICKS = 2000
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_tables_allocate_programs_that_end_or_loop():
@@ -664,25 +663,23 @@ def test_table_jumps_loop_their_programs_and_play_the_player(tune, tables, reque
     assert_plays(request, ir, np.asarray(SWMPlayer(swm).render_grid(TICKS)), lambda: SWMPlayer(swm))
 
 
-def test_the_tally_tool_lifts_checks_and_counts_a_tune_list(
-    addaraya, tmp_path, capsys, monkeypatch
-):
-    monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    tool = importlib.import_module("lift_tally")
+def test_the_corpus_tool_lifts_replays_and_counts_a_tune_list(addaraya, tmp_path, capsys):
     (tmp_path / "bad.sid").write_bytes(b"PSID")
     tunes = tmp_path / "tunes.csv"
     tunes.write_text(
         f"path,player,songs\n{addaraya},SidWizard,1\nbad.sid,SidWizard,1\nother.sid,GoatTracker,1\n"
     )
-    out = tmp_path / "results.csv"
-    argv = [str(tunes), "--root", str(tmp_path), "--player", "SidWizard", "--songs", "1"]
-    assert tool.main([*argv, "--check", "200", "--registers", "2,3", "--out", str(out)]) == 0
-    results = dict(line.split(",", 1) for line in out.read_text().splitlines()[1:])
-    assert results[str(addaraya)] == "match" and len(results) == 2
-    assert "    1  match" in capsys.readouterr().out
-    assert tool.main([str(out), "--only", "^match$", "--workers", "1"]) == 0
-    assert capsys.readouterr().out.strip() == "1  lifted"
-    assert tool.cause("pattern $1A row 12: tick 3") == "pattern # row #: tick #"
+    args = ["--hvsc", str(tmp_path), "--player", "SidWizard", "--subtunes", "1", "--jobs", "1"]
+    first, second = tmp_path / "first", tmp_path / "second"
+    argv = ["check", str(tunes), *args, "--plain", "--out", str(first)]
+    assert corpus.main([*argv, "--ticks", "200", "--registers", "2,3"]) == 0
+    rows = {r["path"]: r for r in csv.DictReader((first / "results.csv").open())}
+    assert rows[str(addaraya)]["verified"] == "yes" and len(rows) == 2
+    assert rows["bad.sid"]["gap"] == "SidFormatError: input is too short to contain a SID header"
+    assert "     1  verified" in capsys.readouterr().out
+    rerun = ["check", str(first / "results.csv"), "--only", "^verified$", "--plain"]
+    assert corpus.main([*rerun, "--jobs", "1", "--out", str(second)]) == 0
+    assert capsys.readouterr().out.splitlines()[-1].strip() == "1  lifted"
 
 
 # Csillag's table rows turned into jumps, as ``(instrument, table, row, target row)``: a pulse
