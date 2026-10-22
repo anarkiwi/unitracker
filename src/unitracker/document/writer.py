@@ -188,6 +188,17 @@ def native_state_from(player, ir: dict, ticks: int, first, log: list) -> Native:
     )
 
 
+def native_over(ir: dict, ticks: int) -> Native:
+    """The :class:`Native` of song ``ir`` played ``ticks`` ticks, the bound another song's
+    state recurrence set: the firings a candidate of that song's grid plays."""
+    player = SongPlayer(ir, record_reads=True)
+    log = fired_log(player)
+    play_to(player, 1)
+    first = tuple(player.regs)
+    play_to(player, ticks)
+    return native_state_from(player, ir, ticks, first, log)
+
+
 def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None = None) -> Native:
     """The :class:`Native` of song ``ir``: one replay to its state's recurrence, recording the
     frequency-table entries it reads and its registers after the first tick. ``ticks``, where
