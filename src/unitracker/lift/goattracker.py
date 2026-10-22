@@ -233,6 +233,35 @@ def build_options(player) -> list[int]:
     return [int(player.optimize_pulse), int(player.optimize_realtime)]
 
 
+TABLE_RUNS = (C.CMD_SETWAVEPTR, C.CMD_SETPULSEPTR, C.CMD_SETFILTERPTR)
+
+
+def _needs_instrument(trk: dict, phrases: dict) -> bool:
+    """Whether a voice plays a note or runs a table before its steps name an instrument."""
+    for play in trk["plays"]:
+        for event in phrases[play["phrase"]]:
+            if event.get("instrument"):
+                return False
+            if isinstance(event.get("note"), int) or any(
+                code in TABLE_RUNS and arg for code, arg in event_commands(event)
+            ):
+                return True
+    return False
+
+
+def voice_init(player, tracks: list, phrases: dict) -> dict:
+    """``vinit`` records: the instrument native ``player`` (a pygoattracker player) gives a voice
+    in its init (``mt_initchn``), for each voice that needs one before it names one."""
+    player.render_grid(1)
+    # pylint: disable-next=protected-access
+    chans = player._channels
+    return {
+        v: {"ins": chan.instr & 0x3F}
+        for v, (trk, chan) in enumerate(zip(tracks, chans))
+        if _needs_instrument(trk, phrases)
+    }
+
+
 def _phrases(song, tracks) -> dict:
     """Every pattern the tracks play, lifted to a phrase."""
     out = {}
@@ -500,6 +529,8 @@ class GoatTrackerLift(Lift):
         freq = list(info.note_read[:128]) + [0] * max(0, 128 - len(info.note_read))
         instruments, restarts = instrument_records(song.instruments, adparam)
         tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
+        phrases = _phrases(song, tracks)
+        vinit = voice_init(self.native(), tracks, phrases)
         header = dec.header
         return {
             "unitracker": "ir",
@@ -518,9 +549,10 @@ class GoatTrackerLift(Lift):
                 "pulsetab": pulse_records(song.pulsetable),
                 "filttab": filter_records(song.filtertable),
                 "speedtab": speed_records(song.speedtable),
+                **({"vinit": vinit} if vinit else {}),
             },
             "tracks": tracks,
-            "phrases": _phrases(song, tracks),
+            "phrases": phrases,
             "playroutine": library(self.playroutine),
         }
 

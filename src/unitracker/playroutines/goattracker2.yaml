@@ -43,6 +43,13 @@ record_types:
     fields: {ad: 0, sr: 0, ctrl: 0, pw: 0, filter: 0, speed: 0, vd: 0, freq: 0, restart: 0}
     unwritten: [speed, vd]
     refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, freq: x, restart: restart}
+  # The instrument init gives a voice (mt_initchn, the voice's instr) that plays a note or runs a
+  # table before it names one.
+  vinit:
+    fixed: true
+    form: map
+    fields: [ins]
+    refs: {ins: ins}
   # Hard restart: a lookahead row, read hold ticks before the note (the gate timer), that
   # may turn the gate off and then preset the envelope to the build's one preset; then the
   # note's first-tick row, which writes the first waveform with the gate on, or only the gate.

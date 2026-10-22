@@ -26,6 +26,7 @@ from unitracker.playroutine.codec import CodecError, CommandCodec, RowCodec, row
 from unitracker.playroutine.library import library
 from unitracker.playroutine.records import record_types
 from unitracker.modfit.convert import ConversionError
+from unitracker.player import oracle
 from unitracker.player.vm import SongPlayer, event_commands
 
 
@@ -591,3 +592,13 @@ def test_the_vm_plays_the_builds_pulse_and_realtime_optimisations(build):
     theirs = np.asarray(player().render_grid(400), np.uint8)
     assert vm_mismatch(song, theirs) is None
     assert (build == [1, 1]) == (np.asarray(make().render_grid(400), np.uint8) == theirs).all()
+
+
+def test_a_voice_runs_a_table_before_it_names_an_instrument_on_the_init_instrument():
+    rows = [(None, 0, 9, 1), (24, 1, 0, 0)] + [(None, 0, 0, 0)] * 14
+    pulse = [(0x88, 0), (0x20, 0x10), (0xFF, 2)]
+    text, song, _, _ = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, pulse=pulse))
+    assert song["records"]["vinit"] == {0: {"ins": 1}}
+    init = yaml.safe_load(text)["init"]
+    assert [atom.split("!")[0] for atom in init] == ["-.i1", "-", "-"]
+    assert "-!run:pw1" in text and oracle.play(text, 50)[1][0] is not None
