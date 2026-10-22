@@ -25,7 +25,7 @@ from pygoattracker import (
     TypedSong,
 )
 from pygoattracker import constants as GT
-from pysidtracker import gridcmp
+from pysidtracker import find_format, gridcmp
 from pysidtracker.survey import file_oracle
 from pysidtracker.testing import resolve_tune
 from pysidwizard import parse_sid_song
@@ -281,7 +281,7 @@ class _Shared(dict):
 
 def _reference(name, sid):
     raw = sid.read_bytes()
-    grid = backends.native_player(raw).render_grid(REFERENCE_TICKS[name])
+    grid = find_format(raw).play(raw).render_grid(REFERENCE_TICKS[name])
     lift = backends.lifter(raw)
     song = lift.run()
     return Reference(sid, raw, song, np.asarray(grid, np.uint8), lift.document)

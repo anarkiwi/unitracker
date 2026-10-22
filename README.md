@@ -40,15 +40,16 @@ lift.verdict                         # unitracker-player against the native grid
 backends.verify(text, raw, subtune)  # the verdict of any generic document
 ```
 
-`tools/corpus.py` holds the renderers for pysidtracker's survey: `render` lifts each subtune
-and plays its generic document on unitracker-player, `native` plays the backend's player; both
-are compared with the sidtrace oracle (lift failures are `library_error` rows):
+`tools/corpus.py:render` is the renderer for pysidtracker's survey: it lifts each subtune and
+plays its generic document on unitracker-player; `--format auto` plays the tune's installed
+`pysidtracker` format's native player instead. Both are compared with the sidtrace oracle (lift
+failures are `library_error` rows):
 
 ```sh
 python -m pysidtracker.survey find $HVSC --out out/survey/tunes.csv --player 'goattracker|wizard|defmon'
 PYTHONPATH=tools python -m pysidtracker.survey run $HVSC out/survey/tunes.csv --work out/survey --render corpus:render
 python -m pysidtracker.survey report out/survey/results.csv
-python -m pysidtracker.survey file tools/corpus.py:native TUNE.sid --frames 3007   # one tune; :render for its document
+python -m pysidtracker.survey file --format auto TUNE.sid --frames 3007   # one tune; tools/corpus.py:render for its document
 ```
 
 ## Triage
@@ -65,7 +66,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | what the canonical passes find, prove and refuse over many tunes | `python tools/corpus.py canonical TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
 | how documents use the vocabulary, and which native commands tunes play | `python tools/corpus.py census DOC.yaml\|TUNE.sid ... [--codes 14,15] [--json OUT.json]` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
-| the native player's register grid | `lift.backends.native_player(raw)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
+| the native player's register grid | `pysidtracker.find_format(raw).play(raw, subtune)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
 | why did a modulator not become an expression? | `python tools/modulators.py occurrences TUNE.sid [--unit U] [--cells c1,c2]`, `unitracker-modfit exprs` |
 | on which ticks does the native unit hold each expression its generic modulators play? | `python tools/modulators.py firings TUNE.sid [--cell pw:0] [--ticks A:B] [--timed]` |
 | what writes a unit's cell, and which starts inherit its value | `python tools/modulators.py writers goattracker2 sidwizard defmon` |

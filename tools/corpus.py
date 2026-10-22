@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 from lark import Token, Tree
-from pysidtracker import gridcmp
+from pysidtracker import find_format, gridcmp
 from pysidtracker.survey import deadline
 from tqdm import tqdm
 from unitracker_grammar import parse
@@ -560,7 +560,7 @@ def census(args) -> int:
     return 0
 
 
-# ---- grid and the survey's renderers -----------------------------------------------------
+# ---- grid and the survey's renderer ------------------------------------------------------
 
 
 def grid(args) -> int:
@@ -569,7 +569,7 @@ def grid(args) -> int:
     gridcmp files. 1 when they differ."""
     ours, starts = oracle.play(args.doc.read_text(encoding="utf-8"), args.ticks, progress=True)
     raw = shared.tune(args.sid).read_bytes()
-    theirs = np.asarray(backends.native_player(raw, args.subtune).render_grid(args.ticks))
+    theirs = np.asarray(find_format(raw).play(raw, args.subtune).render_grid(args.ticks))
     verdict = gridcmp.verdict_onset(ours, starts, theirs)
     if args.grids:
         gridcmp.write_grid(ours, args.grids / "doc.csv.zst")
@@ -599,12 +599,6 @@ def render(data, song, nframes):
     played = oracle.play(lift.document, nframes)[0]
     info = {"backend": backends.detect(data), "chars": len(lift.document)}
     return np.asarray(played, np.int16), info
-
-
-def native(data, song, nframes):
-    """The survey renderer of 1-based ``song`` of a ``.sid`` on its backend's native player."""
-    played = backends.native_player(data, song - 1).render_grid(nframes)
-    return np.asarray(played, np.int16), {"backend": backends.detect(data)}
 
 
 def main(argv=None) -> int:

@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 import yaml
 from conftest import assert_plays
-from pysidtracker.survey import load_render
+from pysidtracker import SidParseError, find_format
+from pysidtracker.survey import load_render, renderer
 
 from unitracker import cli, document
 from unitracker.lift import backends, verify
@@ -64,7 +65,7 @@ def test_elided_in():
 def test_the_lift_replays_its_native_player(references, name, request):
     ref = references[name]
     assert len(np.unique(ref.native, axis=0)) > 500
-    assert_plays(request, ref.ir(), ref.native, lambda: backends.native_player(ref.raw))
+    assert_plays(request, ref.ir(), ref.native, lambda: find_format(ref.raw).play(ref.raw))
 
 
 def test_the_format_example_is_the_metal_warrior_document(references):
@@ -164,7 +165,7 @@ def test_the_lift_tool_writes_the_generic_document_and_its_verdict(
 def test_an_unknown_format_is_refused(references):
     raw = bytearray(references["metal_warrior"].raw)
     raw[0x7C:] = bytes(len(raw) - 0x7C)
-    with pytest.raises(backends.UnknownFormat):
+    with pytest.raises(SidParseError):
         backends.detect(bytes(raw))
 
 
@@ -174,8 +175,8 @@ def test_the_survey_renderer_plays_the_document_as_the_native_player(references)
     assert grid.shape == (300, 25) and grid.dtype.name == "int16"
     assert info == {"backend": "goattracker2", "chars": len(ref.generic)}
     assert (grid == oracle.play(ref.generic, 300)[0]).all()
-    grid, info = load_render(tool.replace(".py", ".py:native"))(ref.raw, 1, 100)
-    assert info == {"backend": "goattracker2"} and (grid == ref.native[:100]).all()
+    grid, info = renderer(fmt="auto")(ref.raw, 1, 100)
+    assert info == {"format": "goattracker2"} and (grid == ref.native[:100]).all()
 
 
 @pytest.mark.parametrize("name", TUNES)
@@ -184,4 +185,4 @@ def test_the_optimised_tune_plays_its_native_player(references, optimised_tunes,
     assert result.after < result.before and any(f.kept for f in result.findings)
     assert result.text == document.write(result.ir)
     ref = references[name]
-    assert_plays(request, result.ir, ref.native, lambda: backends.native_player(ref.raw))
+    assert_plays(request, result.ir, ref.native, lambda: find_format(ref.raw).play(ref.raw))

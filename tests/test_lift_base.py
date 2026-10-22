@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from conftest import gt_tune, sw_fx
 from pydefmon import DefmonPlayer
+from pysidtracker import find_format
 from pysidwizard import SWMPlayer, parse_sid_song
 
 from unitracker.lift import backends, base, defmon
@@ -171,9 +172,9 @@ def test_a_decoded_sidwizard_module_lifts_and_plays_as_given(csillag):
     assert lift.run()["phrases"]["p09"][1] == {"note": "off", "command": [0x12, 4], "steps": 24}
     ours = lift.native().render_grid(400)
     assert np.array_equal(ours, SWMPlayer(swm).render_grid(400))
-    assert not np.array_equal(ours, backends.native_player(raw).render_grid(400))
-    theirs = SWMPlayer(parse_sid_song(raw, 1)).render_grid(400)
-    assert np.array_equal(backends.native_player(raw).render_grid(400), theirs)
+    native = find_format(raw).play(raw).render_grid(400)
+    assert not np.array_equal(ours, native)
+    assert np.array_equal(native, SWMPlayer(parse_sid_song(raw, 1)).render_grid(400))
 
 
 def test_the_defmon_passes_run_in_order_and_convert_last(rent_a_cop, monkeypatch):
@@ -213,7 +214,7 @@ def test_a_defmon_lift_without_expressions_skips_convert(rent_a_cop, monkeypatch
     raw = rent_a_cop.read_bytes()
     lift = DefmonLift.from_sid(raw, expressions=False)
     assert lift.run() == list(lift.stages())[-1][1] == backends.lift(raw, expressions=False)
-    grid = backends.native_player(raw).render_grid(200)
+    grid = find_format(raw).play(raw).render_grid(200)
     assert np.array_equal(lift.native().render_grid(200), grid)
     assert np.array_equal(DefmonPlayer(raw).render_grid(200), grid)
 

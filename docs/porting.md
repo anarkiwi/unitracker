@@ -19,7 +19,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 
 | need | tool |
 |---|---|
-| the native replay's register grid | `lift.backends.native_player(raw).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
+| the native replay's register grid | `pysidtracker.find_format(raw).play(raw, subtune).render_grid(n)`; in tests, `conftest.oracle(raw, frames)` (the 6502 oracle, cached) |
 | the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
 | where the generic document differs, by register and value (exit 0 on agreement, `--json` the machine-readable diff) | `tools/corpus.py grid out/porting/doc.yaml TUNE.sid --ticks 3007 [--context N] [--json PATH]` |
@@ -48,7 +48,8 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 The native replay comes from a Python package built on `pysidtracker` (`pygoattracker`,
 `pydefmon`, `pysidwizard`) that decodes the module and runs the replay as a
 `pysidtracker.MemPlayer`; its `render_grid(n)` is the reference register grid. A port needs one,
-as a dependency in `pyproject.toml`.
+as a dependency in `pyproject.toml`, that registers a `pysidtracker` format (a `SidFormat` on the
+`pysidtracker.formats` entry-point group) whose parser recognises the tune.
 
 Start from the existing port closest to the target player:
 
@@ -127,10 +128,11 @@ it in `wnote`, when a wavetable row first sets the frequency).
 PYTHONPATH=src .venv/bin/python -c '
 import sys, numpy as np
 from pathlib import Path
+from pysidtracker import find_format
 from unitracker.lift import backends
 from unitracker.player.vm import SongPlayer
 raw = Path(sys.argv[1]).read_bytes()
-theirs = np.asarray(backends.native_player(raw).render_grid(3007), dtype=np.uint8)
+theirs = np.asarray(find_format(raw).play(raw).render_grid(3007), dtype=np.uint8)
 print(SongPlayer(backends.lift(raw, expressions=False)).mismatch(theirs))
 ' TUNE.sid
 ```
@@ -349,10 +351,11 @@ supplies the player:
 `run()` checks the build, runs `structure` and the normalisations, then, with `expressions`,
 `convert`, `canonical` and `verify`, which leaves the generic document in `document` and its
 verdict on unitracker-player against the native grid in `verdict`; `passes()` names the stages in
-order and `stages()` yields each one's song. Register it in `backends.py`: `detect` recognises the
-image (before the GoatTracker fallback, which recognises a tune by decompiling it), and `lifter`
-dispatches to `<Name>Lift.from_sid(raw, subtune, expressions)`; `lift`, `native_player` and
-`verify` go through it, and the CLI, the tools and the tests go through these.
+order and `stages()` yields each one's song. Register it in `backends.py`'s `LIFTS` under the
+name of the `pysidtracker` format that recognises the tune (`detect`, `pysidtracker.find_format`):
+`lifter` dispatches to `<Name>Lift.from_sid(raw, subtune, expressions)`, and `lift` and `verify`
+go through it; the native player is that format's (`find_format(raw).play(raw, subtune)`). The
+CLI, the tools and the tests go through these.
 
 **Resolved at lift time.** The generic document carries only what the composer's rows and definitions
 imply, so the lifter resolves what the native data leaves implicit:
@@ -422,7 +425,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under
 |---|---|---|---|
 | 1 | pick the closest port; fetch the reference tunes | `tests/conftest.py` | `.venv/bin/python tools/corpus.py check --out out/porting` |
 | 2 | transcribe the replay: cells, tables, procs, `init`, `tick`, ghost, `onset` | `playroutines/<name>.yaml` | the `expressions=False` snippet of section 2 prints `None` |
-| 3 | a first lifter (a `Lift` subclass) and its registration | `lift/<name>.py`, `lift/backends.py`, `pyproject.toml` | the same snippet, through `backends.lift` and `backends.native_player` |
+| 3 | a first lifter (a `Lift` subclass) and its registration | `lift/<name>.py`, `lift/backends.py`, `pyproject.toml` | the same snippet, through `backends.lift` |
 | 4 | record types, codec shapes and commands on the shared keys | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit keywords <name>` |
 | 5 | hard restart, chords, filter, lifetime, relative control in their shared forms | `playroutines/<name>.yaml` | `.venv/bin/python -m pytest -n 4 tests/test_format_events.py` |
 | 6 | modulator units and chip maps | `playroutines/<name>.yaml` | `.venv/bin/unitracker-modfit --out out/porting/exprs.txt exprs TUNE.sid` |
