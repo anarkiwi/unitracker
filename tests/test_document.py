@@ -184,8 +184,8 @@ def test_a_document_that_plays_the_native_grid_verifies():
     names = [name for name, _ in lift.stages()]
     assert names[-1] == "verify" and lift.gap is None
     parse(lift.document)
-    assert lift.verdict.ok and lift.verdict.ticks == lift.ticks
-    assert lift.verdict.line() == f"verified: {lift.ticks} ticks play the native grid"
+    assert lift.verdict.ok and lift.verdict.n == lift.ticks
+    assert lift.verdict.line() == f"verified: {lift.ticks} ticks play the reference grid"
     assert "ctrl: [{hold: 0, gate: 0}, {ctrl: 65, note: +0}, end]" in lift.document
 
 
@@ -207,7 +207,7 @@ def test_a_grid_that_differs_names_its_first_difference():
     verdict = verify.compare(ending, np.vstack([played, np.repeat(played[-1:], 10, axis=0)]))
     assert verdict.onset is None and verdict.played == len(played) and not verdict.ok
     assert (
-        verdict.line() == f"mismatch: the document ends at tick {len(played)} of {len(played) + 10}"
+        verdict.line() == f"mismatch: the render ends at tick {len(played)} of {len(played) + 10}"
     )
 
 

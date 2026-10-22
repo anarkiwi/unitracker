@@ -29,6 +29,7 @@ from unitracker.cache import Pool
 from unitracker.lift import backends, verify
 from unitracker.lift.base import LiftError
 from unitracker.player import oracle
+from unitracker.player.canonical import REGISTERS
 from unitracker.player.vm import SongPlayer, event_commands, runs
 
 FIELDS = (
@@ -86,7 +87,7 @@ def motion(theirs, ours) -> str:
     return "document holds" if ours[0] == ours[1] else "both move"
 
 
-def vm_verdict(lift, song: dict, ticks: int, registers: str) -> verify.Verdict:
+def vm_verdict(lift, song: dict, ticks: int, registers: str) -> gridcmp.Verdict:
     """The lifter's song replayed on its VM against ``ticks`` of the native grid, only
     ``registers`` (comma-separated offsets) compared when given."""
     player, theirs = SongPlayer(song), np.asarray(lift.native().render_grid(ticks), np.uint8)
@@ -95,7 +96,7 @@ def vm_verdict(lift, song: dict, ticks: int, registers: str) -> verify.Verdict:
         other = np.ones(theirs.shape[1], dtype=bool)
         other[[int(r, 0) for r in registers.split(",")]] = False
         ours[:, other] = theirs[: len(ours), other]
-    return verify.compare_grids(ours, player.starts, theirs)
+    return gridcmp.verdict_onset(ours, player.starts, theirs)
 
 
 def lifted(path: Path, opts: dict) -> tuple:
@@ -136,11 +137,11 @@ def check_one(row: dict, opts: dict) -> dict:
         return res
     if opts["diff"]:
         (out / f"{res['doc']}.diff.json").write_text(
-            json.dumps(verdict.summary(), indent=2) + "\n", encoding="utf-8"
+            json.dumps(verdict.summary(REGISTERS), indent=2) + "\n", encoding="utf-8"
         )
     res.update(
         verified="yes" if verdict.ok else "no",
-        ticks=verdict.ticks,
+        ticks=verdict.n,
         cells=len(verdict.cells),
         registers=brief(verdict),
     )
@@ -569,19 +570,19 @@ def grid(args) -> int:
     ours, starts = oracle.play(args.doc.read_text(encoding="utf-8"), args.ticks, progress=True)
     raw = shared.tune(args.sid).read_bytes()
     theirs = np.asarray(backends.native_player(raw, args.subtune).render_grid(args.ticks))
-    verdict = verify.compare_grids(ours, starts, theirs)
+    verdict = gridcmp.verdict_onset(ours, starts, theirs)
     if args.grids:
         gridcmp.write_grid(ours, args.grids / "doc.csv.zst")
         gridcmp.write_grid(theirs, args.grids / "native.csv.zst")
     if args.json is not None:
-        text = json.dumps(verdict.summary(), indent=2) + "\n"
+        text = json.dumps(verdict.summary(REGISTERS), indent=2) + "\n"
         if args.json == "-":
             sys.stdout.write(text)
         else:
             Path(args.json).parent.mkdir(parents=True, exist_ok=True)
             Path(args.json).write_text(text, encoding="utf-8")
         return int(not verdict.ok)
-    print(f"starts: {starts}\n{verdict.report()}")
+    print(f"starts: {starts}\n{gridcmp.runs_report(verdict, **verify.REPORT)}")
     if verdict.onset is not None:
         print(gridcmp.window_report(theirs, ours, verdict.onset[0], args.context))
     return int(not verdict.ok)

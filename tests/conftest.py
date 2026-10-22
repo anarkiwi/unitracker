@@ -25,6 +25,7 @@ from pygoattracker import (
     TypedSong,
 )
 from pygoattracker import constants as GT
+from pysidtracker import gridcmp
 from pysidtracker.survey import file_oracle
 from pysidtracker.testing import resolve_tune
 from pysidwizard import parse_sid_song
@@ -159,9 +160,9 @@ def attach(request, text: str) -> str:
     return text
 
 
-def grid_diff_of(request, ver: verify.Verdict) -> str:
-    """The grid diff of ``ver`` (:meth:`verify.Verdict.report`), attached to the test's report."""
-    return attach(request, ver.report())
+def grid_diff_of(request, ver: gridcmp.Verdict) -> str:
+    """The grid diff of ``ver`` (``gridcmp.runs_report``), attached to the test's report."""
+    return attach(request, gridcmp.runs_report(ver, **verify.REPORT))
 
 
 def assert_plays(request, song: dict, theirs, native) -> None:
@@ -169,7 +170,7 @@ def assert_plays(request, song: dict, theirs, native) -> None:
     carries :func:`verify.explain`'s report of ``native``."""
     player = SongPlayer(song)
     grid = player.render_grid(len(theirs))
-    ver, text = verify.compare_grids(grid, player.starts, theirs), None
+    ver, text = gridcmp.verdict_onset(grid, player.starts, theirs), None
     if not ver.ok:
         text = attach(request, verify.explain(ver, song, (grid, theirs), native).text())
     assert ver.ok, text

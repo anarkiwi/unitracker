@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import conftest
 import numpy as np
 import pytest
+from pysidtracker import gridcmp
 from pysidtracker.asm6502 import assemble
 from pysidtracker.oracle import register_grid
 from pysidtracker.player import MemPlayer
@@ -16,25 +17,27 @@ from unitracker.lift import verify
 from unitracker.player.vm import SongPlayer
 
 
-def mismatched_verdict() -> verify.Verdict:
+def mismatched_verdict() -> gridcmp.Verdict:
     """A two-grid diff: theirs' voice 1 frequency lo byte set at tick 2, both grids four ticks."""
     ours = np.zeros((4, 25), dtype=np.uint8)
     theirs = np.zeros((4, 25), dtype=np.uint8)
     theirs[2, 0] = 7
-    ver = verify.compare_grids(ours, [1], theirs)
+    ver = gridcmp.verdict_onset(ours, [1], theirs)
     assert not ver.ok and ver.onset == (2, 0)
     return ver
 
 
 def test_grid_diff_of_carries_the_verdicts_report(request):
     ver = mismatched_verdict()
-    assert conftest.grid_diff_of(request, ver) == ver.report()
-    assert request.node.failure_report == ver.report()
+    report = gridcmp.runs_report(ver, **verify.REPORT)
+    assert conftest.grid_diff_of(request, ver) == report
+    assert request.node.failure_report == report
 
 
 def test_the_report_names_each_differing_register_its_runs_and_both_grids_values():
-    ver = verify.Verdict(
-        ticks=12,
+    ver = gridcmp.Verdict(
+        n=12,
+        unit="tick",
         played=12,
         starts=(1, 4, None),
         onset=(3, 5),
@@ -48,7 +51,7 @@ def test_the_report_names_each_differing_register_its_runs_and_both_grids_values
             (8, 8, 4, 2),
         ),
     )
-    assert ver.report() == (
+    assert gridcmp.runs_report(ver, **verify.REPORT) == (
         "mismatch: tick 3, register $05 v1 ad (from tick 0: tick 2, $0B v2 ctrl)\n"
         "  $05 v1 ad: 2 cells, ticks 3-7\n"
         "    3: doc 01, native 09\n"
@@ -64,13 +67,18 @@ def test_the_report_names_each_differing_register_its_runs_and_both_grids_values
 
 def test_the_report_counts_the_value_lines_it_omits_and_names_a_verified_or_ended_document():
     cells = tuple((t, 0, 1 if t % 2 else 2, 0) for t in range(10))
-    text = verify.Verdict(10, 10, (0,), (0, 0), (0, 0), cells).report()
+    text = tick_report(n=10, played=10, starts=(0,), onset=(0, 0), whole=(0, 0), cells=cells)
     assert "  $00 v1 freq lo: 10 cells, ticks 0-9" in text
     assert "    0: doc 02, native 00" in text and "    ... 4 more value lines" in text
-    verified = verify.Verdict(8, 8, (0, 0, 0), None, None, ())
-    assert verified.report() == "verified: 8 ticks play the native grid"
-    ended = verify.Verdict(8, 4, (0, 0, 0), None, (2, 0), ())
-    assert ended.report() == "mismatch: the document ends at tick 4 of 8"
+    verified = tick_report(n=8, ok=True, played=8, starts=(0, 0, 0))
+    assert verified == "verified: 8 ticks play the native grid"
+    ended = tick_report(n=8, played=4, starts=(0, 0, 0), whole=(2, 0))
+    assert ended == "mismatch: the document ends at tick 4 of 8"
+
+
+def tick_report(**fields) -> str:
+    """``gridcmp.runs_report`` of a tick verdict with ``fields``."""
+    return gridcmp.runs_report(gridcmp.Verdict(unit="tick", **fields), **verify.REPORT)
 
 
 def counting(step: int) -> dict:
@@ -111,7 +119,7 @@ def verdict(song: dict, theirs) -> tuple:
     """``(verdict, grids)`` of ``song`` on the VM against ``theirs``."""
     player = SongPlayer(song)
     grid = player.render_grid(len(theirs))
-    return verify.compare_grids(grid, player.starts, theirs), (grid, theirs)
+    return gridcmp.verdict_onset(grid, player.starts, theirs), (grid, theirs)
 
 
 def test_explain_traces_the_native_player_on_the_tick_it_last_stored_the_register():

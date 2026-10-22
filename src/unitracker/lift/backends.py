@@ -1,6 +1,6 @@
 """Format detection and dispatch to each backend's lifter and native player."""
 
-from pysidtracker import SidError, SidImage
+from pysidtracker import SidError, SidImage, gridcmp
 
 from unitracker.lift import verify as proof
 from unitracker.lift.base import start_song
@@ -60,7 +60,7 @@ def native_player(raw: bytes, subtune=None):
     return lifter(raw, subtune).native()
 
 
-def verify(document_text: str, raw_sid: bytes, subtune=None, ticks: int = 3007) -> proof.Verdict:
-    """The :class:`~unitracker.lift.verify.Verdict` of a generic document against ``ticks``
+def verify(document_text: str, raw_sid: bytes, subtune=None, ticks: int = 3007) -> gridcmp.Verdict:
+    """The :class:`~pysidtracker.gridcmp.Verdict` of a generic document against ``ticks``
     ticks of the native player of ``raw_sid``'s ``subtune`` (by default its header's)."""
     return proof.compare(document_text, native_player(raw_sid, subtune).render_grid(ticks))
