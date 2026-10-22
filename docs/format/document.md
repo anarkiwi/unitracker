@@ -8,7 +8,8 @@ with the meaning of [unitracker-player](https://github.com/anarkiwi/unitracker-p
 no player. `unitracker.document.write(ir)` writes it from the lifter's song, and `unitracker-lift`
 proves it: played by unitracker-player, it must give the native player's register grid (see
 [Lifting](../playroutines/lifting.md)). `document.native_state(ir)` is the one native replay the
-writer reads (the note-table entries the song reads, the tables, the voices' onsets);
+writer reads (the note table, the notes the song reads, the tables, the voices' onsets), to its
+state's recurrence and a period more, or to its end where every voice's track ends;
 `write(ir, native)` takes one already made.
 
 From the lifter's song the writer emits:
@@ -16,7 +17,7 @@ From the lifter's song the writer emits:
 | part | written |
 |---|---|
 | header | no `playroutine`; `clock`, `voices` and `tempo` only where they differ from PAL (985248 Hz, 19656 cycles per tick), 3 and 6; a playroutine without a tempo steps once per tick (`tempo: 1`) |
-| `tables` | each table an expression indexes (`T[k]`) as a list; `G`, the native note table by format note, where it differs from `F` at a note the song reads, holding only the entries the song reads (0 elsewhere); then every `F(k)` reads `G[k]` and an instrument without `freq` has `freq: G[N]` |
+| `tables` | each table an expression indexes (`T[k]`) as a list; `G`, the native note table by format note, where it differs from `F` at a note the song reads, holding the whole table over the notes `F` spans and those the song reads (its trailing zeros left out); then every `F(k)` reads `G[k]` and an instrument without `freq` has `freq: G[N]` |
 | frequency | the lifter's song reads a frequency expression's `v` as the offset from the note's frequency; the document reads it as the frequency word: `G[N] + e` with `v` read as `(v - G[N]) % 65536`, and 0 until the first native firing of an instrument's, a note-started program's or a note's command's frequency |
 | firing ticks | `φ` counts ticks: each expression is re-timed from its native unit's firings to its modulators' ticks (`unitracker.document.retime`), `φ` read as the firing count `φ - Σ (φ >= s)` over the ticks `s` the unit holds on and a recurrence's update times a hold factor that is 0 on them, every `T`th tick from `o < T` spelled `(φ + T - o) // T` and `(φ % T == o)`; an event whose ticks differ from those of its expression's other modulators plays its own through its command, a copy of the program it runs or a copy of its instrument |
 | `init` | one event per voice: the global registers the native init sets (`!resfilt`, `!mode`, `!vol`, `!cut`), defMON's `vinit` and `ginit` (a legato note for the base note, `!pw`, `!freq`, `!cut`), and the lead-in's tempo |
@@ -37,7 +38,7 @@ unitracker: 1.20
 meta: {title: Metal Warrior Title Remix, author: Lasse Öörni (Cadaver), released: 2002 Covert Bitops}
 tempo: 12
 tables:
-  G: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 744, 0, 835, ...]
+  G: [26368, 56576, 30976, 15360, 10496, 17408, 36096, 2048, 47104, 41216, 50432, 10240, 52480, 47616,
     ...
 init: [-!vol:15!tempo:2, -, -]
 song:

@@ -20,6 +20,7 @@ from unitracker.modfit import exprs as modfit_exprs
 from unitracker.modfit import grammar as G
 from unitracker.modfit import phase
 from unitracker.modfit.form import Form
+from unitracker.player import reach
 from unitracker.player.modulation import INIT, Occurrence
 from unitracker.player.vm import SongError, SongPlayer
 from unitracker.playroutine.atoms import note_index
@@ -738,6 +739,18 @@ def test_defmon_fixed_pitch_offset_becomes_its_rows_freq_expression(row, af):
     assert np.array_equal(regs(out, 120), want)
     assert generic(out, len(want))
     assert not np.array_equal(regs(dm_af(), 120), want)
+
+
+def test_a_song_that_ends_is_written_to_its_end():
+    ir = dm_af()
+    ir["records"]["sidtab"][0]["af"] = 12
+    out = convert.convert(ir, cache=None, workers=1)
+    with pytest.raises(reach.ReachabilityError):
+        reach.recurrence(SongPlayer(out), 2000)
+    native = document.native_state(out, 2000)
+    assert native.ticks == sum(e.get("steps", 1) for e in out["phrases"]["p1"])
+    text = document.write(out)
+    assert text == document.write(out, native) and text.endswith("  - end\n")
 
 
 # ---- defMON's ACID accumulator and its offset cp -----------------------------------------
