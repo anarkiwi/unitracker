@@ -774,3 +774,14 @@ def test_a_keyboard_tracked_chip_map_inverts_its_store(name):
                 c: ev(e, {**env, "value": v}) % (1 << width[c]) for c, e in chip["store"].items()
             }
             assert ev(chip["value"], {**env, **cells}) == v
+
+
+def test_a_pre_18_driver_reads_the_first_frame_freq_hi_by_track(doom_schlager):
+    raw = doom_schlager.read_bytes()
+    lift = sidwizard.SidWizardLift.from_sid(raw, expressions=False)
+    song = lift.run()
+    assert song["tables"]["build"] == [1]
+    theirs = np.asarray(lift.native().render_grid(870), np.uint8)
+    assert SongPlayer(song).mismatch(theirs) is None
+    song["tables"]["build"] = [0]
+    assert SongPlayer(song).mismatch(theirs) is not None

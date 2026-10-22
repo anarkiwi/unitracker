@@ -16,6 +16,7 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
 | notes | `note_offset` 0 |
 | onset | the tick a wavetable row first sets the voice's frequency: on its first note's first tick the voice still sounds the frequency it had before the note |
+| build | the `build` table: the native player's PULSEOPTIMIZATION (no pulse step on a voice's fetch tick nor on tick 0 of a pattern's first row) and REALTIMEOPTIMIZATION (no continuous command on tick 0), each 1 when the build has it |
 
 ## Records
 

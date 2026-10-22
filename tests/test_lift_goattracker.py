@@ -568,3 +568,24 @@ def test_a_jump_to_a_jump_row_reads_that_row_as_data(tune):
     ins = {"wave_ptr": 1, "pulse_ptr": 1 if "pulse" in tune else 0, "gateoff_timer": 2}
     ins.update(sustain_release=0xF0, filter_ptr=1 if "filt" in tune else 0)
     lifted(*gt_tune(instruments=[ins], **tune))
+
+
+@pytest.mark.parametrize("build", [[0, 0], [0, 1], [1, 0], [1, 1]])
+def test_the_vm_plays_the_builds_pulse_and_realtime_optimisations(build):
+    rows = [(24, 1, 1, 1)] + [(None, 0, 1, 1)] * 3 + [(26, 1, 1, 1)] + [(None, 0, 1, 1)] * 11
+    ins = [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    pulse = [(0x88, 0), (0x20, 0x10), (0xFF, 2)]
+    dec, _ = gt_tune([(0x41, 0), (0xFF, 0)], ins, rows, speed=[(0, 0x40)], pulse=pulse)
+    make = dec.player
+
+    def player():
+        native = make()
+        native.optimize_pulse, native.optimize_realtime = map(bool, build)
+        return native
+
+    dec.player = player
+    song = gt.GoatTrackerLift(dec, expressions=False).run()
+    assert song["tables"]["build"] == build
+    theirs = np.asarray(player().render_grid(400), np.uint8)
+    assert SongPlayer(song).mismatch(theirs) is None
+    assert (build == [1, 1]) == (np.asarray(make().render_grid(400), np.uint8) == theirs).all()

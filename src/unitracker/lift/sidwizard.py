@@ -690,6 +690,7 @@ class SidWizardLift(Lift):
                 "freqhi": list(hi),
                 "exptab": list(playroutine["tables"]["exptab"]),
                 "idle": idle_rows(swm.instruments[0]),
+                "build": [int(swm.first_frame_freq_by_track)],
             },
             "records": {
                 "ins": instruments.records,
