@@ -90,7 +90,7 @@ The check (`proof.mismatch`) is exact, not sampled:
 ### Resuming from the input
 
 A candidate plays exactly as the input until it first reads a datum the two hold differently, so
-its trace need not start at tick 0. The input, when it plays its own grid, is played once as a `Baseline` (`unitracker.player.checkpoint`), kept on the input's trace:
+its trace need not start at tick 0. The input's one recorded run (`unitracker.player.trace`) holds its `Baseline` (`unitracker.player.checkpoint`), kept on the input's trace:
 
 | it notes | |
 |---|---|

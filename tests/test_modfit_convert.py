@@ -13,7 +13,7 @@ from pydefmon import DefmonPlayer
 from pysidtracker import SidImage
 from unitracker_grammar import expr as xexpr
 
-from unitracker import document
+from unitracker import cache, document
 from unitracker.document.events.lifetime import selected
 from unitracker.lift import defmon
 from unitracker.modfit import convert
@@ -369,8 +369,8 @@ def occurrence(unit, instance, start, index, label=()):
     return occ
 
 
-def obs_of(occs, events=None) -> dict:
-    return {"occurrences": occs, "events": events or {}, "plays": [[0], [0], [0]]}
+def obs_of(occs, events=None) -> SimpleNamespace:
+    return SimpleNamespace(occurrences=occs, events=events or {}, plays=[[0], [0], [0]])
 
 
 def pulse_clones(ir):
@@ -781,7 +781,7 @@ def acid_fixture():
 
 def test_acid_starts_carry_nothing_in_and_pulse_is_proved_under_the_chip_invariants(acid):
     an, seen, pulse = acid.analysis, set(), []
-    for occ in acid.obs["occurrences"]:
+    for occ in acid.obs.occurrences:
         d = acid.found[occ.key][0]
         if d.identity:
             continue
@@ -831,7 +831,7 @@ def test_the_acid_direction_through_init_is_the_inits_cut_expression(sub):
     want = regs(ir, 800)
     assert set(want[:, 22]) == ({2, 3} if sub else {2})
     conv = convert.analyse(ir, cache=None, workers=1)
-    (init,) = [o for o in conv.obs["occurrences"] if o.hook == INIT]
+    (init,) = [o for o in conv.obs.occurrences if o.hook == INIT]
     assert (init.unit, init.tick, init.label, init.v_in, init.start["sub"]) == (
         "acid B",
         0,
@@ -961,7 +961,7 @@ def test_a_derivation_is_cached_only_for_the_code_that_derived_it(tmp_path, monk
     monkeypatch.setattr(convert, "_analysis", lambda _ir, _key: SimpleNamespace(derived=derived))
 
     def derive(identity):
-        monkeypatch.setattr(convert, "code_identity", lambda: identity)
+        monkeypatch.setattr(cache, "code_identity", lambda: identity)
         return convert.derive_task(ir, convert.ir_key(ir), start, tmp_path)
 
     assert [derive("a"), derive("a"), derive("b"), derive("a")] == [1, 1, 2, 1]
@@ -969,6 +969,6 @@ def test_a_derivation_is_cached_only_for_the_code_that_derived_it(tmp_path, monk
 
 
 def test_the_code_identity_covers_every_modfit_module_and_the_playroutine_library():
-    names = {p.name for p in convert.SOURCES}
+    names = {p.name for p in cache.SOURCES}
     assert {"fit.py", "sweeps.py", "specs.yaml", "goattracker2.yaml", "defmon.yaml"} <= names
-    assert convert.code_identity() == convert.code_identity()
+    assert cache.code_identity() == cache.code_identity()

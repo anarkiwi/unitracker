@@ -24,8 +24,7 @@ from unitracker.optimise.model import ERRORS
 from unitracker.optimise.passes import CANONICAL, LARGER_UNPROVED, PASSES
 from unitracker.optimise.proof import Trace, mismatch
 from unitracker.player import oracle, reach
-from unitracker.player.checkpoint import Baseline
-from unitracker.player.vm import SongPlayer
+from unitracker.player.trace import trace
 
 
 @dataclass
@@ -163,16 +162,13 @@ class Optimiser:
     def __init__(self, ir: dict, passes=None, workers: int | None = None):
         self.passes = list(passes or PASSES)
         self.workers = workers if workers is not None else default_workers()
-        player = SongPlayer(ir, record_reads=True)
-        log = document.fired_log(player)
-        baseline = Baseline(player)
-        tick, period = baseline.found
-        document.play_to(player, tick + period)
-        self.ref = Trace.replayed(baseline.rows, player.starts, tick - period, period, baseline)
+        run = trace(ir)
+        if not run.recurs():
+            raise reach.ReachabilityError(f"playback state did not recur within {run.frames} ticks")
+        base = run.baseline
+        self.ref = Trace.replayed(base.rows, run.starts, run.tick - run.period, run.period, base)
         self.source = self.base = ir
-        native = document.native_state_from(
-            player, ir, tick + period, baseline.rows[0] if baseline.rows else None, log
-        )
+        native = document.native_from(ir, run)
         self.text = document.write(ir, native)
         self.tokens = tokens(self.text)
         state = {"ref": self.ref, "native": native, "grid": oracle.play(self.text, native.ticks)[0]}

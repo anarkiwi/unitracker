@@ -111,9 +111,9 @@ every firing; a row's firings are checked once with its counted cell as `k0 + dÂ
 `convert.convert(ir)` returns the song with every declared unit's native modulation
 written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
 
-1. **Window.** Repeats are written out; the song is replayed natively to the recurrence of its
-   state and one period more (`reach.table_reads`). Each occurrence records its start cells
-   and the event instance `(voice, play count, step)` that started it.
+1. **Window.** Repeats are written out; the song's trace (`unitracker.player.trace`) is its one
+   native run to the recurrence of its state and one period more. Each occurrence records its
+   start cells and the event instance `(voice, play count, step)` that started it.
 2. **Derive.** Start keys are computed in chunks; each distinct key is derived and proved
    once (`exprs.Pool`, `--workers` processes, two BLAS threads each).
 3. **Group.** Occurrences group by unit and `label`. Over a group's starts that modulate: a
@@ -146,13 +146,20 @@ written as expressions; `convert.analyse(ir)` returns the whole `Conversion`.
    is set) plays nothing of the unit, and gets `v`. Changed events
    go into phrase variants (`p3~1`); a track's loop is unrolled where its passes differ.
    `retire` fields are cleared in every row of their record.
-5. **Verify.** The rewritten song's register grid must equal the native song's over the whole
-   window, each voice from its first note (`gridcmp.first_mismatch` under the playroutine's
-   `tolerance`).
+5. **Verify.** The rewritten song's register grid, from its own trace, must equal the native
+   song's over the whole window, each voice from its first note (`gridcmp.first_mismatch` under
+   the playroutine's `tolerance`).
 
-Observations, derivations and conversions are cached in `$UNITRACKER_CACHE` (default
+Each song a lift makes (native, converted, canonical) is played once. Its trace holds what every
+stage reads of the run: the register grid, each voice's onset, the units' occurrences with their
+events, the expressions' firings, the table entries read and the optimiser's `Baseline`. The
+conversion, the optimiser and its canonical passes, and the writer's `native_state` read it; a
+song whose state does not recur within a bound keeps a trace of that bound, recorded again only
+for a longer one.
+
+Traces, derivations and conversions are cached in `$UNITRACKER_CACHE` (default
 `out/modfit/cache/`) under the sha256 of the song and the code identity
-(`convert.code_identity`): one sha256 per process over the contents of `convert.SOURCES`, which
+(`cache.code_identity`): one sha256 per process over the contents of `cache.SOURCES`, which
 are every `modfit/*.py`, `modfit/specs.yaml`, the playroutine library and the player and playroutine
 modules a conversion reads. An entry is valid only for the code that wrote it, so a cache shared
 across commits or worktrees never serves another commit's result. Starts are derived in a pool of

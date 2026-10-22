@@ -158,17 +158,24 @@ def _track(player, log: dict) -> None:
 class Baseline:  # pylint: disable=too-few-public-methods
     """A song played to its recurrence (``found``, as :func:`reach.recurrence` returns it): its
     rows, the first read of each datum, its kept states and a snapshot every :data:`EVERY`
-    ticks."""
+    ticks; ``found`` is None where the state does not recur within ``max_ticks``. ``log``
+    receives each datum's first read as the player goes on, past the recurrence too, and
+    ``watch(player)`` sees each tick played to the recurrence."""
 
-    def __init__(self, player, max_ticks: int = reach.MAX_TICKS):
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, player, max_ticks=reach.MAX_TICKS, log=None, progress=False, watch=None
+    ):
         self.skeleton = (player.codegen.skeleton(), player.modulation is not None)
-        log = {("P", v, 0): 0 for v in range(len(player.voice_cells))}
+        log = {} if log is None else log
+        log.update({("P", v, 0): 0 for v in range(len(player.voice_cells))})
         _track(player, log)
         self.rows, self.kept, self.snaps = [], {}, {}
         last = reach.STRIDE * (reach.REMEMBERED - 1)
 
         def each(p):
             tick = p.ticks - 1
+            if watch is not None:
+                watch(p)
             self.rows.append(tuple(p.regs))
             if tick % reach.STRIDE == 0 and tick < last:
                 self.kept[p.state()] = tick
@@ -176,7 +183,10 @@ class Baseline:  # pylint: disable=too-few-public-methods
                 self.snaps[p.ticks] = snapshot(p)
             return False
 
-        self.found = reach.recurrence(player, max_ticks, each=each)
+        try:
+            self.found = reach.recurrence(player, max_ticks, progress, each=each)
+        except reach.ReachabilityError:
+            self.found = None
         self.reads = sorted(log.items(), key=lambda kv: kv[1])
         self.values = [value(player, item) for item, _ in self.reads]
 

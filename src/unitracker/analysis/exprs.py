@@ -87,7 +87,7 @@ def group_lines(conv, an, key: tuple, members: list, places: dict) -> list:
     """One unit and label: its occurrences, distinct starts, texts, places and general form."""
     # pylint: disable=too-many-locals
     unit, label = an.unit(key[0]), key[1]
-    occs = [conv.obs["occurrences"][i] for i in members]
+    occs = [conv.obs.occurrences[i] for i in members]
     starts = list(dict.fromkeys(o.key for o in occs))
     results = [Result(conv.found[s][0], s[1], s[2], start_value=conv.found[s][1]) for s in starts]
     live = [r for r in results if not r.derived.identity]
@@ -131,7 +131,7 @@ def song_lines(song: Song, workers) -> tuple:
     tol = song.ir["playroutine"].get("tolerance")
     verdict = verify.compare(text, native_grid(song, ticks), tol=tol)
     lines = [f"## {song.path.stem} ({song.player})"]
-    occs = conv.obs["occurrences"]
+    occs = conv.obs.occurrences
     lines.append(f"  occurrences {len(occs)} over {conv.ticks} ticks (to the state's recurrence "
                  f"and one period more); expressions {len(conv.out['exprs'])}")  # fmt: skip
     lines.append("  the rewritten song plays the native song's register grid exactly over them")

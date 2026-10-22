@@ -8,10 +8,9 @@ if TYPE_CHECKING:
     from unitracker.document.writer import (
         GenericError,
         Native,
-        fired_log,
+        native_from,
         native_over,
         native_state,
-        native_state_from,
         play_to,
         write,
     )
@@ -19,10 +18,9 @@ if TYPE_CHECKING:
 __all__ = [
     "GenericError",
     "Native",
-    "fired_log",
+    "native_from",
     "native_over",
     "native_state",
-    "native_state_from",
     "play_to",
     "write",
 ]
