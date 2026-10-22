@@ -969,7 +969,14 @@ def test_a_derivation_is_cached_only_for_the_code_that_derived_it(tmp_path, monk
     assert calls == [start, start] and len(list((tmp_path / "derived").glob("*.pkl"))) == 2
 
 
-def test_the_code_identity_covers_every_modfit_module_and_the_playroutine_library():
-    names = {p.name for p in cache.SOURCES}
-    assert {"fit.py", "sweeps.py", "specs.yaml", "goattracker2.yaml", "defmon.yaml"} <= names
-    assert cache.code_identity() == cache.code_identity()
+def test_the_code_identity_covers_the_import_closure_and_the_playroutine_library():
+    files, versions = cache.code_sources("unitracker.modfit")
+    names = {"/".join(p.parts[-2:]) for p in files}
+    assert {"modfit/fit.py", "modfit/specs.yaml", "playroutines/goattracker2.yaml"} <= names
+    assert {"player/reach.py", "playroutine/expr.py", "playroutine/library.py"} <= names
+    assert {"events/lifetime.py", "player/trace.py"} <= names and "document/writer.py" not in names
+    assert any(v.startswith("unitracker-grammar==") for v in versions)
+    files, versions = cache.code_sources("unitracker.optimise")
+    assert "document/writer.py" in {"/".join(p.parts[-2:]) for p in files}
+    assert any(v.startswith("unitracker-player==") for v in versions)
+    assert cache.code_identity() != cache.code_identity("unitracker.optimise")

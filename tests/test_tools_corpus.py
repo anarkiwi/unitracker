@@ -126,7 +126,7 @@ def test_a_reference_tune_is_checked_reported_and_compared(references, tmp_path,
     assert "goattracker2: 0/1 verified" in printed and "mismatch: freq, " in printed
     (row,) = csv.DictReader((out / "results.csv").open())
     assert (row["onset"], row["onset_reg"]) == ("1550", "$0E")
-    assert row["motion"] in ("document holds", "both move")
+    assert row["motion"] == "both move"
     name = f"00000000-{ref.sid.stem}"
     assert (out / f"{name}.yaml").read_text() == ref.generic
     earlier = _csv(
