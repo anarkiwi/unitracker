@@ -1,13 +1,15 @@
 # SID-Wizard (`sidwizard`)
 
-The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame, of
-[`sidwizard.yaml`](../../src/unitracker/playroutines/sidwizard.yaml).
+The SID-Wizard 1.x player IRQ, every build (drivers 0-5) at any number of play calls per
+frame, of [`sidwizard.yaml`](../../src/unitracker/playroutines/sidwizard.yaml).
 
 ## Lifting
 
 | | |
 |---|---|
-| tune | a SID-Wizard 1.x export, normal build, decoded by pysidwizard |
+| tune | a SID-Wizard 1.x export, decoded by pysidwizard |
+| build | the export's player build (normal, medium, light, extra, bare, demo; see Builds) |
+| tick | one play call: `frame_speed` per frame (see Multispeed) |
 | lifted from | the decoded module |
 | tempo | the subtune's tempo pair: one tempo when both bytes have bit 7 set (the first byte), each byte 0 written as 6 |
 | step | one pattern row; the playroutine runs each voice's tempo counter, reads a row at TICK_0, applies it at TICK_2 and plays the next instrument's restart on the ticks between, ticking the voices in the player's reverse order |
@@ -16,6 +18,46 @@ The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame,
 | onset | the note's hard-restart tick, which sets its FREQ-HI: its programs sound on the next tick |
 | build | the `build` table: 1 for a pre-1.8 driver, whose hard-restart tick reads FREQ-HI from FREQTBH at the voice's track offset (7 times the voice) instead of at the note |
 | before the first note | the first note's two set-up ticks read instrument 1's header as WF rows (the player's instrument 0 is linked to it, and its WF cursor starts at the control byte): the `idle` table holds the rows they read, ending in $FF, and sets the FREQ-LO the note's hard-restart tick carries; a jump or chord among them is not covered |
+
+## Builds
+
+The builds are one `player.asm` assembled with different `feature` flags, which
+`pysidwizard.features.features_for_driver` gives by the export's driver byte. The lifter reads
+the tune's build there and expresses it two ways:
+
+- as data, where a flag only stops the player reading a field: without octave shifts every
+  instrument's shift is 0; without the pulse or filter reset switch the header's control bits 6
+  and 7 are clear; without pulse or filter keyboard tracking (which also reads the filter
+  routing) each row's third byte is 0; without detune the WF rows set none; without arp speeds
+  every WF row lasts one tick and a WF byte below $10 is a waveform; without hard-restart types
+  every restart fires from TICK_0 with the default envelope ($0F/$00), never staccato; without
+  the first-frame switch the first tick always writes control $09;
+- as the playroutine's `constants`, each named as its `PlayerFeatures` field, where a flag
+  changes what a proc does: `arpspeedsupp` (hold rows), `calcvibrato` (the vibrato and slide
+  amplitude: without it the raw amplitude indexes FREQTBH-1), `detunesupport` (the detune and
+  the carry into FREQ-LO), `finefiltsweep` (without it a sweep steps the cutoff's high
+  byte), `frame1switch` (the first tick's FREQ-HI), `allghostregs` (an
+  envelope small FX keeps the live other nibble), `vibslidealways` (the tables walk on a new
+  note's set-up ticks), `wfarp_nop_supp` (without it a WF arp of $80 is absolute note 0) and
+  `chordsupport` (without it a WF arp of $7F is a relative note). The YAML holds the normal
+  build's values.
+
+A build that walks the tables on a note's set-up ticks steps the pulse program through
+instrument 1's header before each voice's first note: the lifter reads the pulse word and
+sweep count each voice's first note starts with from the native player, into `vinit` (`pw`,
+written as the init row's `!pw`) and the `pwcount` table.
+
+## Multispeed
+
+A tune exported at `frame_speed` calls per frame runs the player on one call of each frame and
+MULPLY on the others, which steps each voice's WF program, and its pulse and filter programs
+when the instrument's arp speed has bit 6 or 7 set (`ins.mul`), from the voice's first player
+tick after its note. The first call is a MULPLY call. A tick is one call: the clock's
+`cycles_per_tick` is the frame's divided by `frame_speed`, the constant `speed` is
+`frame_speed`, and every count of player ticks is written in calls: the tempo, the tempo FX and
+a restart's lookahead `hold`, and its first-tick row lasts `speed` ticks. Before its first note
+a voice walks instrument 1's WF rows on every MULPLY call, following its jumps: `idle` holds
+every row it reads.
 
 ## Records
 
@@ -180,7 +222,6 @@ The lifter fails, naming what it meets:
 - a table that starts with a jump; a jump that lands on no row (a jump, an end marker or past
   the instrument); a WF jump to a hold row, which the player plays as a waveform; a WF jump
   past $7F, which the player abandons, resting without the end's pitch carry;
-- the orderlist's transpose, tempo and volume commands, multispeed, other player
-  builds, init-routine voice-register writes, a tune with no instruments, and the effects not
+- the orderlist's transpose, tempo and volume commands, init-routine voice-register writes, a tune with no instruments, and the effects not
   listed above (small FX $4x and $8x-$Fx, big FX but $01-$03, $10, $11, $13 and $14,
   note-column values past $78 but $7D and $7E).

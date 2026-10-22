@@ -112,6 +112,32 @@ third_ninja = hvsc_tune(
     "Path to Spiikki's Third Ninja, SID-Wizard WF table jumps.",
 )
 
+lykia_boss = hvsc_tune(
+    "lykia_boss",
+    "MUSICIANS/C/C0zmo/Lykia_Boss.sid",
+    "Path to C0zmo's Lykia Boss, a SID-Wizard bare-build export.",
+)
+mega_run = hvsc_tune(
+    "mega_run",
+    "MUSICIANS/A/Arturo_Dente/Mega-Run.sid",
+    "Path to Arturo Dente's Mega-Run, a SID-Wizard light-build export.",
+)
+awakening = hvsc_tune(
+    "awakening",
+    "MUSICIANS/S/Spider_Jerusalem/Awakening.sid",
+    "Path to Spider Jerusalem's Awakening, a SID-Wizard medium-build export.",
+)
+snowballed = hvsc_tune(
+    "snowballed",
+    "MUSICIANS/W/Wemyss_Chris/Snowballed.sid",
+    "Path to Chris Wemyss' Snowballed, a SID-Wizard extra-build export.",
+)
+samwise = hvsc_tune(
+    "samwise",
+    "MUSICIANS/A/Ant1/Samwise.sid",
+    "Path to Ant1's Samwise, a SID-Wizard extra-build export of a pre-1.8 driver.",
+)
+
 
 def table(*rows) -> Table:
     """A GoatTracker 2 table of ``(left, right)`` ``rows``."""

@@ -15,7 +15,7 @@ class View:
         inst = pr.get("instrument") or {}
         self.ins = inst.get("type")
         self.base = int(inst.get("base", 0))
-        self.commands = CommandCodec(pr.get("commands"), self.rtypes)
+        self.commands = CommandCodec(pr.get("commands"), self.rtypes, pr.get("constants"))
         self.nibbles = {
             code: (str(v["name"]), int(v["nibble"]))
             for code, v in command_variants(pr.get("commands"))

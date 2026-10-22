@@ -32,7 +32,9 @@ PLAYERS = sorted(
 )
 LIBS = {p: library(p) for p in PLAYERS}
 TYPES = {p: record_types(pr) for p, pr in LIBS.items()}
-COMMANDS = {p: CommandCodec(pr.get("commands"), TYPES[p]) for p, pr in LIBS.items()}
+COMMANDS = {
+    p: CommandCodec(pr.get("commands"), TYPES[p], pr.get("constants")) for p, pr in LIBS.items()
+}
 DOCS = Path(__file__).resolve().parents[1] / "docs" / "playroutines"
 HEADER = "| command | argument |"
 KEYS_HEADER = "| `ctrl` row key | forms |"

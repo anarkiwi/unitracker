@@ -42,7 +42,8 @@ PREFIX = {
     "ins": "i",
 }
 FIELD = {"pw": "pw", "cut": "filter", "freq": "freq"}  # the instrument field of a cell key
-# The ticks a note sounds after its onset cell is set (each playroutine's doc).
+# The player ticks a note sounds after its onset cell is set (each playroutine's doc), each the
+# playroutine's constant ``speed`` ticks (default 1).
 ONSET_LAG = {"defmon": 1, "sidwizard": 1}
 GATE_CLEARS_MASK = ("defmon",)  # a row that sets the gate without a mask clears the mask
 FIRST_TICK_BEFORE = ("goattracker2", "sidwizard")  # first-tick row a tick before the programs
@@ -966,7 +967,9 @@ def untimed(ir: dict, native: Native) -> tuple[str, int]:
     """``(text, lead)``: the generic document of ``ir`` with its expressions over the native
     firings, and the ticks its lead-in delays it (see :func:`_lead`)."""
     text = respelled(ir, _Respell(ir, native))
-    lead = _lead(text, native.starts, ONSET_LAG.get(ir["playroutine"]["name"], 0))
+    pr = ir["playroutine"]
+    lag = ONSET_LAG.get(pr["name"], 0) * int((pr.get("constants") or {}).get("speed", 1))
+    lead = _lead(text, native.starts, lag)
     if lead:
         text = respelled(ir, _Respell(ir, native, lead))
     return text, lead

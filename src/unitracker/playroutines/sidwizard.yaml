@@ -3,9 +3,23 @@
 # pattern row; the playroutine counts each voice's tempo, reads a row at TICK_0, applies it
 # at TICK_2 and writes the hard-restart ADSR on the ticks between.
 defaults: {tempo: 6}
+# The player build's feature flags the procs read (pysidwizard.features.PlayerFeatures, the
+# normal build's here); the lifter sets each from the tune's build.
+constants:
+  arpspeedsupp: 1
+  calcvibrato: 1
+  detunesupport: 1
+  finefiltsweep: 1
+  frame1switch: 1
+  allghostregs: 0
+  vibslidealways: 0
+  wfarp_nop_supp: 1
+  chordsupport: 1
+  # Play calls per frame: the player runs on one, MULPLY on the others (see tick).
+  speed: 1
 # A tempo is each voice's pair of row lengths tl, tr: 3-127 ticks (a byte 0 plays 6).
 tempo:
-  cells: {tl: a, tr: b}
+  cells: {tl: "a // speed", tr: "b // speed"}
 tables:
   freqlo: [7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
   freqhi: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255, 7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
@@ -15,6 +29,8 @@ tables:
   # The WF rows a voice reads before its first instrument, ending in $FF: the cursor init
   # zeroes reads instrument 1's header (the player's instrument 0 is linked to it).
   idle: [255]
+  # Each voice's pulse sweep count as its first note starts (see vinit's pw).
+  pwcount: [0, 0, 0]
   exptab: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255]
 # !pw and !filter: the header's control bits 6 and 7, which keep the program running on
 # a note that selects no instrument.
@@ -43,17 +59,17 @@ commands:
   17:
     when: "arg < 0x100 and ((arg >> 4) == 0 or (arg >> 4) >= 3) and ((arg & 0x0F) == 0 or (arg & 0x0F) >= 3)"
     name: tempo
-    args: {a: "(arg >> 4) if arg >> 4 else 6", b: "(arg & 0x0F) if arg & 0x0F else 6"}
-    raw: "(a << 4) | b"
+    args: {a: "((arg >> 4) if arg >> 4 else 6) * speed", b: "((arg & 0x0F) if arg & 0x0F else 6) * speed"}
+    raw: "((a // speed) << 4) | (b // speed)"
     column: fx
   20:
     when: "arg < 0x100 and ((arg >> 4) == 0 or (arg >> 4) >= 3) and ((arg & 0x0F) == 0 or (arg & 0x0F) >= 3)"
     name: vtempo
-    args: {a: "(arg >> 4) if arg >> 4 else 6", b: "(arg & 0x0F) if arg & 0x0F else 6"}
-    raw: "(a << 4) | b"
+    args: {a: "((arg >> 4) if arg >> 4 else 6) * speed", b: "((arg & 0x0F) if arg & 0x0F else 6) * speed"}
+    raw: "((a // speed) << 4) | (b // speed)"
     column: fx
-  18: {name: tempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg, column: fx}
-  19: {name: vtempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "(arg & 0x7F) if arg & 0x7F else 6", raw: arg, column: fx}
+  18: {name: tempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "((arg & 0x7F) if arg & 0x7F else 6) * speed", raw: "arg // speed", column: fx}
+  19: {name: vtempo, when: "(arg & 0x7F) == 0 or (arg & 0x7F) >= 3", arg: "((arg & 0x7F) if arg & 0x7F else 6) * speed", raw: "arg // speed", column: fx}
   288: {name: ad, nibble: 4, column: instrument}
   304: {name: ad, nibble: 0, column: instrument}
   336: {name: sr, nibble: 4, column: instrument}
@@ -64,8 +80,10 @@ record_types:
     form: map
     # flags: bits 4-5 the vibrato type, bit 6 keeps the pulse and bit 7 the filter program
     # running across notes (see lifetime); the field has no written form.
-    fields: {flags: 16, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, octave: 0, ctrl: 0, pw: 0, filter: 0, freq: 0, restart: 0}
-    unwritten: [flags, vibrato, vibdelay, octave]
+    # mul: the arp speed's bits 6 and 7, which also run the pulse and filter programs on the
+    # multispeed calls.
+    fields: {flags: 16, ad: 0, sr: 0, vibrato: 0, vibdelay: 0, octave: 0, ctrl: 0, pw: 0, filter: 0, freq: 0, restart: 0, mul: 0}
+    unwritten: [flags, vibrato, vibdelay, octave, mul]
     refs: {ctrl: wftab, pw: pwtab, filter: flttab, freq: x, restart: restart}
   # Hard restart: a lookahead row, written hold (2 or 1) ticks before the note's row applies:
   # the gate off and the hard-restart envelope, with control $18 (staccato, the voice's tables
@@ -77,11 +95,15 @@ record_types:
     optional: [ctrl, gate, ad, sr]
     codec:
       - when: "first and not last and hold >= 1 and hold <= 2 and (ctrl < 0 or ctrl == 0x18) and gate == 0 and ad >= 0 and sr >= 0"
-        keys: {hold: hold}
-        raw: {hold: hold}
+        keys: {hold: "hold * speed"}
+        raw: {hold: "hold // speed"}
       - when: "last and not first and hold == 0 and gate == 1 and ad < 0 and sr < 0"
+        keys: {hold: {value: speed, omit: "speed == 1"}}
+        raw: {hold: 0}
   # WF/arp row: w a waveform ($10+) or a hold count below $10 (the row keeps the waveform); a
-  # the arp byte (relative up $00-$7E, none $80, absolute $81-$DF, relative down $E0-$FF); d
+  # the arp byte (relative up $00-$7E, none $80, absolute $81-$DF, relative down $E0-$FF; a
+  # build without the arp NOP plays $80 as absolute note 0, and one without arp speeds plays
+  # every w as a waveform); d
   # the signed detune the row sets, written as its constant freq ($FF keeps it; the lifter
   # writes the value kept); h the ticks a waveform row holds after its first, the instrument's
   # arp speed. A hold row lasts w ticks after its first whatever its h, which paces the
@@ -90,7 +112,7 @@ record_types:
     writes_as: ctrl
     fields: {w: 0, a: 128, d: 0, h: 0, next: 0}
     codec:
-      - when: "w >= 0x10 and a != 0x7F and d != 0xFF and 0 <= h <= 0x3F"
+      - when: "wfarp_nop_supp and (w >= 0x10 or not arpspeedsupp) and (a != 0x7F or not chordsupport) and d != 0xFF and 0 <= h <= 0x3F"
         keys:
           hold: "h + 1"
           ctrl: w
@@ -100,7 +122,17 @@ record_types:
           w: ctrl
           h: "hold - 1"
           d: "(freq & 0xFF) if has_freq else 0"
-      - when: "w >= 0 and w < 0x10 and h == w and a != 0x7F and d != 0xFF"
+      - when: "not wfarp_nop_supp and (w >= 0x10 or not arpspeedsupp) and (a != 0x7F or not chordsupport) and d != 0xFF and 0 <= h <= 0x3F"
+        keys:
+          hold: "h + 1"
+          ctrl: w
+          note: {byte: a, none: 0x100, abs: [0x80, 0xDF]}
+          freq: {value: "s8(d)", omit: "d == 0"}
+        raw:
+          w: ctrl
+          h: "hold - 1"
+          d: "(freq & 0xFF) if has_freq else 0"
+      - when: "arpspeedsupp and w >= 0 and w < 0x10 and h == w and (a != 0x7F or not chordsupport) and d != 0xFF"
         keys:
           hold: "w + 1"
           note: {byte: a, none: 0x80, abs: [0x81, 0xDF]}
@@ -133,10 +165,18 @@ record_types:
         raw: {a: "0x80 | mode", b: cut, res: res}
   # A voice's held FREQ (LO/HI) before its first note; the IR seeds its held FREQ from this so
   # the onset's carried FREQ-LOW matches the native's, which plays an idle FREQ on note=0 frames.
+  # pw: the pulse cells its first note starts with, which a build that walks the tables on a
+  # note's set-up ticks (VIBSLIDEALWAYS) has stepped through instrument 1's header.
   vinit:
     fixed: true
     form: map
-    fields: {lo: 0, hi: 0}
+    fields: {lo: 0, hi: 0, pw: 0}
+    unwritten: [lo, hi]
+    codec:
+      - keys:
+          pw: {value: pw, omit: "pw == 0"}
+        raw:
+          pw: "pw if has_pw else 0"
 functions:
   # The row of restart program r on the note's first tick: its last.
   hrnote:
@@ -147,7 +187,7 @@ functions:
     expr: "(freqhi[d & 0xFF] << 8) | freqlo[d & 0xFF]"
   fy:
     args: [a, d]
-    expr: "(((a + 1) >> 1) + (d & 0xFF)) & 0xFF"
+    expr: "((((a + 1) >> 1) + (d & 0xFF)) & 0xFF) if calcvibrato else (a & 0xFF) + 10"
   fyc:
     args: [a, d]
     expr: "fy(a, d) if fy(a, d) < 203 else 203"
@@ -174,6 +214,7 @@ functions:
     args: [k, d]
     expr: "0 if k == 0 else (ktd(k, d) & 0xFF) + (ktd(k, d) >= 0)"
 global:
+  phase: {width: 8}
   fctl: {width: 8, init: 255}
   fswitch: {width: 8}
   fres: {width: 8}
@@ -367,10 +408,11 @@ procs:
   run_wf:
     - {if: "sa != 0", then: [{set: {wpos: sa}}]}
   small_fx:
-    - {if: "sfc == 0x20", then: [{set: {aov: sa, dov: -1}}]}
-    - {if: "sfc == 0x30", then: [{set: {aov: -1, dov: sa}}]}
-    - {if: "sfc == 0x50", then: [{set: {sov: sa, rov: -1}}]}
-    - {if: "sfc == 0x60", then: [{set: {sov: -1, rov: sa}}]}
+    # Each sets one nibble's override and clears the other's, which ALLGHOSTREGS keeps live.
+    - {if: "sfc == 0x20", then: [{set: {aov: sa, dov: "((dov if dov >= 0 else ins[ci].ad & 0x0F) if allghostregs else -1)"}}]}
+    - {if: "sfc == 0x30", then: [{set: {dov: sa, aov: "((aov if aov >= 0 else ins[ci].ad >> 4) if allghostregs else -1)"}}]}
+    - {if: "sfc == 0x50", then: [{set: {sov: sa, rov: "((rov if rov >= 0 else ins[ci].sr & 0x0F) if allghostregs else -1)"}}]}
+    - {if: "sfc == 0x60", then: [{set: {rov: sa, sov: "((sov if sov >= 0 else ins[ci].sr >> 4) if allghostregs else -1)"}}]}
     - {if: "sfc != 0x70 and ci != 0", then: [{call: write_adsr}]}
     - {if: "sfc == 0x70", then: [{call: run_wf}]}
   slide_speed:
@@ -468,10 +510,10 @@ procs:
     - set: {wpos: "wftab[wpos].next"}
   # One WF/arp row: rw, rx, rd.
   wf_apply:
-    - if: "rw < 0x10"
+    - if: "rw < 0x10 and arpspeedsupp"
       then: [{set: {arpcnt: rw}}]
       else: [{set: {sctl: "rw & gate"}}]
-    - if: "rx == 0x80"
+    - if: "rx == 0x80 and wfarp_nop_supp"
       then: [{set: {carry: 1}}]
       else:
         - if: "rx >= 0xE0"
@@ -540,7 +582,9 @@ procs:
         - call: filt_advance
         - return: true
     - {if: "fsweep >= t1", then: [{call: filt_advance}, {return: true}]}
-    - set: {fsweep: "fsweep + 1", t3: "(((vfhi << 3) | (vflo & 7)) + s8(t2)) & 0x7FF"}
+    # A build without the fine sweep adds the step to the cutoff's high byte, whose low bits it
+    # never sets.
+    - set: {fsweep: "fsweep + 1", t3: "(((vfhi << 3) | (vflo & 7)) + s8(t2) * (1 if finefiltsweep else 8)) & 0x7FF"}
     - set: {vflo: "t3 & 7", vfhi: "t3 >> 3", fcutlo: "t3 & 7", fcuthi: "t3 >> 3"}
   # The voice's register values for this tick.
   compose:
@@ -551,24 +595,24 @@ procs:
         - call: write_adsr
         - set: {rr: "hrnote(ins[ci].restart)"}
         - if: "restart[rr].ctrl >= 0"
-          then: [{set: {sctl: "restart[rr].ctrl & gate", sfh: "freqhi[vi * 7 if build[0] else (note + oct) & 0xFF]"}}]
+          then: [{set: {sctl: "restart[rr].ctrl & gate", sfh: "freqhi[vi * 7 if build[0] else (note + oct) & 0xFF] if frame1switch else sfh"}}]
         - return: true
     - if: "ins[ci].ctrl != 0 or zpd"
       then:
         - set: {t1: "dfreq((wfarp if wfabs else note + wfarp + oct) & 0x7F) + voff"}
         - set: {zpl: t1, zph: "t1 >> 8"}
-    - set: {t2: "zpl + (det & 0xFF) + carry"}
+    - set: {t2: "zpl + ((det & 0xFF) + carry if detunesupport else 0)"}
     - set: {sfl: t2, sfh: "zph + (t2 > 0xFF)", sph: "(pwhi & 0x7F) + pwtrack(pwkt, note + oct)", spl: pwlo}
   note_setup:
     - if: "hr > 0"
       then: [{call: compose}, {call: run_deferred}, {set: {hr: "hr - 1"}}, {return: true}]
     - call: pre_hr_ins
     - {if: "pre < 2 and upi != 0 and restart[rr].ctrl >= 0", then: [{call: emit_pre_hr}, {return: true}]}
-    - set: {innew: "haspend and pk == 1 and not pleg"}
+    - set: {innew: "haspend and pk == 1 and not pleg and not vibslidealways"}
     - {if: "pre < 2 and upi != 0", then: [{set: {gate: 0xFE}}]}
     - {if: "not innew", then: [{call: tick_vibrato}]}
     - call: tick_wf
-    - if: "skipw and pre < 2 and haspend and pk == 1 and not pleg and pifx != 0"
+    - if: "skipw and not vibslidealways and pre < 2 and haspend and pk == 1 and not pleg and pifx != 0"
       then: [{set: {carry: 1}}]
     - {if: "not innew", then: [{call: tick_pw}, {call: tick_filt}]}
     - call: compose
@@ -609,14 +653,43 @@ procs:
     - for_voices: [{if: "vi == target", then: [{call: tick_voice}]}]
     - for_voices: [{if: "vi == fctl", then: [{set: {fdp: "note + oct"}}]}]
     - for_voices: [{call: write_regs}]
+  # MULCNTP: a multispeed call steps the WF program, and the pulse and filter programs of an
+  # instrument whose mul bits say so, of every voice past its note's first PLAYER tick (ARPSCNT
+  # positive); a voice without an instrument walks instrument 1's (the player's instrument 0).
+  mulcntp:
+    - call: tick_wf
+    - {if: "ins[ci].mul & 0x40", then: [{call: tick_pw}]}
+    - {if: "ins[ci].mul & 0x80", then: [{call: tick_filt}]}
+    - call: compose
+  tick_mul:
+    - set: {leg2: 0, adsrw: 0, zpd: 0}
+    - {if: "arpcnt >= 0x80", then: [{return: true}]}
+    - if: "ci != 0"
+      then: [{call: mulcntp}]
+      else: [{set: {ci: 1, zpd: 1}}, {call: mulcntp}, {set: {ci: 0}}]
+  mulframe:
+    - set: {target: 2}
+    - for_voices: [{if: "vi == target", then: [{call: tick_mul}]}]
+    - set: {target: 1}
+    - for_voices: [{if: "vi == target", then: [{call: tick_mul}]}]
+    - set: {target: 0}
+    - for_voices: [{if: "vi == target", then: [{call: tick_mul}]}]
+    - for_voices: [{call: write_regs}]
+  # A call: the player on phase 0, MULPLY on the others; the first call is phase 1.
+  call:
+    - if: "phase == 0"
+      then: [{call: frame}]
+      else: [{call: mulframe}]
+    - set: {phase: "(phase + 1) % speed"}
 init:
   - for_voices:
       - set: {vi: nv}
-      - set: {r0: "vinit[vi].lo", r1: "vinit[vi].hi"}
+      - set: {r0: "vinit[vi].lo", r1: "vinit[vi].hi", pwhi: "vinit[vi].pw >> 8", pwlo: "vinit[vi].pw & 0xFF", pwcnt: "pwcount[vi]"}
       - set: {nv: "nv + 1"}
-  - call: frame
+  - set: {phase: "1 % speed"}
+  - call: call
 tick:
-  - call: frame
+  - call: call
 ghost:
   global: {0x15: fcutlo, 0x16: "fcuthi + fkd(fkt, fdp) + fshift + ((fcuthi + fkd(fkt, fdp)) >> 8)", 0x17: "(fres & 0xF0) | (fswitch & 0x0F)", 0x18: fmv}
   voice: {0: "r1:r0", 2: r2, 3: "r3 & 0x0F", 4: r4, 5: r5, 6: r6}
