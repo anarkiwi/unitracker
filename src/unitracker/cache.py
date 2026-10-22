@@ -1,13 +1,12 @@
 """Content-keyed on-disk caching and the process pool shared by conversion and optimisation."""
 
-import concurrent.futures
 import fcntl
 import hashlib
-import multiprocessing
 import os
 import pickle
 from pathlib import Path
 
+from pysidtracker import jobs
 from tqdm import tqdm
 
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
@@ -59,36 +58,41 @@ def default_workers() -> int:
 
 
 class Pool:
-    """A process pool over the host's cores with two BLAS threads per worker, or in-process."""
+    """A pool of ``workers`` processes (:func:`pysidtracker.jobs.imap`) with two BLAS threads
+    each, or in-process for one worker unless ``isolated``.
 
-    def __init__(self, workers: int, items: int):
+    A job's :func:`pysidtracker.jobs.deadline` is enforced by killing its worker's process
+    group, nested pools included.
+    """
+
+    def __init__(self, workers: int, items: int, isolated: bool = False):
         self.workers = max(1, min(workers or default_workers(), items))
-        self.pool = None
-        if self.workers > 1:
+        self.isolated = isolated or self.workers > 1
+        if self.isolated:
             for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
                 os.environ[var] = "2"
-            ctx = multiprocessing.get_context("spawn")
-            self.pool = concurrent.futures.ProcessPoolExecutor(self.workers, mp_context=ctx)
 
-    def map(self, fn, tasks: list, desc: str) -> list:
-        """``[fn(*task)]`` in order, with a progress bar over completed tasks."""
+    def map(self, fn, tasks: list, desc: str, failed=None) -> list:
+        """``[fn(*task)]`` in order, with a progress bar over completed tasks; ``failed(task,
+        error)`` stands for a task that raised, ran past its deadline or lost its worker
+        (without it the error is raised)."""
         progress = tqdm(total=len(tasks), desc=desc, unit="task", leave=False)
-        if self.pool is None:
-            out = []
-            for t in tasks:
-                out.append(fn(*t))
+        out = [None] * len(tasks)
+        if not self.isolated:
+            for i, t in enumerate(tasks):
+                out[i] = fn(*t)
                 progress.update()
             progress.close()
             return out
-        futures = {self.pool.submit(fn, *t): i for i, t in enumerate(tasks)}
-        out = [None] * len(tasks)
-        for f in concurrent.futures.as_completed(futures):
-            out[futures[f]] = f.result()
-            progress.update()
-        progress.close()
+        try:
+            for i, value, error in jobs.imap(fn, tasks, self.workers):
+                if error is not None and failed is None:
+                    raise error
+                out[i] = value if error is None else failed(tasks[i], error)
+                progress.update()
+        finally:
+            progress.close()
         return out
 
     def close(self) -> None:
-        """Shut the pool down."""
-        if self.pool is not None:
-            self.pool.shutdown()
+        """Nothing to shut down: :meth:`map` reaps its workers."""

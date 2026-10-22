@@ -232,3 +232,15 @@ def test_grid_agrees_over_the_ticks_the_grids_share(references, tmp_path):
     doc = tmp_path / "metal_warrior.yaml"
     doc.write_text(ref.generic, encoding="utf-8")
     assert corpus.main(["grid", str(doc), str(ref.sid), "--ticks", "32"]) == 0
+
+
+def test_a_lift_past_its_timeout_is_killed_and_recorded(references, tmp_path, monkeypatch):
+    monkeypatch.setenv("UNITRACKER_CACHE", str(tmp_path / "cache"))
+    ref = references["metal_warrior"]
+    tunes = _csv(tmp_path / "t.csv", ["path", "md5"], [{"path": ref.sid.name, "md5": "0" * 32}])
+    out = tmp_path / "out"
+    argv = ["check", str(tunes), "--hvsc", str(ref.sid.parent), "--out", str(out)]
+    assert corpus.main([*argv, "--jobs", "1", "--timeout", "0.5"]) == 0
+    (row,) = csv.DictReader((out / "results.csv").open())
+    assert row["gap"] == "TimeoutError: exceeded 0.5s" and row["verified"] == "no"
+    assert (out / f"00000000-{ref.sid.stem}.err").read_text() == row["gap"] + "\n"
