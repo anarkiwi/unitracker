@@ -589,5 +589,5 @@ def test_the_vm_plays_the_builds_pulse_and_realtime_optimisations(build):
     song = gt.GoatTrackerLift(dec, expressions=False).run()
     assert song["tables"]["build"] == build
     theirs = np.asarray(player().render_grid(400), np.uint8)
-    assert SongPlayer(song).mismatch(theirs) is None
+    assert vm_mismatch(song, theirs) is None
     assert (build == [1, 1]) == (np.asarray(make().render_grid(400), np.uint8) == theirs).all()
