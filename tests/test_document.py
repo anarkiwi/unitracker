@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from conftest import gt_tune, mini_song
 from unitracker_grammar import NTSC_HZ, frequency, parse
+from unitracker_grammar import table as f_table
 from unitracker_player import read
 
 from unitracker import cli, document
@@ -82,7 +83,7 @@ def test_the_header_names_no_player_and_what_differs_from_pal():
     assert "playroutine" not in text
     ftab = library("goattracker2")["tables"]["ftab"]
     table = list(read(text).tables["G"])
-    assert table == [ftab[k] if k in native.notes else 0 for k in range(max(native.notes) + 1)]
+    assert table == ftab[: len(f_table(NTSC_HZ))] and len(table) > max(native.notes) + 1
     assert any(table[k] != frequency(k, NTSC_HZ) for k in native.notes)
 
 

@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 
 from unitracker_grammar import PAL_HZ, CanonicalError, frequency, parse
+from unitracker_grammar import table as f_table
 from unitracker_grammar import expr as xexpr
 
 from unitracker.document import retime
@@ -67,8 +68,9 @@ class GenericError(ValueError):
 @dataclass(frozen=True)
 class Native:  # pylint: disable=too-many-instance-attributes
     """What a song plays natively that its generic document needs: the ticks to its state's
-    recurrence and a period more, the format notes it reads the frequency of, its note table
-    there, its modulator tables, each voice's onset tick and, where no voice starts on the
+    recurrence and a period more (or to its end), the format notes it reads the frequency of,
+    its note table, ``{format note: word}`` over every note ``F`` spans and every note it reads,
+    its modulator tables, each voice's onset tick and, where no voice starts on the
     first tick, the registers after it: the state after init; and each expression's firings,
     ``{cell: {tick: occurrence}}`` with ``{occurrence: expression text}``."""
 
@@ -83,11 +85,15 @@ class Native:  # pylint: disable=too-many-instance-attributes
     texts: dict = field(default_factory=dict)
 
     def note_table(self) -> list[int] | None:
-        """The native note table from format note 0 when it differs from ``F`` at a note the
-        song reads, else None; as a table patch does, it holds only what the song reads."""
+        """The whole native note table from format note 0, its trailing zeros (the grammar's
+        value outside a table) left out, when it differs from ``F`` at a note the song reads,
+        else None."""
         if all(self.table[k] == frequency(k, self.clock_hz) for k in self.notes):
             return None
-        return [self.table.get(k, 0) for k in range(max(self.notes) + 1)]
+        words = [self.table[k] for k in range(len(self.table))]
+        while words and not words[-1]:
+            words.pop()
+        return words
 
 
 def _canonical(value) -> str:
@@ -95,23 +101,34 @@ def _canonical(value) -> str:
     return xexpr.canonical(str(value))
 
 
+def _ended(player) -> bool:
+    """Whether every voice of ``player`` has read its track's last step: the song has ended."""
+    return all(cells[-1].ended for cells in player.voice_cells)
+
+
 def _replay(ir: dict, max_ticks: int, ticks: int | None) -> tuple:
     """``(player, ticks, registers after the first tick, log)`` of a replay of ``ir`` to its
-    state's recurrence and a period more, or ``ticks`` where it does not recur within
-    ``max_ticks``: the player has played those ticks, logging its expressions' firings."""
+    state's recurrence and a period more, to its end where every voice ends (:func:`_ended`),
+    or ``ticks`` where it does neither within ``max_ticks``: the player has played those
+    ticks, logging its expressions' firings."""
     player = SongPlayer(ir, record_reads=True)
     log = fired_log(player)
     first: list = []
+
+    def each(p) -> bool:
+        if not first:
+            first.append(tuple(p.regs))
+        return _ended(p)
+
     try:
-        tick, period = reach.recurrence(
-            player, max_ticks, each=lambda p: None if first else first.append(tuple(p.regs))
-        )
+        found = reach.recurrence(player, max_ticks, each=each)
     except reach.ReachabilityError:
         if ticks is None:
             raise
-        tick, period = ticks, 0
-    play_to(player, tick + period)
-    return player, tick + period, first[0] if first else None, log
+        found = (ticks, 0)
+    end = player.ticks if found is None else sum(found)
+    play_to(player, end)
+    return player, end, first[0] if first else None, log
 
 
 def play_to(player, ticks: int) -> None:
@@ -171,7 +188,8 @@ def native_state_from(player, ir: dict, ticks: int, first, log: list) -> Native:
     notes = {k for k in notes if k >= 0}
     clock = int((ir.get("clock") or DEFAULTS["clock"])["clock_hz"])
     word = ns.get("_F") or (lambda k: frequency(k, clock))
-    table = {k: int(word(k)) for k in notes}
+    span = max(len(f_table(clock)), max(notes, default=-1) + 1)
+    table = {k: int(word(k)) for k in range(span)}
     tables = {
         name: [int(ns["_T"][name](i)) for i in range(int(t["size"]))]
         for name, t in (spec.get("tables") or {}).items()
