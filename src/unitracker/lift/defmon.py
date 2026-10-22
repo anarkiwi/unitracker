@@ -320,16 +320,17 @@ def voice_init(rep: Replay) -> dict:
 
 def unheard_init(lift, ir: dict) -> dict:
     """``ir`` without the ``vinit`` notes its replay does not hear, once a replay to the song's
-    recurrence and one period more proves it plays ``lift``'s replay grid (the module's
-    frequency registers, which the playroutine does not carry, unheard)."""
+    recurrence and one period more proves it plays ``lift``'s replay grid bit for bit (the
+    module's frequency registers, which the playroutine does not carry, unheard; the song plays
+    the replay's carries, so a 1-LSB difference is heard)."""
     ticks = window(ir)
     theirs = lift.grid(ticks)
 
     def mismatch(song):
         player = SongPlayer(song)
-        return first_mismatch(player.render_grid(ticks), theirs, player.starts)
+        return first_mismatch(player.render_grid(ticks), theirs, player.starts, carry=False)
 
-    found = first_mismatch(grid(ir, ticks), theirs, starts(ir))
+    found = first_mismatch(grid(ir, ticks), theirs, starts(ir), carry=False)
     if found is not None:
         raise LiftError(
             f"the init's frequency registers are heard: tick {found[0]}, register {found[1]}"

@@ -713,10 +713,13 @@ def diff(ours: np.ndarray, theirs: np.ndarray, starts: list | None = None) -> li
     ]
 
 
-def first_mismatch(ours: np.ndarray, theirs: np.ndarray, starts: list) -> tuple[int, int] | None:
+def first_mismatch(
+    ours: np.ndarray, theirs: np.ndarray, starts: list, carry: bool = True
+) -> tuple[int, int] | None:
     """The first cell of :func:`diff`, ``(tick, register)``, or None when the grids agree on
-    the song's own state."""
-    return gridcmp.first_mismatch(ours, theirs, starts)
+    the song's own state; without ``carry`` the 1-LSB carry is a difference too."""
+    cells = gridcmp.cell_diff(ours, theirs, starts=starts, tol="carry" if carry else None)
+    return (int(cells[0, 0]), int(cells[0, 1])) if len(cells) else None
 
 
 def runs(cells: list) -> list:

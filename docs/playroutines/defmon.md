@@ -59,7 +59,8 @@ a nibble, as the reference grid does.
 
 The module also carries each voice's frequency registers through init, which sound on the first
 tick only, before the pitch step sets them from the note; the playroutine starts them at 0 and the
-lifter refuses a tune whose replay hears them. It writes `note` only where the replay hears it. The
+lifter refuses a tune whose replay hears them, comparing the song's grid with the replay's bit for
+bit (the song plays the replay's carries, so a 1-LSB difference is heard). It writes `note` only where the replay hears it. The
 slide accumulator counts only under a slide a layer-A program starts before the voice's first
 note, which clears it. There are no `pw` or
 `filter` record types.
