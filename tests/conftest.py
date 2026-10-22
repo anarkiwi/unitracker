@@ -100,6 +100,12 @@ civilization = hvsc_tune(
     "MUSICIANS/H/Hermit/Civilization.sid",
     "Path to Hermit's Civilization, SID-Wizard pulse table jumps.",
 )
+doom_schlager = hvsc_tune(
+    "doom_schlager",
+    "MUSICIANS/S/Spider_Jerusalem/C64-Doom-Schlager.sid",
+    "Path to Spider Jerusalem's C64-Doom-Schlager, a pre-1.8 SID-Wizard driver whose"
+    " first-frame FREQ_HI reads FREQTBH by the voice's track offset.",
+)
 third_ninja = hvsc_tune(
     "third_ninja",
     "MUSICIANS/S/Spiikki/Third_Ninja.sid",

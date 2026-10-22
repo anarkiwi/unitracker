@@ -14,6 +14,7 @@ The SID-Wizard 1.x player IRQ, normal build (driver 0), one play call per frame,
 | notes | `note_offset` 1: SID-Wizard index 49 is `C4` |
 | first note | each voice's first note must select an instrument |
 | onset | the note's hard-restart tick, which sets its FREQ-HI: its programs sound on the next tick |
+| build | the `build` table: 1 for a pre-1.8 driver, whose hard-restart tick reads FREQ-HI from FREQTBH at the voice's track offset (7 times the voice) instead of at the note |
 | before the first note | the first note's two set-up ticks read instrument 1's header as WF rows (the player's instrument 0 is linked to it, and its WF cursor starts at the control byte): the `idle` table holds the rows they read, ending in $FF, and sets the FREQ-LO the note's hard-restart tick carries; a jump or chord among them is not covered |
 
 ## Records

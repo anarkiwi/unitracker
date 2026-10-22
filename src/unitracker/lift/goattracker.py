@@ -227,6 +227,12 @@ def native_start(player) -> dict:
     return {"tempo": tempos.pop(), "funk0": funk[0], "funk1": funk[1]}
 
 
+def build_options(player) -> list[int]:
+    """The ``build`` table of native ``player`` (a pygoattracker player): its
+    PULSEOPTIMIZATION and REALTIMEOPTIMIZATION."""
+    return [int(player.optimize_pulse), int(player.optimize_realtime)]
+
+
 def _phrases(song, tracks) -> dict:
     """Every pattern the tracks play, lifted to a phrase."""
     out = {}
@@ -503,6 +509,7 @@ class GoatTrackerLift(Lift):
             "voices": 3,
             "tables": {
                 "ftab": [int(v) for v in freq],
+                "build": build_options(self.native()),
             },
             "records": {
                 "ins": instruments,

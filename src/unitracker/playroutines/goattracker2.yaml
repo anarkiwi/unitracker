@@ -7,6 +7,8 @@ tempo:
   cells: {tempo: "a - 1 if a == b and 3 <= a <= 127 else 0", funk0: "a - 1", funk1: "b - 1"}
 tables:
   ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  # PULSEOPTIMIZATION and REALTIMEOPTIMIZATION of the build (1: on, greloc's default).
+  build: [1, 1]
 commands:
   5: {name: ad}
   6: {name: sr}
@@ -419,12 +421,14 @@ procs:
               else: [{set: {tick: "funk1 if tempo else funk0", tempo: "tempo ^ 1"}}]
             - {if: "gatetimer > tick", then: [{set: {state: 1}}]}
         - call: wave_exec
-    - if: "not skip and tick != 0"
+    # build[0], PULSEOPTIMIZATION: no pulse step on a fetch tick or tick 0 of a phrase's first
+    # step; build[1], REALTIMEOPTIMIZATION: no continuous command on tick 0.
+    - if: "not skip and (tick != 0 or not build[1])"
       then: [{run: {record: tickn, index: command, field: do}}, {set: {fired: 1}}]
     - set: {fetchtick: "tick == gatetimer"}
-    - if: "not fetchtick and pptr != 0"
+    - if: "not (fetchtick and build[0]) and pptr != 0"
       then:
-        - {if: "tick == 0 and at_phrase_start", then: [{return: true}]}
+        - {if: "build[0] and tick == 0 and at_phrase_start", then: [{return: true}]}
         - call: pulse_exec
     - {if: fetchtick, then: [{call: get_new_notes}]}
 
