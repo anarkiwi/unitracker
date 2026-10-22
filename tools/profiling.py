@@ -20,7 +20,7 @@ import z3
 from tqdm import tqdm
 
 import shared
-from unitracker import optimise
+from unitracker import cache, optimise
 from unitracker.lift import backends
 from unitracker.modfit import convert as C
 from unitracker.modfit import grammar as G
@@ -63,7 +63,7 @@ def lift(args) -> int:
 def starts(source: str, subtune) -> tuple:
     """``(analysis, [start key], {start key: occurrence count})`` of a tune, the song and its
     keys kept under ``out/modfit/profile`` by source, subtune and code identity."""
-    key = f"{source}:{subtune}:{C.code_identity()}"
+    key = f"{source}:{subtune}:{cache.code_identity()}"
     where = KEYS / f"{hashlib.sha256(key.encode()).hexdigest()[:16]}.pkl"
     if where.exists():
         ir, counts = pickle.loads(where.read_bytes())
@@ -72,7 +72,7 @@ def starts(source: str, subtune) -> tuple:
         obs = C.observe(ir, None)
         an = C.Analysis(ir)
         counts = {}
-        for occ in tqdm(obs["occurrences"], desc="start keys", unit="occ"):
+        for occ in tqdm(obs.occurrences, desc="start keys", unit="occ"):
             k = an.key(an.unit(occ.unit), occ)
             if k is not None:
                 counts[k] = counts.get(k, 0) + 1

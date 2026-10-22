@@ -41,7 +41,7 @@ def occurrences(ir: dict, unit: str | None = None, cells: tuple = ()) -> list:
     obs = convert.observe(ir, None)
     _, texts = convert.derive_all(ir, obs, None, workers=1)
     out = []
-    for occ, text in zip(obs["occurrences"], texts):
+    for occ, text in zip(obs.occurrences, texts):
         if unit is None or occ.unit == unit:
             shown = " ".join(f"{c}={occ.start.get(c)}" for c in cells)
             out.append(

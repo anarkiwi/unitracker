@@ -10,7 +10,6 @@ import ast
 import copy
 import dataclasses
 import functools
-import importlib.util
 import json
 from pathlib import Path
 
@@ -20,7 +19,7 @@ import sympy
 from pysidtracker import gridcmp
 from unitracker_grammar.expr import ExpressionError, source
 
-from unitracker.cache import CACHE, Pool, cached, content_key
+from unitracker.cache import CACHE, Pool, cached, content_key, ir_key
 
 from unitracker.playroutine.codec import command_code, command_variants, evaluate
 from unitracker.document.events.lifetime import selected
@@ -28,35 +27,14 @@ from unitracker.playroutine.records import chained, program_path, record_types
 from unitracker.playroutine.codec import row_codecs
 from unitracker.modfit import grammar as G
 from unitracker.modfit.exprs import Analysis
-from unitracker.modfit.replay import Replay, Stepper
+from unitracker.modfit.replay import Stepper
 from unitracker.player import reach
 from unitracker.player.modulation import INIT, declared, unit_command, unit_width
-from unitracker.player.vm import ONSET, SongPlayer, fold_empty
+from unitracker.player.trace import Trace, trace
+from unitracker.player.vm import ONSET, fold_empty
 
 IDENTITY = "v"
 CHUNK = 256
-_HERE = Path(__file__).resolve().parent
-SOURCES = (
-    sorted(_HERE.glob("*.py"))
-    + [_HERE / "specs.yaml"]
-    + sorted((_HERE.parent / "playroutines").glob("*.yaml"))
-    + [
-        Path(importlib.util.find_spec(f"unitracker.{m}").origin)
-        for m in (
-            "player.modulation",
-            "player.vm",
-            "playroutine.records",
-            "playroutine.codec",
-            "playroutine.schema",
-        )
-    ]
-)
-
-
-@functools.cache
-def code_identity() -> str:
-    """The content key of the code a conversion depends on (``SOURCES``), once per process."""
-    return content_key(*(p.read_bytes() for p in SOURCES))
 
 
 class ConversionError(ValueError):
@@ -78,119 +56,41 @@ def expand_repeats(ir: dict) -> dict:
     return out
 
 
-class Observer(Replay):
-    """A native replay that records the event instance each occurrence belongs to.
-
-    An instance is ``(voice, play count, step)``; ``events`` maps ``(unit, instance)`` to the
-    occurrence a start hook of the unit was applying when that event was the voice's last. An
-    occurrence's ``instance`` is the voice's last event at its start, ``fetched`` at its first
-    firing.
-    """
-
-    def __init__(self, ir: dict):
-        super().__init__(ir, lambda unit, occ: None)
-        voices = len(self.player.voice_cells)
-        self.count, self.last = [0] * voices, [None] * voices
-        self.plays = [[] for _ in range(voices)]
-        self.hooked, self.started, self.events = {}, {}, {}
-        fetch = self.ns["_fetch"]
-
-        def observed(v):
-            voice, cursor = self.voice_of[id(v)], v[-1]
-            self.last[voice] = None
-            if not cursor.ended:
-                if cursor.step == 0:
-                    self.plays[voice].append(cursor.index)
-                    self.count[voice] += 1
-                self.last[voice] = (voice, self.count[voice] - 1, cursor.step)
-            fetch(v)
-
-        self.ns["_fetch"] = observed
-
-    def applied(self, unit: dict, voice) -> None:
-        self.hooked[(unit["name"], voice)] = None if voice is None else self.last[voice]
-
-    def restart(self, unit: dict, voice, hook: tuple) -> None:
-        super().restart(unit, voice, hook)
-        key = (unit["name"], None if unit.get("scope") == "global" else voice)
-        self.started[key] = None if voice is None else self.last[voice]
-
-    def open(self, unit: dict, name: tuple, voice, snap: dict, before: int) -> None:
-        super().open(unit, name, voice, snap, before)
-        occ = self.active[name]
-        occ.instance, occ.index = self.started.pop(name, None), len(self.occurrences) - 1
-        occ.fetched = None if voice is None else self.last[voice]
-
-    def fired(self, unit: dict, occ) -> None:
-        inst = self.hooked.pop((unit["name"], occ.voice), None)
-        if inst is not None:
-            self.events.setdefault((unit["name"], inst), occ.index)
-
-
-def ir_key(ir: dict) -> str:
-    """The content key of a lifter's song and the code its conversion depends on."""
-    return content_key(json.dumps(ir, sort_keys=True, default=repr), code_identity())
-
-
-def observation(ir: dict, cache: Path | None = CACHE) -> dict:
-    """One native run of ``ir``, to its state's recurrence and one period more.
-
-    The shared observation: the window (its tick count), the window's register grid, the
-    per-voice start ticks, and the occurrences with event attribution. ``window``, ``observe``
-    and ``analyse`` all read it, so the native replay is one run, cached by content and code.
-    """
-
-    def compute():
-        obs = Observer(ir)
-        rows: list = []
-        tick, period = reach.recurrence(
-            obs.player, progress=True, each=lambda p: rows.append(list(p.regs))
+def observation(ir: dict, cache: Path | None = CACHE) -> Trace:
+    """The song's one native run (:func:`trace.trace`), to its state's recurrence and a period
+    more: the window, its register grid, each voice's onset and the occurrences with their
+    events. Raises :class:`reach.ReachabilityError` where the state does not recur."""
+    got = trace(ir, cache=cache)
+    if not got.recurs():
+        raise reach.ReachabilityError(
+            f"playback state did not recur within {reach.MAX_TICKS} ticks"
         )
-        while obs.player.ticks < tick + period:
-            obs.player.play_frame()
-            rows.append(list(obs.player.regs))
-        return {
-            "occurrences": obs.occurrences,
-            "events": obs.events,
-            "plays": obs.plays,
-            "rows": rows,
-            "starts": list(obs.player.starts),
-            "tick": tick,
-            "period": period,
-            "ticks": tick + period,
-        }
-
-    where = cache / f"convert-observe-{ir_key(ir)}.pkl" if cache is not None else None
-    return cached(where, compute)
+    return got
 
 
 def window(ir: dict) -> int:
-    """Ticks that play every state the song reaches twice: to its recurrence and a period more."""
-    return observation(ir)["ticks"]
+    """Ticks that play every state the song reaches twice: to its recurrence and a period more.
+
+    ``window``, ``grid`` and ``starts`` read the trace of the song with its repeats written out,
+    the one its conversion reads.
+    """
+    return observation(expand_repeats(ir)).ticks
 
 
 def grid(ir: dict, ticks: int | None = None) -> np.ndarray:
-    """The song's native register grid from the shared observation, ``ticks`` rows (the window).
-
-    Past the window the state already repeats, so longer grids extend by the period.
-    """
-    obs = observation(ir)
-    rows = np.asarray(obs["rows"], dtype=np.uint8)
-    base = obs["ticks"]
-    if ticks is None or ticks <= base:
-        return rows[:ticks]
-    a = obs["tick"] - obs["period"]
-    extra = rows[a + (np.arange(base, ticks) - a) % obs["period"]]
-    return np.concatenate((rows, extra))
+    """The song's native register grid, ``ticks`` rows (the window); past the window the state
+    already repeats, so longer grids extend by the period."""
+    obs = observation(expand_repeats(ir))
+    return obs.grid(obs.ticks if ticks is None else ticks)
 
 
 def starts(ir: dict) -> list:
-    """The song's per-voice start ticks, from the shared observation."""
-    return observation(ir)["starts"]
+    """The song's per-voice start ticks."""
+    return list(observation(expand_repeats(ir)).starts)
 
 
-def observe(ir: dict, cache: Path | None = CACHE) -> dict:
-    """The song's native occurrences and event attribution over its window, cached by content."""
+def observe(ir: dict, cache: Path | None = CACHE) -> Trace:
+    """The song's native occurrences and event attribution over its window."""
     return observation(ir, cache)
 
 
@@ -355,11 +255,11 @@ def group_texts(an: Analysis, occs: list, found: dict) -> list:
     return out
 
 
-def derive_all(ir: dict, obs: dict, cache: Path | None, workers=None) -> tuple:
+def derive_all(ir: dict, obs: Trace, cache: Path | None, workers=None) -> tuple:
     """``(start derivations, each occurrence's text)``, every distinct start derived in parallel."""
     # pylint: disable=too-many-locals
     key = ir_key(ir)
-    occs = obs["occurrences"]
+    occs = obs.occurrences
     chunks = [occs[i : i + CHUNK] for i in range(0, len(occs), CHUNK)]
     pool = Pool(workers, max(len(chunks), 1))
     try:
@@ -390,7 +290,7 @@ def _program(rows: dict, rtype, entry: int) -> tuple:
 class Rewrite:  # pylint: disable=too-many-instance-attributes
     """A song's modulations rewritten as expressions, from its occurrences and their texts."""
 
-    def __init__(self, ir: dict, obs: dict, texts: list):
+    def __init__(self, ir: dict, obs: Trace, texts: list):
         self.ir = copy.deepcopy(ir)
         self.pr = self.ir["playroutine"]
         self.rtypes = record_types(self.pr)
@@ -422,7 +322,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
 
     def run(self) -> dict:
         """The rewritten lifter's song."""
-        occs = self.obs["occurrences"]
+        occs = self.obs.occurrences
         sites = {}
         for i, occ in enumerate(occs):
             where = self.site(occ)
@@ -678,7 +578,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     def _instances(self, voice: int):
         """``(instance, event)`` of each step a voice plays over the window, in order."""
         plays = self.ir["tracks"][voice]["plays"]
-        for count, pos in enumerate(self.obs["plays"][voice]):
+        for count, pos in enumerate(self.obs.plays[voice]):
             for step, event in enumerate(_steps(self.ir["phrases"][plays[pos]["phrase"]])):
                 yield (voice, count, step), event
 
@@ -687,7 +587,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         """``{instance: head}``: the instance whose event names the instrument each instance
         plays, None for none (``lifetime.selected``)."""
         out = {}
-        for voice in range(len(self.obs["plays"])):
+        for voice in range(len(self.obs.plays)):
             out.update((key, head) for key, _, head in selected(self._instances(voice)))
         return out
 
@@ -828,7 +728,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         self._pending = []
         base = int(self.instrument.get("base", 0))
         targets = self._plan_targets(plan)
-        for voice in range(len(self.obs["plays"])):
+        for voice in range(len(self.obs.plays)):
             current = None
             for instance, _event in self._instances(voice):
                 target = targets.get(instance)
@@ -852,7 +752,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
     def event_at(self, instance: tuple) -> tuple:
         """``(phrase name, step)`` of an instance, or None past its phrase's end."""
         voice, count, step = instance
-        play = self.ir["tracks"][voice]["plays"][self.obs["plays"][voice][count]]
+        play = self.ir["tracks"][voice]["plays"][self.obs.plays[voice][count]]
         if step >= len(_steps(self.ir["phrases"][play["phrase"]])):
             return None
         return play["phrase"], step
@@ -874,10 +774,10 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         """Each event's native modulator commands as its expression's ``!freq`` command, and each
         commandless step a driven occurrence spans after the voice's first note."""
         # pylint: disable=too-many-locals
-        occs = self.obs["occurrences"]
+        occs = self.obs.occurrences
         legato = self.spec.get("legato") or {}
         legato_code = command_code(self.pr.get("commands"), "legato")
-        for (unit, instance), i in sorted(self.obs["events"].items(), key=repr):
+        for (unit, instance), i in sorted(self.obs.events.items(), key=repr):
             spec, occ, text = self.units[unit], occs[i], self.texts[i]
             code = unit_command(self.pr, spec)
             if code is None or self.site(occ) is not None:
@@ -925,9 +825,9 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
             if code is None:
                 continue
             native = set(spec["commands"])
-            for voice in range(len(self.obs["plays"])):
+            for voice in range(len(self.obs.plays)):
                 for instance, event in self._instances(voice):
-                    if (unit, instance) in self.obs["events"] or not any(
+                    if (unit, instance) in self.obs.events or not any(
                         int(c[0]) in native for c in _cmds(event)
                     ):
                         continue
@@ -946,7 +846,7 @@ class Rewrite:  # pylint: disable=too-many-instance-attributes
         for (voice, count, step), event in self.events.items():
             per.setdefault((voice, count), {})[step] = event
         for voice, track in enumerate(self.ir["tracks"]):
-            counts = self.obs["plays"][voice]
+            counts = self.obs.plays[voice]
             n, loop = len(track["plays"]), track.get("loop")
             by_pos = {}
             # A last pass the window cuts short repeats a whole pass a period earlier.
@@ -1057,7 +957,7 @@ class Conversion:
 
     ir: dict
     ticks: int
-    obs: dict
+    obs: Trace
     found: dict
     texts: list
     out: dict
@@ -1074,12 +974,12 @@ def analyse(ir: dict, cache: Path | None = CACHE, workers=None) -> Conversion:
     ``tolerance``), to its state's recurrence and one period more."""
     ir = expand_repeats(ir)
     obs = observation(ir, cache)
-    ticks = obs["ticks"]
+    ticks = obs.ticks
     found, texts = derive_all(ir, obs, cache, workers)
     out = Rewrite(ir, obs, texts).run()
-    want = np.asarray(obs["rows"], dtype=np.uint8)
     tol = ir["playroutine"].get("tolerance")
-    bad = gridcmp.first_mismatch(SongPlayer(out).render_grid(ticks), want, obs["starts"], tol=tol)
+    ours = trace(out, ticks, cache).grid(ticks)
+    bad = gridcmp.first_mismatch(ours, obs.rows, list(obs.starts), tol=tol)
     if bad is not None:
         raise ConversionError(f"the expressions play differently: tick {bad[0]}, register {bad[1]}")
     return Conversion(ir, ticks, obs, found, texts, out)

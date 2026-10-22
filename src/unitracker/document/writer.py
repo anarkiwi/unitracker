@@ -5,7 +5,6 @@ native note table that differs from ``F`` where the song reads it is the documen
 """
 
 import ast
-import itertools
 import re
 from dataclasses import dataclass, field
 
@@ -19,7 +18,7 @@ from unitracker.playroutine import tempo
 from unitracker.playroutine.library import DEFAULTS
 from unitracker.playroutine.records import record_types
 from unitracker.document.yamlstyle import Atom, Flow, FlowMap
-from unitracker.player import oracle, reach
+from unitracker.player import oracle, reach, trace
 from unitracker.player.modulation import declared
 from unitracker.player.vm import SongPlayer
 
@@ -102,74 +101,19 @@ def _canonical(value) -> str:
     return xexpr.canonical(str(value))
 
 
-def _ended(player) -> bool:
-    """Whether every voice of ``player`` has read its track's last step: the song has ended."""
-    return all(cells[-1].ended for cells in player.voice_cells)
-
-
-def _replay(ir: dict, max_ticks: int, ticks: int | None) -> tuple:
-    """``(player, ticks, registers after the first tick, log)`` of a replay of ``ir`` to its
-    state's recurrence and a period more, to its end where every voice ends (:func:`_ended`),
-    or ``ticks`` where it does neither within ``max_ticks``: the player has played those
-    ticks, logging its expressions' firings."""
-    player = SongPlayer(ir, record_reads=True)
-    log = fired_log(player)
-    first: list = []
-
-    def each(p) -> bool:
-        if not first:
-            first.append(tuple(p.regs))
-        return _ended(p)
-
-    try:
-        found = reach.recurrence(player, max_ticks, each=each)
-    except reach.ReachabilityError:
-        if ticks is None:
-            raise
-        found = (ticks, 0)
-    end = player.ticks if found is None else sum(found)
-    play_to(player, end)
-    return player, end, first[0] if first else None, log
-
-
 def play_to(player, ticks: int) -> None:
     """Play ``player`` until it has played ``ticks`` frames."""
     while player.ticks < ticks:
         player.play_frame()
 
 
-def fired_log(player) -> list:
-    """The list to which each firing of an expression the player's units play appends
-    ``(tick, cell, occurrence, expression index)``: the cell ``(key, voice)`` (voice None for
-    a global unit's), an occurrence numbered from 1 per start."""
-    log: list = []
-    modulation = player.modulation
-    if modulation is None:
-        return log
-    cells = {u["name"]: (u["key"], u.get("scope") == "global") for u in modulation.units}
-    last: dict = {}
-    serials = itertools.count(1)
-
-    def fired(unit: dict, occ) -> None:
-        if occ.derived is None:
-            return
-        key, glob = cells[unit["name"]]
-        name = (unit["name"], occ.voice)
-        if last.get(name, (None,))[0] is not occ:
-            last[name] = (occ, next(serials))
-        log.append((modulation.tick, (key, None if glob else occ.voice), last[name][1], occ.key))
-
-    modulation.fired = fired
-    return log
-
-
-def _firings(player, log: list, ticks: int) -> tuple:
+def _firings(ir: dict, log: list, ticks: int) -> tuple:
     """``({cell: {tick: occurrence}}, {occurrence: expression text})`` of the firings logged
     before ``ticks``."""
     fired: dict = {}
     keys: dict = {}
     texts: dict = {}
-    exprs = player.song.get("exprs") or {}
+    exprs = ir.get("exprs") or {}
     for tick, cell, serial, key in log:
         if tick < ticks:
             fired.setdefault(cell, {})[tick] = serial
@@ -179,31 +123,27 @@ def _firings(player, log: list, ticks: int) -> tuple:
     return fired, keys
 
 
-def native_state_from(player, ir: dict, ticks: int, first, log: list) -> Native:
-    """The :class:`Native` of a song ``ir`` already played to ``ticks`` by ``player``: ``first``
-    is the registers after the first tick (or None) and ``log`` the expressed firings logged."""
+def _native(ir: dict, ticks: int, reads, word, tables: dict, starts: tuple, first, log) -> Native:
+    """The :class:`Native` of song ``ir`` over ``ticks``: ``reads(table)`` the entries read,
+    ``word`` the frequency word of an internal note (None: ``F``), ``first`` the registers after
+    the first tick and ``log`` the expressed firings (:func:`trace.fired_log`)."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     spec = declared(ir["playroutine"]) or {}
-    ns, offset = player.namespace, int(ir["playroutine"].get("note_offset", 0))
-    reads = (player.table_reads or {}).get
-    notes = {i - offset for t in (spec.get("freq") or {}).values() for i in reads(t, ())}
+    offset = int(ir["playroutine"].get("note_offset", 0))
+    notes = {i - offset for t in (spec.get("freq") or {}).values() for i in reads(t)}
     notes = {k for k in notes if k >= 0}
     clock = int((ir.get("clock") or DEFAULTS["clock"])["clock_hz"])
-    word = ns.get("_F") or (lambda k: frequency(k, clock))
+    word = word or (lambda k: frequency(k, clock))
     span = max(len(f_table(clock)), max(notes, default=-1) + 1)
-    table = {k: int(word(k)) for k in range(span)}
-    tables = {
-        name: [int(ns["_T"][name](i)) for i in range(int(t["size"]))]
-        for name, t in (spec.get("tables") or {}).items()
-    }
     return Native(
         ticks,
         frozenset(notes),
-        table,
+        {k: int(word(k)) for k in range(span)},
         tables,
         clock,
-        tuple(player.starts),
-        first if 0 not in player.starts else None,
-        *_firings(player, log, ticks),
+        tuple(starts),
+        first if 0 not in starts else None,
+        *_firings(ir, log, ticks),
     )
 
 
@@ -211,20 +151,59 @@ def native_over(ir: dict, ticks: int) -> Native:
     """The :class:`Native` of song ``ir`` played ``ticks`` ticks, the bound another song's
     state recurrence set: the firings a candidate of that song's grid plays."""
     player = SongPlayer(ir, record_reads=True)
-    log = fired_log(player)
+    log = trace.fired_log(player)
     play_to(player, 1)
     first = tuple(player.regs)
     play_to(player, ticks)
-    return native_state_from(player, ir, ticks, first, log)
+    reads = {name: set(read) for name, read in player.table_reads.items()}
+    return _native(
+        ir,
+        ticks,
+        lambda t: reads.get(t, ()),
+        player.namespace.get("_F"),
+        trace.spec_tables(player),
+        player.starts,
+        first,
+        log,
+    )
+
+
+def native_from(ir: dict, run: trace.Trace, ticks: int | None = None, frames=None) -> Native:
+    """The :class:`Native` of song ``ir`` from its trace ``run``, over ``ticks`` (its window by
+    default), its onsets and table reads over the first ``frames`` (``ticks``) ticks."""
+    ticks = run.ticks if ticks is None else ticks
+    frames = ticks if frames is None else frames
+    first = tuple(run.rows[0].tolist()) if run.frames else None
+    return _native(
+        ir,
+        ticks,
+        lambda t: run.read(t, frames),
+        None if run.words is None else run.words.__getitem__,
+        run.tables,
+        run.onsets(frames),
+        first,
+        run.firings(ticks),
+    )
 
 
 def native_state(ir: dict, max_ticks: int = reach.MAX_TICKS, ticks: int | None = None) -> Native:
-    """The :class:`Native` of song ``ir``: one replay to its state's recurrence, recording the
-    frequency-table entries it reads and its registers after the first tick. ``ticks``, where
-    given, stands for the recurrence and a period of a song whose state does not recur within
-    ``max_ticks``."""
-    player, ticks, first, log = _replay(ir, max_ticks, ticks)
-    return native_state_from(player, ir, ticks, first, log)
+    """The :class:`Native` of song ``ir`` from its trace (:func:`trace.trace`), over its state's
+    recurrence and a period more, or to its end where every voice ends first. ``ticks``, at
+    most ``max_ticks + 1`` where given, stands for that of a song that does neither within
+    ``max_ticks``, read over those played."""
+    run = trace.trace(ir, max_ticks)
+    if (
+        run.end is not None
+        and run.end <= min(max_ticks, max_ticks if run.tick is None else run.tick) + 1
+    ):
+        return native_from(ir, run, run.end)
+    if run.recurs(max_ticks):
+        return native_from(ir, run)
+    if ticks is None:
+        raise reach.ReachabilityError(f"playback state did not recur within {max_ticks} ticks")
+    if ticks > max_ticks + 1:
+        raise ValueError(f"{ticks} ticks is past the {max_ticks + 1} a bounded run plays")
+    return native_from(ir, run, ticks, max_ticks + 1)
 
 
 @dataclass

@@ -21,7 +21,7 @@ from unitracker.modfit import grammar as G
 from unitracker.modfit.phase import Order, clipped, ramp, by_phase, shortest_lasso
 from unitracker.modfit.phase import Trace as Segments
 from unitracker.optimise.model import ERRORS, currents, incoming, play_order
-from unitracker.player import reach
+from unitracker.player.trace import trace
 from unitracker.player.modulation import unit_command, units
 
 FREQ = "freq"
@@ -106,16 +106,18 @@ def _observed(ir: dict) -> dict:
         return {}
     song = convert.expand_repeats(ir)
     try:
-        obs = convert.observation(song)
-    except (reach.ReachabilityError, *ERRORS):
+        obs = trace(song)
+    except ERRORS:
+        return {}
+    if not obs.recurs():
         return {}
     per = {}
-    for occ in (o for o in obs["occurrences"] if o.unit in names and o.instance is not None):
+    for occ in (o for o in obs.occurrences if o.unit in names and o.instance is not None):
         per.setdefault(occ.instance, []).append(occ.firings)
     places = {name: _places(events) for name, events in song["phrases"].items()}
     seen = {}
     for (voice, count, step), fired in per.items():
-        name = song["tracks"][voice]["plays"][obs["plays"][voice][count]]["phrase"]
+        name = song["tracks"][voice]["plays"][obs.plays[voice][count]]["phrase"]
         for place in places[name][step : step + 1]:
             seen.setdefault((name, place[0]), set()).add(tuple(fired) if place[1] else ())
     return {at: _single(f) for at, f in seen.items()}
