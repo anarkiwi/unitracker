@@ -127,5 +127,5 @@ def test_a_pair_of_equal_tempos_is_written_as_one(player, code, arg, written, re
     doc, starts = oracle.play(text, 300)
     vm = SongPlayer(ir).render_grid(300)
     if note_ticks(doc) != note_ticks(vm):
-        grid_diff_of(request, gridcmp.verdict_onset(doc, starts, vm))
+        grid_diff_of(request, gridcmp.verdict_onset(doc, starts, vm), text, ir)
     assert note_ticks(doc) == note_ticks(vm)

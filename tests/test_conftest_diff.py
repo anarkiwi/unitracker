@@ -13,7 +13,11 @@ from pysidtracker.asm6502 import assemble
 from pysidtracker.oracle import register_grid
 from pysidtracker.player import MemPlayer
 
+from test_tempo import scale_song
+
+from unitracker import document
 from unitracker.lift import verify
+from unitracker.player import oracle
 from unitracker.player.vm import SongPlayer
 
 
@@ -187,6 +191,62 @@ def test_the_hook_leaves_a_report_with_no_attached_diff_alone():
     assert _run_hook(item, inner) is inner and inner.wasxfail == "the reason"
 
 
-def test_the_hook_leaves_a_plain_failure_alone():
-    item, inner = SimpleNamespace(failure_report="DIFF"), SimpleNamespace()
-    assert _run_hook(item, inner) is inner and not hasattr(inner, "wasxfail")
+def test_the_hook_adds_the_diff_to_a_failure_and_leaves_a_pass_alone():
+    item = SimpleNamespace(failure_report="DIFF")
+    passed = SimpleNamespace(failed=False, sections=[])
+    assert _run_hook(item, passed) is passed and passed.sections == []
+    failed = SimpleNamespace(failed=True, sections=[])
+    assert _run_hook(item, failed).sections == [("explain", "DIFF")]
+    assert not hasattr(failed, "wasxfail")
+
+
+def documents() -> tuple:
+    """``(edited, source, song)``: a scale song, its document, and the document with ``!ad`` on
+    its first phrase's second note."""
+    song = scale_song("sidwizard")
+    text = document.write(song)
+    edited = text.replace("p2: [C4.i1!tempo:6, D4,", "p2: [C4.i1!tempo:6, D4!ad:90,", 1)
+    assert edited != text
+    return edited, text, song
+
+
+def onset(subject, against, ticks: int = 40) -> tuple:
+    """``(verdict, grids)`` of ``subject`` against ``against``, each played ``ticks`` ticks."""
+    grids = tuple(conftest.render(w, ticks) for w in (subject, against))
+    return gridcmp.verdict_onset(*oracle.play(subject, ticks), grids[1]), grids
+
+
+def test_explain_slices_a_documents_setattr_store_to_its_command():
+    edited, text, song = documents()
+    for against, right in ((text, "reference"), (song, "generic")):
+        ver, grids = onset(edited, against)
+        assert ver.onset[1] == 5
+        why = verify.explain(ver, edited, grids, against, name="ad")
+        assert why.values == {"document": 90, right: 0}
+        left = [why.left.events[i].text for i in why.left.keep]
+        assert left[-1] == "regs[at + 5] = voice.ad"
+        assert "setattr(voice, key, value & 0xFF)" in left
+        assert any(t.startswith("for key, value in event.ops") for t in left)
+        assert why.right.keep and why.text().startswith("divergence: ad, reference frame")
+
+
+def test_explain_runs_a_document_against_a_raw_tune_on_jennings():
+    raw = counter_tune()
+    theirs = np.asarray(register_grid(raw, 4), np.uint8)
+    text = documents()[1]
+    ver = gridcmp.verdict_onset(oracle.play(text, 4)[0], [0, 0, 0], theirs)
+    assert ver.onset == (0, 0x18)
+    why = verify.explain(ver, text, (verify.player(text).render_grid(4), theirs), raw)
+    assert why.values == {"document": 15, "6502": 2, "reference": 2}
+    assert why.left.events[why.left.root].text == "regs[24] = self.mode | self.vol"
+    assert "STA $d418" in why.right.lines[why.right.root]
+
+
+def test_grid_diff_of_explains_a_document_and_a_failure_carries_it(request):
+    edited, text, _ = documents()
+    ver, _ = onset(edited, text)
+    report = conftest.grid_diff_of(request, ver, edited, text)
+    assert report.startswith(gridcmp.runs_report(ver, **verify.REPORT))
+    assert "WHY: the steps the diverging value came from" in report
+    assert "DOCUMENT" in report and "REFERENCE" in report
+    assert request.node.failure_report == report

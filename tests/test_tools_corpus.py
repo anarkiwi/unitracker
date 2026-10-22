@@ -3,11 +3,13 @@
 import csv
 import json
 import random
+import re
 from pathlib import Path
 
 import corpus
 import shared
 
+import pytest
 from pysidtracker import gridcmp
 
 VERDICT = gridcmp.Verdict(
@@ -207,6 +209,22 @@ def test_grid_diffs_the_diverging_reference_tune_for_the_eye_and_the_machine(
     assert corpus.main(argv) == 1
     text = capsys.readouterr().out
     assert "mismatch: tick 26, register $07 v2 freq lo" in text and "\n    26 O " in text
+
+
+@pytest.mark.parametrize("against", ["native", "6502", "vm"])
+def test_grid_explains_the_documents_onset(references, tmp_path, capsys, against):
+    ref = references["csillag"]
+    doc = tmp_path / "csillag.yaml"
+    doc.write_text(ref.generic, encoding="utf-8")
+    argv = ["grid", str(doc), str(ref.sid), "--ticks", "64", "--explain", against]
+    assert corpus.main(argv) == 1
+    text = capsys.readouterr().out
+    label = {"native": "NATIVE", "6502": "6502", "vm": "GENERIC"}[against]
+    head = re.search(r"^divergence: csillag, reference frame (\d+), register \$(\w\w)", text, re.M)
+    assert head and "WHY: the steps the diverging value came from" in text
+    assert re.search(rf"^DOCUMENT +\| {label}$", text, re.M)
+    if against != "vm":
+        assert (int(head[1]), int(head[2], 16)) == (26, 7)
 
 
 def test_grid_agrees_over_the_ticks_the_grids_share(references, tmp_path):

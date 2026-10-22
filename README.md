@@ -62,7 +62,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | does the lifter's song replay its native grid on the VM, without expressions | `python tools/corpus.py check LIST.csv --plain --ticks 3007 [--registers 2,3]` |
 | does a lifter change alter any tune's output? | `python tools/corpus.py check ... --out DIR [--plain]` before and after, then `diff -r` |
 | a random lifted sample of generic documents, balanced over the three players | `python tools/corpus.py check tunes.csv --sample N [--seed S] [--subtunes 1] --out DIR` (from the survey's `find` csv) |
-| where (on which ticks, registers and values) does a generic document differ from the native grid? | `python tools/corpus.py grid DOC.yaml TUNE.sid [--ticks N] [--json [PATH]] [--grids DIR]` (exit 1 on a difference; `--grids` for `python -m pysidtracker.gridcmp`) |
+| where (on which ticks, registers and values) does a generic document differ from the native grid? | `python tools/corpus.py grid DOC.yaml TUNE.sid [--ticks N] [--json [PATH]] [--grids DIR] [--explain native\|6502\|vm]` (exit 1 on a difference; `--grids` for `python -m pysidtracker.gridcmp`; `--explain` why, [docs/porting.md](docs/porting.md#2-transcribing-the-replay)) |
 | what the canonical passes find, prove and refuse over many tunes | `python tools/corpus.py canonical TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
 | how documents use the vocabulary, and which native commands tunes play | `python tools/corpus.py census DOC.yaml\|TUNE.sid ... [--codes 14,15] [--json OUT.json]` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |

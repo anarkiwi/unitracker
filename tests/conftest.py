@@ -160,9 +160,20 @@ def attach(request, text: str) -> str:
     return text
 
 
-def grid_diff_of(request, ver: gridcmp.Verdict) -> str:
-    """The grid diff of ``ver`` (``gridcmp.runs_report``), attached to the test's report."""
-    return attach(request, gridcmp.runs_report(ver, **verify.REPORT))
+def render(who, ticks: int) -> np.ndarray:
+    """The grid of ``ticks`` ticks of a document's text, a song (the VM) or a player factory."""
+    return np.asarray((who() if callable(who) else verify.player(who)).render_grid(ticks))
+
+
+def grid_diff_of(request, ver: gridcmp.Verdict, subject=None, against=None) -> str:
+    """The grid diff of ``ver`` (``gridcmp.runs_report``), attached to the test's report; given
+    the ``subject`` it judged and what it was ``against`` (each a document's text, a song or a
+    native player factory), followed by :func:`verify.explain`'s report of its onset."""
+    text = gridcmp.runs_report(ver, **verify.REPORT)
+    if subject is not None and ver.onset is not None:
+        grids = tuple(render(who, ver.n) for who in (subject, against))
+        text += "\n\n" + verify.explain(ver, subject, grids, against).text()
+    return attach(request, text)
 
 
 def assert_plays(request, song: dict, theirs, native) -> None:
@@ -307,9 +318,12 @@ def optimised_tunes(request) -> dict:
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item, call):  # pylint: disable=unused-argument
-    """The report a test attached with :func:`attach`, on its expected-failure line."""
+    """The report a test attached with :func:`attach`, on its expected-failure line or as its
+    failure's ``explain`` section."""
     report = yield
     diff = getattr(item, "failure_report", None)
     if diff is not None and getattr(report, "wasxfail", None) is not None:
         report.wasxfail = f"{report.wasxfail}\n\n{diff}"
+    elif diff is not None and getattr(report, "failed", False):
+        report.sections.append(("explain", diff))
     return report

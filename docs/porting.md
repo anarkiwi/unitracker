@@ -23,7 +23,7 @@ than writing a port-specific copy; the README's *Triage* table indexes the same 
 | the first differing `(tick, register)` of the lifter's song on its VM | `SongPlayer.mismatch(theirs)`, `vm.first_mismatch(ours, theirs, starts)` |
 | whether the generic document plays the native grid on unitracker-player | `unitracker-lift TUNE.sid -o out/porting/doc.yaml` (exits 0 with `verified` on its last line); in code `backends.verify(text, raw, subtune)` |
 | where the generic document differs, by register and value (exit 0 on agreement, `--json` the machine-readable diff) | `tools/corpus.py grid out/porting/doc.yaml TUNE.sid --ticks 3007 [--context N] [--json PATH]` |
-| why the lifter's song diverges: its VM tick beside the native's (a Python player traced, or the raw tune's 6502 on jennings), each with the diverging value's dataflow | `verify.explain(verdict, song, (grid, theirs), native).text()` (pysidtracker's `whydiff`) |
+| why a document or the lifter's song diverges: its tick beside a document's, the VM's, the native player's (traced in Python) or the raw tune's 6502 on jennings, each with the diverging value's dataflow | `verify.explain(verdict, subject, (ours, theirs), against).text()` (pysidtracker's `whydiff`); `tools/corpus.py grid DOC TUNE.sid --explain native\|6502\|vm` |
 | the ticks the native unit holds each expression on, by the generic modulators that play it | `tools/modulators.py firings TUNE.sid --cell pw:0 --ticks A:B` |
 | the verify verdict and forbidden native names for every reference tune | `tools/corpus.py check --out OUT --forbid NAME ...` (add the tune to `tools/shared.py`'s `REFERENCES`) |
 | a modulator's occurrences and derived expressions | `tools/modulators.py occurrences TUNE.sid --unit U --cells c1,c2` |
@@ -149,6 +149,15 @@ PYTHONPATH=src .venv/bin/python tools/corpus.py grid out/porting/doc.yaml TUNE.s
 It exits 1 on a difference; `--json PATH` (or stdout on `--json`) writes the machine-readable
 diff, so a divergence is a parseable list of registers, runs and values rather than a one-line
 verdict.
+
+`--explain native|6502|vm` adds why it differs: pysidtracker's `whydiff` traces the document's
+tick on unitracker-player line by line beside the native player's (traced in Python), the tune's
+play call on jennings, or the lifter's song on the VM (judged at its own onset), each with the
+backward slice of the diverging register, e.g. a `!ad` command's value through `event.ops` and
+`setattr(voice, key, ...)` to the register. In code, `verify.explain(verdict, subject, (ours,
+theirs), against)` explains any pair: `subject` and `against` each a document's text, a song (the
+VM) or a native player factory, or `against` the raw tune (`subtune=`); `verify.side` builds one
+side and `verify.DocumentPlayer` is unitracker-player as a whydiff player (`play_frame`, `regs`).
 
 **Files:** `src/unitracker/playroutines/<name>.yaml`. **Verify:** the snippet above prints `None`.
 
@@ -399,7 +408,7 @@ differing registers and values, and exits 1 on a difference.
 | lifter | `tests/test_lift_<name>.py` | each `LiftError`, with `pytest.raises(LiftError, match=...)`, as `tests/test_lift_goattracker.py`; the passes, as `tests/test_lift_base.py` |
 | exprs report | `unitracker-modfit exprs` | section 4 |
 | optimiser | `tests/conftest.py` `OPTIMISED` | the tune with a subset of passes that keeps the suite's time bounded |
-| a song against a native grid | `tests/conftest.py` | `assert_plays(request, song, theirs, native)`, `native` a player factory or the raw tune: its failure, and a strict xfail's `-rx` line, carry `verify.explain`'s report; a document's verdict carries the grid diff (`grid_diff_of`) |
+| a song against a native grid | `tests/conftest.py` | `assert_plays(request, song, theirs, native)`, `native` a player factory or the raw tune: its failure, and a strict xfail's `-rx` line, carry `verify.explain`'s report; a document's verdict carries the grid diff and, given what it was compared against, its explanation (`grid_diff_of(request, verdict, text, against)`) |
 
 **Acceptance:** `unitracker-lift TUNE.sid -o out/porting/doc.yaml` exits 0, and so does
 `unitracker-lift TUNE.sid -o out/porting/doc.opt.yaml --optimise`, which runs every pass of the
