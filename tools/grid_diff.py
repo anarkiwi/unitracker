@@ -11,11 +11,12 @@ import json
 from pathlib import Path
 
 import numpy as np
+from pysidtracker import gridcmp
 
 from unitracker.lift import backends
 from unitracker.lift import verify
 from unitracker.player import oracle
-from unitracker.player.vm import REGISTERS, runs
+from unitracker.player.vm import REGISTERS
 
 
 def row(regs) -> str:
@@ -24,53 +25,19 @@ def row(regs) -> str:
     return " | ".join([*parts, " ".join(f"{x:02x}" for x in regs[21:])])
 
 
-def span(a: int, b: int) -> str:
-    """A tick or a run of ticks."""
-    return str(a) if a == b else f"{a}-{b}"
-
-
-SHOWN = 6
-
-
-def register_lines(entry: dict, shown: int = SHOWN) -> list:
-    """A differing register's block: its tick runs and both grids' values over them, the first
-    ``shown`` value lines and the rest counted (``--json`` keeps them all)."""
-    cells = entry["cells"]
-    values = [line for run in entry["runs"] for line in run["values"]]
-    ticks = "tick" if entry["from"] == entry["to"] else "ticks"
-    lines = [
-        f"  ${entry['reg']:02X} {entry['name']}: {cells} cell{'s' if cells != 1 else ''}, "
-        f"{ticks} {span(entry['from'], entry['to'])}"
-    ]
-    for a, b, doc, native in values[:shown]:
-        lines.append(f"    {span(a, b)}: doc {doc:02x}, native {native:02x}")
-    if len(values) > shown:
-        more = len(values) - shown
-        lines.append(f"    ... {more} more value line{'s' if more != 1 else ''}")
-    return lines
-
-
 def report(verdict: verify.Verdict) -> str:
-    """The human-readable diff: the first mismatch under both criteria and each differing
-    register's runs and values."""
-    if verdict.ok:
-        return f"verified: {verdict.ticks} ticks play the native grid"
-    if verdict.onset is not None:
-        line = (
-            f"mismatch: tick {verdict.onset[0]}, "
-            f"register ${verdict.onset[1]:02X} {REGISTERS[verdict.onset[1]]}"
-        )
-        if verdict.whole is not None:
-            line += (
-                f" (from tick 0: tick {verdict.whole[0]}, "
-                f"${verdict.whole[1]:02X} {REGISTERS[verdict.whole[1]]})"
-            )
-        lines = [line]
-    else:
-        lines = [f"mismatch: the document ends at tick {verdict.played} of {verdict.ticks}"]
-    for entry in runs(list(verdict.cells)):
-        lines += register_lines(entry)
-    return "\n".join(lines)
+    """The human-readable diff: the gridcmp onset report of the verdict, doc against native."""
+    grid = gridcmp.Verdict(
+        n=verdict.ticks,
+        unit="tick",
+        ok=verdict.ok,
+        played=verdict.played,
+        starts=verdict.starts,
+        onset=verdict.onset,
+        whole=verdict.whole,
+        cells=tuple(verdict.cells),
+    )
+    return gridcmp.runs_report(grid, names=REGISTERS, subject="document", a="doc", b="native")
 
 
 def main(argv=None) -> int:
