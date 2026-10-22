@@ -8,10 +8,11 @@ from pathlib import Path
 import corpus
 import shared
 
-from unitracker.lift import verify
+from pysidtracker import gridcmp
 
-VERDICT = verify.Verdict(
-    ticks=8,
+VERDICT = gridcmp.Verdict(
+    n=8,
+    unit="tick",
     played=8,
     starts=(2, 3, None),
     onset=(0, 6),
@@ -98,7 +99,7 @@ def test_a_mismatch_row_names_its_registers_values_and_forbidden_words(monkeypat
         "$00 v1 freq lo: 1 tick 1 (doc 05, native 00); $06 v1 sr: 2 ticks 2-5 (doc 09, native 00)"
     )
     assert (out / "t.yaml").read_text() == "song: [x1: sr]\n"
-    assert json.loads((out / "t.diff.json").read_text())["first"] == [0, 6]
+    assert json.loads((out / "t.diff.json").read_text())["onset"] == [0, 6]
     install_fake_lift(monkeypatch, None, None, "ins i1: no generic form")
     row = corpus.check_one({"path": str(sid)}, {**OPTS, "out": str(out)})
     assert row["gap"] == "gap: ins i1: no generic form" and (out / "t.err").exists()
@@ -199,10 +200,10 @@ def test_grid_diffs_the_diverging_reference_tune_for_the_eye_and_the_machine(
     argv = ["grid", str(doc), str(ref.sid), "--ticks", "64"]
     assert corpus.main([*argv, "--json", str(out), "--grids", str(tmp_path)]) == 1
     summary = json.loads(out.read_text(encoding="utf-8"))
-    assert summary["ok"] is False and summary["first"] == [26, 7] and summary["starts"] == [3, 3, 3]
+    assert summary["ok"] is False and summary["onset"] == [26, 7] and summary["starts"] == [3, 3, 3]
     assert (tmp_path / "doc.csv.zst").is_file() and (tmp_path / "native.csv.zst").is_file()
     assert corpus.main([*argv, "--json"]) == 1
-    assert json.loads(capsys.readouterr().out)["first"] == [26, 7]
+    assert json.loads(capsys.readouterr().out)["onset"] == [26, 7]
     assert corpus.main(argv) == 1
     text = capsys.readouterr().out
     assert "mismatch: tick 26, register $07 v2 freq lo" in text and "\n    26 O " in text

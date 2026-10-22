@@ -5,10 +5,10 @@ import irs
 import numpy as np
 import pytest
 from conftest import grid_diff_of
+from pysidtracker import gridcmp
 from unitracker_grammar import parse
 
 from unitracker import document
-from unitracker.lift import verify
 from unitracker.player import oracle
 from unitracker.player.vm import SongError, SongPlayer
 from unitracker.playroutine import tempo
@@ -127,5 +127,5 @@ def test_a_pair_of_equal_tempos_is_written_as_one(player, code, arg, written, re
     doc, starts = oracle.play(text, 300)
     vm = SongPlayer(ir).render_grid(300)
     if note_ticks(doc) != note_ticks(vm):
-        grid_diff_of(request, verify.compare_grids(doc, starts, vm))
+        grid_diff_of(request, gridcmp.verdict_onset(doc, starts, vm))
     assert note_ticks(doc) == note_ticks(vm)

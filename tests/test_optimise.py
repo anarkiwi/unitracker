@@ -8,10 +8,11 @@ import irs
 import numpy as np
 import pytest
 from conftest import grid_diff_of
+from pysidtracker import gridcmp
 
 from unitracker import cli, document, optimise
 from unitracker.lift import backends
-from unitracker.lift.verify import Verdict, compare
+from unitracker.lift.verify import compare
 from unitracker.optimise.model import walk
 from unitracker.player import oracle
 from unitracker.player.vm import SongPlayer
@@ -273,10 +274,10 @@ def kept(result) -> list:
     return [f.edit[0] for f in result.findings if f.kept]
 
 
-def plays_alike(source: dict, ir: dict, text: str) -> tuple[object, Verdict]:
+def plays_alike(source: dict, ir: dict, text: str) -> tuple[object, gridcmp.Verdict]:
     """``(mismatch, verdict)``: whether ``ir`` replays ``source`` on the VM and document
     ``text`` plays the source's grid on unitracker-player from each voice's first note;
-    ``verdict`` is the grids' diff (its :meth:`~verify.Verdict.report`)."""
+    ``verdict`` is the grids' diff (``gridcmp.runs_report``)."""
     native = document.native_state(source)
     grid, _ = oracle.play(document.write(source, native), native.ticks)
     return optimise.mismatch(optimise.Trace(source), ir), compare(text, grid)
@@ -398,7 +399,7 @@ def test_lift_optimise_flag(tmp_path, monkeypatch):
         """A lift of ``ir`` whose verdict is the songs it is asked to verify."""
 
         document = gap = None
-        verdict = Verdict(1, 1, (), None, None)
+        verdict = gridcmp.Verdict(n=1, unit="tick", ok=True, played=1)
 
         @staticmethod
         def run():

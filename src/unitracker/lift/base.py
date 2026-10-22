@@ -6,7 +6,7 @@ import dataclasses
 from collections import deque
 from collections.abc import Callable, Iterator
 
-from pysidtracker import SidImage
+from pysidtracker import SidImage, gridcmp
 from unitracker_player import PlayError
 
 from unitracker import document
@@ -53,7 +53,7 @@ class Lift(abc.ABC):
         self.tune, self.expressions = tune, expressions
         self.ticks: int | None = None
         self.document: str | None = None
-        self.verdict: verify.Verdict | None = None
+        self.verdict: gridcmp.Verdict | None = None
         self.gap: str | None = None
 
     @classmethod
@@ -86,7 +86,7 @@ class Lift(abc.ABC):
         optimiser's canonical passes, proved on the written text."""
         return canonical(song)
 
-    def verify(self, song: dict) -> verify.Verdict | None:
+    def verify(self, song: dict) -> gridcmp.Verdict | None:
         """The verdict of ``song``'s generic document, played by unitracker-player, against
         the native grid over the conversion's ticks; :attr:`document` holds the document, and
         :attr:`gap` the lifting gap that keeps it from being written or played."""

@@ -4,10 +4,10 @@ order, and the table entries a song can reach."""
 import numpy as np
 import pytest
 from conftest import mini_song
+from pysidtracker.gridcmp import verdict_onset
 
 from unitracker.playroutine.expr import ExprError
-from unitracker.lift.verify import compare_grids
-from unitracker.player.canonical import CANONICAL_ORDER
+from unitracker.player.canonical import CANONICAL_ORDER, REGISTERS
 from unitracker.player.reach import ReachabilityError, table_reads
 from unitracker.player.vm import (
     Cursor,
@@ -348,34 +348,33 @@ def test_the_verdict_carries_the_differing_cells_and_a_machine_readable_summary(
     ours = np.zeros((8, 25), dtype=np.uint8)
     ours[1, 0] = 5
     ours[2, 6] = 9
-    verdict = compare_grids(ours, [2, 3, None], theirs)
+    verdict = verdict_onset(ours, [2, 3, None], theirs)
     assert verdict.onset == (2, 6) and verdict.whole == (1, 0)
     assert verdict.cells == ((2, 6, 9, 0),)
     assert not verdict.ok
-    assert verdict.summary() == {
+    onset_fields = {"unit": "tick", "steps": 8, "played": 8, "ended": 0, "starts": [2, 3, None]}
+    lead_fields = dict.fromkeys(("lead", "first", "bad", "min_lead", "min_bad", "min_first"))
+    lead_fields.update(regs=[], min_regs=[])
+    assert verdict.summary(REGISTERS) == {
         "ok": False,
-        "ticks": 8,
-        "played": 8,
-        "ended": 0,
-        "starts": [2, 3, None],
-        "first": [2, 6],
+        **onset_fields,
+        "onset": [2, 6],
         "whole": [1, 0],
+        **lead_fields,
         "registers": runs([(2, 6, 9, 0)]),
         "cells": [[2, 6, 9, 0]],
     }
-    assert compare_grids(theirs, [2, 3, None], theirs).summary() == {
+    assert verdict_onset(theirs, [2, 3, None], theirs).summary(REGISTERS) == {
         "ok": True,
-        "ticks": 8,
-        "played": 8,
-        "ended": 0,
-        "starts": [2, 3, None],
-        "first": None,
+        **onset_fields,
+        "onset": None,
         "whole": None,
+        **lead_fields,
         "registers": [],
         "cells": [],
     }
-    ended = compare_grids(ours, [2, 3, None], theirs[:4])
-    assert ended.ticks == 4 and ended.cells == ((2, 6, 9, 0),)
+    ended = verdict_onset(ours, [2, 3, None], theirs[:4])
+    assert ended.n == 4 and ended.cells == ((2, 6, 9, 0),)
 
 
 def test_canonical_order_is_every_register_once():
