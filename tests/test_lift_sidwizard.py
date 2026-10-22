@@ -11,7 +11,7 @@ import corpus
 import numpy as np
 import pytest
 import yaml
-from conftest import assert_plays, oracle, sw_fx, sw_table_byte
+from conftest import assert_plays, oracle, sw_fx, sw_table_byte, vm_mismatch
 from pysidwizard import (
     End,
     Loop,
@@ -782,6 +782,6 @@ def test_a_pre_18_driver_reads_the_first_frame_freq_hi_by_track(doom_schlager):
     song = lift.run()
     assert song["tables"]["build"] == [1]
     theirs = np.asarray(lift.native().render_grid(870), np.uint8)
-    assert SongPlayer(song).mismatch(theirs) is None
+    assert vm_mismatch(song, theirs) is None
     song["tables"]["build"] = [0]
-    assert SongPlayer(song).mismatch(theirs) is not None
+    assert vm_mismatch(song, theirs) is not None
