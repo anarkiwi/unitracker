@@ -54,3 +54,21 @@ def cells(pr: dict, tempo) -> dict:
     return {
         cell: evaluate(expr, {"a": a, "b": b}) for cell, expr in (spec.get("cells") or {}).items()
     }
+
+
+def initial(ir: dict) -> tuple[int, int]:
+    """The initial tempo pair ``(a, b)`` of lifter's song ``ir``: its own, else its playroutine's
+    default; a playroutine without a tempo steps each tick."""
+    pr = ir["playroutine"]
+    value = ir.get(NAME, default(pr))
+    if value is None:
+        value = 6 if pr.get(NAME) else 1
+    return pair(value)
+
+
+def parsed(text: str | None) -> tuple[int, int] | None:
+    """``(a, b)`` of a tempo command's written argument ``a`` or ``a/b``; None for None."""
+    if text is None:
+        return None
+    a, _, b = text.partition("/")
+    return int(a), int(b or a)

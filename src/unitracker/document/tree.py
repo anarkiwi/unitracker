@@ -392,14 +392,18 @@ class _Writer:
             out.append(Atom(text))
         return Flow(out)
 
+    def _encoded(self, cmd: int, raw: int) -> tuple:
+        """``(name, value)`` of a command (``CommandCodec.encode``)."""
+        try:
+            return self.commands.encode(cmd, raw)
+        except CodecError as exc:
+            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+
     def command(self, cmd: int, raw: int) -> str | None:
         """A command as ``name[:arg]``, or None for no command."""
         if not (cmd or raw):
             return None
-        try:
-            name, value = self.commands.encode(cmd, raw)
-        except CodecError as exc:
-            raise SongFormatError(f"{self.pr['name']}: {exc}") from exc
+        name, value = self._encoded(cmd, raw)
         if isinstance(value, tuple) and self.commands.inline(name):
             rtype = self.rtypes[value[0]]
             row = {f: int(self._row(rtype, value[1]).get(f, rtype.default(f))) for f in rtype.own}
@@ -494,6 +498,8 @@ class _Writer:
         rows, loop = timeline.to_rows(
             [timeline.folded(trk, key) for trk in self.ir["tracks"]],
             {n: len(arr) for n, arr in compiled.items()},
+            tempo.initial(self.ir),
+            self._retimes(compiled),
         )
         alias = self.phrases(rows, compiled)
         fixed = self._roots()
@@ -506,6 +512,22 @@ class _Writer:
             item["play"] = Flow(self._entry(e, alias, pnames) for e in row)
             out.append(item)
         return out, loop
+
+    def _retimes(self, compiled: dict) -> dict:
+        """``{phrase: {step: (tempo, vtempo)}}``: the tempo pairs each phrase's events set
+        (see :func:`timeline.to_rows`)."""
+        out: dict = {}
+        for name, arr in compiled.items():
+            for start, _ in runs(arr):
+                cmds = [int(x) for x in arr[start][3:EVENT_COLUMNS]]
+                found = {}
+                for c, a in zip(cmds[::2], cmds[1::2]):
+                    if (c or a) and self._encoded(c, a)[0] in tempo.COMMANDS:
+                        key, _, value = self.command(c, a).partition(":")
+                        found[key] = tempo.parsed(value)
+                if found:
+                    out.setdefault(name, {})[start] = tuple(found.get(k) for k in tempo.COMMANDS)
+        return out
 
     @staticmethod
     def _entry(entry, alias, pnames):
