@@ -20,6 +20,7 @@ from pygoattracker.model import (
 )
 
 from unitracker.lift import goattracker as gt
+from unitracker.lift import verify
 from unitracker.playroutine.codec import CodecError, CommandCodec, RowCodec, row_codecs
 from unitracker.playroutine.library import library
 from unitracker.playroutine.records import record_types
@@ -449,6 +450,16 @@ def test_the_instrument_vibrato_is_the_instrument_freq(delay, rows, second, freq
         freq = song["records"]["ins"][number].get("freq")
         assert freq is None if fragment is None else fragment in song["exprs"][freq]
     assert song_def(text)["phrase"]["p1"] == atoms
+
+
+@pytest.mark.parametrize("command, written", [((5, 0x5A), "!ad:90"), ((6, 0xA7), "!sr:167")])
+def test_a_notes_envelope_command_plays_on_its_note_init_tick(command, written):
+    """Set-AD and set-SR on a hard-restarted note play on its note-init tick, after the
+    instrument's envelope: the document's command plays with its restart's first-tick row."""
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(26, 0, *command)] + [REST] * 11
+    text, _, _, theirs = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], rows=rows))
+    assert f"D2{written}" in text
+    assert verify.compare(text, theirs).ok
 
 
 def test_a_swing_alternates_its_tempos():

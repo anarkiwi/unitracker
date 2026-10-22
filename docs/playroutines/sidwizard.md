@@ -116,7 +116,9 @@ voices play, and no row decodes a `route`. The volume is not covered.
 | at most one: `hold` 1 or 2, `gate: 0`, `ad`, `sr`, and `ctrl: 24` for a staccato restart (the voice's tables pause) | `{ctrl: n}` (the first waveform) or `{gate: 1}` |
 
 A note sets the gate on itself, so the first-tick row always does, and a restart of that row alone
-decodes as none.
+decodes as none. A starting note's envelope small FX apply on its first tick after its
+instrument's envelope, as its `!ad` and `!sr` play with the first-tick row
+([Hard restart](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#hard-restart)).
 
 ## Lifetime
 

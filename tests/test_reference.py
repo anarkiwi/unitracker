@@ -147,6 +147,16 @@ def test_the_generic_document_plays_unitracker_player_to_its_known_difference(re
     assert verdict.line().startswith(f"mismatch: tick {GENERIC[name][0]}, register $")
 
 
+ENVELOPE = [7 * v + r for v in range(3) for r in (5, 6)]
+
+
+@pytest.mark.parametrize("name", TUNES)
+def test_the_generic_document_plays_the_native_envelope(references, name):
+    ref = references[name]
+    grid = oracle.play(ref.generic, len(ref.native))[0]
+    np.testing.assert_array_equal(grid[:, ENVELOPE], ref.native[: len(grid), ENVELOPE])
+
+
 @pytest.mark.parametrize("name", TUNES)
 def test_the_lift_tool_writes_the_generic_document_and_its_verdict(
     references, name, tmp_path, capsys

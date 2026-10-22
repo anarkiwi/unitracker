@@ -143,7 +143,9 @@ or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step wri
 The player reads the voice's next step its instrument's gate timer ahead of each note; an
 instrument without a restart reads it on the note's first tick. A note keeps the gate as the
 restart left it, so its first-tick row sets it. The build has one envelope preset (`adparam`),
-so every lookahead row that sets `ad` and `sr` sets the same values (`uniform`).
+so every lookahead row that sets `ad` and `sr` sets the same values (`uniform`). A note's set-AD and set-SR
+(commands 5 and 6) run on its first tick after it loads the instrument's envelope, as its `!ad`
+and `!sr` play with the first-tick row ([Hard restart](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md#hard-restart)).
 
 ## Lifetime
 
