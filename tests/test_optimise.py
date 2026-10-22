@@ -319,23 +319,7 @@ def test_the_proof_repeats_the_grid_and_finds_the_first_difference(monkeypatch):
     assert optimise.mismatch(ref, song(SCALE))[0] == "unproved"
 
 
-UNPROVED = {
-    "unhoist": "the generic document plays a note's !ad at its hard restart a tick apart from"
-    " the instrument's ad",
-}
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        (
-            pytest.param(k, marks=pytest.mark.xfail(strict=True, reason=UNPROVED[k]))
-            if k in UNPROVED
-            else k
-        )
-        for k in FIRES
-    ],
-)
+@pytest.mark.parametrize("case", FIRES)
 def test_a_pass_keeps_the_edits_the_grid_proves(case, request):
     name, ir, ops, edited = FIRES[case]
     opt = optimise.Optimiser(ir, [name], workers=1)
