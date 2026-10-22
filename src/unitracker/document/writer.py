@@ -155,7 +155,7 @@ def native_over(ir: dict, ticks: int) -> Native:
     play_to(player, 1)
     first = tuple(player.regs)
     play_to(player, ticks)
-    reads = player.table_reads
+    reads = {name: set(read) for name, read in player.table_reads.items()}
     return _native(
         ir,
         ticks,

@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 from test_checkpoint import LATE_DOC
 from test_player import counter_song
+import test_modfit_convert
 
 from unitracker import document
 from unitracker.document import writer
@@ -67,3 +68,10 @@ def test_a_trace_is_recorded_once_and_again_only_past_its_bound(tmp_path, monkey
     with pytest.raises(reach.ReachabilityError):
         short.grid(52)
     assert trace.trace(counter_song(4), cache=None).recurs()
+
+
+def test_a_replay_over_a_bound_reads_the_notes_the_trace_does():
+    ir = test_modfit_convert.sw_song()
+    native = document.native_state(ir)
+    assert document.native_over(ir, native.ticks) == native
+    assert native.tables and native.notes
