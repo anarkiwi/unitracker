@@ -57,10 +57,10 @@ def spec_tables(player) -> dict:
 
 
 class Attribution:  # pylint: disable=too-few-public-methods
-    """The event instance ``(voice, play count, step)`` each occurrence of a player's units
-    belongs to: ``instance`` the voice's last event at its start, ``fetched`` at its first
-    firing; ``events`` maps ``(unit, instance)`` to the occurrence its hook applied, ``plays``
-    each voice's play indices in the order it starts them."""
+    """The event instance ``(voice, play count, step)`` each occurrence of an observing
+    modulation's units belongs to: ``instance`` the voice's last event at its start,
+    ``fetched`` at its first firing; ``events`` maps ``(unit, instance)`` to the occurrence its
+    hook applied, ``plays`` each voice's play indices in the order it starts them."""
 
     def __init__(self, mod: Modulation):
         voices = len(mod.player.voice_cells)
@@ -183,9 +183,10 @@ class Trace:  # pylint: disable=too-many-instance-attributes
 
 def record(ir: dict, limit: int = reach.MAX_TICKS, progress: bool = True) -> Trace:
     """Play ``ir`` once to its state's recurrence and a period more, or ``limit + 1`` ticks
-    where it does not recur by ``limit``, recording its :class:`Trace`."""
+    where it does not recur by ``limit``, recording its :class:`Trace`; the occurrences are an
+    observing modulation's, which snapshots every cell at each start."""
     player = SongPlayer(ir, watch=True)
-    seen = Attribution(player.modulation or Modulation(player, lambda unit, occ: None))
+    seen = Attribution(Modulation(player, lambda unit, occ: None))
     fired, log = fired_log(player), {}
     base = Baseline(player, limit, log, progress)
     rows = list(base.rows)

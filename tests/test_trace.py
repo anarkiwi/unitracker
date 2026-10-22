@@ -9,7 +9,6 @@ from test_player import counter_song
 from unitracker import document
 from unitracker.document import writer
 from unitracker.player import reach, trace
-from unitracker.player.modulation import Modulation
 from unitracker.player.vm import SongPlayer
 
 
@@ -30,14 +29,13 @@ def test_a_trace_is_the_songs_own_play_to_its_recurrence():
     assert run.baseline.found == (run.tick, run.period)
 
 
-def test_a_traces_occurrences_are_those_a_separate_observer_sees():
+def test_a_song_with_expressions_is_observed_with_every_cell_at_each_start():
     run = trace.record(LATE_DOC)
-    player = SongPlayer(LATE_DOC, watch=True)
-    seen = trace.Attribution(Modulation(player, lambda unit, occ: None))
-    document.play_to(player, run.frames)
-    assert occurrences(run.occurrences) == occurrences(seen.occurrences)
-    assert (run.events, run.plays) == (seen.events, seen.plays)
+    player = SongPlayer(LATE_DOC)
+    cells = set(player._index[0]) | set(player._index[1])  # pylint: disable=protected-access
+    assert run.occurrences and all(cells <= set(o.start) for o in run.occurrences)
     assert {o.instance for o in run.occurrences} - {None}
+    assert sum(o.firings for o in run.occurrences) >= len(run.fired) > 0
 
 
 def test_a_native_state_over_a_bound_reads_what_the_bounded_play_does():
