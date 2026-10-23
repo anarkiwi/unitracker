@@ -128,7 +128,8 @@ record_types:
         then:
           - set: {arp: row.n}
           - {call: wnote, with: {n: "(row.n & 0x7F) if row.n >= 0x80 else ((note + row.n) & 0x7F)"}}
-  # Pulsetable row: l $80+ sets the width from (l & $0F, r); otherwise l ticks of a signed r sweep.
+  # Pulsetable row: l $80-$FF sets the width from (l & $0F, r); otherwise l ticks of a signed r
+  # sweep, the byte 0 read as 256.
   # x: the expression a program of that one row is (see modulators).
   pulsetab:
     writes_as: pw
@@ -136,7 +137,7 @@ record_types:
     expr: x
     fields: [l, r, next, x]
     codec:
-      - when: "l >= 0x80"
+      - when: "0x80 <= l <= 0xFF"
         keys: {pw: "((l & 0x0F) << 8) | r"}
         raw: {l: "0x80 | (pw >> 8)", r: "pw & 0xFF"}
     do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
@@ -223,7 +224,7 @@ voice:
   wtime: {width: 8}
   wcur: {width: 8}
   pptr: {width: 8}
-  ptime: {width: 8}
+  ptime: {width: 9}
   vibtime: {width: 8}
   vibdelay: {width: 8}
   # 1 once the command unit has fired since the note started.
@@ -354,7 +355,7 @@ procs:
   pulse_exec:
     - if: "ptime == 0"
       then:
-        - if: "pulsetab[pptr].l >= 0x80"
+        - if: "0x80 <= pulsetab[pptr].l <= 0xFF"
           then:
             - run: {record: pulsetab, index: pptr, template: do}
             - set: {pptr: "pulsetab[pptr].next"}

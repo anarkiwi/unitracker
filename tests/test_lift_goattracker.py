@@ -603,6 +603,17 @@ def test_a_jump_to_a_jump_row_reads_that_row_as_data(tune):
     lifted(*gt_tune(instruments=[ins], **tune))
 
 
+def test_a_pulse_sweep_of_time_zero_sweeps_256_ticks():
+    ins = [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    pulse = [(0x88, 0), (0x00, 5), (0x84, 0), (0xFF, 0)]
+    text, song, player, theirs = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], ins, pulse=pulse))
+    width = theirs[:, 2].astype(int) | (theirs[:, 3].astype(int) & 0x0F) << 8
+    begun = player.starts[0]
+    steps = np.diff(width[begun : begun + 70])
+    assert set(steps) <= {0, 5} and (steps == 5).sum() > 50
+    assert verify.compare(text, theirs, tol=tolerance(song)).ok
+
+
 @pytest.mark.parametrize("build", [[0, 0], [0, 1], [1, 0], [1, 1]])
 def test_the_vm_plays_the_builds_pulse_and_realtime_optimisations(build):
     rows = [(24, 1, 1, 1)] + [(None, 0, 1, 1)] * 3 + [(26, 1, 1, 1)] + [(None, 0, 1, 1)] * 11
