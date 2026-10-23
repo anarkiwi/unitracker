@@ -3,10 +3,12 @@ their native players, their generic documents use only the shared vocabulary, an
 check and optimise the same through the command-line tools."""
 
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
+import corpus
 import yaml
 from conftest import assert_plays, tolerance
 from pysidtracker import SidParseError, find_format
@@ -179,7 +181,10 @@ def test_an_unknown_format_is_refused(references):
         backends.detect(bytes(raw))
 
 
-def test_the_survey_renderer_plays_the_document_as_the_native_player(references):
+def test_the_survey_renderer_plays_the_document_as_the_native_player(references, monkeypatch):
+    # load_render imports the path as a fresh ``corpus`` module; the imported one, whose
+    # functions the corpus tool's worker pools pickle by name, is restored after the test.
+    monkeypatch.setitem(sys.modules, "corpus", corpus)
     ref, tool = references["metal_warrior"], str(ROOT / "tools" / "corpus.py")
     grid, info = load_render(tool)(ref.raw, 1, 300)
     assert grid.shape == (300, 25) and grid.dtype.name == "int16"
