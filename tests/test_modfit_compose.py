@@ -113,6 +113,8 @@ def rebuilt(fz, factor, cell: str, state: dict) -> int:
 
 
 TOWARD = {"hold", "clamp", "reflect"}
+# SID-Wizard's PORTAME steps on from a target it reaches with no speed.
+PORTAME = TOWARD - {"hold"}
 
 
 def test_goattracker_factors(units):
@@ -137,10 +139,10 @@ def test_sidwizard_factors(units, composers):
         [(cell, slide)] = keyword_factors(composers["sidwizard"], code, None)
         assert cell == "voff" and slide.proved and slide.hit == "-"
     [(_, glide)] = keyword_factors(composers["sidwizard"], 3, None)
-    assert glide.proved and set(glide.kinds) == TOWARD
+    assert glide.proved and set(glide.kinds) == PORTAME
     fz = units["sidwizard"]
     [porta] = unit(units, "sidwizard", "procs.tick_porta", "voff")
-    assert porta.proved and set(porta.kinds) == TOWARD
+    assert porta.proved and set(porta.kinds) == PORTAME
     up = rebuilt(fz, porta, "voff", {"voff": 0xFFFF, "fml": 1, "fmh": 0})
     down = rebuilt(fz, porta, "voff", {"voff": 1, "fml": 1, "fmh": 0})
     assert (up, down) == (1, 0)
@@ -321,8 +323,8 @@ def test_slicer_keeps_a_branch_return_before_kept_actions():
     sliced, _ = Slicer(pr, Writes(pr), dict(pr["procs"])).seq(
         resolve(pr, "procs.tick_vibrato"), {"vfc"}, {"vfc"}
     )
-    branch = next(a for a in sliced if a.get("if") == "svib == 0")
-    assert [b["if"] for b in branch["else"]] == ["svib != 0x10", "vdc >= 0"]
+    branch = next(a for a in sliced if a.get("if") == "svib == 0 and vibratotypes")
+    assert [b["if"] for b in branch["else"]] == ["svib >= 0x80", "vdc >= 0"]
 
 
 def test_keyword_verdicts():

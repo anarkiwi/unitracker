@@ -160,7 +160,7 @@ DECLARED_HOOKS = {
     ("defmon", "pulse A"): [{"at": {"proc": "pattern"}, "pointer": ["rowA"]}],
     ("defmon", "acid B"): [{"at": {"proc": "pattern"}, "pointer": ["rowB"]}],
     ("sidwizard", "pulse"): [{"at": {"proc": "start_note"}, "written": ["ppos"]}],
-    ("sidwizard", "filter"): [{"at": {"proc": "start_note"}, "written": ["fpos"]}],
+    ("sidwizard", "filter"): [{"at": {"proc": "set_filter"}, "written": ["fpos"]}],
 }
 
 

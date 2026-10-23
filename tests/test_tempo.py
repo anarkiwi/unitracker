@@ -71,7 +71,7 @@ def test_a_swing_alternates_its_two_step_lengths(value):
 
 def test_a_tempo_cell_must_be_a_cell():
     pr = library("sidwizard")
-    assert tempo.cells(pr, [3, 4]) == {"tl": 3, "tr": 4} and tempo.written(5, 5) == 5
+    assert tempo.cells(pr, [3, 4]) == {"tl": 3, "tr": 4, "tle": 0} and tempo.written(5, 5) == 5
     ir = scale_song("sidwizard")
     with pytest.raises(SongError, match="unknown cell 'nope'"):
         SongPlayer({**ir, "playroutine": {**pr, "tempo": {"cells": {"nope": "a"}}}})

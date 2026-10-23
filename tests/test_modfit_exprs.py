@@ -719,6 +719,7 @@ W_LINEAR = {"W": lambda k: 7 * k + 1}
 def test_a_carried_delay_counter_is_a_gate(known):
     m = machine("sidwizard", "pitch")
     vib = {"ci": 1, "svib": 0x10, "vfc": 2, "vper": 8, "fml": ("idx", "W", "N"), "fmh": 0}
+    vib.update(note=40, oct=0)
     live = []
     for k in (-1, 3, 15):
         v0 = sympy.Integer(0) if known or k != 3 else None

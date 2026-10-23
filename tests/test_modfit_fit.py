@@ -312,7 +312,10 @@ def test_sidwizard_row_duration_and_delay_closed_forms(timers):
     orbit = sw.orbit(vdc, "procs.tick_vibrato")
     [test] = vdc.tests
     sigs = {p: signature(*orbit.truths(test, p)) for p in orbit.domain()}
-    assert list(grouped(sigs)) == [("duration", "0..127", ["p + 1"])]
+    assert list(grouped(sigs)) == [
+        ("constant", "-256..-1", ["0"]),
+        ("duration", "0..255", ["p + 1"]),
+    ]
     assert orbit.duration(5) == 7
 
 

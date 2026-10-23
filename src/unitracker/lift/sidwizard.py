@@ -53,6 +53,8 @@ SETUP_TICKS = 2
 NORMAL = features_for_driver(0)
 # The arp speed's bits that also run the pulse and filter programs on multispeed calls.
 MUL_TABLES = 0xC0
+# EXPTABH's zero bytes before the tune's FREQTBH.
+EXPTAB_ZEROS = 11
 
 
 class Tables:
@@ -83,7 +85,8 @@ def table_rows(name: str, ins) -> tuple[list[bytes], int | None]:
     row its last continues to (None: it ends).
 
     A jump's target is an offset in the instrument's memory image. A pulse or filter jump to
-    itself rests as the end does, and to a sweep row spends a tick (a sweep of none).
+    itself, and a WF jump past $7F (which the player abandons), rest as the end does; a pulse or
+    filter jump to a sweep row spends a tick (a sweep of none).
     """
     image, wave = ins.memory_image(), name == "wftab"
     tables = (ins.wf_table, ins.pw_table)[: ("wftab", "pwtab", "flttab").index(name)]
@@ -100,12 +103,7 @@ def table_rows(name: str, ins) -> tuple[list[bytes], int | None]:
         target = image[pos + 1]
         if not rows:
             raise LiftError(f"{name}: a program that starts with a jump is not covered")
-        if wave and target >= 0x80:
-            raise LiftError(
-                f"wftab: a jump to ${target:02X}, which rests without the end's pitch carry, is"
-                " not covered"
-            )
-        if target == pos and not wave:
+        if (wave and target >= 0x80) or (target == pos and not wave):
             break
         first = image[target] if target + 3 <= len(image) else TABLE_END
         if first in (TABLE_JUMP, TABLE_END):
@@ -122,15 +120,24 @@ def table_rows(name: str, ins) -> tuple[list[bytes], int | None]:
     return rows, None
 
 
+def ram(ins) -> bytes:
+    """The bytes the player reads from instrument ``ins``'s address: the image's own, past its
+    tables too, while they hold its encoding."""
+    image = ins.memory_image()
+    return ins.ram if ins.ram.startswith(image) else image
+
+
 def idle_rows(ins, features: PlayerFeatures = NORMAL, reads: int = SETUP_TICKS) -> list[int]:
     """The WF rows a voice reads on the ``reads`` ticks before its first note applies, before it
-    has an instrument, ending in $FF: the player's instrument 0 is linked to ``ins``
-    (instrument 1), and the cursor init zeroes reads its memory from the control byte, following
-    its jumps. A hold row's count keeps that many ticks from reading a row, in a build with arp
-    speeds."""
-    image, out, pos = ins.memory_image() + bytes([TABLE_END]), [], 0
+    has an instrument, ending in $FF: ``ins`` is the player's instrument 0 (see
+    :func:`dummy`), whose memory the cursor init zeroes reads from the control byte, following
+    its jumps; one past $7F the player abandons, resting as at the end. A hold row's count keeps
+    that many ticks from reading a row, in a build with arp speeds."""
+    image, out, pos = ram(ins) + bytes([TABLE_END]), [], 0
     while reads > 0:
         jump = image[pos] == TABLE_JUMP
+        if jump and image[pos + 1] >= 0x80:
+            break
         if jump and image[pos + 1] < len(image) - 1 and image[image[pos + 1]] != TABLE_JUMP:
             pos = image[pos + 1]
         row = image[pos : pos + 3]
@@ -652,11 +659,11 @@ class Instruments:
 
 
 def tempo(swm):
-    """The subtune's initial tempo as written, in play calls: both bytes of its pair when
-    neither has bit 7 clear (the player's single tempo, the first byte), each a tempo byte (0
-    plays 6) of player ticks, ``frame_speed`` calls each."""
+    """The subtune's initial tempo as written, in play calls: both bytes of its pair, or the first
+    when it has bit 7 set (the player's single tempo), each a tempo byte (0 plays 6) of player
+    ticks, ``frame_speed`` calls each."""
     left, right = swm.subtune_tempos[0] if swm.subtune_tempos else (6, 6)
-    if left & 0x80 and right & 0x80:
+    if left & 0x80:
         right = left
     try:
         pair = (shared_commands().encode(0x12, b & 0x7F)[1] for b in (left, right))
@@ -670,6 +677,12 @@ def freq(swm, features) -> tuple[bytes, bytes]:
     if swm.freq_lo_image and swm.freq_hi_image:
         return swm.freq_lo_image, swm.freq_hi_image
     return freq_tables(features, swm.freq_table_tail)
+
+
+def exptab(hi: bytes, size: int) -> list[int]:
+    """EXPTABH's first ``size`` bytes, which the vibrato and slide amplitudes read: zeros, then
+    the tune's FREQTBH ``hi``."""
+    return ([0] * EXPTAB_ZEROS + list(hi))[:size]
 
 
 def first_notes(swm, frames: int = 1 << 14) -> list[tuple[int, int, int]]:
@@ -686,6 +699,12 @@ def first_notes(swm, frames: int = 1 << 14) -> list[tuple[int, int, int]]:
         if None not in out:
             break
     return [first or (frames, 0, 0) for first in out]
+
+
+def dummy(swm):
+    """The instrument INSPTLO/HI slot 0 points at, which the player reads for a voice without an
+    instrument: instrument 1, unless the image links another."""
+    return swm.dummy_instrument or swm.instruments[0]
 
 
 def idle_reads(swm, firsts: list) -> int:
@@ -721,8 +740,10 @@ class SidWizardLift(Lift):
 
     @cached_property
     def features(self):
-        """The player build the tune was exported for."""
-        return features_for_driver(self.tune.swm.driver_type)
+        """The player build the tune was exported for: the flags its player code was assembled
+        with, else its driver byte's build."""
+        swm = self.tune.swm
+        return swm.features or features_for_driver(swm.driver_type)
 
     def check_build(self) -> None:
         swm = self.tune.swm
@@ -767,8 +788,8 @@ class SidWizardLift(Lift):
             "tables": {
                 "freqlo": list(lo),
                 "freqhi": list(hi),
-                "exptab": list(playroutine["tables"]["exptab"]),
-                "idle": idle_rows(swm.instruments[0], self.features, idle_reads(swm, firsts)),
+                "exptab": exptab(hi, len(playroutine["tables"]["exptab"])),
+                "idle": idle_rows(dummy(swm), self.features, idle_reads(swm, firsts)),
                 "pwcount": [count for _, _, count in firsts],
                 "build": [int(swm.first_frame_freq_by_track)],
             },
