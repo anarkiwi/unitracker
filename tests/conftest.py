@@ -27,7 +27,7 @@ from pygoattracker import (
 from pygoattracker import constants as GT
 from pysidtracker import find_format, gridcmp
 from pysidtracker.survey import file_oracle
-from pysidtracker.testing import resolve_tune
+from pysidtracker.testing import default_cache, resolve_tune
 from pysidwizard import parse_sid_song
 from pysidwizard.player import INST_WF_TABLE_POS
 
@@ -35,17 +35,15 @@ from unitracker import optimise
 from unitracker.lift import backends, verify
 from unitracker.player.vm import SongPlayer
 
-ROOT = Path(__file__).resolve().parents[1]
-CACHE = ROOT / ".tunecache"
 os.environ.setdefault("UNITRACKER_WORKERS", str(max(2, min(8, len(os.sched_getaffinity(0)) // 8))))
-os.environ.setdefault("UNITRACKER_CACHE", str(CACHE / "modfit"))
+os.environ.setdefault("UNITRACKER_CACHE", str(default_cache() / "modfit"))
 
 
 def hvsc_tune(name: str, tune: str, doc: str):
     """A session fixture ``name``: the path to HVSC ``tune`` (local $HVSC, cache, or mirror)."""
 
     def fixture() -> Path:
-        path = resolve_tune(tune, cache_dir=CACHE)
+        path = resolve_tune(tune)
         if path is None:
             pytest.skip("HVSC tune unavailable")
         return Path(path)
@@ -182,8 +180,8 @@ def sw_table_byte(raw: bytes, instrument: int, which: str, offset: int, value: i
 
 
 def oracle(raw: bytes, frames: int):
-    """The 6502 oracle's register grid of tune ``raw``, cached by content under the tune cache."""
-    return np.asarray(file_oracle(raw, 1, frames, work=CACHE / "oracle")[1], dtype=np.uint8)
+    """The 6502 oracle's register grid of tune ``raw``, cached by content with the oracle traces."""
+    return np.asarray(file_oracle(raw, 1, frames, work=default_cache("csv"))[1], dtype=np.uint8)
 
 
 def attach(request, text: str) -> str:

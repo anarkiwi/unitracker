@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from pydefmon import DefmonPlayer
-from conftest import CACHE, vm_mismatch
+from conftest import vm_mismatch
 from pysidtracker.testing import resolve_tune
 from irs import song as ir_song
 
@@ -339,7 +339,7 @@ def test_locate_reads_each_build_at_its_places(request, tune, variants, cells):
     ],
 )
 def test_builds_not_covered_are_named(tune, message):
-    path = resolve_tune(tune, cache_dir=CACHE)
+    path = resolve_tune(tune)
     if path is None:
         pytest.skip("HVSC tune unavailable")
     with pytest.raises(dm.LiftError, match=message):

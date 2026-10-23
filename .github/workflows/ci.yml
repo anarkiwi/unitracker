@@ -22,12 +22,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - uses: actions/cache@v6
-        with:
-          path: .tunecache
-          key: tunecache-${{ hashFiles('tests/conftest.py', 'src/unitracker/modfit/**') }}
-          restore-keys: tunecache-
       - run: pip install -e ".[dev]"
+      - uses: anarkiwi/pysidtracker/.github/actions/cache@v0.30.0
+        with:
+          key: ${{ hashFiles('tests/*.py', 'tools/shared.py', 'src/unitracker/modfit/**') }}
+          sidtrace: "true"
+          tunes: tests tools/shared.py
       - run: black --check src tests tools
       - run: lint-imports
       - run: pylint src
