@@ -1,11 +1,12 @@
 """The lift's proof: its generic document, played by unitracker-player, reproduces the native
 player's register grid, each voice from its first note (``compare``, a gridcmp onset verdict),
 and why a document, the generic VM or a native player diverges from another or from the
-6502 (``explain``)."""
+6502 (``explain``), and a document as a pathdiff side (``pathdiff_side``)."""
 
 import numpy as np
 from pysidtracker import gridcmp, whydiff
-from unitracker_player import Player, load, play
+from pysidtracker.paths import PySubject
+from unitracker_player import load, play
 
 from unitracker.player import oracle
 from unitracker.player.canonical import REGISTERS
@@ -25,11 +26,12 @@ def compare(text: str, theirs: np.ndarray, progress: bool = False, *, tol=None) 
     return gridcmp.verdict_onset(ours, starts, theirs, tol=tol)
 
 
-class DocumentPlayer(Player):
+class DocumentPlayer(oracle.Onsets):
     """unitracker-player as a whydiff player: ``play_frame`` plays one tick into ``regs``, the
-    register file it writes a register at a time, and ``render_grid`` a fresh run's ticks."""
+    register file it writes a register at a time, ``starts`` each voice's first-note tick, and
+    ``render_grid`` a fresh run's ticks."""
 
-    play_frame = Player.step
+    play_frame = oracle.Onsets.step
 
     def render_grid(self, ticks: int) -> np.ndarray:
         """The registers of ``ticks`` ticks played from the start (fewer where it ends)."""
@@ -53,6 +55,16 @@ def _sources(who) -> dict | None:
 
 def _regs(p, register: int) -> tuple:
     return p.regs, register
+
+
+def _starts(p) -> list:
+    return p.starts
+
+
+def pathdiff_side(text: str, name: str = "lift") -> PySubject:
+    """Document ``text`` on unitracker-player as a ``pysidtracker.pathdiff`` side labelled
+    ``name``: its ``regs`` the register cells, each voice counted from its first note."""
+    return PySubject(lambda: DocumentPlayer(load(text)), cell=_regs, label=name, starts=_starts)
 
 
 def side(who, tick: int, register: int, grid, name: str = ""):
