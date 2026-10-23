@@ -603,6 +603,33 @@ def test_a_jump_to_a_jump_row_reads_that_row_as_data(tune):
     lifted(*gt_tune(instruments=[ins], **tune))
 
 
+def test_the_voice_that_starts_a_filter_program_last_runs_the_filter():
+    """The player keeps one filter table pointer: voice 2's note, a channel after voice 1's,
+    takes the filter, and voice 1's program never plays its second parameter row."""
+    ins = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}
+    instruments = [{**ins, "filter_ptr": 1}, {**ins, "filter_ptr": 6}]
+    filt = [(0x90, 0x11), (0x00, 0x40), (0x02, 0x00), (0xA0, 0x21), (0xFF, 0)]
+    filt += [(0x90, 0x52), (0x00, 0x80), (0xFF, 0)]
+    voice2 = [(31, 2, 0, 0)] + [REST] * 15
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], instruments, filt=filt, voice2=voice2)
+    played = set(np.asarray(native.render_grid(60))[:, 0x17])
+    assert 0x52 in played and 0x21 not in played
+    lift = gt.GoatTrackerLift(dec)
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
+def test_a_note_hard_restarts_at_the_gate_timer_of_the_instrument_before_it():
+    """The player fetches the next row at the voice's instrument's gate timer and hard-restarts
+    it with the new instrument's: four ticks ahead of instrument 2's note, not its own two."""
+    ins = {"wave_ptr": 1, "sustain_release": 0xF6}
+    instruments = [{**ins, "gateoff_timer": 4}, {**ins, "gateoff_timer": 2}]
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(26, 2, 0, 0)] + [REST] * 11
+    lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], instruments, rows)[0])
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
 def test_a_pulse_sweep_of_time_zero_sweeps_256_ticks():
     ins = [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
     pulse = [(0x88, 0), (0x00, 5), (0x84, 0), (0xFF, 0)]
