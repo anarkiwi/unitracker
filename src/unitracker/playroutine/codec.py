@@ -54,6 +54,7 @@ ARGLESS = ("legato",)
 BYTE_SHIFT = {"cut": 3}
 KEY_DEFAULTS = {"hold": 1}
 NONE = "none"
+HOLD = "hold"
 _RELATIVE = re.compile(r"^[+-]\d+$")
 _ROUTE = re.compile(r"^(?P<sign>[+-])(?: (?P<mask>\d+))?$")
 _CTRL = re.compile(r"^(?P<lit>\d+)?\^(?P<mask>\d+)$")
@@ -620,7 +621,8 @@ class CommandCodec:
 
     def encode(self, code: int, arg: int) -> tuple[str, object]:
         """``(name, value)``: value is an int, a tuple of ints for an entry with ``args``,
-        ``(type, index)`` for a reference, ``none``, or None for a command of :data:`ARGLESS`."""
+        ``(type, index)`` for a reference, ``none`` (or the entry's ``none`` spelling, ``hold``),
+        or None for a command of :data:`ARGLESS`."""
         for ecode, name, ref, var in self.entries:
             if ecode != code or (
                 "when" in var and not var.get("inline") and not self._ev(var["when"], arg=arg)
@@ -636,7 +638,8 @@ class CommandCodec:
                 return name, (ref, arg)
             if var.get("inline"):
                 break
-            return self.spelled(name, ref, NONE), NONE
+            value = var.get(NONE, NONE)
+            return self.spelled(name, ref, value), value
         raise CodecError(f"command {code} with argument {arg} has no shared name")
 
     def spelled(self, name: str, ref: str | None, value) -> str:
@@ -653,7 +656,7 @@ class CommandCodec:
         value as, or None when it takes no such value."""
         if (name in ARGLESS) != (value is None):
             return None
-        if value is None or value == NONE:
+        if value is None or value in (NONE, HOLD):
             none = None if ref is None else self.rtypes[ref].none
             return evaluate(var.get("raw", 0), {}) if value is None else none
         if "args" in var:
@@ -689,6 +692,15 @@ class CommandCodec:
             except CodecError:
                 continue
         raise CodecError(f"the player can't express {command_text(name, value)}")
+
+    def stop(self, name: str) -> tuple[int, int]:
+        """``(code, arg)`` of command ``name``'s ``none`` argument, however it is spelled."""
+        for value in (NONE, HOLD):
+            try:
+                return self.decode(name, value)
+            except CodecError:
+                continue
+        raise CodecError(f"the player can't express !{name}:{NONE}")
 
 
 def codec_set(pr: dict, rtypes: dict, tables) -> tuple:

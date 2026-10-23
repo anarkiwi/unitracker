@@ -119,6 +119,7 @@ reads by those names (`!tempo:5/7`). These expressions also read the playroutine
 | entry key | meaning |
 |---|---|
 | `lasts` | for `freq`, `step`: the native `!freq` ends on a step without a command |
+| `none` | for a `ref: x` entry, `hold`: its none argument is written `hold` (`!freq:hold`, the frequency holds), not `none` (the instrument's `freq`, or `F(N)`, drives it again) |
 | `also` | `name:arg`, another command whose native effect the code has too: the code decodes as both (`!filter:none!resfilt:0/0`) |
 | `inline` | `true` with a `ref`: the referenced row's fields, each a byte, joined by `/` (`!tempo:6/7`), `when` over the row's fields; the type has no records of its own in the lifter's song |
 | `column` | the event column the command decodes into, `instrument` (event slot 0) or `fx` (slot 1), or a list of them of which it takes the first the event leaves free (an event that names an instrument fills `instrument`); a named entry without one decodes into `fx`, and a column holds one command |
@@ -150,7 +151,8 @@ sets the bit carries `!pw` / `!filter`; a note that names no instrument plays th
 one, and a legato note restarts nothing.
 
 A `commands` entry `{name: freq, lasts: step}` declares a native `!freq` that ends on a step
-carrying no command: each such step after a `!freq` decodes as `!freq:none`.
+carrying no command: each such step after a `!freq` decodes as its none argument, `!freq:none`,
+or `!freq:hold` for an entry with `none: hold`.
 
 ### Envelope commands
 

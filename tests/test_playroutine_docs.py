@@ -118,7 +118,7 @@ def accepted(player: str) -> dict:
     for name, names in refs.items():
         with contextlib.suppress(CodecError):
             stops = name != running.NAME or running.lasts_step(pr)
-            names += [f"`{NONE}`"] if cmds.decode(name, NONE) and stops else []
+            names += [f"`{cmds.encode(*cmds.stop(name))[1]}`"] if stops else []
         cells[name] = ", ".join(names)
     for slot in ("pw", "filter"):
         stops = []
