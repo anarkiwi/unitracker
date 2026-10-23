@@ -63,8 +63,9 @@ def wave_records(table) -> dict:
 
 
 def pulse_records(table) -> dict:
-    """Pulsetable rows as ``l``/``r`` records; a width row's ``l`` keeps the bits it plays."""
-    return _rows(table, lambda l, r: {"l": 0x80 | (l & 0x0F) if l >= 0x80 else l, "r": r})
+    """Pulsetable rows as ``l``/``r`` records; a width row's ``l`` keeps the bits it plays, and
+    a sweep row's is its ticks, 256 for the byte 0."""
+    return _rows(table, lambda l, r: {"l": 0x80 | (l & 0x0F) if l >= 0x80 else l or 0x100, "r": r})
 
 
 def filter_records(table) -> dict:

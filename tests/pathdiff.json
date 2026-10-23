@@ -53,19 +53,6 @@
  },
  {
   "compare": "onset",
-  "frames": 10,
-  "id": "a9cbe3a85fa1",
-  "key": "('first', 'goattracker2:edge:pygoattracker/player.py:Player._play_channel:818>819', '')",
-  "kind": "first",
-  "left": "format:goattracker2",
-  "md5": "07e0662a9196218e2741fe26ccfc494d",
-  "reason": "pygoattracker/player.py:818 if chan.pulse_table_ptr: -> 819: reference frame 9, register $02 v1_pw_lo",
-  "relpath": "MUSICIANS/H/Hoffmann_Michal/Not_Quite_What_I_Wanted.sid",
-  "right": "unitracker.lift.backends:pathdiff_lift",
-  "song": 1
- },
- {
-  "compare": "onset",
   "frames": 13,
   "id": "cb3a3d197a7f",
   "key": "('first', 'goattracker2:edge:pygoattracker/player.py:Player._play_channel:792>793', '')",
