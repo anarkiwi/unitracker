@@ -78,7 +78,7 @@ song:
   ...
   - def:
       phrase:
-        p16: [off!tempo:16, -!freq:none*47]
+        p16: [off!tempo:16, -!freq:hold*47]
     play: [p1, p2, p16]
   - {loop: 2}
 ```
