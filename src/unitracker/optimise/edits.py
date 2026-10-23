@@ -3,7 +3,7 @@
 import copy
 from unitracker_grammar.expr import canonical
 
-from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code
+from unitracker.playroutine.codec import EXPR, CodecError, command_code
 from unitracker.document.events import column
 from unitracker.document.events.running import lasts_step
 from unitracker.playroutine.records import RowEval, chained, program_path, ref_type
@@ -363,10 +363,10 @@ def stitch(ir: dict, name: str, start: int, end: int, text: str) -> dict | None:
 
 
 def hold(ir: dict, name: str, k: int) -> dict | None:
-    """The song with event ``k`` of phrase ``name`` playing ``!freq:none`` for its ``!freq``."""
+    """The song with event ``k`` of phrase ``name`` playing its ``!freq``'s none argument."""
     v = view(ir)
     try:
-        code, none = v.commands.decode("freq", NONE)
+        code, none = v.commands.stop("freq")
     except CodecError:
         return None
     out = copied(ir)

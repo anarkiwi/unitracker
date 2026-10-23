@@ -34,6 +34,20 @@ def test_codec_declarations_are_checked(spec, match):
             RowCodec(types["ctrltab"], [spec], 0)
 
 
+@pytest.mark.parametrize("none, other", [("none", "hold"), ("hold", "none")])
+def test_a_freq_entry_spells_its_none_argument(none, other):
+    """``none: hold`` writes the none argument as ``!freq:hold``, which alone decodes to it;
+    :meth:`CommandCodec.stop` finds it either way, and a command without one has none."""
+    var = {"name": "freq", "ref": "x"} | ({"none": "hold"} if none == "hold" else {})
+    cmds = CommandCodec({16: var, 5: {"name": "ad"}}, record_types(LIBS["goattracker2"]))
+    assert cmds.encode(16, 0) == ("freq", none)
+    assert cmds.decode("freq", none) == cmds.stop("freq") == (16, 0)
+    with pytest.raises(CodecError):
+        cmds.decode("freq", other)
+    with pytest.raises(CodecError, match="can't express !ad:none"):
+        cmds.stop("ad")
+
+
 def test_codec_expressions_read_only_declared_tables():
     assert Evaluator(None, {"t": [7]})("t[0] + t[5]", {}) == 7
     for call in (lambda: Evaluator()("t[0]", {}), lambda: evaluate("nope(", {})):

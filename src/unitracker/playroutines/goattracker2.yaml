@@ -31,8 +31,8 @@ commands:
     - {name: vtempo, when: "arg >= 0x82", arg: "(arg & 0x7F) if (arg & 0x7F) >= 3 else 3", raw: "arg | 0x80"}
   # This voice swings on the pair it names.
   18: {name: vtempo, ref: speedtab, inline: true, when: "2 <= l <= 129 and 2 <= r <= 129"}
-  # A native !freq ends on a step without a command, where 16 with 0 resumes the instrument's.
-  16: {name: freq, ref: x, lasts: step}
+  # A native !freq ends on a step without a command, 16 with 0, where the frequency holds.
+  16: {name: freq, ref: x, lasts: step, none: hold}
   # Legato is read from either slot, beside the event's one command.
   17: {name: legato, when: "arg == 0", column: instrument}
 record_types:

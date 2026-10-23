@@ -13,7 +13,7 @@ import z3
 from sympy.core.function import AppliedUndef
 from unitracker_grammar.expr import ExpressionError, canonical
 
-from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code
+from unitracker.playroutine.codec import EXPR, CodecError, command_code
 from unitracker.document.events.lifetime import starts
 from unitracker.optimise.refs import entries, slots, view
 from unitracker.modfit import convert
@@ -31,13 +31,13 @@ _SAMPLE = 64
 
 
 def freq_codes(ir: dict) -> tuple | None:
-    """``(code, none)``: the ``!freq`` command's code and ``!freq:none``'s argument (None where
+    """``(code, none)``: the ``!freq`` command's code and its none argument's (None where
     the player has none); None for a player without ``!freq``."""
     code = command_code(ir["playroutine"].get("commands"), FREQ, EXPR)
     if code is None:
         return None
     try:
-        return code, view(ir).commands.decode(FREQ, NONE)[1]
+        return code, view(ir).commands.stop(FREQ)[1]
     except CodecError:
         return code, None
 

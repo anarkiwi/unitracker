@@ -59,7 +59,7 @@ command, $B00, see [Filter](#filter)).
 | `!cut` | 0-2040 step 8 |
 | `!tempo` | 2-129, 2-129/2-129 (two different) |
 | `!vtempo` | 2-129, 2-129/2-129 (two different) |
-| `!freq` | `x` name, `none` |
+| `!freq` | `x` name, `hold` |
 | `!legato` | no argument |
 
 
@@ -83,7 +83,7 @@ command, $B00, see [Filter](#filter)).
   note's on every tick, which is not `!legato` alone (that leaves the frequency where it was); one
   the expression conversion leaves is written `!freq` of the expression `0`, the note's frequency,
   once a replay proves the song unchanged.
-- `!freq` is command 16, which plays every expression; `!freq:none` is 16 with 0 (see
+- `!freq` is command 16, which plays every expression; `!freq:hold` is 16 with 0 (see
   Modulators).
 
 ## Control programs
@@ -161,15 +161,16 @@ decodes as `!pw` or `!filter` without an argument.
 
 | unit | key | cell | value `v` | fires | starts | written |
 |---|---|---|---|---|---|---|
-| `command` | `freq` | `freq` | the offset from `F(N)`, the frequency of the step's note: a wavetable note row sets `freq` to its own note's frequency and the command does not run that tick, so commands 1-4 work from the step's note, not the arpeggio's | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, the instrument's `freq` |
+| `command` | `freq` | `freq` | the offset from `F(N)`, the frequency of the step's note: a wavetable note row sets `freq` to its own note's frequency and the command does not run that tick, so commands 1-4 work from the step's note, not the arpeggio's | every tick of a step but tick 0, except ticks a wavetable row plays a note or runs a command | the step's command or argument changes, a note starts, or a wavetable row plays a note | `!freq:x` (command 16); without a command, `!freq:hold` |
 | `wave` | `freq` | `freq` | the offset from the frequency of the sounding note (with the wavetable's arpeggio) | once, on the tick its wavetable row runs | every run of a wavetable step row | the row's `freq` |
 | `pulse` | `pw` | `pulse` | the cell | each pulse-program tick: not on the tick the voice reads its next step, nor tick 0 of a step that starts a phrase | an instrument, `!run:pw` or a wavetable $F9 sets the program | the program's first row (instrument `pw`) |
 | `filter` | `cut` | `filtercutoff`, global | the 11-bit cutoff, `filtercutoff << 3` | each filter-program tick | an instrument, `!run:f`, `!filter:none!resfilt:0/0` or a wavetable $FA/$FB sets the program | the program's first row (instrument `filter`) |
 
-- `!freq` is command 16 with `lasts: step` (see [Lifetime](schema.md#lifetime)); `!freq:none`
-  is command 16 with 0, which plays as a step without a command, and the same `!freq` on the
-  next step continues the occurrence (`φ` keeps counting). A note's steps without a command run the instrument's `freq`
-  expression.
+- `!freq` is command 16 with `lasts: step` and `none: hold` (see [Lifetime](schema.md#lifetime));
+  `!freq:hold` is command 16 with 0, which plays as a step without a command: the command unit
+  stops and the frequency holds, as command 0 does after a frequency command. The same `!freq`
+  on the next step continues the occurrence (`φ` keeps counting). A note's steps without a
+  command run the instrument's `freq` expression.
 - Commands 1-4 and the instrument vibrato are the `command` unit's own firings: the lifter writes
   the commands' modulations as `!freq`, and the instrument vibrato as the instrument's `freq`,
   its delay a term in `φ` (`(φ >= 38)` for a delay of 40), when it starts with the note; a

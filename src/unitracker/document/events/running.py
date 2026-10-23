@@ -4,7 +4,14 @@ lasts until a note starts the instrument."""
 
 from unitracker_grammar.expr import ExpressionError, canonical
 from unitracker.playroutine import tempo
-from unitracker.playroutine.codec import EXPR, NONE, CodecError, command_code, command_variants
+from unitracker.playroutine.codec import (
+    EXPR,
+    HOLD,
+    NONE,
+    CodecError,
+    command_code,
+    command_variants,
+)
 from unitracker.document.events import context, restart
 from unitracker.document.events.lifetime import order, starts
 from unitracker.player.vm import event_commands
@@ -153,9 +160,10 @@ class Running:
 
     def _freq(self, voice: _Voice, value, arg: int) -> str | None:
         """Play ``!freq`` of ``value`` (native argument ``arg``): ``"none"`` where it is written
-        ``!freq:none``, ``"same"`` where it changes nothing, else None."""
-        held = value != NONE and arg in self.held and self.step and self._no_freq(voice)
-        if value == NONE or held:
+        as its none argument, ``"same"`` where it changes nothing, else None."""
+        stop = value in (NONE, HOLD)
+        held = not stop and arg in self.held and self.step and self._no_freq(voice)
+        if stop or held:
             same = voice.x is None
             voice.x = None
             voice.own.pop(NAME, None)
@@ -181,8 +189,8 @@ class Running:
 
     def _settle(self, voice: _Voice, event: dict) -> list:
         """``[(code, arg, verdict)]`` for each command of ``event`` where the voice plays it:
-        ``"same"`` for one that changes nothing, ``"none"`` for a ``!freq`` written
-        ``!freq:none``, else None."""
+        ``"same"`` for one that changes nothing, ``"none"`` for a ``!freq`` written as its none
+        argument, else None."""
         self._start(voice, event)
         out = []
         for code, arg in event_commands(event):
@@ -222,8 +230,8 @@ class Running:
         return out
 
     def _written(self, voice: _Voice, event: dict) -> list:
-        """An event as written: what changes nothing left out, and ``!freq:none`` where the
-        native ``!freq`` ends."""
+        """An event as written: what changes nothing left out, and ``!freq``'s none argument
+        where the native ``!freq`` ends."""
         settled = self._settle(voice, event)
         cmds = [(c, 0 if v == "none" else a) for c, a, v in settled if v != "same"]
         if self._ends(voice, [(c, a) for c, a, _ in settled]):

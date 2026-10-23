@@ -520,8 +520,23 @@ def test_an_arpeggio_under_a_toneporta_of_speed_0_keeps_one_freq():
     arpeggio = [(0x41, 0), (0x04, 0x00), (0x04, 0x03), (0xFF, 2)]
     text, _, _, _ = lifted(*gt_tune(arpeggio, rows=rows))
     first = song_def(text)
-    assert first["phrase"]["p1"] == ["C2.i1*4", "G2!freq:x1!legato", "-!freq:none*11"]
+    assert first["phrase"]["p1"] == ["C2.i1*4", "G2!freq:x1!legato", "-!freq:hold*11"]
     assert first["x"] == {"x1": 0}
+
+
+def test_command_0_after_a_slide_holds_its_frequency():
+    """Command 0 stops the slide where it is: the document holds it with !freq:hold where
+    !freq:none would return the voice to its note's frequency."""
+    rows = [(24, 1, 0, 0), (None, 0, 1, 1), (None, 0, 1, 1), REST, (36, 1, 0, 0)] + [REST] * 11
+    lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, speed=[(0, 0x20)])[0])
+    verdict = lift.verify(lift.run())
+    assert song_def(lift.document)["phrase"]["p1"] == [
+        "C2.i1",
+        "-!freq:x1*2",
+        "-!freq:hold",
+        "C3*12",
+    ]
+    assert verdict.ok, verdict.line()
 
 
 ZERO_SWEEPS = {
