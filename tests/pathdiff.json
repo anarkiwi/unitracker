@@ -27,19 +27,6 @@
  },
  {
   "compare": "onset",
-  "frames": 9,
-  "id": "43053a28c82c",
-  "key": "('first', 'goattracker2:edge:pygoattracker/player.py:Player._filter_routine:463>464', '')",
-  "kind": "first",
-  "left": "format:goattracker2",
-  "md5": "ecf6c8f1400184db9c40bff408ba7ad8",
-  "reason": "pygoattracker/player.py:463 if self._filterptr: -> 464: reference frame 8, register $16 fc_hi",
-  "relpath": "MUSICIANS/M/Mibri/Nineteen_Again.sid",
-  "right": "unitracker.lift.backends:pathdiff_lift",
-  "song": 1
- },
- {
-  "compare": "onset",
   "frames": 774,
   "id": "58231e905962",
   "key": "('value', 'goattracker2:store:12:pygoattracker/player.py:Player._frame:221', 'lift:store:12:unitracker_player/player.py:Player.registers:488')",
@@ -61,19 +48,6 @@
   "md5": "e05b59c66951b9a56c11b83ecd5b6b74",
   "reason": "unitracker_player/player.py:566 elif key == \"run\": -> 568: reference frame 33, register $17 res_filt",
   "relpath": "MUSICIANS/S/Slash/Triace40.sid",
-  "right": "unitracker.lift.backends:pathdiff_lift",
-  "song": 1
- },
- {
-  "compare": "onset",
-  "frames": 44,
-  "id": "980ba44a777e",
-  "key": "('first', '', 'lift:edge:unitracker_player/player.py:Player._run_slot:511>512')",
-  "kind": "first",
-  "left": "format:goattracker2",
-  "md5": "9ad8026fef7d552cea90eb9b1001378b",
-  "reason": "unitracker_player/player.py:511 while (slot := slots[kind])[0] is not None and slot[2] <= t: -> 512: reference frame 43, register $17 res_filt",
-  "relpath": "MUSICIANS/W/Wil/Flip-Flop.sid",
   "right": "unitracker.lift.backends:pathdiff_lift",
   "song": 1
  },
