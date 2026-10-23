@@ -379,6 +379,18 @@ def test_filter_writes_sound_after_the_filter_step(tune, regs):
         assert value in theirs[begun:, reg]
 
 
+@pytest.mark.parametrize("command,data", [(0xB, 0x31), (0xC, 0x31), (0xD, 3)])
+@pytest.mark.parametrize("tempo", [0, 4])
+def test_a_rests_filter_and_volume_commands_sound_on_its_step(command, data, tempo):
+    """The player writes $D416-$D418 before its voices' tick 0 commands, so a rest's B, C or D
+    sounds on the step, a tick after its restart's first-tick row."""
+    rows = [(24, 1, 0xF, tempo) if tempo else (24, 1, 0, 0), *[REST] * 3]
+    rows += [(None, 0, command, data), *[REST] * 11]
+    lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], rows=rows)[0])
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
 @pytest.mark.parametrize(
     "wave,rows,speed,error,match",
     [
