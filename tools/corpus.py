@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 from lark import Token, Tree
-from pysidtracker import find_format, gridcmp
+from pysidtracker import find_format, gridcmp, start_subtune
 from pysidtracker.jobs import deadline
 from tqdm import tqdm
 from unitracker_grammar import parse
@@ -27,7 +27,7 @@ import shared
 from unitracker import optimise
 from unitracker.cache import Pool
 from unitracker.lift import backends, verify
-from unitracker.lift.base import LiftError, start_song
+from unitracker.lift.base import LiftError
 from unitracker.player import oracle
 from unitracker.player.canonical import REGISTERS
 from unitracker.player.vm import SongPlayer, event_commands
@@ -49,7 +49,6 @@ FIELDS = (
     "forbidden",
     "gap",
 )
-GROUPS = ("freq", "freq", "pw", "pw", "ctrl", "ad", "sr")
 GLOBALS = ("cut", "cut", "res/route", "mode/vol")
 PLAYERS = {
     "goattracker2": re.compile(r"^GoatTracker_V2\.x$"),
@@ -170,7 +169,7 @@ def category(row: dict) -> str:
     if not row.get("onset_reg"):
         return "lifted"
     reg = int(row["onset_reg"][1:], 16)
-    group = GROUPS[reg % 7] if reg < 21 else GLOBALS[reg - 21]
+    group = gridcmp.VOICE_ROLES[reg % 7] if reg < 21 else GLOBALS[reg - 21]
     return f"mismatch: {group}, {row['motion'] or 'first tick'}"
 
 
@@ -610,7 +609,7 @@ def explain(args, doc: str, raw: bytes, played: tuple) -> str:
     grid, voices' first notes and the native grid) against ``args.explain``; the VM is judged
     by its own onset."""
     ours, starts, theirs = played
-    subtune = start_song(raw) if args.subtune is None else args.subtune
+    subtune = start_subtune(raw) if args.subtune is None else args.subtune
     other = raw if args.explain == "6502" else lambda: find_format(raw).play(raw, subtune)
     if args.explain == "vm":
         other = backends.lift(raw, subtune)

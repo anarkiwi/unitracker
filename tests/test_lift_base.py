@@ -1,13 +1,11 @@
 """The lift framework's passes, through the GoatTracker 2 lifter on synthetic tunes, the
 SID-Wizard lifter on Csillag and patched cuts of it, and the defMON lifter on its builds."""
 
-import struct
-
 import numpy as np
 import pytest
 from conftest import gt_tune, sw_fx, vm_mismatch
 from pydefmon import DefmonPlayer
-from pysidtracker import find_format
+from pysidtracker import SidImage, find_format, write_psid
 from pysidwizard import SWMPlayer, parse_sid_song
 
 from unitracker.lift import backends, base, defmon
@@ -90,13 +88,9 @@ def test_a_build_the_playroutine_does_not_cover_stops_before_the_structure(monke
 
 def psid(start: int, songs: int = 3) -> bytes:
     """A version 2 PSID header of ``songs`` subtunes starting on 1-based ``start``, and an RTS."""
-    fields = struct.pack(">HHHHHHHI", 2, 0x7C, 0x1000, 0x1000, 0x1000, songs, start, 0)
-    return b"PSID" + fields + bytes(102) + b"\x60"
-
-
-@pytest.mark.parametrize("raw,subtune", [(psid(2), 1), (psid(0), 0), (b"\x00\x10\x60", 0)])
-def test_the_start_song_is_the_headers_or_the_first(raw, subtune):
-    assert base.start_song(raw) == subtune
+    return write_psid(
+        load=0x1000, init=0x1000, play=0x1000, image=b"\x60", songs=songs, start_song=start
+    )
 
 
 def test_from_sid_decodes_the_start_song_unless_given_one(monkeypatch):
@@ -167,7 +161,7 @@ def test_a_sidwizard_lift_without_expressions_skips_convert(csillag, monkeypatch
 def test_a_decoded_sidwizard_module_lifts_and_plays_as_given(csillag):
     raw = csillag.read_bytes()
     swm = sw_fx(raw, {(9, 8): (0x10, 4)})
-    lift = SidWizardLift(Decoded(swm, base.SidImage.from_bytes(raw).header, 0), expressions=False)
+    lift = SidWizardLift(Decoded(swm, SidImage.from_bytes(raw).header, 0), expressions=False)
     assert lift.run()["phrases"]["p09"][1] == {"note": "off", "command": [0x12, 4], "steps": 24}
     ours = lift.native().render_grid(400)
     assert np.array_equal(ours, SWMPlayer(swm).render_grid(400))
