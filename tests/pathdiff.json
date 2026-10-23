@@ -1,19 +1,6 @@
 [
  {
   "compare": "onset",
-  "frames": 12,
-  "id": "1e427f41204b",
-  "key": "('first', '', 'lift:edge:unitracker_player/player.py:Player._command:633>637')",
-  "kind": "first",
-  "left": "format:goattracker2",
-  "md5": "f782d336f013868d00aecf568b2f4aed",
-  "reason": "unitracker_player/player.py:633 elif key == \"pw\": -> 637: reference frame 11, register $18 mode_vol",
-  "relpath": "MUSICIANS/R/Radiantx/Natural_Constructor.sid",
-  "right": "unitracker.lift.backends:pathdiff_lift",
-  "song": 1
- },
- {
-  "compare": "onset",
   "frames": 30,
   "id": "2a943fac6632",
   "key": "('first', 'goattracker2:edge:pygoattracker/player.py:Player._get_new_notes:750>752', '')",

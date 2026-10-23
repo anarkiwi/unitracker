@@ -134,7 +134,8 @@ wavetable $FB row set whole; from the command or the wavetable row, the byte 0 a
 filter program, and is written so: `!filter:none!resfilt:0/0` (one command $B00) and `{res: 0, route: 0, filter: none}`. A pattern command or wavetable row that sets the cutoff, `res`/`route`
 or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step writes
 `$D416`-`$D418` before the channels run, so the playroutine latches them there (`fcutreg`,
-`fctrlreg`, `fmodereg`).
+`fctrlreg`, `fmodereg`); on a rest they play on its step, as a note-less event's filter and
+volume commands do.
 
 ## Hard restart
 
