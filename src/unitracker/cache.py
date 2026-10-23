@@ -3,35 +3,21 @@
 import fcntl
 import functools
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 import os
 import pickle
+import sys
 from pathlib import Path
 
+import grimp
 from pysidtracker import jobs
 from tqdm import tqdm
 
 CACHE = Path(os.environ.get("UNITRACKER_CACHE", "out/modfit/cache"))
 _HERE = Path(__file__).resolve().parent
-SOURCES = (
-    sorted((_HERE / "modfit").glob("*.py"))
-    + [_HERE / "modfit" / "specs.yaml"]
-    + sorted((_HERE / "playroutines").glob("*.yaml"))
-    + [
-        Path(importlib.util.find_spec(f"unitracker.{m}").origin)
-        for m in (
-            "player.checkpoint",
-            "player.modulation",
-            "player.reach",
-            "player.trace",
-            "player.vm",
-            "playroutine.records",
-            "playroutine.codec",
-            "playroutine.schema",
-        )
-    ]
-)
+DATA = ("modfit/specs.yaml", "playroutines/*.yaml")
 
 
 def content_key(*parts) -> str:
@@ -44,9 +30,35 @@ def content_key(*parts) -> str:
 
 
 @functools.cache
-def code_identity() -> str:
-    """The content key of the code a conversion depends on (``SOURCES``), once per process."""
-    return content_key(*(p.read_bytes() for p in SOURCES))
+def code_sources(root: str) -> tuple:
+    """``(source files, distribution versions)`` of ``root`` and every module it imports, a
+    package with all its modules, from the import graph (grimp): each unitracker module's file
+    and the package data, and ``name==version`` of each other distribution (the standard
+    library's by the Python version)."""
+    graph = grimp.build_graph("unitracker", include_external_packages=True, cache_dir=None)
+    names, todo = set(), [root]
+    while todo:
+        name = todo.pop()
+        if name in names:
+            continue
+        names.add(name)
+        if name.split(".")[0] == "unitracker":
+            todo += graph.find_modules_directly_imported_by(name) | graph.find_children(name)
+    files = sorted(
+        Path(importlib.util.find_spec(m).origin) for m in names if m.split(".")[0] == "unitracker"
+    )
+    files += sorted(p for pattern in DATA for p in _HERE.glob(pattern))
+    owners = importlib.metadata.packages_distributions()
+    dists = {d for m in names for d in owners.get(m.split(".")[0], ())} - {"unitracker"}
+    versions = sorted(f"{d}=={importlib.metadata.version(d)}" for d in dists)
+    return tuple(files), (f"python=={sys.version}", *versions)
+
+
+@functools.cache
+def code_identity(root: str = "unitracker.modfit") -> str:
+    """The content key of the code under ``root`` (:func:`code_sources`), once per process."""
+    files, versions = code_sources(root)
+    return content_key(*(p.read_bytes() for p in files), *versions)
 
 
 def ir_key(ir: dict) -> str:

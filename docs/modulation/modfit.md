@@ -159,9 +159,11 @@ for a longer one.
 
 Traces, derivations and conversions are cached in `$UNITRACKER_CACHE` (default
 `out/modfit/cache/`) under the sha256 of the song and the code identity
-(`cache.code_identity`): one sha256 per process over the contents of `cache.SOURCES`, which
-are every `modfit/*.py`, `modfit/specs.yaml`, the playroutine library and the player and playroutine
-modules a conversion reads. An entry is valid only for the code that wrote it, so a cache shared
+(`cache.code_identity`): one sha256 per process over `cache.code_sources("unitracker.modfit")`,
+the import closure of `unitracker.modfit` from the import graph (grimp, a package with all its
+modules): every unitracker module's source in it, `modfit/specs.yaml` and the playroutine library,
+and the version of each other distribution it imports and of Python. The canonical form's cache
+adds `unitracker.optimise`'s closure, which holds the writer. An entry is valid only for the code that wrote it, so a cache shared
 across commits or worktrees never serves another commit's result. Starts are derived in a pool of
 `$UNITRACKER_WORKERS` processes, else one per core the process may run on; the pool reads no other
 cap, so set it to bound a lift.

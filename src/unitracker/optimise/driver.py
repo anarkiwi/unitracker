@@ -16,7 +16,7 @@ from unitracker_player import PlayError
 
 from unitracker import document
 from unitracker.playroutine.library import SongFormatError
-from unitracker.cache import CACHE, cached, content_key, default_workers
+from unitracker.cache import CACHE, cached, code_identity, content_key, default_workers
 from unitracker.modfit.convert import ir_key
 from unitracker.modfit.grammar import tokens
 from unitracker.optimise.edits import EDITS
@@ -278,11 +278,6 @@ def optimise(ir: dict, passes=None, workers: int | None = None, progress: bool =
     return Optimiser(ir, passes, workers).run(progress)
 
 
-@functools.cache
-def _code() -> str:
-    return content_key(*(p.read_bytes() for p in sorted(Path(__file__).parent.glob("*.py"))))
-
-
 def canonical(ir: dict, workers: int | None = None, cache: Path | None = CACHE) -> dict:
     """``ir`` with the canonical passes kept, proved as every pass is, cached by content beside
     the conversion's; ``ir`` itself where none keeps an edit, its state does not recur or it has
@@ -295,5 +290,9 @@ def canonical(ir: dict, workers: int | None = None, cache: Path | None = CACHE) 
             return ir
         return result.ir if any(f.kept for f in result.findings) else ir
 
-    where = cache / f"canonical-{content_key(ir_key(ir), _code())}.pkl" if cache else None
+    where = (
+        cache / f"canonical-{content_key(ir_key(ir), code_identity("unitracker.optimise"))}.pkl"
+        if cache
+        else None
+    )
     return cached(where, compute)
