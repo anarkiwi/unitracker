@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TUNECACHE = ROOT / ".tunecache"
 REFERENCES = (
     "MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid",
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
@@ -19,7 +18,7 @@ REFERENCES = (
 
 def tune(source, hvsc=None) -> Path:
     """The ``.sid`` file ``source``: a local path, else a path under ``hvsc``, else an HVSC name
-    resolved through ``$HVSC``, the test tune cache or the mirror."""
+    resolved through ``$HVSC``, pysidtracker's tune cache or the mirror."""
     path = Path(source)
     if path.is_file():
         return path
@@ -27,7 +26,7 @@ def tune(source, hvsc=None) -> Path:
         return Path(hvsc) / source
     from pysidtracker.testing import resolve_tune  # pylint: disable=import-outside-toplevel
 
-    found = resolve_tune(str(source), cache_dir=TUNECACHE)
+    found = resolve_tune(str(source))
     if found is None:
         raise FileNotFoundError(f"{source}: no such tune")
     return Path(found)
