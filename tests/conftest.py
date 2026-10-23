@@ -88,6 +88,11 @@ csillag = hvsc_tune(
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
     "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
 )
+coca_koala = hvsc_tune(
+    "coca_koala",
+    "MUSICIANS/S/Stinsen/Coca_Koala.sid",
+    "Path to Stinsen's Coca Koala, GoatTracker 2 wavetable notes before an instrument vibrato.",
+)
 addaraya = hvsc_tune(
     "addaraya",
     "MUSICIANS/H/Hermit/Stalker-Addaraya_Gurza_Dreaming.sid",

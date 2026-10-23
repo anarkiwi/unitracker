@@ -20,6 +20,7 @@ from pygoattracker.model import (
 )
 from pysidtracker import gridcmp
 
+from unitracker.lift import backends
 from unitracker.lift import goattracker as gt
 from unitracker.lift import verify
 from unitracker.playroutine.codec import CodecError, CommandCodec, RowCodec, row_codecs
@@ -631,3 +632,16 @@ def test_a_voice_runs_a_table_before_it_names_an_instrument_on_the_init_instrume
     init = yaml.safe_load(text)["init"]
     assert [atom.split("!")[0] for atom in init] == ["-.i1", "-", "-"]
     assert "-!run:pw1" in text and oracle.play(text, 50)[1][0] is not None
+
+
+def test_a_lifts_expressions_are_timed_over_the_firings_of_its_song(coca_koala):
+    """Voice 1's first instrument plays three wavetable notes before its vibrato first fires; its
+    frequency follows them where the document is timed over the window its native firings are
+    logged over."""
+    raw = coca_koala.read_bytes()
+    lift = backends.lifter(raw)
+    lift.run()
+    grid = oracle.play(lift.document, 12)[0]
+    np.testing.assert_array_equal(
+        grid[8:12, :2], np.asarray(lift.native().render_grid(12))[8:12, :2]
+    )
