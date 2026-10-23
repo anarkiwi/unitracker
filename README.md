@@ -66,6 +66,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | what the canonical passes find, prove and refuse over many tunes | `python tools/corpus.py canonical TUNE.sid ... [--jobs J] [--workers N] [--out DIR]` |
 | how documents use the vocabulary, and which native commands tunes play | `python tools/corpus.py census DOC.yaml\|TUNE.sid ... [--codes 14,15] [--json OUT.json]` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
+| the fewest fixes for where lifted documents part from the native player over a corpus, each a strict xfail explained by whydiff (`tests/pathdiff.json`) | `python -m pysidtracker.pathdiff {build,rank,xfails} ... --right unitracker.lift.backends:pathdiff_lift --compare onset` ([regenerating](docs/porting.md#corpus-divergences)) |
 | the native player's register grid | `pysidtracker.find_format(raw).play(raw, subtune)`; the 6502 oracle grid is `tests/conftest.py:oracle` |
 | why did a modulator not become an expression? | `python tools/modulators.py occurrences TUNE.sid [--unit U] [--cells c1,c2]`, `unitracker-modfit exprs` |
 | on which ticks does the native unit hold each expression its generic modulators play? | `python tools/modulators.py firings TUNE.sid [--cell pw:0] [--ticks A:B] [--timed]` |

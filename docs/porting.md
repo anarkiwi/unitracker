@@ -428,6 +428,29 @@ PYTHONPATH=src .venv/bin/pylint --disable=missing-function-docstring tests tools
 PYTHONPATH=src .venv/bin/python -m pytest -n 4 --cov=unitracker --cov-fail-under=85
 ```
 
+### Corpus divergences
+
+`tests/pathdiff.json` holds pysidtracker's
+[pathdiff](https://github.com/anarkiwi/pysidtracker/blob/main/docs/pathdiff.md) cases for the
+native player against the lift: over a corpus, the fewest fixes that explain where the lifted
+document on unitracker-player parts from the native player (each voice from its first note), one
+representative tune per fix. `tests/test_pathdiff.py` runs each as a strict xfail whose failure is
+whydiff's explanation; a fix makes its case pass and the run red until the case is pruned. The
+right side is `backends.pathdiff_lift` (`verify.pathdiff_side` of the lifted document); a tune that does
+not lift is a build error, not a divergence. To regenerate, from a survey `find` csv of the
+player's tunes:
+
+```sh
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 UNITRACKER_WORKERS=1
+PAIR="--left format:goattracker2 --right unitracker.lift.backends:pathdiff_lift"
+python -m pysidtracker.pathdiff build $HVSC tunes.csv --work out/pathdiff $PAIR --compare onset --jobs 28
+python -m pysidtracker.pathdiff rank --work out/pathdiff $PAIR --explain 10
+python -m pysidtracker.pathdiff xfails --work out/pathdiff $PAIR --manifest tests/pathdiff.json --top 15 --verify --prune
+```
+
+`rank` writes `out/pathdiff/pathdiff/<pair>/fixes.csv` and, per top fix, whydiff's
+`explain/<rank>.txt`; `xfails` keeps existing cases and adds only new ones that still fail.
+
 ## 8. Checklist
 
 | # | step | files | command (each with `PYTHONPATH=src`) |

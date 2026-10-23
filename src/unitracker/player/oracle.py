@@ -10,7 +10,7 @@ from unitracker_player.player import FILTER, PULSE
 from unitracker.player.canonical import REG_COUNT
 
 
-class _Onsets(Player):
+class Onsets(Player):
     """The generic player, recording the tick of each voice's first note but the init row's."""
 
     def __init__(self, song):
@@ -28,7 +28,7 @@ class _Onsets(Player):
 def play(text: str, ticks: int, progress: bool = False) -> tuple[np.ndarray, list]:
     """``(grid, starts)``: the registers after each of up to ``ticks`` ticks of document
     ``text`` (fewer where it ends first) and the tick of each voice's first note, or None."""
-    player = _Onsets(load(text))
+    player = Onsets(load(text))
     grid = np.zeros((ticks, REG_COUNT), dtype=np.uint8)
     played = 0
     for t in tqdm(range(ticks), desc="generic", unit="tick", disable=not progress, leave=False):
@@ -39,7 +39,7 @@ def play(text: str, ticks: int, progress: bool = False) -> tuple[np.ndarray, lis
     return grid[:played], player.starts
 
 
-class _Firings(_Onsets):
+class _Firings(Onsets):
     """The generic player, recording each modulator's cell ``(key, voice)`` (voice None for the
     cutoff), the tick of each of its firings and its origin: ``(event, how)`` for one a voice's
     event starts on its own tick by its ``key`` command (``command``, ``note command`` with a

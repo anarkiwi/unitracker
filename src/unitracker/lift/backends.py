@@ -3,8 +3,10 @@
 import importlib
 
 from pysidtracker import SidParseError, find_format, gridcmp
+from pysidtracker.paths import PySubject
 
 from unitracker.lift import verify as proof
+from unitracker.lift.base import LiftError
 from unitracker.playroutine.library import library
 
 LIFTS = {
@@ -49,3 +51,14 @@ def tolerance(raw: bytes, subtune=None):
     """The gridcmp tolerance the playroutine of ``raw``'s lifter declares (``tolerance``), or
     None: its grids compare exactly."""
     return library(lifter(raw, subtune).playroutine).get("tolerance")
+
+
+def pathdiff_lift(raw: bytes, song: int) -> PySubject:
+    """The generic document lifted from ``raw``'s 1-based ``song`` on unitracker-player, as a
+    ``pysidtracker.pathdiff`` side (``--right unitracker.lift.backends:pathdiff_lift``); a
+    lift without a document raises :class:`~unitracker.lift.base.LiftError`."""
+    lifted = lifter(raw, song - 1)
+    lifted.run()
+    if lifted.document is None:
+        raise LiftError(f"no generic document: {lifted.gap}")
+    return proof.pathdiff_side(lifted.document)
