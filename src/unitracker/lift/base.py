@@ -6,7 +6,7 @@ import dataclasses
 from collections import deque
 from collections.abc import Callable, Iterator
 
-from pysidtracker import SidImage, gridcmp
+from pysidtracker import gridcmp, start_subtune
 from unitracker_player import PlayError
 
 from unitracker import document
@@ -21,12 +21,6 @@ Pass = Callable[["Lift", dict], dict]
 
 class LiftError(ValueError):
     """The tune uses something its playroutine or lifter does not cover."""
-
-
-def start_song(raw: bytes) -> int:
-    """The 0-based subtune the PSID header of ``raw`` starts on (0 without a header)."""
-    header = SidImage.from_bytes(raw).header
-    return (header.start_song or 1) - 1 if header is not None else 0
 
 
 def song_meta(psid, source: str) -> dict:
@@ -59,7 +53,7 @@ class Lift(abc.ABC):
     @classmethod
     def from_sid(cls, raw: bytes, subtune: int | None = None, expressions: bool = True) -> "Lift":
         """The lift of ``.sid`` ``raw``'s ``subtune``, by default the one its header starts on."""
-        return cls(cls.decode(raw, start_song(raw) if subtune is None else subtune), expressions)
+        return cls(cls.decode(raw, start_subtune(raw) if subtune is None else subtune), expressions)
 
     @staticmethod
     @abc.abstractmethod

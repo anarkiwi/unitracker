@@ -1,14 +1,13 @@
 """The tests' failure reports: whydiff's explanation of the VM beside a native player or a raw
 tune's 6502, the verdict's grid diff, and their xfail line."""
 
-import struct
 from functools import partial
 from types import SimpleNamespace
 
 import conftest
 import numpy as np
 import pytest
-from pysidtracker import gridcmp
+from pysidtracker import gridcmp, write_psid
 from pysidtracker.asm6502 import assemble
 from pysidtracker.oracle import register_grid
 from pysidtracker.player import MemPlayer
@@ -115,8 +114,7 @@ PLAY = "init: LDA #$00\nSTA $fb\nRTS\nplay: INC $fb\nLDA $fb\nASL A\nSTA $d418\n
 def counter_tune() -> bytes:
     """A PSID whose play call writes twice its call count to $D418."""
     code, labels = assemble(PLAY, 0x1000)
-    fields = struct.pack(">HHHHHHHI", 2, 0x7C, 0, labels["init"], labels["play"], 1, 1, 0)
-    return b"PSID" + fields + bytes(102) + struct.pack("<H", 0x1000) + code
+    return write_psid(load=0x1000, init=labels["init"], play=labels["play"], image=code)
 
 
 def verdict(song: dict, theirs) -> tuple:

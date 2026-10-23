@@ -3,7 +3,6 @@
 from collections.abc import Iterator
 
 import numpy as np
-from tqdm import tqdm
 from unitracker_grammar import expr as xexpr
 
 from unitracker.playroutine import tempo
@@ -677,16 +676,18 @@ class SongPlayer:
 
     def render_wav(self, path, seconds: float, model: str = "8580", progress: bool = False):
         """Render ``seconds`` to a WAV file through an emulated SID."""
-        from pysidtracker.audio import render_wav  # pylint: disable=import-outside-toplevel
+        from pysidtracker.audio import render_player_wav  # pylint: disable=import-outside-toplevel
 
         clock = self.song["clock"]
-        cycles = int(clock["cycles_per_tick"])
-        hz = float(clock["clock_hz"])
-        n = int(seconds * hz / cycles)
-        flushes = tqdm(
-            self.iter_flushes(n), total=n, desc="render", unit="tick", disable=not progress
+        return render_player_wav(
+            self,
+            path,
+            seconds=seconds,
+            model=model,
+            cycles_per_frame=int(clock["cycles_per_tick"]),
+            clock_frequency=float(clock["clock_hz"]),
+            progress=progress,
         )
-        return render_wav(flushes, path, model=model, cycles_per_frame=cycles, clock_frequency=hz)
 
 
 class _Stepper:
