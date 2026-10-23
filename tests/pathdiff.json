@@ -1,19 +1,6 @@
 [
  {
   "compare": "onset",
-  "frames": 30,
-  "id": "2a943fac6632",
-  "key": "('first', 'goattracker2:edge:pygoattracker/player.py:Player._get_new_notes:750>752', '')",
-  "kind": "first",
-  "left": "format:goattracker2",
-  "md5": "335a79b79ccc417028a510bae4a3f7af",
-  "reason": "pygoattracker/player.py:750 if pattern[chan.pattptr + 1]: -> 752: reference frame 29, register $06 v1_sr",
-  "relpath": "MUSICIANS/G/GI-Joe/Miomodo_2SID.sid",
-  "right": "unitracker.lift.backends:pathdiff_lift",
-  "song": 1
- },
- {
-  "compare": "onset",
   "frames": 986,
   "id": "3a60d50bb5b7",
   "key": "('first', 'goattracker2:edge:pygoattracker/player.py:Player._tick0_command:572>573', '')",
@@ -22,32 +9,6 @@
   "md5": "399039f3405c615cdc4f36c713aa769e",
   "reason": "pygoattracker/player.py:572 elif command == constants.CMD_SETWAVE: -> 573: reference frame 985, register $04 v1_ctrl",
   "relpath": "MUSICIANS/F/FatFrost/St33range.sid",
-  "right": "unitracker.lift.backends:pathdiff_lift",
-  "song": 1
- },
- {
-  "compare": "onset",
-  "frames": 774,
-  "id": "58231e905962",
-  "key": "('value', 'goattracker2:store:12:pygoattracker/player.py:Player._frame:221', 'lift:store:12:unitracker_player/player.py:Player.registers:488')",
-  "kind": "value",
-  "left": "format:goattracker2",
-  "md5": "c4c306f567a2f25dbe958bdab61223ee",
-  "reason": "pygoattracker/player.py:221 self._mem[base : base + constants.SID_REGISTERS] = bytes(v & 0xFF for v in out) -> v2_ad || unitracker_player/player.py:488 regs[at + 5] = voice.ad -> v2_ad: reference frame 773, register $0C v2_ad",
-  "relpath": "MUSICIANS/X/Xiny6581/Walking_in_My_Shoes.sid",
-  "right": "unitracker.lift.backends:pathdiff_lift",
-  "song": 1
- },
- {
-  "compare": "onset",
-  "frames": 34,
-  "id": "7377972a02b6",
-  "key": "('first', '', 'lift:edge:unitracker_player/player.py:Player._apply:566>568')",
-  "kind": "first",
-  "left": "format:goattracker2",
-  "md5": "e05b59c66951b9a56c11b83ecd5b6b74",
-  "reason": "unitracker_player/player.py:566 elif key == \"run\": -> 568: reference frame 33, register $17 res_filt",
-  "relpath": "MUSICIANS/S/Slash/Triace40.sid",
   "right": "unitracker.lift.backends:pathdiff_lift",
   "song": 1
  },
