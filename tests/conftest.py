@@ -93,6 +93,16 @@ coca_koala = hvsc_tune(
     "MUSICIANS/S/Stinsen/Coca_Koala.sid",
     "Path to Stinsen's Coca Koala, GoatTracker 2 wavetable notes before an instrument vibrato.",
 )
+dsr_8090 = hvsc_tune(
+    "dsr_8090",
+    "MUSICIANS/T/Triace/DSR_8090.sid",
+    "Path to Triace's DSR 8090, GoatTracker 2 notes of an instrument without a pulse table.",
+)
+slime_deluxe = hvsc_tune(
+    "slime_deluxe",
+    "MUSICIANS/B/Bayliss_Richard/Slime_Deluxe.sid",
+    "Path to Richard Bayliss's Slime Deluxe, GoatTracker 2 toneporta notes over a wavetable.",
+)
 addaraya = hvsc_tune(
     "addaraya",
     "MUSICIANS/H/Hermit/Stalker-Addaraya_Gurza_Dreaming.sid",

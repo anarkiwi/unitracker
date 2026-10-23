@@ -536,7 +536,7 @@ def test_an_arpeggio_under_a_toneporta_of_speed_0_keeps_one_freq():
     text, _, _, _ = lifted(*gt_tune(arpeggio, rows=rows))
     first = song_def(text)
     assert first["phrase"]["p1"] == ["C2.i1*4", "G2!freq:x1!legato", "-!freq:hold*11"]
-    assert first["x"] == {"x1": 0}
+    assert first["x"] == {"x1": "(v - F(N)) % 65536 - ((v - F(N)) % 65536)*(φ >= 1) + F(N)"}
 
 
 def test_command_0_after_a_slide_holds_its_frequency():
@@ -628,6 +628,35 @@ def test_a_note_hard_restarts_at_the_gate_timer_of_the_instrument_before_it():
     lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], instruments, rows)[0])
     lift.run()
     assert lift.verdict.ok, lift.verdict
+
+
+def test_a_notes_set_waveform_sounds_on_its_first_tick():
+    """The player runs a note's tick 0 command after the instrument's first waveform, on the
+    restart's first-tick row: a note's 7 writes its waveform there."""
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(26, 1, 7, 0x21)] + [REST] * 11
+    lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], rows=rows)[0])
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
+def test_a_toneporta_note_sets_the_note_a_running_wavetable_reads(slime_deluxe):
+    """Voice 2's toneporta note at tick 12 does not restart its wavetable, whose relative row
+    reads the new note on the note's tick 0."""
+    lift = backends.lifter(slime_deluxe.read_bytes())
+    lift.run()
+    grid = oracle.play(lift.document, 24)[0]
+    native = np.asarray(lift.native().render_grid(24))
+    np.testing.assert_array_equal(grid[8:24, 7:9], native[8:24, 7:9])
+
+
+def test_a_note_of_an_instrument_without_a_pulse_table_keeps_the_pulse(dsr_8090):
+    """Voice 3's note at tick 431 is of an instrument with no pulse table: the pulse program its
+    earlier note started sweeps on through it."""
+    lift = backends.lifter(dsr_8090.read_bytes())
+    lift.run()
+    grid = oracle.play(lift.document, 450)[0]
+    native = np.asarray(lift.native().render_grid(450))
+    np.testing.assert_array_equal(grid[420:450, 16:18], native[420:450, 16:18])
 
 
 def test_a_pulse_sweep_of_time_zero_sweeps_256_ticks():
