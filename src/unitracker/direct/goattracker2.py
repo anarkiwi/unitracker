@@ -23,13 +23,58 @@ from unitracker_player.player import play
 
 from unitracker.document.yamlstyle import Atom, Dumper, Flow, FlowMap
 
-VERSION = "1.20"
+VERSION = "1.22"
+EVENT = "n"
+TICK = "tick.freq"
 WIDTH = 100
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 PHI = "φ"
 ROW_KEYS = "wait hold ctrl gate note ad sr pw cut res route mode freq run filter vol".split()
 FREQ_CMDS = (C.CMD_PORTAUP, C.CMD_PORTADOWN, C.CMD_TONEPORTA, C.CMD_VIBRATO)
 LEAD = 2
+CALC = "((G[(N + 1) % 128] - G[N % 128]) % 65536) // d"
+TO = f"G[{EVENT} % 128]"
+WALK = f"min({PHI}, a) + ({PHI} >= a)*(({PHI} - a) % p)"
+LAGGED = f"min({PHI} - l, a) + ({PHI} - l >= a)*(({PHI} - l - a) % p)"
+
+
+def _toward(s: str) -> str:
+    return f"(v < {TO})*min(v + {s}, {TO}) + (v > {TO})*max(v - ({s}), {TO}) + (v == {TO})*v"
+
+
+def _vibrate(s: str) -> str:
+    return f"v + ({PHI} >= l)*(({s}) - 2*({s})*V[o + {LAGGED}])"
+
+
+def _walk(carried: str) -> str:
+    return f"{carried}*(1 - P[o + {WALK}] // 4096) + P[o + {WALK}] % 4096"
+
+
+def _packed(t: str) -> str:
+    byte = f"(({t}) + ({t}) // 256) % 256"
+    return f"(({byte}) % 16)*256 + {byte}"
+
+
+TEMPLATES = {
+    "note": f"G[N % 128]*({PHI} < 1) + v*({PHI} >= 1)",
+    "porta": "v + g*s",
+    "portan": f"v + g*({CALC})",
+    "tporta": _toward("s"),
+    "tportan": _toward(CALC),
+    "snap": TO,
+    "vib": _vibrate("s"),
+    "vibn": _vibrate(CALC),
+    "walk": _walk("v"),
+    "walks": _packed(_walk("(v % 256)")),
+}
+TEMPLATES.update(
+    (f"{base}1", f"v + ({PHI} < 1)*({TEMPLATES[base]} - v)")
+    for base in ("porta", "portan", "tporta", "tportan", "snap")
+)
+SLOTS = (
+    "{freq: {wave: {reset: [row.note, row.freq]}, tick: {hold: [%s]}}, "
+    "pw: {pulse: {hold: [%s]}}}"
+)
 
 
 class TranscribeError(ValueError):
@@ -72,7 +117,9 @@ def index(prefix: int, period: int, phi: str = PHI) -> str:
 
 
 def _ordered(keys: dict) -> FlowMap:
-    return FlowMap((k, keys[k]) for k in ROW_KEYS if k in keys)
+    """A row's keys in the grammar's order, a slot's key ``slot.cell`` at its cell's."""
+    order = {k: i for i, k in enumerate(ROW_KEYS)}
+    return FlowMap(sorted(keys.items(), key=lambda kv: order[kv[0].rsplit(".", 1)[-1]]))
 
 
 @dataclass
@@ -147,12 +194,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.model = model
         self.ref = model.player()
         freq = self.ref._freq_table  # pylint: disable=protected-access
-        self.tables = {"G": [freq[k & 0x7F] for k in range(256)]}
-        self.ctrl, self.pw, self.filter, self.x, self.ins = {}, {}, {}, {}, {}
-        self.phrases = {}
+        self.tables = {"G": list(freq[:128])}
+        self.walks, self.vibs = [], []
+        self.ctrl, self.filter, self.x, self.ins, self.used = {}, {}, {}, {}, set()
+        self.phrases, self.entered = {}, set()
         self.funk = [t + 1 for t in self.ref._funktable]  # pylint: disable=protected-access
-
-    # ---- tables -------------------------------------------------------------------------
 
     def _lt(self, table, ptr):
         return self.ref._lt(table, ptr)  # pylint: disable=protected-access
@@ -160,32 +206,51 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def _rt(self, table, ptr):
         return self.ref._rt(table, ptr)  # pylint: disable=protected-access
 
-    def _table(self, prefix: str, values: list) -> str:
-        """The name of a table holding ``values``, defined once."""
-        for name, held in self.tables.items():
-            if name.startswith(prefix) and held == values:
-                return name
-        name = prefix + letters(sum(n.startswith(prefix) for n in self.tables))
-        self.tables[name] = values
-        return name
+    # ---- modulators ---------------------------------------------------------------------
 
-    def _speed(self, idx: int) -> str:
-        """Speed table entry ``idx`` as a 16-bit step, or the note-relative calculated one."""
+    def instance(self, template: str, **params) -> str:
+        """The ``x`` name of ``template`` with ``params``, defined once."""
+        self.used.add(template)
+        bag = ", ".join(f"{k}: {v}" for k, v in params.items())
+        return self._named(self.x, "x", Atom(f"{template} {{{bag}}}" if bag else template))
+
+    @staticmethod
+    def _offset(cat: list, values: list) -> int:
+        """The offset of ``values`` in the concatenated table ``cat``, appended once."""
+        n = len(values)
+        for o in range(len(cat) - n + 1):
+            if cat[o : o + n] == values:
+                return o
+        cat.extend(values)
+        return len(cat) - n
+
+    def _speed(self, idx: int) -> tuple:
+        """``(note-relative, params)`` of speed table entry ``idx``: a 16-bit step ``s``, or
+        the note's semitone step divided by ``d``."""
         if not idx:
-            return "0"
+            return False, {"s": 0}
         left, right = self._lt(C.STBL, idx), self._rt(C.STBL, idx)
         if left >= 0x80:
-            return f"((G[N + 1] - G[N]) % 65536) // {1 << right}"
-        return str(left << 8 | right)
+            return True, {"d": 1 << right}
+        return False, {"s": left << 8 | right}
 
-    def _vibrato(self, idx: int, phase: int = 0):
-        """``(signs table, prefix, period, speed)`` of vibrato speed entry ``idx``: the sign
-        bit of each firing from vibrato ``phase``."""
-        cmp = self._lt(C.STBL, idx) if idx else 0
-        speed = str(self._rt(C.STBL, idx)) if idx else "0"
-        if cmp >= 0x80:
-            cmp &= 0x7F
-            speed = f"((G[N + 1] - G[N]) % 65536) // {1 << self._rt(C.STBL, idx)}"
+    def portamento(self, cmd: int, data: int, once: bool = False) -> str:
+        """The ``x`` name of portamento ``cmd`` with speed entry ``data``; ``once``, one step."""
+        calc, params = self._speed(data)
+        if cmd == C.CMD_TONEPORTA:
+            template = "snap" if not data else "tportan" if calc else "tporta"
+            params = params if data else {}
+        else:
+            template = "portan" if calc else "porta"
+            params = {"g": 1 if cmd == C.CMD_PORTAUP else -1} | params
+        return self.instance(template + ("1" if once else ""), **params)
+
+    def vibrato(self, idx: int, lag: int = 0, phase: int = 0) -> str:
+        """The ``x`` name of the vibrato of speed entry ``idx`` from ``phase``, after ``lag``
+        firings that change nothing."""
+        cmp, right = (self._lt(C.STBL, idx), self._rt(C.STBL, idx)) if idx else (0, 0)
+        calc = cmp >= 0x80
+        cmp &= 0x7F
 
         def fire(vt):
             if cmp < vt < 0x80:
@@ -194,60 +259,21 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             return vt, vt & 1
 
         bits, prefix, period = orbit(fire, phase)
-        return self._table("V", bits), prefix, period, speed
+        speed = {"d": 1 << right} if calc else {"s": right}
+        return self.instance(
+            "vibn" if calc else "vib",
+            **speed,
+            l=lag,
+            o=self._offset(self.vibs, bits),
+            a=prefix,
+            p=period,
+        )
 
-    # ---- modulators ---------------------------------------------------------------------
-
-    def command(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        self, cmd: int, data: int, noted: bool = True, lag: int = 0, phase: int = 0
-    ) -> str:
-        """The ``x`` name of realtime command ``cmd`` with ``data``: ``noted``, the note's
-        frequency until its first firing; its first ``lag`` firings change nothing; a vibrato
-        from ``phase``."""
-        if cmd != C.CMD_VIBRATO:
-            text = self._step(cmd, data)
-        else:
-            name, prefix, period, s = self._vibrato(data, phase)
-            at = index(prefix, period, f"({PHI} - {lag})" if lag else PHI)
-            text = f"v + ({s}) - 2*({s})*{name}[{at}]"
-        if lag:
-            text = f"v + ({PHI} >= {lag})*({text} - v)"
-        if noted:
-            text = f"G[N]*({PHI} < 0) + ({PHI} >= 0)*({text})"
-        return self._named(self.x, "x", canonical(text))
-
-    def _step(self, cmd: int, data: int) -> str:
-        """One firing of portamento ``cmd`` with speed entry ``data``, from frequency ``v``."""
-        s = self._speed(data)
-        if cmd == C.CMD_PORTAUP:
-            return f"v + {s}"
-        if cmd == C.CMD_PORTADOWN:
-            return f"v - ({s})"
-        if not data:
-            return "G[N]"
-        return f"(v < G[N])*min(v + {s}, G[N]) + (v > G[N])*max(v - ({s}), G[N]) + (v == G[N])*v"
-
-    def instrument_freq(self, speed_ptr: int, delay: int) -> str:
-        """The instrument's frequency: its note, with its vibrato after ``delay`` firings."""
-        if not speed_ptr:
-            return "G[N]"
-        bits, prefix, period, s = self._vibrato(speed_ptr)
-        name, low, drift = self._cumulative(self.tables[bits], prefix)
-        lag = max(delay - 1, 0)
-        psi = f"({PHI} - {lag})" if lag else PHI
-        at = f"{name}[{index(prefix, period, psi)}] - {-low}"
-        if drift:
-            at += f" + {drift}*(({psi} >= {prefix})*(({psi} - {prefix}) // {period}))"
-        gate = f"({PHI} >= {lag})*" if lag else ""
-        return canonical(f"G[N] + {gate}({s})*({at})")
-
-    def _cumulative(self, bits: list, prefix: int) -> tuple:
-        """``(table, offset, drift)``: the running sum of the vibrato's signs, offset to be
-        non-negative, and what one cycle adds."""
-        signs = [1 - 2 * b for b in bits]
-        cum = np.cumsum(signs).tolist()
-        low = min(0, *cum)
-        return self._table("W", [c - low for c in cum]), low, sum(signs[prefix:])
+    def command(self, cmd: int, data: int, phase: int = 0) -> str:
+        """The ``x`` name of realtime command ``cmd`` with ``data``."""
+        if cmd == C.CMD_VIBRATO:
+            return self.vibrato(data, phase=phase)
+        return self.portamento(cmd, data)
 
     def _pulse_step(self, state: tuple, start: int) -> tuple:
         """``(state', width)`` of one pulse table execution from ``state`` and width ``start``."""
@@ -271,23 +297,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return s1, (0, (p1 - a) & 0xFFF)
 
     def pulse(self, pos: int) -> str:
-        """The ``pw`` name of the pulse program at table position ``pos``: per firing a set
-        value or an added step, from the reference player's own pulse execution. The value is
-        the width, or SIMPLEPULSE's packed byte ``b``, the width ``(b & $0F) << 8 | b``."""
+        """The ``x`` name of the pulse table walk from position ``pos``: per firing a set
+        value (bit 12 of ``P``) or an added step, at the walk's offset, from the reference
+        player's own pulse execution."""
         outs, prefix, period = orbit(self._pulse_firing, (pos, 0))
-        sets, at = [k for k, _ in outs], index(prefix, period)
-        name = self._table("P", [v for _, v in outs])
-        carried = "(v % 256)" if self.ref.simplepulse else "v"
-        if not any(sets):
-            text = f"{carried} + {name}[{at}]"
-        elif all(sets):
-            text = f"{name}[{at}]"
-        else:
-            text = f"{carried}*(1 - {self._table('K', sets)}[{at}]) + {name}[{at}]"
-        if self.ref.simplepulse:
-            byte = f"(({text}) + ({text}) // 256) % 256"
-            text = f"(({byte}) % 16)*256 + {byte}"
-        return self._named(self.pw, "pw", canonical(text))
+        o = self._offset(self.walks, outs)
+        template = "walks" if self.ref.simplepulse else "walk"
+        return self.instance(template, o=o, a=prefix, p=period)
 
     # ---- programs -----------------------------------------------------------------------
 
@@ -312,14 +328,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 pos = self._rt(table, pos)
         return rows + [FlowMap(loop=at[pos]) if pos in at else Atom("end")]
 
-    def wave(self, pos: int, gated: bool = True, freq: str = "G[N]") -> str:
+    def wave(self, pos: int, gated: bool = True) -> str:
         """The ``ctrl`` name of the wavetable program at ``pos``; not ``gated``, it first turns
-        the gate the note set on off again, as a note whose first wave leaves it off. Where its
-        rows step the frequency, its note rows set it to ``freq``, the instrument's."""
+        the gate the note set on off again, as a note whose first wave leaves it off. Where a
+        row binds the wave slot to a step, its note rows bind it back to ``note``."""
         rows = self._program(C.WTBL, pos, self._wave_row) if pos else [Atom("end")]
-        if any(isinstance(r, dict) and "freq" in r for r in rows):
+        if any(isinstance(r, dict) and "wave.freq" in r for r in rows):
             rows = [
-                _ordered(r | {"freq": freq}) if isinstance(r, dict) and "note" in r else r
+                (
+                    _ordered(r | {"wave.freq": Atom("note")})
+                    if isinstance(r, dict) and "note" in r
+                    else r
+                )
                 for r in rows
             ]
         if not gated:
@@ -346,36 +366,33 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         else:
             return self._wave_command(wave & 0x0F, note)
         if note != 0x80:
-            if note < 0x80:
-                keys["note"] = Atom(f"+{note}")
-            else:
-                keys["note"] = Atom(note_name(note & 0x7F))
+            keys["note"] = Atom(f"+{note}" if note < 0x80 else note_name(note & 0x7F))
         return keys
 
     def _wave_command(self, cmd: int, arg: int) -> dict:
         """The row keys of wavetable command ``cmd`` with ``arg``."""
-        none = Atom("none")
+        stop = Atom("hold")
+
+        def step():
+            return {"wave.freq": Atom(self.portamento(cmd, arg, once=True))}
+
         keys = {
             C.CMD_SETAD: lambda: {"ad": arg},
             C.CMD_SETSR: lambda: {"sr": arg},
             C.CMD_SETWAVE: lambda: {"ctrl": arg},
-            C.CMD_SETPULSEPTR: lambda: {"run": Atom(self.pulse(arg))} if arg else {"pw": none},
-            C.CMD_SETFILTERPTR: lambda: {"run": Atom(self.filt(arg))} if arg else {"filter": none},
+            C.CMD_SETPULSEPTR: lambda: {"pw": Atom(self.pulse(arg)) if arg else stop},
+            C.CMD_SETFILTERPTR: lambda: {"run": Atom(self.filt(arg))} if arg else {"cut": stop},
             C.CMD_SETFILTERCTRL: lambda: {"res": arg >> 4, "route": arg & 0x0F}
-            | ({} if arg else {"filter": none}),
+            | ({} if arg else {"cut": stop}),
             C.CMD_SETFILTERCUTOFF: lambda: {"cut": arg << 3},
             C.CMD_SETMASTERVOL: lambda: {"vol": arg} if arg < 0x10 else {},
-            C.CMD_PORTAUP: lambda: self._once(cmd, arg),
-            C.CMD_PORTADOWN: lambda: self._once(cmd, arg),
-            C.CMD_TONEPORTA: lambda: self._once(cmd, arg),
+            C.CMD_PORTAUP: step,
+            C.CMD_PORTADOWN: step,
+            C.CMD_TONEPORTA: step,
         }.get(cmd)
         if keys is None:
             raise TranscribeError(f"wavetable command {cmd:X}")
         return keys()
-
-    def _once(self, cmd: int, arg: int) -> dict:
-        """A wavetable row's portamento: one firing each time the row runs, then held."""
-        return {"freq": canonical(f"v + ({PHI} < 1)*({self._step(cmd, arg)} - v)")}
 
     def filt(self, pos: int) -> str:
         """The ``filter`` name of the filter program at ``pos``: one row per execution."""
@@ -412,30 +429,24 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             return name
         ins = self.ref._instr[n]  # pylint: disable=protected-access
         keys = {"ad": ins.ad, "sr": ins.sr}
-        keys["ctrl"] = Atom(self.wave(ins.wave_ptr, self.gated(n), self.note_freq(n)))
+        keys["ctrl"] = Atom(self.wave(ins.wave_ptr, self.gated(n)))
         if ins.pulse_ptr:
             keys["pw"] = Atom(self.pulse(ins.pulse_ptr))
         if ins.filter_ptr:
             keys["filter"] = Atom(self.filt(ins.filter_ptr))
-        keys["freq"] = self.note_freq(n)
+        keys["wave.freq"], keys[TICK] = Atom("note"), Atom(self.tick(n))
         keys["restart"] = Flow(self._restart(ins))
         self.ins[name] = FlowMap(keys)
         return name
 
-    def resumed(self, n: int, state: tuple) -> str:
-        """Command 0 after a frequency command: instrument ``n``'s vibrato resumes from the
-        frequency where it is, from vibrato ``state`` ``(phase, delay left)``; without one,
-        the frequency holds."""
+    def tick(self, n: int, state: tuple | None = None) -> str:
+        """Instrument ``n``'s binding of the tick slot: its vibrato after its delay, or from
+        vibrato ``state`` ``(phase, delay left)`` it carries; ``none`` without one."""
         ins = self.ref._instr[n]  # pylint: disable=protected-access
         if not ins.speed_ptr:
-            return "hold"
-        phase, delay = state
-        return self.command(C.CMD_VIBRATO, ins.speed_ptr, False, max(delay - 1, 0), phase)
-
-    def note_freq(self, n: int) -> str:
-        """Instrument ``n``'s frequency expression."""
-        ins = self.ref._instr[n]  # pylint: disable=protected-access
-        return self.instrument_freq(ins.speed_ptr, ins.vibdelay)
+            return "none"
+        phase, delay = state or (0, ins.vibdelay)
+        return self.vibrato(ins.speed_ptr, max(delay - 1, 0), phase)
 
     def gated(self, n: int) -> bool:
         """Whether a note of instrument ``n`` leaves the gate on: a first wave sets it on, or
@@ -461,32 +472,65 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return [_ordered(first), _ordered(init), FlowMap(), Atom("end")]
 
     def phrase(self, occ: Occurrence) -> str:
-        """The name of the phrase pattern occurrence ``occ`` plays: its rows' events from the
-        command and instrument it enters with and each row's vibrato state."""
+        """The name of the phrase pattern occurrence ``occ`` plays. Command 0 binds the
+        instrument's tick slot after a frequency command, and at a pattern's first such row
+        where some occurrence enters it with one running, from the vibrato state it carries."""
         rows = self.ref._patterns[occ.pattern]  # pylint: disable=protected-access
-        events, cur, instr = [], occ.running, occ.instr
+        events, instr = [], occ.instr
+        run = (
+            occ.running if occ.pattern in self.entered else None,
+            occ.pattern not in self.entered,
+        )
         for k, at in enumerate(range(0, len(rows) - 4, 4)):
-            instr = rows[at + 1] or instr
-            state = occ.rows[k] if k < len(occ.rows) else (0, 0)
-            event, cur = self._event(rows[at : at + 4], cur, instr, state)
+            row = rows[at : at + 4]
+            instr = row[1] or instr
+            event, run = self._event(row, instr, occ.rows[k] if k < len(occ.rows) else (0, 0), run)
             events.append(event)
         return self.phrases.setdefault(tuple(rests(events)), f"p{len(self.phrases) + 1}")
+
+    def _event(self, row, instr: int, state: tuple, run: tuple) -> tuple:
+        """``(atom, (running command, tick slot bound))`` of one pattern row played by
+        ``instr`` with vibrato ``state`` after its tick 0."""
+        note, ins, cmd, data = row
+        cur, bound = run
+        noted = note <= C.LASTNOTE
+        text = ""
+        if noted and cmd != C.CMD_TONEPORTA:
+            cur, bound = None, True
+        if cmd in FREQ_CMDS:
+            if cur != (cmd, data):
+                text = f"!{TICK}:{self.command(cmd, data, 0 if noted else state[0])}"
+            cur, bound = (cmd, data), False
+        elif cmd == C.CMD_DONOTHING:
+            if not bound:
+                text = f"!{TICK}:{self.tick(instr, state if cur else None)}"
+            cur, bound = None, True
+        else:
+            text = self._command(cmd, data, instr, noted)
+        if noted and cmd == C.CMD_TONEPORTA:
+            text += "!legato"
+        return Atom(self._atom(note, ins) + text), (cur, bound)
+
+    def _atom(self, note: int, ins: int) -> str:
+        if note <= C.LASTNOTE:
+            atom = note_name(note - C.FIRSTNOTE)
+        else:
+            atom = {C.KEYOFF: "off", C.KEYON: "on"}.get(note, "-")
+        return atom + (f".{self.instrument(ins)}" if ins else "")
 
     def _command(self, cmd: int, data: int, instr: int, noted: bool) -> str:
         """The text of one-shot command ``cmd`` with ``data`` on a row played by ``instr``,
         ``noted`` where it starts a note."""
-        gated, freq = not noted or self.gated(instr), self.note_freq(instr)
+        gated = not noted or self.gated(instr)
         text = {
             C.CMD_SETAD: lambda: f"!ad:{data}",
             C.CMD_SETSR: lambda: f"!sr:{data}",
             C.CMD_SETWAVE: lambda: f"!ctrl:{data}",
-            C.CMD_SETWAVEPTR: lambda: (
-                f"!run:{self.wave(data, gated, freq)}" if data else "!run:none"
-            ),
-            C.CMD_SETPULSEPTR: lambda: f"!run:{self.pulse(data)}" if data else "!pw:none",
-            C.CMD_SETFILTERPTR: lambda: f"!run:{self.filt(data)}" if data else "!filter:none",
+            C.CMD_SETWAVEPTR: lambda: f"!run:{self.wave(data, gated)}" if data else "!run:none",
+            C.CMD_SETPULSEPTR: lambda: f"!pw:{self.pulse(data) if data else 'hold'}",
+            C.CMD_SETFILTERPTR: lambda: f"!run:{self.filt(data)}" if data else "!cut:hold",
             C.CMD_SETFILTERCTRL: lambda: (
-                f"!resfilt:{data >> 4}/{data & 0x0F}" if data else "!filter:none!resfilt:0/0"
+                f"!resfilt:{data >> 4}/{data & 0x0F}" if data else "!resfilt:0/0!cut:hold"
             ),
             C.CMD_SETFILTERCUTOFF: lambda: f"!cut:{data << 3}",
             C.CMD_SETMASTERVOL: lambda: f"!vol:{data}" if data < 0x10 else "",
@@ -513,45 +557,19 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             return f"!{which}tempo:{self.funk[ticks]}/{self.funk[1 - ticks]}"
         return f"!{which}tempo:{max(ticks, 3)}"
 
-    def _event(self, row, cur, instr, state):
-        """``(atom, running frequency command)`` of one pattern row played by ``instr``, with
-        vibrato ``state`` after its tick 0."""
-        note, ins, cmd, data = row
-        if note <= C.LASTNOTE:
-            atom = note_name(note - C.FIRSTNOTE)
-        else:
-            atom = {C.KEYOFF: "off", C.KEYON: "on"}.get(note, "-")
-        if ins:
-            atom += "." + self.instrument(ins)
-        if note <= C.LASTNOTE and cmd != C.CMD_TONEPORTA:
-            cur = None
-        text = ""
-        if cmd in FREQ_CMDS:
-            if cur != (cmd, data):
-                phase = 0 if note <= C.LASTNOTE else state[0]
-                text = f"!freq:{self.command(cmd, data, phase=phase)}"
-            cur = (cmd, data)
-        elif cmd == C.CMD_DONOTHING:
-            text = f"!freq:{self.resumed(instr, state)}" if cur is not None else ""
-            cur = None
-        else:
-            noted = note <= C.LASTNOTE and cmd != C.CMD_TONEPORTA
-            text = self._command(cmd, data, instr, noted)
-        if note <= C.LASTNOTE and cmd == C.CMD_TONEPORTA:
-            text += "!legato"
-        return Atom(atom + text), cur
-
     # ---- the document -------------------------------------------------------------------
 
-    def holds(self) -> FlowMap:
-        """The playroutine's per-tick skips as hold events."""
+    def slots(self) -> str:
+        """The frequency's wavetable and realtime slots and the pulse slot, with the
+        playroutine's per-tick skips as their holds."""
         ref = self.ref
-        freq = ["step-1" if ref.optimize_realtime else "note-1", "row"]
-        pw = ["read", "note-1", "last-1"] if ref.optimize_pulse else ["note-1"]
-        return FlowMap(freq=Flow(map(Atom, freq)), pw=Flow(map(Atom, pw)))
+        tick = ["step-1" if ref.optimize_realtime else "note-1", "row"]
+        pulse = ["read", "note-1", "last-1"] if ref.optimize_pulse else ["note-1"]
+        return SLOTS % (", ".join(tick), ", ".join(pulse))
 
     def timeline(self, run: Run) -> tuple:
         """``(rows, loop row or None)`` of the reference player's pattern starts."""
+        self.entered = {o.pattern for occs in run.starts for o in occs if o.running}
         plays = {}
         for v, occs in enumerate(run.starts):
             for occ in occs:
@@ -569,7 +587,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         """The init events: instrument 1 on every voice, its vibrato running from the intro."""
         first = f"-.{self.instrument(1)}"
         speed = self.ref._instr[1].speed_ptr  # pylint: disable=protected-access
-        intro = f"!freq:{self.command(C.CMD_VIBRATO, speed, False, 1)}" if speed else ""
+        intro = f"!{TICK}:{self.vibrato(speed, 1)}" if speed else ""
         return Flow(
             [Atom(f"{first}!vol:15!tempo:{LEAD}{intro}")]
             + [Atom(f"{first}{intro}")] * (C.MAX_CHN - 1)
@@ -588,12 +606,17 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         init = self.init()
         phrases = {"p0": Flow([Atom("-"), Atom(f"-!tempo:{rowlen}")])}
         phrases.update((name, Flow(events)) for events, name in self.phrases.items())
-        defs = {"phrase": phrases, "ins": self.ins}
-        for key, store in (("ctrl", self.ctrl), ("pw", self.pw), ("filter", self.filter)):
-            if store:
-                defs[key] = dict(store)
+        self.used.add("note")
+        defs = {"phrase": phrases, "ins": self.ins, "ctrl": self.ctrl}
+        if self.filter:
+            defs["filter"] = self.filter
+        defs["mod"] = {k: canonical(v) for k, v in TEMPLATES.items() if k in self.used}
         if self.x:
-            defs["x"] = dict(self.x)
+            defs["x"] = self.x
+        if self.walks:
+            self.tables["P"] = [k << 12 | v for k, v in self.walks]
+        if self.vibs:
+            self.tables["V"] = self.vibs
         song = [{"def": defs, "play": rows[0]}] + [{"play": r} for r in rows[1:]]
         song.append(Atom("end") if loop is None else FlowMap(loop=loop))
         header = self.model.header
@@ -601,12 +624,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             "unitracker": Atom(VERSION),
             "meta": FlowMap(title=header.name, author=header.author, released=header.released),
             "tempo": rowlen,
-            "hold": self.holds(),
             "tables": {k: Flow(v) for k, v in self.tables.items()},
             "init": init,
             "song": song,
         }
-        return yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
+        text = yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
+        head, rest = text.split("tables:", 1)
+        return f"{head}slots: {self.slots()}\ntables:{rest}"
 
 
 def rests(events: list) -> list:

@@ -144,7 +144,10 @@ def test_synthetic_tunes_play_exactly(case):
 
 def test_holds_follow_the_build():
     text = exact(gt_tune(WAVE))
-    assert "hold: {freq: [step-1, row], pw: [read, note-1, last-1]}" in text
+    assert (
+        "slots: {freq: {wave: {reset: [row.note, row.freq]}, tick: {hold: [step-1, row]}}, "
+        "pw: {pulse: {hold: [read, note-1, last-1]}}}\n" in text
+    )
 
 
 def test_unsupported_wavetable_commands_are_refused():
@@ -160,6 +163,6 @@ def test_metal_warrior(metal_warrior):
 
 def test_cli(metal_warrior, capsys):
     assert g.main([str(metal_warrior)]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.20\n")
+    assert capsys.readouterr().out.startswith(f"unitracker: {g.VERSION}\n")
     assert g.main(["--verify", "--frames", "400", str(metal_warrior)]) == 0
     assert ": exact" in capsys.readouterr().out

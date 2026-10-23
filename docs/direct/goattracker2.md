@@ -33,11 +33,27 @@ voice event, so each is a hold.
 
 | skip | condition | hold |
 |---|---|---|
-| realtime commands | tick 0 (`optimize_realtime`), and the tick 0 of a new note | `freq: step-1` (`note-1` without the option) |
-| realtime commands | a wavetable row that plays a note or a command (`skip_tickn`) | `freq: row` |
+| realtime commands | tick 0 (`optimize_realtime`), and the tick 0 of a new note | `tick.freq: step-1` (`note-1` without the option) |
+| realtime commands | a wavetable row that plays a note or a command (`skip_tickn`) | `tick.freq: row` |
 | pulse table | the fetch tick (`optimize_pulse`) | `pw: read` |
 | pulse table | tick 0 of a new note that is not toneporta | `pw: note-1` |
 | pulse table | tick 0 of a pattern's last row, where the sequencer advances (`optimize_pulse`) | `pw: last-1` |
+
+## Frequency
+
+`_play_channel` writes the frequency twice a tick, in order: `_wave_exec` (a wavetable note row
+sets it, a wavetable command steps it), then `_tickn_command` (the realtime command, or the
+instrument's vibrato with command 0). The document declares them as the frequency's two slots in
+that order, `slots: {freq: [wave, tick]}`: each fires on the value the one before it left, and a
+held slot passes it on.
+
+| writer | slot | modulator |
+|---|---|---|
+| wavetable note row | `wave.freq` | `G[N]` once, then `v` |
+| wavetable `$F1`/`$F2`/`$F3` | `wave.freq` | one step of the portamento, then `v` |
+| a note's instrument | `wave.freq`, `tick.freq` | `v`; its vibrato after `delay - 1` firings |
+| pattern commands 1-4 | `!tick.freq:x` | `v ± s`, toward `G[n]` (`n` the event note), vibrato from the row's phase |
+| command 0 after a frequency command | `!tick.freq:x`, or `!tick.freq:none` without a vibrato | the instrument's vibrato from the row's phase and delay left |
 
 ## Instruments
 
@@ -47,7 +63,7 @@ voice event, so each is a hold.
 | wavetable position | `ctrl`, the wavetable program (`c` of no rows for 0) |
 | pulse table position | `pw`, the pulse expression; 0 leaves the running one |
 | filter table position | `filter`, the filter program; 0 leaves the running one |
-| vibrato param, delay | `freq`: `G[N]`, plus the vibrato after `delay - 1` firings |
+| vibrato param, delay | `tick.freq`: the vibrato after `delay - 1` firings |
 | gate timer, hard restart flags `$40`/`$80`, `adparam` | `restart`: `{hold: timer, gate: 0, ad, sr}` |
 | first wave | `restart`'s tick-0 row: `ctrl`, `gate: 1`, `ad`, `sr`, and `run` of the empty `c`, as tick 0 does not run the old wavetable |
 
@@ -61,7 +77,8 @@ player's overrun entries included).
 | wavetable `$01-$0F` delay | `wait` |
 | wavetable `$10-$DF`, `$E0-$EF` | `ctrl` (`& $0F` for `$Ex`) |
 | wavetable note `$00-$7F`, `$81-$DF`, `$80` | `note: +n` (`$40-$7F` down), absolute `note`, none |
-| wavetable `$F5/$F6/$F7/$F9/$FA/$FB/$FC/$FD` | `ad`, `sr`, `ctrl`, `run`/`pw: none`, `run`/`filter: none`, `res`+`route`, `cut`, `vol` |
+| wavetable `$F1/$F2/$F3` | `wave.freq`, one step |
+| wavetable `$F5/$F6/$F7/$F9/$FA/$FB/$FC/$FD` | `ad`, `sr`, `ctrl`, `run`/`pw: hold`, `run`/`cut: hold`, `res`+`route`, `cut`, `vol` |
 | wavetable `$FF xx` | `{loop: k}`, or `end` for `xx = 0` |
 | pulse table | one expression of `φ` (the firing count, by the holds): per firing a set width or an added step, from `_pulse_exec`, `P[i]` (and `K[i]` where both occur) over the orbit's prefix and cycle |
 | filter table `$80-$F0` (+ a following `$00`) | `{mode, res, route, cut}` in one row |
@@ -75,19 +92,18 @@ its value is a function of its firings.
 
 | command | generic |
 |---|---|
-| `0` after a frequency command | `!freq:hold` |
-| `1`, `2` | `!freq:x`: `v ± s`, `s` the speed entry or `(G[N+1] - G[N]) >> r` |
-| `3` with a note | `!freq:x` toward `G[N]`, and `!legato` |
-| `4` | `!freq:x`: `v ± s` by the sign bit of the vibrato phase, a table over its orbit |
+| `0` after a frequency command | `!tick.freq:x` (the instrument's vibrato) or `!tick.freq:none` |
+| `1`, `2` | `!tick.freq:x`: `v ± s`, `s` the speed entry or `(G[N+1] - G[N]) >> r` |
+| `3` with a note | `!tick.freq:x` toward `G[n]`, and `!legato` |
+| `4` | `!tick.freq:x`: `v ± s` by the sign bit of the vibrato phase, a table over its orbit |
 | `5`, `6`, `7` | `!ad`, `!sr`, `!ctrl` |
-| `8`, `9`, `A` | `!run:c`/`!run:none`, `!run:pw`/`!pw:none`, `!run:f`/`!filter:none` |
-| `B` | `!resfilt:r/m`, `!filter:none!resfilt:0/0` for 0 |
+| `8`, `9`, `A` | `!run:c`/`!run:none`, `!run:pw`/`!pw:hold`, `!run:f`/`!cut:hold` |
+| `B` | `!resfilt:r/m`, `!resfilt:0/0!cut:hold` for 0 |
 | `C`, `D` | `!cut:8c`, `!vol` |
 | `F` | `!tempo` (`!vtempo` for `$80+`) |
 
-A frequency command starting on a new note is `G[N]` before its first firing (`φ < 0`), as the
-wavetable's note row sets the frequency on the tick the command skips. A phrase is a pattern and
-the frequency command running into it: the same command continues without restarting `φ`.
+A phrase is a pattern occurrence's events; the same command running into it continues without
+restarting `φ`.
 
 ## Context
 
@@ -105,6 +121,4 @@ These play differently from GoatTracker because the document has no construct fo
 | GoatTracker | why the document differs |
 |---|---|
 | one filter program for the song | a document's filter slot is per voice: a second voice starting a filter program leaves the first voice's running |
-| one frequency accumulator that wavetable note rows set, wavetable commands step and the realtime command or the instrument vibrato steps | a cell has one owning modulator: a row cannot set the frequency under a running command, and a row's step replaces the instrument's vibrato |
-| toneporta toward the event's note | `N` includes the wavetable's relative note |
 | a toneporta note's note change on tick 0 | a `!legato` note applies on the step's tick, GoatTracker's tick 1 |
