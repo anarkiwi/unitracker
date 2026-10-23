@@ -89,8 +89,22 @@ A frequency command starting on a new note is `G[N]` before its first firing (`Ï
 wavetable's note row sets the frequency on the tick the command skips. A phrase is a pattern and
 the frequency command running into it: the same command continues without restarting `Ï†`.
 
+## Context
+
+Each pattern occurrence is written from the reference player's channel state at each row's
+tick 0: the frequency command running into it, its instrument, and the vibrato phase and the
+delay left. Occurrences whose events come out the same share a phrase. A vibrato command starts
+from that phase; command 0 after a frequency command resumes the instrument's vibrato from it.
+
 ## Not transcribed
 
-Funk tempo (command `E`, and `F` below 2), wavetable commands `$F0-$F4` and `$F8`/`$FE`, and a
-filter table started by a second voice while another voice's runs (GoatTracker's filter is one
-program; the document's filter slots are per voice).
+Wavetable vibrato (`$F4`) and the commands that stop the song (`$F0`, `$F8`, `$FE`) are refused.
+
+These play differently from GoatTracker because the document has no construct for them:
+
+| GoatTracker | why the document differs |
+|---|---|
+| one filter program for the song | a document's filter slot is per voice: a second voice starting a filter program leaves the first voice's running |
+| one frequency accumulator that wavetable note rows set, wavetable commands step and the realtime command or the instrument vibrato steps | a cell has one owning modulator: a row cannot set the frequency under a running command, and a row's step replaces the instrument's vibrato |
+| toneporta toward the event's note | `N` includes the wavetable's relative note |
+| a toneporta note's note change on tick 0 | a `!legato` note applies on the step's tick, GoatTracker's tick 1 |

@@ -119,6 +119,11 @@ CASES = {
         ]
         + [REST] * 10,
     },
+    "funk tempo": {
+        "wave": WAVE,
+        "rows": [(24, 1, 0xE, 1), REST, REST, (26, 0, 0xF, 1)] + [REST] * 12,
+        "speed": [(0x05, 0x03)],
+    },
     "a tempo command": {"wave": WAVE, "rows": [(24, 1, 15, 4)] + [REST] * 15},
     "key off and on with an instrument": {
         "wave": WAVE,
@@ -142,9 +147,9 @@ def test_holds_follow_the_build():
     assert "hold: {freq: [step-1, row], pw: [read, note-1, last-1]}" in text
 
 
-def test_unsupported_commands_are_refused():
-    with pytest.raises(g.TranscribeError, match="funk"):
-        g.Transcriber(gt_tune(WAVE, rows=[(24, 1, 0xE, 0)] + [REST] * 15)[0]).document()
+def test_unsupported_wavetable_commands_are_refused():
+    with pytest.raises(g.TranscribeError, match="wavetable command 4"):
+        g.Transcriber(gt_tune([(0xF4, 0x01), (0xFF, 0x00)])[0]).document()
 
 
 def test_metal_warrior(metal_warrior):

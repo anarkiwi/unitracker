@@ -14,6 +14,7 @@ convert native pitch, pulse and filter modulations to proved integer expressions
 | [docs/modulation/modfit.md](docs/modulation/modfit.md) | modulation analysis and the proved conversion to expressions (`unitracker-modfit`) |
 | [docs/optimise.md](docs/optimise.md) | the optimiser's passes and guarantee |
 | [docs/porting.md](docs/porting.md) | bringing another playroutine to unitracker |
+| [docs/direct/goattracker2.md](docs/direct/goattracker2.md) | a standalone GoatTracker 2 transcription from pygoattracker's playroutine (`python -m unitracker.direct.goattracker2`) |
 
 ## Install
 
