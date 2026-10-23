@@ -135,7 +135,7 @@ filter program, and is written so: `!filter:none!resfilt:0/0` (one command $B00)
 or the volume ($B-$D, $FB-$FD) sounds on the following tick: the filter step writes
 `$D416`-`$D418` before the channels run, so the playroutine latches them there (`fcutreg`,
 `fctrlreg`, `fmodereg`); on a rest they play on its step, as a note-less event's filter and
-volume commands do.
+volume commands do, and so does a filter program a rest's $A starts.
 
 ## Hard restart
 
