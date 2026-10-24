@@ -166,3 +166,66 @@ COUPLED = doc(
     "  get(): |\n    clc\n    lda v\n    adc s\n    sta v\n    lda v+1\n    adc #0\n    sta v+1\n"
     "    rts\n" + EXACT_CODE[5 : EXACT_CODE.index("  start")],
 )
+
+# p2 is p1 two semitones up, p3 is p1 but for one interval
+TRANSPOSE = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: [{ctrl: 65}, end]}\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -, E4, G4, -, C5, -*3]\n"
+    "        p2: [D4.i1, -, F#4, A4, -, D5, -*3]\n"
+    "        p3: [C4.i1, -, F4, G4, -, C5, -*3]\n",
+    play="[p1]\n  - play: [p2-1]\n  - play: [p3]",
+    mods="",
+)
+
+# a legato note bound to a modulator that jumps to the note: alone on its slot (dropped), after
+# an instrument's binding on an earlier slot (that slot's none), not at the note (kept), and
+# writing state a later binding reads (refused)
+SNAP_MODS = (
+    "mod:\n  nt(): (phi == 0)*F(N) + (phi > 0)*v\n  snap(): F(n)\n  up(): F(n) + 5\n"
+    "  snapc(): |\n    lda ne\n    sta s\n    tay\n    lda F.lo,y\n    sta v\n    lda F.hi,y\n"
+    "    sta v+1\n    rts\n"
+    "  get(): |\n    clc\n    lda v\n    adc s\n    sta v\n    lda v+1\n    adc #0\n    sta v+1\n"
+    "    rts\n"
+)
+SNAP = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: [{ctrl: 65}, end]}\n"
+    "        i2: {ad: 9, ctrl: [{ctrl: 65}, end], wave.freq: nt()}\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -, E4!tick.freq:snap()!legato, -, D4.i2, -, G4!tick.freq:snap()!legato, -,"
+    " D4.i2, -, E4!tick.freq:up()!legato, -*3]\n",
+    head="voices: 1\nslots: {freq: {wave: {}, tick: {}}}\n",
+    mods=SNAP_MODS,
+)
+SNAP_STATE = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: [{ctrl: 65}, end]}\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -, E4!freq:snapc()!legato, -!freq:none, -!freq:get(), -*3]\n",
+    head="voices: 1\nstate: {freq: {s: 1}}\n",
+    mods=SNAP_MODS,
+)
+
+# i1's none ends no binding at its notes, i2's ends the one C4's command made
+INS_NONE = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: c1, freq: none}\n"
+    "        i2: {ad: 8, ctrl: c1, freq: none}\n"
+    "      ctrl:\n"
+    "        c1: [{hold: 2, ctrl: 65}, {}, {ctrl: 64}, end]\n"
+    "      phrase:\n"
+    "        p1: [C4.i1!freq:vib(2), -, D4.i2, -*3, E4.i1, -*3]\n",
+    mods="mod:\n  vib(d): v + d*(phi % 4)\n",
+)
+
+# a restart whose last row is empty: the row before it falls a tick before the note
+RESTART_EMPTY = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: [{ctrl: 65}, end], restart: [{gate: 0, ad: 15},"
+    " {hold: 2, ad: 9, sr: 240}, {}, end]}\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -*3, D4, -*3]\n",
+    mods="",
+)
