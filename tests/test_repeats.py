@@ -15,6 +15,7 @@ import optimiser_docs as D
 from unitracker.optimiser import Guarantee, optimise
 from unitracker.optimiser.inline import inline
 from unitracker.optimiser.repeats import encoded, grouped, lcp, repeats, song_rows
+from unitracker.optimiser.transpose import transpose
 
 REFERENCE = Path(os.environ.get("UNITRACKER_REF_DOCS", "out/ref22/lifted"))
 ONLY = (("repeats", repeats),)
@@ -162,3 +163,11 @@ def test_a_lifted_reference_document_takes_repeats_and_plays_its_grid(name):
     result = optimise(text, ticks=3000, order=ONLY)
     assert result.after < result.before and any(p == "repeats" for p, _ in result.kept)
     assert Guarantee(text, 3000).holds(result.text) and read(result.text) == result.doc
+
+
+def test_transpose_reads_phrases_that_hold_groups():
+    text = PHRASES.replace("p3:[C4.i1,D,C,D,E,C,D,C,D,E,-*2]", "p3:[D4.i1,[E,f]x4,G,-*3]")
+    doc = applied(read(text), repeats(read(text)))
+    edits = transpose(doc)
+    assert [e.label for e in edits] == ["phrase p3 -> p1+2"]
+    assert Guarantee(text).holds(printed(edits[0].apply(doc)))

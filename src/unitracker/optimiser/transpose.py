@@ -5,6 +5,7 @@ from dataclasses import replace
 from functools import partial
 
 from unitracker_grammar.document import Document, Play, Signed
+from unitracker_grammar.expand import flat
 from unitracker_player.document import note_number
 
 from unitracker.optimiser.passes import NO_NOTE, Edit, _dropped
@@ -42,7 +43,9 @@ def transpose(doc: Document) -> list:
     its play entries naming that phrase, the shift added to their transposes."""
     first, edits = {}, []
     for name, events in doc.records("phrase").items():
-        key, notes = _shape(events)
+        if not isinstance(events, tuple):
+            continue
+        key, notes = _shape(flat(events))
         if not notes:
             continue
         if key not in first:
