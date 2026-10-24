@@ -107,18 +107,17 @@ class _Inliner:  # pylint: disable=too-few-public-methods
         return self.memo[name]
 
     def program(self, name: str):
-        """Definition ``name`` as a program or a program template's call: a binding (a
-        ``pw`` or ``filter`` record's) as the program of its one row, which, unlike an
-        instrument's own binding, keeps its φ where it binds again."""
-        kind, value = self.defs[name][0], self.body(name)
-        if isinstance(value, Program) or isinstance(value, Call) and value.name in self.forms:
-            return value
-        return Program((Row(((_CELL[kind], value),)),))
+        """Definition ``name`` where an instrument's field names it: itself, a binding (a
+        ``pw`` or ``filter`` record's) the field's own binding, as the name plays there."""
+        return self.body(name)
 
     def run(self, name: str):
-        """A ``run``'s inline form: the program after its kind, a call as itself."""
-        value = self.program(name)
-        return value if isinstance(value, Call) else Run(self.defs[name][0], value)
+        """A ``run``'s inline form: the program after its kind (a binding the program of its
+        one row), a call as itself."""
+        kind, value = self.defs[name][0], self.body(name)
+        if isinstance(value, Call) and value.name in self.forms or isinstance(value, Program):
+            return value if isinstance(value, Call) else Run(kind, value)
+        return Run(kind, Program((Row(((_CELL[kind], value),)),)))
 
     def items(self, item) -> tuple:
         """A song item's inline form: a section of the targets its items, or a group of

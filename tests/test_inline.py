@@ -53,7 +53,7 @@ song:
  - end
 """
 SINGLE = ["c1", "c4", "f1", "i1", "i3", "p1", "pw1", "pw2", "pw3", "r1"]
-# i2's named binding keeps its phi across p2's notes, where an instrument's own binding restarts it
+# i2's named binding restarts its phi on each of p2's notes, as an instrument's own binding does
 CONTINUOUS = SHARED.replace("p2:[G3.i2,- run:c2,A,-*5]", "p2:[G3.i2,-,A.i2,-*5]")
 RUNS = SHARED.replace("i3:{ad:3,ctrl:arp(7,4),pw:add(100)}", "i3:{ad:3,pw:pw4}").replace(
     "- run:c2", "- run:pw5"
@@ -78,7 +78,7 @@ def test_single_inlines_each_definition_used_once_and_keeps_shared_ones_and_temp
     assert {k for k, _ in out.mods} == {"vib(d)", "add(d)"}
     assert "arp(a,b):[" in text and "ctrl:arp(7,4)" in text and "pw:add(100)" in text
     assert "run:ctrl[{ctrl:33},end]" in text and "run:pw[{pw:v + 5},end]" in text
-    assert "D.i2 run:filter[{cut:300" in text and "pw:[{pw:v + 3*phi},end]" in text
+    assert "D.i2 run:filter[{cut:300" in text and "pw:v + 3*phi" in text
     assert "- play:[p2+2,p2-3]" in text and "restart:[{hold:1,gate:0}" in text
 
 
@@ -95,16 +95,16 @@ def test_all_defines_each_definition_the_song_reaches_at_its_first_use():
     assert inline(doc, "all", lambda text: False) == (doc, ["first use"])
 
 
-def test_a_named_binding_inline_keeps_its_phase_as_a_program_of_one_row():
+def test_a_named_binding_inline_is_the_field_s_binding():
     out, refused = inline(read(CONTINUOUS), "single", Guarantee(CONTINUOUS).holds)
-    assert not refused and "pw:[{pw:v + 3*phi},end]" in printed(out)
+    assert not refused and "pw:v + 3*phi}" in printed(out) and "{pw:v + 3*phi}" not in printed(out)
 
 
 def test_a_call_inline_stays_a_call_or_binds_as_a_program():
     doc = read(RUNS)
     out = inlined(doc, {"pw4", "pw5"})
     text = printed(out)
-    assert "pw:[{pw:vib(3)},end]" in text and "- run:pt(900)" in text
+    assert "pw:vib(3)}" in text and "{pw:vib(3)}" not in text and "- run:pt(900)" in text
     assert Guarantee(RUNS).holds(text)
 
 

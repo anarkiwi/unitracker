@@ -15,7 +15,7 @@ from unitracker_player.player import Player
 from unitracker.optimiser.passes import Edit, _label
 from unitracker.optimiser.tree import update
 
-_SITE = 5  # a modulator's binding site, after the player's ``[fn, phi, voice, name, command]``
+_SITE = 6  # a binding site, after the player's ``[fn, phi, voice, name, command, once]``
 
 
 class _Site:  # pylint: disable=too-few-public-methods
@@ -50,8 +50,8 @@ class _Tracer(Player):
             left.difference_update(slots)
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
-    def _set(self, v: int, cell: str, slot: int, fn, command: bool, fresh=False):
-        super()._set(v, cell, slot, fn, command, fresh)
+    def _set(self, v: int, cell: str, slot: int, fn, once: bool, command: bool, fresh=False):
+        super()._set(v, cell, slot, fn, once, command, fresh)
         if cell == "freq":
             self._settle(v, (slot,))
 
