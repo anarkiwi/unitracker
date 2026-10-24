@@ -115,11 +115,19 @@ def test_a_rename_the_guarantee_refuses_is_not_kept(monkeypatch):
 
 def test_the_passes_run_in_order_with_the_rename_last():
     order = [n for n, _ in driver.PASSES]
-    assert order == ["defaults", "merge", "transpose", "snap", "template", "hoist", "once"] + [
+    assert order == [
+        "defaults",
+        "merge",
+        "transpose",
+        "snap",
+        "template",
+        "hoist",
+        "once",
         "prelude",
         "instruments",
-        "phrases",
         "chords",
+        "phrases",
+        "repeats",
     ]
 
 

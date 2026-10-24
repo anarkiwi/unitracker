@@ -48,16 +48,31 @@ A candidate the grammar or the player refuses does not hold.
 
 | pass | proposes |
 |---|---|
-| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo:6`, `voices:3`, a `clock` at PAL's `clock_hz`, `tempo:[a,a]` as `a`; a row's `wait:0` and `hold:1`; ` tempo:a/a` and ` vtempo:a/a` as `a`, `*1`, and a non-note's ` legato`, ` pw`, ` filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note:+0` of a control program no `run` starts (a note clears the rows' notes as it starts it); an instrument's `none` field, one per instrument (it ends a binding only where one lasts to that instrument's note, so the guarantee decides); a program row of only `wait` and `hold` folded into the hold of the row before (`{hold:2,ctrl:65},{}` is `{hold:3,ctrl:65}`), not where a loop starts at it |
+| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo:6`, `voices:3`, a `clock` at PAL's `clock_hz`, `tempo:[a,a]` as `a`; a row's `wait:0` and `hold:1`; ` tempo:a/a` and ` vtempo:a/a` as `a`, `*1`, and a non-note's ` legato`, ` pw`, ` filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note:+0` of a control program no `run` starts (a note clears the rows' notes as it starts it); an instrument's `none` field, one per instrument (it ends a binding only where one lasts to that instrument's note, so the guarantee decides); a program row of only `wait` and `hold` folded into the hold of the row before (`{hold:2,ctrl:65},{}` is `{hold:3,ctrl:65}`), not where a loop starts at it; a run of bare rests one rest of their steps (`-*3,-` is `-*4`) |
 | `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, phrases, and templates of modulators and programs, equal up to their parameters' names |
 | `transpose` | each phrase whose events are an earlier phrase's but for one shift `k` of every note (a note atom's; a program row's notes are the instrument's and stay) becoming the first such phrase in document order, its record dropped and each play entry of it naming that phrase with `k` added to its transpose (`p2` = `p1` up 2: `p2-1` is `p1+1`) |
 | `snap` | each phrase event's frequency binding under which the voice's frequency was `F(N)` at every tick the binding lasted over the guarantee's horizon (see [Snap](#snap)) becoming the cell's own `F(N)`: the binding dropped where no frequency slot was bound as it applied, else a `none` of each slot that was |
 | `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait:0` and `hold:1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl:ctrl_1(7,4)`, `restart:restart_1(2,9,240)`, ` run:ctrl_1(7,3)` |
 | `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
+| `once` | a command binding a slot that a later event of its phrase stops with `none`, no command of the cell between, becoming a binding that fires once (`snap()!`), the `none` dropped and the rests it leaves merged |
 | `prelude` | per template of the document's own (code or expression), each call whose firings over the guarantee's horizon (`trace.record(..., every=True)`) a prelude template plays exactly becoming that prelude call, the template dropped where no call names it: `fit.prelude_calls` solves each prelude template's integers from the firings (`glide` the one step; `slide` the largest step and the transposes of the notes the firings that step less arrive at; `vibrato` each φ before the first off `F(N)`, the depth from that residual and the width from the largest; `pwm`, `sweep`, `tremolo` from the one value per φ), verifying each candidate compiled as the player compiles it, masked to the cell; the cheapest call in tokens is kept |
 | `instruments` | each group of two or more instrument records alike but for integers (`ad`, `sr`, an integer binding, a call's integer arguments) becoming one template `ins_k` with a parameter per position whose values differ (positions of equal values sharing one, named by the callee's parameter or the field's stem, `_2` after a stem where a count would spell a record's name), each record a call of it: ` i1:ins_1(9,800)` of ` ins_1(ad,p):{ad:ad,sr:240,ctrl:c1,pw:p,restart:hr(ad,240)}` |
 | `chords` | per program template whose parameters a row reads only as `note:+p`, and per instrument template passing parameters only to such positions, its note parameters permuted (signature and every call) where every call gives them in one order not ascending, and each call's run of them that is a chord's intervals (music21's name, root position, where `CHORDS` gives exactly that run) written as the chord's name, fewest arguments first: `arp(3,7,10)` is `arp(min7)` |
 | `phrases` | each group of two or more phrase records alike but for their notes (rests, `off`/`on`, instruments, commands, flags, steps and groups equal) becoming one template `ph_k` with a parameter (`x`, `y`, `z`, `u`, `w`, `x2`, ...) per differing note position, positions of equal notes sharing one and those equal in every record literal, each record a call of it: ` p1:ph_1(C4,G4)` |
+| `repeats` | each phrase's events (a record, an inline phrase; groups played out first) in their cheapest encoding with groups, `[D,E]x4`, `[D,E\|F\|G]`, nested; the song's rows in sections and groups, the loop item the first of the looped rows (see [Repeats](#repeats)) |
+
+### Repeats
+
+A phrase's encoding is an exact interval DP over its events: the cheapest encoding of each span
+is a sequence of events and groups, a group a tandem repeat `[B]xk` of a primitive body or a
+volta `[B|E1|E2...]` (endings of one length, the body their longest common prefix), its parts
+encoded alike. Costs are cl100k tokens: an event's text alone (its octave written), a group's
+brackets, bars and count; the driver measures the true size. The song's rows are split at the
+loop row, Re-Pair (`unitracker_player.streams.repair`) compresses both parts over shared rules,
+a rule whose definition costs at least what its uses save (by the same DP) is inlined, one at a
+time, deepest first, to a fixpoint, and each kept rule is a section `sK` (numbered in reading
+order); the song and each section body are then encoded by the DP, a repeated section a part
+`s3x2`. Both edits are the input once their sugar is expanded, and a second round proposes none.
 
 After the last round the `names` rename (`optimise(..., rename=True)`, the default) gives each
 program template the `template` pass named `{kind}_k` a name by its shape, in document order:
@@ -219,7 +234,7 @@ language model) learns the format from without resolving names
 | mode | writes inline |
 |---|---|
 | `named` | nothing (the default) |
-| `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record; shared ones and templates stay named |
+| `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record, a section (its items in place in the song or the section that plays it, the loop item kept); shared ones and templates stay named |
 | `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad:9}`, `freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`; a record that is a template's call and its template at once: `C4.i1=ins_1(ad,p)={...}(9,800)`, `p1=ph_1(x,y)=[...](C4,E4)`); a definition the song never reaches is dropped, so no section is left |
 
 In `single`, templates (`mod:` records and program templates) are the format's shared
@@ -234,13 +249,13 @@ Definitions):
 | a play entry's phrase, `p1+2` | `[C4,-*3]+2` |
 | an instrument's `ctrl`, `restart`, `pw` or `filter` program | the program, `ctrl:[{ctrl:65},end]` |
 | a `run:` row key or command of a program | the program after its kind, `run:pw[{pw:800},end]` |
-| a `pw` or `filter` record that is a binding `b` | the program of its one row, `[{pw:b},end]` |
+| a `pw` or `filter` record that is a binding `b` | in an instrument's field the binding `b`; in a `run:` the program of its one row, `pw[{pw:b},end]` |
 | a record that is a call of a program template | the call |
 | an instrument or phrase record that is its template's call, `C4.i1`, `p1` | the call, `C4.ins_1(9,240)`, `play:[ph_1(G1,E1)]` |
+| a song item `s1`, `s1x2` | its items, `[...]x2` |
 
-A binding record becomes the program of its one row, never the instrument's own binding: the
-player starts an instrument's own binding's phi at 0 on each note, while a named binding, a
-program, keeps its phi where the same note binds it again. A definition that reaches itself (a
+A binding record plays where its name stands as the binding written there (the player's
+semantics, format 2.3), so an instrument's field takes the binding itself. A definition that reaches itself (a
 program whose rows run it) has no inline form and stays named. The definitions are written
 inline together where the guarantee holds over the document the passes left (so after any
 lossy step), else in halves as the driver proves edits; a refused one stays named. A

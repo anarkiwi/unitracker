@@ -213,3 +213,18 @@ def test_template_makes_programs_alike_but_for_integers_one_template_of_calls():
 
 def test_template_proposes_nothing_without_two_programs_differing_in_integers():
     assert not templates.template(read(D.MERGE))
+
+
+def test_once_fires_a_binding_its_none_ends_once_where_it_plays_the_same():
+    found = labels(passes.once(read(D.ONCE)))
+    assert len(found) == 2 and any(label.endswith("pw:800!") for label in found)
+    result = optimise(D.ONCE, order=(("defaults", passes.defaults), ("once", passes.once)))
+    assert "C4.i1 pw:800!,-*4,D" in result.text and result.text.count("pw:none") == 1
+    assert "pw:'v + 8'!" not in result.text and Guarantee(D.ONCE).holds(result.text)
+
+
+def test_defaults_make_a_run_of_bare_rests_one_rest():
+    text = D.ONCE.replace("-*3,- pw:none", "-*3,-,-")
+    assert labels(passes.defaults(read(text))) == ["defs/1/records/0/1: rests"]
+    result = optimise(text, order=(("defaults", passes.defaults),))
+    assert "-*5" in result.text and Guarantee(text).holds(result.text)

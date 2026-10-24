@@ -4,7 +4,8 @@ note becomes that one, each play entry of it transposed by the shift (docs/optim
 from dataclasses import replace
 from functools import partial
 
-from unitracker_grammar.document import Call, Document, Group, Play, Signed
+from unitracker_grammar.document import Call, Document, Play, Signed
+from unitracker_grammar.expand import flat
 from unitracker_player.document import note_number
 
 from unitracker.optimiser.passes import NO_NOTE, Edit, _dropped
@@ -42,9 +43,9 @@ def transpose(doc: Document) -> list:
     its play entries naming that phrase, the shift added to their transposes."""
     first, edits = {}, []
     for name, events in doc.records("phrase").items():
-        if "(" in name or isinstance(events, Call) or any(isinstance(e, Group) for e in events):
+        if "(" in name or isinstance(events, Call):
             continue
-        key, notes = _shape(events)
+        key, notes = _shape(flat(events))
         if not notes:
             continue
         if key not in first:
