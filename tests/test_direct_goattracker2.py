@@ -77,6 +77,24 @@ CASES = {
         "speed": [(131, 2)],
     },
     "vibrato": {"wave": WAVE, "rows": [(24, 1, 4, 1)] + [REST] * 15, "speed": [(3, 48)]},
+    "instrument vibrato after toneporta and command 0, unoptimised": {
+        "wave": WAVE,
+        "instruments": [
+            {"wave_ptr": 1, "gateoff_timer": 2, "vibrato_param": 1, "vibrato_delay": 8}
+        ],
+        "rows": [(24, 1, 15, 4), REST, (27, 0, 3, 0), REST, REST, (30, 0, 0, 0)] + [REST] * 10,
+        "speed": [(1, 16)],
+        "optimize_realtime": False,
+        "optimize_pulse": False,
+    },
+    "instrument vibrato, portamento, then command 0 from phase 0": {
+        "wave": WAVE,
+        "instruments": [
+            {"wave_ptr": 1, "gateoff_timer": 2, "vibrato_param": 1, "vibrato_delay": 2}
+        ],
+        "rows": [(24, 1, 0, 0), REST, REST, (None, 0, 1, 2), (None, 0, 1, 2)] + [REST] * 11,
+        "speed": [(3, 40), (0, 20)],
+    },
     "instrument vibrato": {
         "wave": WAVE,
         "instruments": [

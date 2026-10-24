@@ -60,7 +60,7 @@ def _ordered(keys: dict) -> FlowMap:
 class Occurrence:
     """A pattern a voice starts: the generic tick of its first step, its transpose, the
     frequency command ``(command, data)`` running into it (or None), its instrument, and each
-    row's vibrato delay left after its tick 0."""
+    row's vibrato delay left entering its tick 0."""
 
     tick: int
     pattern: int
@@ -95,7 +95,6 @@ def sequence(model, frames: int, loops: int = 3) -> Run:
 
     def channel_tick(channel):
         chan = ref._channels[channel]  # pylint: disable=protected-access
-        row = None
         if (chan.tick - 1) & 0xFF == 0 and fetched[channel] is not None:
             pattern, row, trans = fetched[channel]
             if row == 0:
@@ -105,9 +104,9 @@ def sequence(model, frames: int, loops: int = 3) -> Run:
                     Occurrence(frame[0] + 1, pattern, trans, running, chan.instr & 0x3F)
                 )
             fetched[channel] = None
+            if run.starts[channel]:
+                run.starts[channel][-1].rows.append(chan.vibdelay)
         play_channel(channel)
-        if row is not None and run.starts[channel]:
-            run.starts[channel][-1].rows.append(chan.vibdelay)
 
     def call():
         play_call()
@@ -376,7 +375,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     def _event(self, row, instr: int, delay: int, run: tuple) -> tuple:
         """``(atom, (running command, tick slot bound))`` of one pattern row played by
-        ``instr`` with vibrato ``delay`` left after its tick 0."""
+        ``instr`` with vibrato ``delay`` left entering its tick 0, where the slot fires."""
         note, ins, cmd, data = row
         cur, bound = run
         noted = note <= C.LASTNOTE
@@ -389,7 +388,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             cur, bound = (cmd, data), False
         elif cmd == C.CMD_DONOTHING:
             if not bound:
-                text = f"!{TICK}:{self.tick(instr, delay if cur else None)}"
+                text = f"!{TICK}:{self.tick(instr, delay)}"
             cur, bound = None, True
         else:
             text = self._command(cmd, data, instr, noted)

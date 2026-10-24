@@ -252,8 +252,9 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
     ``instruments`` keyword dicts of :class:`pygoattracker.Instrument` (default one instrument
     on the wavetable's first row); ``rows`` the pattern's ``(note, instrument, command, data)``
     rows, a note as an offset from ``FIRSTNOTE`` or None for a rest; ``voice2`` voice 2's, which
-    otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``)
-    and ``pulse_step``.
+    otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``),
+    ``pulse_step`` and other :class:`pygoattracker.player.Player` options (``optimize_realtime``
+    and the like).
     """
     # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     instruments = instruments or [{"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
@@ -282,7 +283,7 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
         speedtable=table(*speed),
     )
     build = SimpleNamespace(adparam=None, srparam=None, deftempo=None)
-    state, step = opts.get("state"), opts.get("pulse_step", 1)
+    state, step = opts.pop("state", None), opts.pop("pulse_step", 1)
     info = SimpleNamespace(
         simplepulse=False,
         state=state,
@@ -303,9 +304,10 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
             default_tempo=build.deftempo,
             state=state,
             pulse_step=step,
+            **opts,
         ),
     )
-    return dec, Player(song, freq_table=GT.FREQ_TABLE, state=state, pulse_step=step)
+    return dec, Player(song, freq_table=GT.FREQ_TABLE, state=state, pulse_step=step, **opts)
 
 
 OPTIMISED = {
