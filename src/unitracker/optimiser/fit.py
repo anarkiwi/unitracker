@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from unitracker_grammar import frequency
-from unitracker_grammar.expr import PHI
+
+PHI = "phi"
 
 BITS = {"freq": 16, "pw": 12, "cut": 11}
 # the base a form's shape adds to: the slot's input, nothing, or the sounding or event note

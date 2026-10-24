@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from unitracker_grammar.document import Code, read
+from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
 import optimiser_docs as D
@@ -44,7 +45,9 @@ def test_code_that_is_exactly_an_expression_is_fitted_exactly():
     assert not any(isinstance(body, Code) for _, body in doc.mods)
     assert doc.header.state is None and not result.refused
     assert {r.name for r in result.kept} == {"slide", "start", "wob"}
-    assert dict((k, str(v)) for k, v in doc.mods)["sq(q)"].startswith("v + q - 2*q*(")
+    assert dict((k, str(v)) for k, v in doc.mods)["sq(q)"] == canonical(
+        "v + q - 2*q*(phi // 2 % 2)"
+    )
     assert "b.freq: sq(8)" in result.text and "b.freq: sq(16)" in result.text
     assert np.array_equal(play(result.text), play(D.EXACT))
     assert result.after < result.before and all(s == (0, 0, 0) for s in result.stats.values())
@@ -145,7 +148,7 @@ def test_a_delayed_square_on_the_input_carries_along_a_chain():
     v = np.concatenate([[9000], out[:-1]])
     fir = firings(phi, out, v)
     sq = [f for f in fit.fits(fir, EXACT["freq"]) if f.key == ("sq", "v", True)]
-    assert sq and sq[0].params["d"] == 3 and "(φ >= d)" in sq[0].text()
+    assert sq and sq[0].params["d"] == 3 and f"({fit.PHI} >= d)" in sq[0].text()
     assert not [f for f in fit.fits(fir, EXACT["freq"]) if f.key == ("keep", "v", False)]
 
 

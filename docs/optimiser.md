@@ -70,32 +70,32 @@ then run on its result, their guarantee taken against it.
 
 1. **Record** (`trace.py`): the document plays over `ticks` (to its end where it ends; a looping
    song needs `ticks`), and each firing of each call's routine is recorded by call and cell:
-   tick, voice, φ, input `v`, output, `N`, `n`.
+   tick, voice, phi, input `v`, output, `N`, `n`.
 2. **Fit** (`fit.py`): per call, residuals of the output against each base (`v`, `0`, `F(N)`,
-   `F(n)`; the notes for the frequency only) are summarised per φ, and each shape's integer
+   `F(n)`; the notes for the frequency only) are summarised per phi, and each shape's integer
    parameters fitted:
 
    | shape | form (added to the base) | fit |
    |---|---|---|
    | `keep` | `0` | none |
    | `off` | `q` | weighted median |
-   | `lin` | `q + s*φ` | weighted least squares, slope rounded |
-   | `up`, `down` | `min(q + s*φ, m)`, `max(...)` | the line short of the extreme, held at it |
-   | `sq` | `q + w*((φ + o) // h % 2)` | every half period `h` to 64 and offset `o` |
-   | `tri` | `q + s*abs((φ + o) % (2*h) - h)` | as `sq`, `q` and `s` by least squares |
-   | `tab` | `T[k + min(φ, l)] - z` | the residual per φ to its last change, held after |
-   | `loop` | `T[k + min(φ, l) + max(φ - l, 0) % p] - z` | the shortest preperiod `l` and period `p` over two periods or more |
-   | `first` | `v + (φ < l)*(B + q - v)` | the base `B` until φ `l`, the input after |
+   | `lin` | `q + s*phi` | weighted least squares, slope rounded |
+   | `up`, `down` | `min(q + s*phi, m)`, `max(...)` | the line short of the extreme, held at it |
+   | `sq` | `q + w*((phi + o) // h % 2)` | every half period `h` to 64 and offset `o` |
+   | `tri` | `q + s*abs((phi + o) % (2*h) - h)` | as `sq`, `q` and `s` by least squares |
+   | `tab` | `T[k + min(phi, l)] - z` | the residual per phi to its last change, held after |
+   | `loop` | `T[k + min(phi, l) + max(phi - l, 0) % p] - z` | the shortest preperiod `l` and period `p` over two periods or more |
+   | `first` | `v + (phi < l)*(B + q - v)` | the base `B` until phi `l`, the input after |
 
-   A shape on a base whose residual is 0 before some φ `d` is also fitted from `d` on, as
-   `(φ >= d)*(...)`. A form is kept when its error over every firing keeps to the cell's
+   A shape on a base whose residual is 0 before some phi `d` is also fitted from `d` on, as
+   `(phi >= d)*(...)`. A form is kept when its error over every firing keeps to the cell's
    tolerance; along a chain (a firing whose input is what the voice's firing before left) the
    form's own output feeds the next firing, so a form that drifts is refused.
 3. **Template**: per code template, the cheaper (in tokens) of one form key fitting all its
    calls and each call's cheapest form, grouped by key. Each group is one expression template
    named by its shape with a parameter per value its calls differ in, a parameter that is an
    integer multiple of another written as that multiple, and the rest literal
-   (`vib(0,4,32)`, `vib(0,4,64)` → `sq(32)`, `sq(64)` of `sq(q): v + q - 2*q*(...)`). A table
+   (`vib(0,4,32)`, `vib(0,4,64)` → `sq(32)`, `sq(64)` of `sq(q): v - 2*(phi // 2 % 2)*q + q`). A table
    form's tables are one new table, each call's offset `k`.
 4. **Prove**: each code template's replacement is screened alone for size, then the
    replacements are proved together and, refused, in halves, as the driver's edits: kept where
@@ -119,7 +119,7 @@ cell's error and the size before and after.
 
 A call fitted from its own firings cannot follow state another code template writes: a template
 that only feeds another's state fits `keep` and is refused by the check, and a call bound on two
-cells is left as it is. The guarantee covers the horizon only: a form fitted to the φ a song
+cells is left as it is. The guarantee covers the horizon only: a form fitted to the phi a song
 reaches may differ past it.
 
 `python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR [--seconds S]]` tabulates the
