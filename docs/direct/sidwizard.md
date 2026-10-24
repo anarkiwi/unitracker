@@ -45,7 +45,7 @@ row lasts from its read to the voice's next read (tempo, funk tempo and tempo FX
 | TICK_0/1 staccato skip | `run` of a program resuming the tables where the player left them (`tick.freq: wt()` where VIBSLIDE runs every tick) |
 | TICK_2 | the row applied: note, instrument, FX |
 
-A binding already held keeps its φ: TICK_1 rebinds `tick.freq: stp()`, `fx.cut: none` and
+A binding already held keeps its phi: TICK_1 rebinds `tick.freq: stp()`, `fx.cut: none` and
 `late.cut: none` when TICK_2 binds them.
 
 | TICK_2 row | event |
@@ -83,7 +83,7 @@ A binding already held keeps its φ: TICK_1 rebinds `tick.freq: stp()`, `fx.cut:
 | instrument `n` | `i<n>`; `i<n + 64(voice + 1)>` with a first frame by track; dummies `i256`… |
 | AD, SR | `ad`, `sr` |
 | STRTSND | `snd.freq: snd(c,d,i,q,h,t,r/g)`, `tick.freq: stp()` |
-| WF table | `ctrl`: `{ctrl: 9 or the first waveform, route}`, then a row per read held its ARPSCNT ticks; arp as `note` (`+n`, `-n`, absolute) with `wave.freq: tone()`; detune and carry as `dt.freq: det(f,d,c,b)`; chord rows a read per chord pitch; `$FE` jumps taken on the tick, `{loop: k}`; the walk at rest re-read at its pace |
+| WF table | `ctrl`: `{ctrl: 9 or the first waveform, route_on: 0}` (`route_off: 0` unrouted), then a row per read held its ARPSCNT ticks; arp as `note` (`+n`, `-n`, absolute) with `wave.freq: tone()`; detune and carry as `dt.freq: det(f,d,c,b)`; chord rows a read per chord pitch; `$FE` jumps taken on the tick, `{loop: k}`; the walk at rest re-read at its pace |
 | pulse table | `pw`: set `{pw: w}`, sweep `{hold: n, pw: v + d}`, its advance tick; with keyboard tracking `pst`/`psw`/`pid`/`pwr` |
 | filter table (claimed) | `filter`: set `{res, mode, cut}`, sweep `{hold: n, cut: v + 8d}` (`v + d` FINEFILTSWEEP), advance tick; with keyboard tracking or BIGFX0F `fst`/`fsw`/`fid`/`frs` (`fho` a handover) |
 | a resumed table (legato, switch, staccato, reset switch) | a program from the player's position and sweep count |
