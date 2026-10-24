@@ -51,6 +51,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     handover: tuple = None
     gate: tuple = None
     switch: tuple = None
+    cutfirst: bool = True
     skips: dict = field(default_factory=dict)
 
 
@@ -120,6 +121,8 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
             wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
             rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
         before, octave = v.instrument, v.octave_shift
+        holder = ref.filter_controller_voice
+        rec.cutfirst = holder is None or voices[id(v)] >= voices[id(holder)]
         if rec.newnote and v.instrument is not None and not 1 <= (row.instrument or 0) < LEGATO:
             control, feats = v.instrument.control, ref.features
             held = ref.filter_controller_voice is v
@@ -201,6 +204,12 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         claims[:] = [filter_state()]
         ref.play_frame()
         _claims(ref, claims[1:], out)
+        for i, v in enumerate(ref.voices):
+            rec = out.reads[i][-1] if out.reads[i] else None
+            if rec is not None and rec.frame + 2 == frame and rec.kept[1]:
+                if ref.filter_controller_voice is not v:
+                    # Another voice took the filter on the tick: the kept walk is its.
+                    rec.kept = (rec.kept[0], (), rec.kept[2])
         for i, v in enumerate(ref.voices):
             if v.sequence_ended and out.ended[i] is None:
                 out.ended[i] = frame

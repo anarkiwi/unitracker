@@ -222,6 +222,10 @@ NORMAL = {
             "i3": {"gateoff_pw": 26},
         },
     ),
+    "cutoff FX on the filter's voice, before and after its walk": (
+        [Row(note=37, instrument=1), Row(fx=0x0F, fx_value=0x30), EMPTY, Row(fx=0x0F, fx_value=9)],
+        {"i1": {"filter_table": bytes.fromhex("9f0800051000")}},
+    ),
     "reset switches keep the pulse and filter walking": (
         notes((37, 1), (40, None), (44, None), (40, 1)),
         {"i1": {"control": 0xDA, "pw_table": bytes.fromhex("8400000c2000"), "arp_speed": 0}},
@@ -334,3 +338,13 @@ def test_cli(mega_run, capsys):
     assert capsys.readouterr().out.startswith(f"unitracker: {s.VERSION}\nmeta: {{title: Mega-Run")
     assert s.main(["--verify", "--frames", "400", str(mega_run)]) == 0
     assert f"{mega_run}: exact" in capsys.readouterr().out
+
+
+def test_a_cutoff_fx_of_an_earlier_voice_lands_after_the_filter_walk(border_odyssey):
+    """The player runs voice 3, 2, 1: voice 1's BIGFX0F lands after voice 2's filter walk."""
+    raw = border_odyssey.read_bytes()
+    first = [EMPTY, EMPTY, Row(fx=0x0F, fx_value=0x30), EMPTY]
+    second = [Row(note=37, instrument=1), EMPTY, EMPTY, EMPTY]
+    swm = song(raw, first, [second], i1={"filter_table": bytes.fromhex("9f0800051000")})
+    swm.patterns[0].rows[0] = Row(note=40, instrument=3)
+    assert "late.cut:fhi(48)" in exact(swm)

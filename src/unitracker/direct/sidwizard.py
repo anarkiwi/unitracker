@@ -87,6 +87,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
         # A table walk can read any instrument byte as a track amount: write as the player.
         self.pwkb, self.fkb = self.feats.pwkeybtrack, self.feats.filtkbtrack
+        # BIGFX0F writes CTFH under the filter walk: the walk keeps its cutoff in code.
+        self.cutfx = any(r.fx == 0x0F for p in swm.patterns for r in p.rows)
+        self.fkb = self.fkb or self.cutfx
+        self.walk = "walk.cut" if self.cutfx else "cut"
         feats = self.feats
         self.hrc = (
             feats.arpspeedsupp
@@ -452,13 +456,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         if self.fkb:
             rows_of = {
                 "set": lambda p: bands(p)
-                | {"cut": self.call("fst", c=_col(image, p + 1), j=_col(image, p + 2))},
-                "sweep": lambda p: {"cut": self.call("fsw", d=_signed(_col(image, p + 1)))},
-                "advance": lambda p, _: {"cut": self.call("fid", j=_col(image, p + 2))},
-                "jump": {"cut": self.call("frs")},
-                "rest": [Row({"cut": self.call("frs")})],
-                "resumed": {"cut": self.call("frs")},
-                "started": {"cut": self.call("frs")},
+                | {self.walk: self.call("fst", c=_col(image, p + 1), j=_col(image, p + 2))},
+                "sweep": lambda p: {self.walk: self.call("fsw", d=_signed(_col(image, p + 1)))},
+                "advance": lambda p, _: {self.walk: self.call("fid", j=_col(image, p + 2))},
+                "jump": {self.walk: self.call("frs")},
+                "rest": [Row({self.walk: self.call("frs")})],
+                "resumed": {self.walk: self.call("frs")},
+                "started": {self.walk: self.call("frs")},
             }
         else:
             rows_of = {
@@ -474,7 +478,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             }
         if handover is not None:
             high, low, res, mode, track = handover
-            cut = {"cut": self.call("fho", c=high, l=low & 7, j=track)} if self.fkb else {}
+            cut = {self.walk: self.call("fho", c=high, l=low & 7, j=track)} if self.fkb else {}
             if not self.fkb:
                 cut = {"cut": high << 3 | low & 7}
             rows_of["started"] = {"res": res, "mode": mode} | cut
@@ -640,12 +644,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             0x08: lambda: {"tick.freq": self.vibrato_byte(ins, value, False)} if ins else None,
             0x0D: lambda: self._dfx(value),
             0x16: lambda: {"tick.freq": self.call("kty", c=value & 0x30)},
+            0x0F: lambda: {("fx" if rec.cutfirst else "late") + ".cut": self.call("fhi", c=value)},
         }
-        if (
-            fx in (0x04, 0x07, 0x09, 0x0A, 0x0B, 0x0C, 0x0E, 0x0F)
-            or 0x17 <= fx <= 0x1C
-            or fx == 0x1F
-        ):
+        if fx in (0x04, 0x07, 0x09, 0x0A, 0x0B, 0x0C, 0x0E) or 0x17 <= fx <= 0x1C or fx == 0x1F:
             if fx != 0x07:
                 raise TranscribeError(f"FX ${fx:02X}")
         if fx == 0x07 and self.feats.chordsupport:
@@ -671,7 +672,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             commands = {"pw": "hold", "cut": "hold"} | ({"pm.freq": "none"} if self.mirror else {})
         if new and tick and self.fkb and rec.holder:
             # The cutoff is written every tick: its track follows the note STRTSND sets.
-            commands = {"cut": self.call("frs")}
+            commands = {self.walk: self.call("frs")}
         if rec.newnote and rec.dummy and not tick:
             state["dummy"] = state["dummy"] or self.dummy(rec.hr)
             commands["run"] = self.ins[state["dummy"]].get("ctrl")
@@ -870,6 +871,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out.append(Slot("pm"))
         if self.feats.detunesupport:
             out.append(Slot("dt", hold=held, reset=("row.freq",)))
+        if self.cutfx:
+            # BIGFX0F applies before the filter walk on a later voice, after it on an earlier.
+            return {"freq": out, "cut": [Slot("fx"), Slot("walk"), Slot("late")]}
         return {"freq": out}
 
     def document(self) -> str:

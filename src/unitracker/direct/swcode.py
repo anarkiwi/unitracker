@@ -150,6 +150,8 @@ def track_templates(finefiltsweep: bool) -> dict:
         + _CUTOFF,
         # FILTPRG past a sweep: the track amount.
         "fid": "lda phi\nora phi+1\nbne go\nlda #j\nsta ck\n" + _CUTOFF,
+        # BIGFX0F: CTFH, under the filter walk's binding.
+        "fhi": "lda phi\nora phi+1\nbne go\nlda #c\nsta ch\n" + _CUTOFF,
         # $D416/$D415 of the cutoff the table rests on.
         "frs": _CUTOFF,
     }
