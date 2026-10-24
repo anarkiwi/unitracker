@@ -5,6 +5,7 @@ import random
 
 import pytest
 from pygoattracker import constants as GT
+from pygoattracker import Build
 from pygoattracker.player import Player, _Channel
 from unitracker_grammar import code, frequency
 from unitracker_player.code import Machine
@@ -34,7 +35,7 @@ def reference(speed=(0, 0), pulse=((), ()), simplepulse=False) -> Player:
     ref._ltable[GT.STBL][0], ref._rtable[GT.STBL][0] = speed
     ref._ltable[GT.PTBL][: len(pulse[0])] = pulse[0]
     ref._rtable[GT.PTBL][: len(pulse[1])] = pulse[1]
-    ref.simplepulse, ref.pulse_step, ref.live_vibrato = simplepulse, 1, False
+    ref.build = Build(simplepulse=simplepulse)
     return ref
 
 
