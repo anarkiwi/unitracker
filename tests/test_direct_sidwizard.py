@@ -169,6 +169,17 @@ NORMAL = {
             "swm": {"chord_table": bytes.fromhex("0003077e0004070c7f")},
         },
     ),
+    "keyboard-tracked pulse and filter rows": (
+        notes((37, 1), (60, 1), (None, None), (13, 3), (90, 1)),
+        {
+            "i1": {
+                "pw_table": bytes.fromhex("84000c20400320c0f0fe1700"),
+                "filter_table": bytes.fromhex("9f08100410fe0200fc06"),
+            },
+            "i3": {"pw_table": bytes.fromhex("8400000a1002")},
+            "i5": {"arp_speed": 0, "wf_table": bytes.fromhex("210000")},
+        },
+    ),
     "typed vibratos": (
         notes((37, 1), (40, 3), (44, 5)),
         {
@@ -259,8 +270,8 @@ def test_a_filter_voice_note_that_leaves_the_filter_walking_is_refused(mega_run)
 
 def test_song_refusals(lykia_boss, csillag):
     swm = song(csillag.read_bytes(), notes((37, 1)))
-    swm.instruments[0].pw_table = bytes.fromhex("880001")
-    with pytest.raises(s.TranscribeError, match="normal build: pulse keyboard tracking"):
+    swm.instruments[0].gateoff_wf = 0x10
+    with pytest.raises(s.TranscribeError, match="normal build: gate-off table pointers"):
         s.Transcriber(swm, META)
     swm = song(lykia_boss.read_bytes(), notes((37, 1)))
     swm.instruments[0].pw_table = bytes.fromhex("100100")

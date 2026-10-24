@@ -2,7 +2,9 @@
 
 The freq cell's state is the player's: ``o`` vibrato_offset, ``s`` set once a WF row's pitch
 drives the frequency, ``z`` FREQLO/FREQHI, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``p`` VIBFREQU,
-``fm`` FREQMOD, ``k`` SLIDEVIB, ``dd`` DETUNER, ``cm``/``ca``/``cv`` WRPITCH's carry.
+``fm`` FREQMOD, ``k`` SLIDEVIB, ``dd`` DETUNER, ``cm``/``ca``/``cv`` WRPITCH's carry; the pw
+cell's ``pl`` PWLOGHO/PWHIGHO, ``pk`` PKBDTRK; the cut cell's ``ch``, ``cl``, ``ck`` CTFH, CTFL and
+its keyboard track.
 """
 
 STATE = {
@@ -19,7 +21,9 @@ STATE = {
         "cm": 1,
         "ca": 1,
         "cv": 1,
-    }
+    },
+    "pw": {"pl": 2, "pk": 1},
+    "cut": {"ch": 1, "cl": 1, "ck": 1},
 }
 
 _FIRST = "lda phi\nora phi+1\nbne step\n"
@@ -52,6 +56,60 @@ _WRPITCH = (
     "jmp sum\nc3:\nlda cv\ncmp #255\nbne cvo\nlda ca\ncvo:\nlsr\njmp sum\nc1:\nsec\njmp sum\n"
     "c0:\nclc\nsum:\nlda z\nadc dd\nsta v\nlda z+1\nadc #0\nsta v+1\nrts\n"
 )
+
+
+# EXPTABH[idx] (12 bytes of zeros, then FREQTBH) for idx = (DPITCH & $7F) + the track amount.
+_TRACK = (
+    "lda ne\nclc\nadc #1\nand #127\nclc\nadc {k}\nphp\ntax\nsec\nsbc #12\ntay\nlda #0\n"
+    "cpx #12\nbcc e0\nlda F.hi,y\ne0:\n"
+)
+_WRPULS = (
+    "go:\nlda pk\nbeq plain\n"
+    + _TRACK.format(k="pk")
+    + "sta v+1\nlda #0\ncpx #13\nbcc e1\ndey\nlda F.hi,y\ne1:\nsta v\nplp\nlda v+1\nsbc v\n"
+    "adc pl+1\nsta v+1\nlda pl\nsta v\nrts\nplain:\nlda pl\nsta v\nlda pl+1\nsta v+1\nrts\n"
+)
+_CUTOFF = (
+    "go:\nlda ck\nbeq fp\n"
+    + _TRACK.format(k="ck")
+    + "plp\nadc ch\nadc #0\njmp fo\nfp:\nlda ch\nfo:\nsta v\nlda #0\nsta v+1\nasl v\nrol v+1\n"
+    "asl v\nrol v+1\nasl v\nrol v+1\nlda cl\nand #7\nora v\nsta v\nrts\n"
+)
+
+
+def track_templates(finefiltsweep: bool) -> dict:
+    """The pulse and filter tables' templates where the tune tracks the keyboard: each binding
+    keeps the player's own value and writes it with the note's track term."""
+    return {
+        # SETPULW: the width and PKBDTRK; then WRPULS.
+        "pst": "lda phi\nora phi+1\nbne go\nlda #<w\nsta pl\nlda #>w\nsta pl+1\nlda #j\nsta pk\n"
+        + _WRPULS,
+        # PWSWEEP's step.
+        "psw": "clc\nlda pl\nadc #<d\nsta pl\nlda pl+1\nadc #>d\nsta pl+1\n" + _WRPULS,
+        # PWADVAN past a sweep: PKBDTRK.
+        "pid": "lda phi\nora phi+1\nbne go\nlda #j\nsta pk\n" + _WRPULS,
+        # WRPULS of the width the table rests on.
+        "pwr": _WRPULS,
+        # SETFILT: CTFH (CTFL cleared with FINEFILTSWEEP) and the track amount.
+        "fst": "lda phi\nora phi+1\nbne go\nlda #c\nsta ch\n"
+        + ("lda #0\nsta cl\n" if finefiltsweep else "")
+        + "lda #j\nsta ck\n"
+        + _CUTOFF,
+        # FILTPRG's sweep step: the 11-bit cutoff (FINEFILTSWEEP) or CTFH.
+        "fsw": (
+            "lda ch\nsta v\nlda #0\nsta v+1\nasl v\nrol v+1\nasl v\nrol v+1\nasl v\nrol v+1\n"
+            "lda cl\nand #7\nora v\nclc\nadc #<d\nsta v\nlda v+1\nadc #>d\nand #7\nsta v+1\n"
+            "lda v\nand #7\nsta cl\nlsr v+1\nror v\nlsr v+1\nror v\nlsr v+1\nror v\nlda v\n"
+            "sta ch\n"
+            if finefiltsweep
+            else "clc\nlda ch\nadc #d\nsta ch\n"
+        )
+        + _CUTOFF,
+        # FILTPRG past a sweep: the track amount.
+        "fid": "lda phi\nora phi+1\nbne go\nlda #j\nsta ck\n" + _CUTOFF,
+        # $D416/$D415 of the cutoff the table rests on.
+        "frs": _CUTOFF,
+    }
 
 
 def templates(calcvibrato: bool, vibratotypes: bool) -> dict:

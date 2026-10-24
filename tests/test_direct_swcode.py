@@ -3,6 +3,7 @@ playroutine functions at the standard note table, trajectory by trajectory over 
 boundary states, for a light build and for a normal build (calculated and typed vibratos)."""
 
 import copy
+import dataclasses
 import random
 
 import pytest
@@ -12,7 +13,7 @@ from unitracker_grammar import code
 from unitracker_player.code import Machine
 
 from unitracker.direct.sidwizard import CLOCK, Transcriber
-from unitracker.direct.swcode import STATE
+from unitracker.direct.swcode import STATE, track_templates
 
 # pylint: disable=protected-access
 
@@ -217,3 +218,82 @@ def test_every_template_reads_only_its_cell_and_round_trips(builds):
         for text in one.code.values():
             assert code.printed(code.read(text)) == text
             assert set(code.symbols(code.read(text))) <= allowed
+
+
+def cell_routine(one, call, cell: str):
+    """``call``'s routine as the player compiles it for ``cell``."""
+    machine = Machine({}, {c: tuple(names.items()) for c, names in STATE.items()}, CLOCK[1])
+    params = code.params(one.routines[call.name])
+    return machine.compile(call.name, one.routines[call.name], dict(zip(params, call.args)), cell)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_pulse_tracking_is_wrpuls(builds, seed):
+    """SETPULW, PWSWEEP and PWADVAN on the voice's width and PKBDTRK, written by WRPULS."""
+    one, rng = builds[1], random.Random(seed)
+    one.code |= track_templates(True)
+    one.routines = {name: code.read(text) for name, text in one.code.items()}
+    v = voice(rng, one)
+    v.pw_hi, v.pw_lo, v.pw_kbd_track = rng.randrange(16), rng.randrange(256), rng.randrange(256)
+    for step in range(20):
+        kind, track = rng.choice(("pst", "psw", "pid", "pwr")), rng.choice((0, rng.randrange(256)))
+        width, delta = rng.randrange(0x8000), rng.randrange(-128, 128)
+        call = {
+            "pst": one.call("pst", w=width, j=track),
+            "psw": one.call("psw", d=delta),
+            "pid": one.call("pid", j=track),
+            "pwr": one.call("pwr"),
+        }[kind]
+        state = bytearray(((v.pw_hi << 8 | v.pw_lo) & 0xFF, v.pw_hi & 0xFF, v.pw_kbd_track))
+        v.note = rng.randrange(1, 0x60)
+        out = cell_routine(one, call, "pw")(0, 0, 0, v.note - 1, state)
+        if kind == "pst":
+            v.pw_hi, v.pw_lo, v.pw_kbd_track = width >> 8 & 0x7F, width & 0xFF, track
+        elif kind == "psw":
+            total = (v.pw_hi << 8 | v.pw_lo) + delta
+            v.pw_hi, v.pw_lo = total >> 8 & 0xFF, total & 0xFF
+        elif kind == "pid":
+            v.pw_kbd_track = track
+        high, _ = one.ref._wrpuls(v)
+        assert out & 0xFFF == (high << 8 | v.pw_lo) & 0xFFF, (step, kind)
+
+
+@pytest.mark.parametrize("seed", range(40))
+@pytest.mark.parametrize("fine", [False, True])
+def test_filter_tracking_is_the_cutoff_write(builds, seed, fine):
+    """SETFILT, FILTPRG's sweep and advance on CTFH/CTFL and the track, as $D416/$D415."""
+    # pylint: disable=too-many-locals
+    one, rng = builds[1], random.Random(seed)
+    one.code |= track_templates(fine)
+    one.routines = {name: code.read(text) for name, text in one.code.items()}
+    ref = copy.copy(one.ref)
+    ref.features = dataclasses.replace(ref.features, finefiltsweep=fine)
+    v = voice(rng, one)
+    ref.filter_controller_voice = v
+    ref.filter_cutoff_hi, ref.filter_cutoff_lo = rng.randrange(256), rng.randrange(8)
+    ref.filter_kbd_track = rng.randrange(256)
+    for step in range(20):
+        kind, track = rng.choice(("fst", "fsw", "fid", "frs")), rng.choice((0, rng.randrange(256)))
+        cut, delta = rng.randrange(256), rng.randrange(-128, 128)
+        call = {
+            "fst": one.call("fst", c=cut, j=track),
+            "fsw": one.call("fsw", d=delta),
+            "fid": one.call("fid", j=track),
+            "frs": one.call("frs"),
+        }[kind]
+        state = bytearray((ref.filter_cutoff_hi, ref.filter_cutoff_lo, ref.filter_kbd_track))
+        v.note = rng.randrange(1, 0x60)
+        out = cell_routine(one, call, "cut")(0, 0, 0, v.note - 1, state)
+        if kind == "fst":
+            ref.filter_cutoff_hi, ref.filter_kbd_track = cut, track
+            ref.filter_cutoff_lo = 0 if fine else ref.filter_cutoff_lo
+        elif kind == "fsw" and fine:
+            total = ((ref.filter_cutoff_hi << 3 | ref.filter_cutoff_lo & 7) + delta) & 0x7FF
+            ref.filter_cutoff_hi, ref.filter_cutoff_lo = total >> 3, total & 7
+        elif kind == "fsw":
+            ref.filter_cutoff_hi = (ref.filter_cutoff_hi + delta) & 0xFF
+        elif kind == "fid":
+            ref.filter_kbd_track = track
+        ref._write_regs()
+        snap = ref.snapshot()
+        assert out & 0x7FF == (snap[0x16] << 3 | snap[0x15] & 7), (step, kind)

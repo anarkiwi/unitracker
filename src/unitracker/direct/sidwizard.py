@@ -5,16 +5,14 @@ applied) carry its events, its tempo the rests after them; the WF, pulse and fil
 programs, the vibrato, slides and WRPITCH code modulators (docs/direct/sidwizard.md).
 """
 
-import math
 import sys
-from dataclasses import dataclass, field
 
 import numpy as np
 from pysidtracker import SidImage, gridcmp
-from pysidwizard import SWMPlayer, parse_sid_song
+from pysidwizard import parse_sid_song
 from pysidwizard.constants import INST_WF_TABLE_POS
-from pysidwizard.player import DEFAULT_HR_ADSR, PAL_CYCLES_PER_FRAME
-from unitracker_grammar import code, frequency
+from pysidwizard.player import DEFAULT_HR_ADSR
+from unitracker_grammar import code
 from unitracker_grammar.document import (
     CONT,
     END,
@@ -40,20 +38,14 @@ from unitracker_player.player import play
 
 from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
-from unitracker.direct.swcode import STATE, templates
+from unitracker.direct.swcode import STATE, templates, track_templates
+from unitracker.direct.swtrace import CLOCK, VOICES, Trace, TraceError, standard, trace
 
 VERSION = "1.23"
-# The clock whose note table F is nearest FREQTBL/FREQTBH at note k + 1: no clock is exact.
-CLOCK = (PAL_CYCLES_PER_FRAME, 985256)
-VOICES = 3
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
-MAX_FRAMES = 200000
 DUMMY = 256
-LOOPS = 4
 # Build flags this transcription refuses whenever the tune uses what they change.
 USED = {
-    "pwkeybtrack": "pulse keyboard tracking",
-    "filtkbtrack": "filter keyboard tracking",
     "pwresetsw": "the pulse reset switch",
     "filtresetsw": "the filter reset switch",
     "gateoffptr": "gate-off table pointers",
@@ -62,7 +54,7 @@ USED = {
 }
 
 
-class TranscribeError(ValueError):
+class TranscribeError(TraceError):
     """The tune uses something this transcription does not spell."""
 
 
@@ -71,175 +63,18 @@ def _col(image: bytes, pos: int, past=0):
     return image[pos] if pos < len(image) else past
 
 
+def _tracked(swm, table: str) -> bool:
+    """Whether a row of an instrument's ``table`` sets a keyboard-track amount."""
+    rows = (r for i in swm.instruments for r in _rows3(getattr(i, table)))
+    return any(len(r) > 2 and r[2] and r[0] < 0xFE for r in rows)
+
+
 def _signed(byte: int) -> int:
     return byte - 0x100 if byte >= 0x80 else byte
 
 
 def _rows3(table: bytes):
     return (table[i : i + 3] for i in range(0, len(table), 3))
-
-
-@dataclass
-class Read:  # pylint: disable=too-many-instance-attributes
-    """A pattern row as the reference player reads it at TICK_0 and applies it at TICK_2."""
-
-    frame: int
-    row: object
-    start: bool
-    newnote: bool
-    hr: object
-    dummy: bool
-    applied: bool = False
-    ins: object = None
-    number: int = 0
-    note: int = 0
-    slide: int = 0
-    tick2: bool = False
-    adsr: tuple = ()
-    keep_filter: bool = False
-    resume: tuple = ()
-    chord: tuple = None
-    skips: dict = field(default_factory=dict)
-
-
-@dataclass
-class Trace:
-    """The reference player's reads per voice, the frame each voice ended, refusals seen."""
-
-    reads: list = field(default_factory=lambda: [[] for _ in range(VOICES)])
-    ended: list = field(default_factory=lambda: [None] * VOICES)
-    starts: list = field(default_factory=lambda: [{} for _ in range(VOICES)])
-    refused: list = field(default_factory=list)
-    frames: int = 0
-
-
-def standard(swm) -> SWMPlayer:
-    """The reference player of ``swm`` with the document's note table: note k + 1 sounds
-    ``F(k)`` at :data:`CLOCK`, and SETFMOD's EXPTABH is built on it."""
-    ref = SWMPlayer(swm)
-    words = [frequency(k - 1, CLOCK[1]) for k in range(256)]
-    ref.freq_lo, ref.freq_hi = bytes(w & 0xFF for w in words), bytes(w >> 8 for w in words)
-    ref.exptabh = bytes(11) + ref.freq_hi
-    return ref
-
-
-def _ended(image: bytes, pos: int, wave: bool) -> bool:
-    """Whether a table walk at ``pos`` rests: an end, a jump nowhere or to itself."""
-    byte = _col(image, pos, 0xFF)
-    target = _col(image, pos + 1) if byte == 0xFE else 0
-    jumped = byte == 0xFE and (target == pos or target >= len(image) or wave and target >= 0x80)
-    return byte == 0xFF or jumped
-
-
-def trace(swm, frames: int = MAX_FRAMES) -> Trace:
-    """The reference player's reads until every voice ended or looped :data:`LOOPS` times."""
-    # pylint: disable=protected-access,too-many-statements,too-many-locals
-    ref, out = standard(swm), Trace()
-    voices = {id(v): i for i, v in enumerate(ref.voices)}
-    advance_row, apply_row = ref._advance_row, ref._apply_row
-    deferred, setfltp, staccato = ref._run_deferred_fx, ref._setfltp, ref._is_staccato_hr_tick
-    claims = []
-
-    def read(v):
-        advance_row(v)
-        if v.pending_row is not None:
-            i = voices[id(v)]
-            start = v.pattern_row == 1
-            if start:
-                out.starts[i].setdefault((id(v.sequence), v.seq_pos), []).append(ref.frame_idx)
-            hr = ref._upcoming_hr_instrument(v, v.pending_row)
-            new = ref._pending_row_has_new_note(v)
-            dummy = v.instrument is None
-            out.reads[i].append(Read(ref.frame_idx, v.pending_row, start, new, hr, dummy))
-
-    def applied(v, row):
-        rec = out.reads[voices[id(v)]][-1]
-        note = row.note
-        rec.slide = v.slide_vib
-        rec.tick2 = (
-            note is not None
-            and 0 < note < 0x60
-            and (row.fx == 0x03 or row.instrument == LEGATO or v.slide_vib == 0xFF)
-        )
-        if rec.tick2:
-            held = ref.filter_controller_voice is v
-            filt = (ref.filt_pos, ref.filter_sweep_count) if held else None
-            wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
-            rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
-        before = v.instrument
-        apply_row(v, row)
-        rec.applied, rec.ins, rec.number = True, v.instrument, v.instrument_idx
-        if v.instrument is not before and not rec.newnote:
-            out.refused.append(f"an instrument selected without a note, frame {ref.frame_idx}")
-        rec.note = v.note + v.octave_shift + v.transpose - 1
-        rec.adsr = (v.sid_ad, v.sid_sr)
-        rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
-
-    def run_deferred(v):
-        pending = v.deferred_fx is not None
-        deferred(v)
-        if pending:
-            rec = out.reads[voices[id(v)]][-1]
-            rec.adsr = (v.sid_ad, v.sid_sr)
-            rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
-
-    def claim(v):
-        setfltp(v)
-        claims.append(v)
-
-    def hard(v, pre, apply_sc=2):
-        fires = staccato(v, pre, apply_sc)
-        if fires:
-            rec = out.reads[voices[id(v)]][-1]
-            wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
-            rec.skips[ref.frame_idx - rec.frame] = (wave, v.instrument)
-        return fires
-
-    ref._advance_row, ref._apply_row, ref._run_deferred_fx = read, applied, run_deferred
-    ref._setfltp, ref._is_staccato_hr_tick = claim, hard
-    for frame in range(frames):
-        claims.clear()
-        ref.play_frame()
-        _claims(ref, claims, out)
-        for i, v in enumerate(ref.voices):
-            if v.sequence_ended and out.ended[i] is None:
-                out.ended[i] = frame
-        if out.refused or _looped(out, frame):
-            out.frames = frame + 1
-            return out
-    raise TranscribeError(f"no loop within {frames} frames")
-
-
-def _looped(out: Trace, frame: int) -> bool:
-    """Whether every voice ended, or its pattern starts repeat and all of them together have
-    repeated :data:`LOOPS` times by ``frame``."""
-    periods, first = [], 0
-    for ended, starts in zip(out.ended, out.starts):
-        if ended is not None:
-            continue
-        seen = max(starts.values(), key=len, default=[])
-        if len(seen) < 3:
-            return False
-        periods.append(seen[-1] - seen[-2])
-        first = max(first, seen[0])
-    return not periods or frame >= first + LOOPS * math.lcm(*periods)
-
-
-def _claims(ref, claims: list, out: Trace) -> None:
-    """Per frame: a STRTSND another voice's claim overrides keeps the filter; a note of the
-    filter's voice that leaves it walking another instrument's table is refused."""
-    holder = ref.filter_controller_voice
-    voices = {id(v): i for i, v in enumerate(ref.voices)}
-    for v in claims:
-        rec = out.reads[voices[id(v)]][-1]
-        first = (rec.ins.filter_table or b"\xff")[0] if rec.ins is not None else 0xFF
-        took = first not in (0x00, 0xFF)
-        if took and holder is not v:
-            rec.keep_filter = True
-        elif not took and holder is v and not (first == 0xFF and ref.swm.filter_stop_rewinds):
-            out.refused.append(
-                f"a note of the filter's voice that does not take it, frame {ref.frame_idx}"
-            )
 
 
 class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
@@ -252,6 +87,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         if refused:
             raise TranscribeError(f"{self.feats.name} build: {', '.join(refused)}")
         self.code = templates(self.feats.calcvibrato, self.feats.vibratotypes)
+        self.pwkb = self.feats.pwkeybtrack and _tracked(swm, "pw_table")
+        self.fkb = self.feats.filtkbtrack and _tracked(swm, "filter_table")
+        if self.pwkb or self.fkb:
+            self.code |= track_templates(self.feats.finefiltsweep)
         self.routines = {name: code.read(text) for name, text in self.code.items()}
         self.programs = {"ctrl": {}, "pw": {}, "filter": {}}
         self.ins, self.used, self.phrases, self.dummies = {}, [], {}, []
@@ -267,16 +106,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out.append("no instruments, or fewer orderlists than voices")
         rows = [r for p in swm.patterns for r in p.rows]
         uses = {
-            "pwkeybtrack": any(
-                len(r) > 2 and r[2] and r[0] < 0xFE
-                for i in swm.instruments
-                for r in _rows3(i.pw_table)
-            ),
-            "filtkbtrack": any(
-                len(r) > 2 and r[2] and r[0] < 0xFE
-                for i in swm.instruments
-                for r in _rows3(i.filter_table)
-            ),
             "pwresetsw": any(i.control & 0x40 for i in swm.instruments),
             "filtresetsw": any(i.control & 0x80 for i in swm.instruments),
             "gateoffptr": any(
@@ -294,6 +123,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             ),
         }
         out += [USED[k] for k, used in uses.items() if used and getattr(feats, k)]
+        if feats.pwkeybtrack and _tracked(swm, "pw_table") and self._held_rows():
+            out.append("WF rows held over ticks with pulse keyboard tracking, their carry")
         if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
             out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
         if feats.fastspeedbind or feats.vibslidealways:
@@ -530,61 +361,75 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         program = Program([Row(first), *lead, *rows], None if loop is None else loop + skip)
         return self._named("ctrl", "c", program)
 
-    def _swept(self, image: bytes, pos: int, row, cell: str, step, count=None) -> tuple:
-        """``(rows, loop)`` of a pulse or filter program from ``pos``: ``row(pos)`` gives a set
-        row's keys, ``step(byte)`` a sweep's per-tick expression; resumed with sweep ``count``
-        from STRTSND's tick, which it leaves to the voice's bindings."""
-        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
+    def _swept(self, image: bytes, pos: int, cell: str, rows_of: dict, count=None) -> tuple:
+        """``(rows, loop)`` of a pulse or filter program from ``pos``; ``rows_of`` gives the
+        keys of a ``set`` row and of a ``sweep``'s ticks, its ``advance`` tick, a ``jump`` to a
+        sweep and the ``rest`` a tracked table keeps writing. Resumed with sweep ``count``, it
+        leaves STRTSND's tick to the voice's bindings."""
         rows, at = [Row({} if count is None else {cell: "none"})], {}
         first = True
         while True:
             if pos >= len(image) or image[pos] == 0xFF:
-                return rows, None
+                return rows + rows_of["rest"], None
             if image[pos] == 0xFE:
                 target = _col(image, pos + 1)
                 if target == pos or target >= len(image):
-                    return rows, None
+                    return rows + rows_of["rest"], None
                 if image[target] in (0xFE, 0xFF):
                     raise TranscribeError(f"a {cell} jump to a jump or an end")
                 if image[target] < 0x80:
-                    rows.append(Row({}))
+                    rows.append(Row(rows_of["jump"]))
                 pos = target
             if pos in at:
                 return rows, at[pos]
             byte = image[pos]
             if first and count is not None and not byte & 0x80:
-                left = byte - count
-                if left > 0:
-                    rows.append(Row({"hold": left, cell: step(_col(image, pos + 1))}))
-                rows.append(Row({cell: "none"} if left > 0 else {}))
+                rows += self._sweep(rows_of, pos, byte - count)
                 first = False
                 pos += 3
                 continue
             at[pos] = len(rows)
             if byte & 0x80:
-                rows.append(Row(row(pos)))
+                rows.append(Row(rows_of["set"](pos)))
             elif first:
                 raise TranscribeError(f"a {cell} table that starts with a sweep")
-            elif byte:
-                rows.append(Row({"hold": byte, cell: step(_col(image, pos + 1))}))
-                rows.append(Row({cell: "none"}))
             else:
-                rows.append(Row({}))
+                rows += self._sweep(rows_of, pos, byte)
             first = False
             pos += 3
+
+    @staticmethod
+    def _sweep(rows_of: dict, pos: int, ticks: int) -> list:
+        """A sweep row's ``ticks`` steps, then its advance tick."""
+        steps = [Row({"hold": ticks} | rows_of["sweep"](pos))] if ticks > 0 else []
+        return steps + [Row(rows_of["advance"](pos, ticks > 0))]
 
     def pulse(self, ins, pos=None, count=None) -> str:
         """The ``pw`` name of instrument ``ins``'s pulse program, from the tick after
         STRTSND's, or resumed from ``pos`` at sweep ``count``."""
         image = self.ref._image(ins)  # pylint: disable=protected-access
-        rows, loop = self._swept(
-            image,
-            INST_WF_TABLE_POS + len(ins.wf_table) + 1 if pos is None else pos,
-            lambda p: {"pw": ((image[p] & 0x7F) << 8 | _col(image, p + 1)) & 0xFFF},
-            "pw",
-            lambda d: Expr(canonical(f"v + {_signed(d)}")),
-            count,
-        )
+
+        def width(p):
+            return ((image[p] & 0x7F) << 8 | _col(image, p + 1)) & 0xFFF
+
+        if self.pwkb:
+            rows_of = {
+                "set": lambda p: {"pw": self.call("pst", w=width(p), j=_col(image, p + 2))},
+                "sweep": lambda p: {"pw": self.call("psw", d=_signed(_col(image, p + 1)))},
+                "advance": lambda p, _: {"pw": self.call("pid", j=_col(image, p + 2))},
+                "jump": {"pw": self.call("pwr")},
+                "rest": [Row({"pw": self.call("pwr")})],
+            }
+        else:
+            rows_of = {
+                "set": lambda p: {"pw": width(p)},
+                "sweep": lambda p: {"pw": Expr(canonical(f"v + {_signed(_col(image, p + 1))}"))},
+                "advance": lambda p, swept: {"pw": "none"} if swept else {},
+                "jump": {},
+                "rest": [],
+            }
+        start = INST_WF_TABLE_POS + len(ins.wf_table) + 1 if pos is None else pos
+        rows, loop = self._swept(image, start, "pw", rows_of, count)
         return self._named("pw", "pw", Program(rows, loop))
 
     def filter(self, ins, pos=None, count=None) -> str:
@@ -593,14 +438,31 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         image = self.ref._image(ins)  # pylint: disable=protected-access
         scale = 1 if self.feats.finefiltsweep else 8
 
-        def row(p):
-            return {"res": image[p] & 0x0F, "mode": image[p] & 0x70, "cut": _col(image, p + 1) << 3}
+        def bands(p):
+            return {"res": image[p] & 0x0F, "mode": image[p] & 0x70}
 
+        if self.fkb:
+            rows_of = {
+                "set": lambda p: bands(p)
+                | {"cut": self.call("fst", c=_col(image, p + 1), j=_col(image, p + 2))},
+                "sweep": lambda p: {"cut": self.call("fsw", d=_signed(_col(image, p + 1)))},
+                "advance": lambda p, _: {"cut": self.call("fid", j=_col(image, p + 2))},
+                "jump": {"cut": self.call("frs")},
+                "rest": [Row({"cut": self.call("frs")})],
+            }
+        else:
+            rows_of = {
+                "set": lambda p: bands(p) | {"cut": _col(image, p + 1) << 3},
+                "sweep": lambda p: {
+                    "cut": Expr(canonical(f"v + {scale * _signed(_col(image, p + 1))}"))
+                },
+                "advance": lambda p, swept: {"cut": "none"} if swept else {},
+                "jump": {},
+                "rest": [],
+            }
         if pos is None:
             pos = INST_WF_TABLE_POS + len(ins.wf_table) + 1 + len(ins.pw_table) + 1
-        rows, loop = self._swept(
-            image, pos, row, "cut", lambda d: Expr(canonical(f"v + {scale * _signed(d)}")), count
-        )
+        rows, loop = self._swept(image, pos, "cut", rows_of, count)
         return self._named("filter", "f", Program(rows, loop))
 
     def resume(self, ins, wave: tuple, pulse=None, filt=None, skip: bool = True) -> str:
@@ -783,6 +645,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             commands, atom = {}, "-"
             if rec.newnote and not tick and not rec.dummy:
                 commands = {"pw": "hold", "cut": "hold"}
+                if self.fkb:
+                    commands["cut"] = self.call("frs") if rec.holder else "hold"
             if rec.newnote and rec.dummy and not tick:
                 state["dummy"] = state["dummy"] or self.dummy(rec.hr)
                 commands["run"] = self.ins[state["dummy"]].get("ctrl")
@@ -939,14 +803,17 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]
         defs += [Section(kind, store) for kind, store in self.programs.items() if store]
         named = {s for t in self.used for s in code.symbols(self.routines[t])}
-        state = [(k, size) for k, size in STATE["freq"].items() if k in named]
+        state = {
+            cell: [(k, size) for k, size in names.items() if k in named]
+            for cell, names in STATE.items()
+        }
         header = Header(
             VERSION,
             self.meta,
             clock=CLOCK,
             tempo=1,
             slots=self.slots(),
-            state={"freq": state} if state else None,
+            state={cell: names for cell, names in state.items() if names} or None,
         )
         mods = [
             (signature(name, code.params(self.routines[name])), Code(self.routines[name]))
