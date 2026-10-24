@@ -16,7 +16,7 @@ dependencies = [
     "numpy>=1.23",
     "tqdm>=4",
     "pysidtracker>=0.36.0",
-    "jennings>=0.2.0",
+    "jennings[superopt] @ git+https://github.com/anarkiwi/jennings@superopt",
     "pygoattracker>=0.7.3",
     "pydefmon>=0.10.1",
     "pysidwizard>=0.3.5",
@@ -26,9 +26,11 @@ dependencies = [
     "grimp>=3.5",
     "sympy>=1.12",
     "tiktoken>=0.7",
+    "egglog>=11",
 ]
 
 [project.optional-dependencies]
+gpu = ["cupy-cuda12x>=13"]
 dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tokenizers>=0.20", "zstandard>=0.21", "filelock>=3.12", "pytest-timeout>=2.2", "import-linter>=2.15"]
 
 [project.urls]
@@ -37,6 +39,7 @@ Homepage = "https://github.com/anarkiwi/unitracker"
 [project.scripts]
 unitracker-lift = "unitracker.cli:lift_main"
 unitracker-modfit = "unitracker.analysis.cli:main"
+unitracker-code6502 = "unitracker.optimiser.code6502.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
