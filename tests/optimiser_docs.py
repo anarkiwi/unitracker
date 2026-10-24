@@ -268,6 +268,7 @@ ONCE = doc(
     "        i1:{ad:9,sr:240}\n"
     "      phrase:\n"
     "        p1:[C4.i1 pw:800,-*3,- pw:none,D pw:'v + 8',-*2,- pw:none]\n"
+)
 
 # templates of the document's own that play as prelude calls (code and expressions), and one
 # (wob) that plays as none
