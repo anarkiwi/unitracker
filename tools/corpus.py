@@ -29,15 +29,18 @@ from unitracker.optimiser.inline import MODES, inline
 FIELDS = ("doc", "path", "md5", "player", "verified", "cells", "first", "gap")
 
 
-def check_one(row: dict, opts: dict) -> dict:
+def check_one(row: dict, opts: dict) -> dict | None:
     """One tune's result row: its format, whether its document plays the native grid over
-    ``frames`` ticks, the differing cells and the first, or the exception it raised."""
+    ``frames`` ticks, the differing cells and the first, or the exception it raised; None for a
+    multi-SID tune unless ``opts["multi"]``."""
     res = dict.fromkeys(FIELDS, "")
     res.update(doc=shared.name(row), path=row["path"], md5=row.get("md5", ""), verified="no")
     out = Path(opts["out"])
     try:
         with deadline(opts["timeout"]):
             raw = shared.tune(row["path"], opts["hvsc"]).read_bytes()
+            if not opts.get("multi") and shared.multi_sid(raw):
+                return None
             res["player"], _, verify = cli.lifter(raw)
             cells, text = verify(raw, opts["subtune"], opts["frames"])
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -77,7 +80,7 @@ def check(args) -> int:
     """The ``check`` command: write each tune's document or error and ``results.csv``."""
     args.out.mkdir(parents=True, exist_ok=True)
     opts = {"out": str(args.out), "hvsc": args.hvsc, "timeout": args.timeout}
-    opts.update(subtune=args.subtune, frames=args.frames)
+    opts.update(subtune=args.subtune, frames=args.frames, multi=args.multi_sid)
     tunes = shared.rows(args.tunes or shared.REFERENCES, args.player, args.subtunes)
     rows = [None] * len(tunes)
     tasks = [(row, opts) for row in tunes]
@@ -90,7 +93,8 @@ def check(args) -> int:
                 "verified": "no",
                 "gap": f"{type(error).__name__}: {error}",
             }
-    rows.sort(key=lambda r: (r["player"], r["doc"]))
+    print(f"{rows.count(None)} multi-SID tunes excluded")
+    rows = sorted(filter(None, rows), key=lambda r: (r["player"], r["doc"]))
     report(rows)
     with (args.out / "results.csv").open("w", newline="") as fh:
         writer = csv.DictWriter(fh, FIELDS)
@@ -150,10 +154,11 @@ def _form(name: str, text: dict, opts: dict) -> str:
     return optimise(text[base], opts["ticks"], **spec).text
 
 
-def forms_one(row: dict, opts: dict) -> dict:
+def forms_one(row: dict, opts: dict) -> dict | None:
     """One tune's forms under ``out/<form>/<doc>.yaml``, each kept from an earlier run, a failed
     one's exception (a timeout's from the start) in ``<doc>.err``, and ``out/meta/<doc>.json``
-    with its format and song length in ticks."""
+    with its format and song length in ticks; None for a multi-SID tune it lifts unless
+    ``opts["multi"]``."""
     out, doc = Path(opts["out"]), shared.name(row)
     meta, text = out / "meta" / f"{doc}.json", {}
     res = {"doc": doc} | dict.fromkeys(opts["forms"], "")
@@ -176,6 +181,9 @@ def forms_one(row: dict, opts: dict) -> dict:
             with deadline(opts["timeout"]):
                 if name == "lifted":
                     raw = shared.tune(row["path"], opts["hvsc"]).read_bytes()
+                    if not opts.get("multi") and shared.multi_sid(raw):
+                        err.unlink()
+                        return None
                     meta.parent.mkdir(parents=True, exist_ok=True)
                     meta.write_text(json.dumps({"player": cli.lifter(raw)[0]}), "utf-8")
                     text[name] = cli.lift(raw, opts["subtune"])
@@ -197,13 +205,15 @@ def write_forms(args) -> int:
     """The ``forms`` command: each tune's forms and ``forms.csv``, its forms' status."""
     opts = {"out": str(args.out), "hvsc": args.hvsc, "timeout": args.timeout}
     opts.update(subtune=args.subtune, ticks=args.ticks, limit=args.limit, retry=args.retry)
-    opts["forms"] = with_bases(args.forms or forms())
+    opts.update(forms=with_bases(args.forms or forms()), multi=args.multi_sid)
     tunes = shared.rows(args.tunes, args.player, args.subtunes)
     rows = []
     for i, value, error in tqdm(
         imap(forms_one, [(r, opts) for r in tunes], args.jobs), total=len(tunes), unit="sid"
     ):
-        rows.append(value or {"doc": shared.name(tunes[i]), "lifted": repr(error)})
+        if value or error is not None:
+            rows.append(value or {"doc": shared.name(tunes[i]), "lifted": repr(error)})
+    print(f"{len(tunes) - len(rows)} multi-SID tunes excluded")
     rows.sort(key=lambda r: r["doc"])
     fields = ["doc", "player", "ticks", *opts["forms"]]
     with (args.out / "forms.csv").open("w", newline="") as fh:
@@ -218,7 +228,9 @@ def write_forms(args) -> int:
 
 def render(data, song, nframes):
     """The survey renderer: 1-based ``song`` of a ``.sid`` lifted by its direct lifter and its
-    document played on unitracker-player."""
+    document played on unitracker-player; a multi-SID tune is refused."""
+    if shared.multi_sid(data):
+        raise ValueError("a multi-SID tune")
     text = cli.lift(data, song - 1)
     played = play(text, ticks=nframes)
     return np.asarray(played, np.int16), {"backend": cli.lifter(data)[0], "chars": len(text)}
@@ -238,6 +250,7 @@ def main(argv=None) -> int:
     p.add_argument("--subtunes", type=int, help="a list's tunes with at most this many")
     p.add_argument("--timeout", type=float, default=0, help="seconds per tune (0: none)")
     p.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) // 4))
+    p.add_argument("--multi-sid", action="store_true", help="include multi-SID tunes")
     p = sub.add_parser("forms", help="write each tune's lifted and optimised forms, cached")
     p.add_argument("tunes", nargs="+", metavar="TUNE.sid|LIST.csv|DIR")
     p.add_argument("--hvsc", type=Path, default=os.environ.get("HVSC"))
@@ -251,6 +264,7 @@ def main(argv=None) -> int:
     p.add_argument("--timeout", type=float, default=600, help="seconds per form (0: none)")
     p.add_argument("--retry", action="store_true", help="retry forms that failed before")
     p.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) - 2))
+    p.add_argument("--multi-sid", action="store_true", help="include multi-SID tunes")
     args = ap.parse_args(argv)
     return write_forms(args) if args.command == "forms" else check(args)
 

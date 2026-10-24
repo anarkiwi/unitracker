@@ -86,7 +86,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def _unsupported(self) -> list:
         """What the tune uses that this transcription refuses."""
         swm, feats, out = self.swm, self.feats, []
-        if swm.frame_speed != 1 or swm.play_gate or any(swm.filter_init):
+        if swm.frame_speed != 1 or self.ref.image.play_gate or any(self.ref.image.filter_init):
             out.append("multispeed, a play gate or an initial filter")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
@@ -126,10 +126,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         if (
             self.feats.frame1switch
             and ins.control & 0x08
-            and not self.swm.first_frame_fixed_waveform
+            and not self.ref.image.quirks.first_frame_fixed_waveform
         ):
             high = 1
-            if self.swm.first_frame_freq_by_track:
+            if self.ref.image.quirks.first_frame_freq_by_track:
                 high, index = 2, (voice * 7 - 1) & 0xFF
         return self.call(
             "snd",
@@ -142,13 +142,12 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             **self.amp((ins.vibrato >> 4) << 3),
         )
 
-    def vibrato_byte(self, ins, byte: int, clear: bool) -> Call:
+    def vibrato_byte(self, ins, byte: int) -> Call:
         """FORCVIB and SETVIBR of vibrato ``byte`` on instrument ``ins``."""
         kind, freq = ins.control & 0x30, byte & 0x0F
         return self.call(
             "vfx",
             c=kind,
-            w=int(clear),
             i=self._counter(kind, freq),
             q=2 * freq,
             **self.amp((byte >> 4) << 3),
@@ -159,7 +158,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def instrument(self, ins, number: int, voice: int) -> str:
         """The name of SID-Wizard instrument ``ins`` (number ``number``) on ``voice``."""
         name = f"i{number}"
-        if self.swm.first_frame_freq_by_track and self.feats.frame1switch:
+        if self.ref.image.quirks.first_frame_freq_by_track and self.feats.frame1switch:
             name = f"i{number + 64 * (voice + 1)}"
         if name in self.ins:
             return name
@@ -254,7 +253,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             elif high in (0x70, 0xE0):
                 pass
             elif high == 0x80 and ins is not None:
-                out["tick.freq"] = self.vibrato_byte(ins, low << 4 | ins.vibrato & 0x0F, False)
+                out["tick.freq"] = self.vibrato_byte(ins, low << 4 | ins.vibrato & 0x0F)
             elif high == 0x90:
                 out["tick.freq"] = self.call("vfq", q=low << 1)
             elif high == 0xA0:
@@ -282,7 +281,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             ),
             0x05: lambda: {"ad": value},
             0x06: lambda: {"sr": value},
-            0x08: lambda: {"tick.freq": self.vibrato_byte(ins, value, False)} if ins else None,
+            0x08: lambda: {"tick.freq": self.vibrato_byte(ins, value)} if ins else None,
             0x0D: lambda: self._dfx(value),
             0x16: lambda: {"tick.freq": self.call("kty", c=value & 0x30)},
             0x0F: lambda: {("fx" if rec.cutfirst else "late") + ".cut": self.call("fhi", c=value)},
@@ -446,7 +445,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             byte = (note & 0x0F) << 4 | ins.vibrato & 0x0F
             if "tick.freq" in commands:
                 raise TranscribeError("two FX of one cell on a row")
-            return Event("-", commands=commands | {"tick.freq": self.vibrato_byte(ins, byte, True)})
+            return Event("-", commands=commands | {"tick.freq": self.vibrato_byte(ins, byte)})
         if note == NPORTAM:
             return Event(
                 "-",

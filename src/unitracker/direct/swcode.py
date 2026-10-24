@@ -1,7 +1,7 @@
 """SID-Wizard's per-tick frequency modulators as 6502 code templates.
 
-The freq cell's state is the player's: ``o`` vibrato_offset, ``s`` set once a WF row's pitch
-drives the frequency, ``z`` FREQLO/FREQHI, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``p`` VIBFREQU,
+The freq cell's state is the player's: ``z`` FREQLO/FREQHI, which WF pitch rows load and
+VIBSLIDE steps in place, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``p`` VIBFREQU,
 ``fm`` FREQMOD, ``k`` SLIDEVIB, ``dd`` DETUNER, ``cm``/``ca``/``cv`` WRPITCH's carry; the pw
 cell's ``pl`` PWLOGHO/PWHIGHO, ``pk`` PKBDTRK, mirrored in the freq cell's ``ml``/``mk`` for
 WRPULS's carry ``cs`` (``mt`` its scratch), ``vt``/``vi``/``vq``/``vr``/``vg`` the instrument's
@@ -13,8 +13,6 @@ import re
 
 STATE = {
     "freq": {
-        "o": 2,
-        "s": 1,
         "z": 2,
         "dc": 1,
         "vc": 1,
@@ -40,29 +38,25 @@ STATE = {
 }
 
 _FIRST = "lda phi\nora phi+1\nbne step\n"
-_ADD = "clc\nlda o\nadc fm\nsta o\nlda o+1\nadc fm+1\nsta o+1\nrts\n"
-_SUB = "sec\nlda o\nsbc fm\nsta o\nlda o+1\nsbc fm+1\nsta o+1\nrts\n"
+_ADD = "clc\nlda z\nadc fm\nsta z\nlda z+1\nadc fm+1\nsta z+1\nrts\n"
+_SUB = "sec\nlda z\nsbc fm\nsta z\nlda z+1\nsbc fm+1\nsta z+1\nrts\n"
 _INCVIBR = "clc\nlda fm\nadc dc\nsta fm\nlda fm+1\nadc #0\nsta fm+1\njmp dov\n"
 _STEP = (
-    "step:\nlda k\ncmp #131\nbeq pm\ncmp #255\n{np}cmp #129\nbeq up\ncmp #130\nbeq dn\ntax\n"
-    "bmi done\nbne nv\n{inc}nv:\nlda dc\nbmi dov\ndec dc\ndone:\nrts\ndov:\nlda vc\nbne cnt\n"
-    "lda p\nsta vc\ncnt:\ndec vc\nlda vc\nasl\ncmp p\nbcc up\ndn:\n"
+    "step:\nlda k\ncmp #131\nbeq pm\ncmp #255\nbeq {np}\ncmp #129\nbeq up\ncmp #130\nbeq dn\n"
+    "tax\nbmi done\nbne nv\n{inc}nv:\nlda dc\nbmi dov\ndec dc\ndone:\nrts\ndov:\nlda vc\n"
+    "bne cnt\nlda p\nsta vc\ncnt:\ndec vc\nlda vc\nasl\ncmp p\nbcc up\ndn:\n"
     + _SUB
     + "up:\n"
     + _ADD
-    + "pm:\nlda o+1\nbmi neg\nora o\nbeq neg\nlda fm\ncmp o\nlda fm+1\nsbc o+1\nbcs zero\nclc\n"
-    "lda o\nsbc fm\nsta o\nlda o+1\nsbc fm+1\nsta o+1\nrts\nneg:\nsec\nlda #0\nsbc o\ntax\n"
-    "lda #0\nsbc o+1\ncpx fm\nsbc fm+1\nbcc zero\nsec\nlda o\nadc fm\nsta o\nlda o+1\nadc fm+1\n"
-    "sta o+1\nrts\nzero:\nlda #0\nsta o\nsta o+1\nrts\n"
 )
-# PORTAME with PORTAVIBRA: tested one unit nearer, its end (PORTEND) the instrument's vibrato.
-_PORTAVIBRA = (
-    "pm:\nlda o+1\nbmi neg\nlda o\ncmp fm\nlda o+1\nsbc fm+1\nbcc zero\nclc\nlda o\nsbc fm\nsta o\n"
-    "lda o+1\nsbc fm+1\nsta o+1\nrts\nneg:\nlda o\neor #255\ntax\nlda o+1\neor #255\ncpx fm\n"
-    "sbc fm+1\nbcc zero\nsec\nlda o\nadc fm\nsta o\nlda o+1\nadc fm+1\nsta o+1\nrts\nzero:\n"
-    "lda #0\nsta o\nsta o+1\nlda vt\nsta k\nlda vi\nsta vc\nlda vq\nsta p\n{amp}rts\n"
+# PORTAME: d = FREQTBL[DPITCH] - z - c (17 bits, c the PORTAVIBRA borrow); within FREQMOD of
+# the target PORTEND ({e}), else z steps FREQMOD + 1 toward it. TARGETN (tgt) loads the target.
+_PORTAME = (
+    "tgt:\nldx ne\ninx\nlda F.lo-1,x\nsta z\nlda F.hi-1,x\nsta z+1\nrts\npm:\nldx ne\ninx\n{c}\n"
+    "lda F.lo-1,x\nsbc z\ntay\nlda F.hi-1,x\nsbc z+1\nbcc pdn\ncpy fm\nsbc fm+1\nbcc {e}\nsec\n"
+    "lda z\nadc fm\nsta z\nlda z+1\nadc fm+1\nsta z+1\nrts\npdn:\npha\ntya\nclc\nadc fm\npla\n"
+    "adc fm+1\nbcs {e}\nclc\nlda z\nsbc fm\nsta z\nlda z+1\nsbc fm+1\nsta z+1\nrts\n{end}"
 )
-# SETFMOD with CALCVIBRATO: FREQMOD at ceil(A / 2) + DPITCH, r that half + 1 (0: none).
 _CALC = (
     "lda #r\nbeq az\nlda ne\nclc\nadc #r\ncmp #204\nbcc ay\nlda #203\nay:\ncmp #107\n"
     "bcs ar\nsec\nsbc #11\nbcc az\ntax\nlda F.hi-1,x\nsta fm\nlda #0\nsta fm+1\njmp ad\naz:\n"
@@ -70,10 +64,6 @@ _CALC = (
     "lda F.hi-1,x\nsta fm+1\nad:\n"
 )
 _CONST = "lda #<g\nsta fm\nlda #>g\nsta fm+1\n"
-_TOWARD = (
-    "ldx ne\ninx\nsec\nlda z\nsbc F.lo-1,x\nsta o\nlda z+1\nsbc F.hi-1,x\nsta o+1\nlda #131\n"
-    "sta k\n"
-)
 _WRPITCH = (
     "go:\nlda cm\nbeq c0\ncmp #1\nbeq c1\ncmp #3\nbeq c3\nlda ne\nclc\nadc #1\nclc\nadc ca\n"
     "jmp sum\nc3:\nlda cv\ncmp #255\nbne cvo\nlda ca\ncmp #2\nbne cvo\nlda cs\ncvo:\nlsr\njmp sum\n"
@@ -164,31 +154,28 @@ def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -
     """The templates' texts for a build: its SETFMOD, whether SLIDEVIB 0 is INCVIBR, and
     whether a portamento ends in the instrument's vibrato."""
     amp = _CALC if calcvibrato else _CONST
-    target = "bne nf\nlda #0\nsta o\nsta o+1\nrts\nnf:\n" if portavibra else "beq pm\n"
-    step = _STEP.format(inc=_INCVIBR if vibratotypes else "", np=target)
-    keep = ""
+    keep, end = "", ""
     if portavibra:
         held = _CALC.replace("#r", "vr") if calcvibrato else _CONST.replace("#<g", "vg")
         held = re.sub(r"\ba([zyrd])\b", r"p\1", held.replace("#>g", "vg+1"))
-        tail = step[step.index("pm:\n") :]
-        step = step.replace(tail, _PORTAVIBRA.format(amp=held))
+        end = "pe:\nlda vt\nsta k\nlda vi\nsta vc\nlda vq\nsta p\n" + held + "jmp tgt\n"
         stored = "lda #r\nsta vr\n" if calcvibrato else "lda #<g\nsta vg\nlda #>g\nsta vg+1\n"
         keep = "lda #c\nsta vt\nlda #i\nsta vi\nlda #q\nsta vq\n" + stored
+    step = _STEP.format(inc=_INCVIBR if vibratotypes else "", np="tgt" if portavibra else "pm")
+    step += _PORTAME.format(
+        c="clc" if portavibra else "sec", e="pe" if portavibra else "tgt", end=end
+    )
     return {
-        # FREQLO/FREQHI of the note masked to 7 bits; a WF pitch row (phi 0) clears the offset.
-        "tone": (
-            "lda phi\nora phi+1\nbne go\nsta o\nsta o+1\nlda #1\nsta s\ngo:\nlda s\nbeq done\n"
-            "lda nn\nclc\nadc #1\nand #127\ntax\nclc\nlda F.lo-1,x\nadc o\nsta z\n"
-            "lda F.hi-1,x\nadc o+1\nsta z+1\ndone:\nlda z\nsta v\nlda z+1\nsta v+1\nrts\n"
-        ),
+        # ABSPTCH/RELPTCH: a WF pitch row (phi 0) loads FREQLO/FREQHI of the note masked to 7 bits.
+        "tone": "lda phi\nora phi+1\nbne go\nlda nn\nclc\nadc #1\nand #127\ntax\nlda F.lo-1,x\n"
+        "sta z\nlda F.hi-1,x\nsta z+1\ngo:\nlda z\nsta v\nlda z+1\nsta v+1\nrts\n",
         # WRPITCH: a WF row (phi 0) sets the detune (f 1) and the carry, mode c (3 skipped), b.
         "det": "lda phi\nora phi+1\nbne go\nlda #f\nbeq keep\nlda #d\nsta dd\nkeep:\nlda #c\n"
         "sta cm\nlda #b\nsta ca\n" + _WRPITCH,
         # SETDETU: a FX's detune, the carry left as the WF walk made it.
         "dfx": "lda phi\nora phi+1\nbne go\nlda #d\nsta dd\n" + _WRPITCH,
-        # STRTSND: SLIDEVIB, SETVIB0, SETVIBR, no detune, the pitch held; h 1 or 2 writes FREQHI.
-        "snd": "lda phi\nora phi+1\nbeq init\nrts\ninit:\nsta o\nsta o+1\nsta s\nsta dd\nlda #c\n"
-        "sta k\n"
+        # STRTSND: SLIDEVIB, SETVIB0, SETVIBR, no detune; h 1 or 2 writes FREQHI.
+        "snd": "lda phi\nora phi+1\nbeq init\nrts\ninit:\nsta dd\nlda #c\nsta k\n"
         "lda #255\nsta cv\n"
         "lda #d\nsta dc\nlda #i\nsta vc\nlda #q\nsta p\n"
         + keep
@@ -201,20 +188,18 @@ def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -
         "wt": _FIRST + "rts\n" + step,
         # VIBSLIDE: the vibrato or slide SLIDEVIB selects.
         "stp": step,
-        # FORCVIB and SETVIBR (w 1 also clears the offset, as a note-column vibrato), then step.
-        "vfx": _FIRST
-        + "lda #c\nsta k\nlda #w\nbeq kept\nlda #0\nsta o\nsta o+1\nkept:\nlda #i\nsta vc\n"
-        "lda #q\nsta p\n" + amp + step,
+        # FORCVIB and SETVIBR, then step.
+        "vfx": _FIRST + "lda #c\nsta k\nlda #i\nsta vc\nlda #q\nsta p\n" + amp + step,
         # SMALFX9: VIBFREQU.
         "vfq": _FIRST + "lda #q\nsta p\n" + step,
         # BIGFX16: SLIDEVIB.
         "kty": _FIRST + "lda #c\nsta k\n" + step,
         # BIGFX01/02 (m 129, 130), BIGFX03 without a note (131), NPORTAM (255).
         "sld": _FIRST + "lda #m\nsta k\n" + amp + step,
-        # BIGFX03 on a note, or a legato's BIGFX01/02 (m): toward its word, no step on the tick.
-        "por": _FIRST + _TOWARD + "lda #m\nsta k\n" + amp + "rts\n" + step,
+        # BIGFX03 on a note, or a legato's BIGFX01/02 (m): no step on the tick.
+        "por": _FIRST + "lda #m\nsta k\n" + amp + "rts\n" + step,
         # Legato $3F: as BIGFX03 with FREQMODH $7F.
-        "leg": _FIRST + _TOWARD + "lda #127\nsta fm+1\nrts\n" + step,
-        # A note after NPORTAM: toward its word at NPORTAM's FREQMOD.
-        "npn": _FIRST + _TOWARD + "rts\n" + step,
+        "leg": _FIRST + "lda #131\nsta k\nlda #127\nsta fm+1\nrts\n" + step,
+        # A note after NPORTAM: PORTAME at NPORTAM's FREQMOD.
+        "npn": _FIRST + "lda #131\nsta k\nrts\n" + step,
     }
