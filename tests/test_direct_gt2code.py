@@ -36,6 +36,13 @@ def reference(speed=(0, 0), pulse=((), ()), simplepulse=False) -> Player:
     ref._ltable[GT.PTBL][: len(pulse[0])] = pulse[0]
     ref._rtable[GT.PTBL][: len(pulse[1])] = pulse[1]
     ref.build = Build(simplepulse=simplepulse)
+    ref._effects = {
+        GT.CMD_PORTAUP: ref._porta_up,
+        GT.CMD_PORTADOWN: ref._porta_down,
+        GT.CMD_TONEPORTA: ref._toneporta,
+        GT.CMD_VIBRATO: ref._vibrato,
+    }
+    ref._pulse_step = ref._pulse_step_simple if simplepulse else ref._pulse_step_full
     return ref
 
 
