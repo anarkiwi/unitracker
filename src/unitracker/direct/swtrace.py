@@ -52,6 +52,9 @@ class Read:  # pylint: disable=too-many-instance-attributes
     gate: tuple = None
     switch: tuple = None
     cutfirst: bool = True
+    ctrl: tuple = ()
+    counts: tuple = (0, 0)
+    arp: tuple = ()
     skips: dict = field(default_factory=dict)
 
 
@@ -84,8 +87,8 @@ def _ended(image: bytes, pos: int, wave: bool) -> bool:
     return byte == 0xFF or jumped
 
 
-def trace(swm, frames: int = MAX_FRAMES) -> Trace:
-    """The reference player's reads until every voice ended or looped :data:`LOOPS` times."""
+def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
+    """The reference player's reads until every voice ended or looped ``loops`` times."""
     # pylint: disable=protected-access,too-many-statements,too-many-locals
     ref, out = standard(swm), Trace()
     voices = {id(v): i for i, v in enumerate(ref.voices)}
@@ -123,6 +126,7 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         before, octave = v.instrument, v.octave_shift
         holder = ref.filter_controller_voice
         rec.cutfirst = holder is None or voices[id(v)] >= voices[id(holder)]
+        rec.counts = (v.pw_sweep_count, ref.filter_sweep_count)
         if rec.newnote and v.instrument is not None and not 1 <= (row.instrument or 0) < LEGATO:
             control, feats = v.instrument.control, ref.features
             held = ref.filter_controller_voice is v
@@ -151,6 +155,8 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         rec.note = v.note + v.octave_shift + v.transpose - 1
         rec.adsr = (v.sid_ad, v.sid_sr)
         rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
+        rec.ctrl = (v.sid_ctrl, v.ptn_gate & 1)
+        rec.arp = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
         ins = v.instrument
         if row.note == 0x7E and ref.features.gateoffptr and ins is not None:
             held = ref.filter_controller_voice is v
@@ -213,15 +219,15 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         for i, v in enumerate(ref.voices):
             if v.sequence_ended and out.ended[i] is None:
                 out.ended[i] = frame
-        if out.refused or _looped(out, frame):
+        if out.refused or _looped(out, frame, loops):
             out.frames = frame + 1
             return out
     raise TraceError(f"no loop within {frames} frames")
 
 
-def _looped(out: Trace, frame: int) -> bool:
+def _looped(out: Trace, frame: int, loops: int) -> bool:
     """Whether every voice ended, or its pattern starts repeat and all of them together have
-    repeated :data:`LOOPS` times by ``frame``."""
+    repeated ``loops`` times by ``frame``."""
     periods, first = [], 0
     for ended, starts in zip(out.ended, out.starts):
         if ended is not None:
@@ -231,7 +237,7 @@ def _looped(out: Trace, frame: int) -> bool:
             return False
         periods.append(seen[-1] - seen[-2])
         first = max(first, seen[0])
-    return not periods or frame >= first + LOOPS * math.lcm(*periods)
+    return not periods or frame >= first + loops * math.lcm(*periods)
 
 
 def _claims(ref, claims: list, out: Trace) -> None:

@@ -39,7 +39,7 @@ from unitracker_player.player import play
 from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
 from unitracker.direct.swcode import STATE, mirror_templates, templates, track_templates
-from unitracker.direct.swtrace import CLOCK, VOICES, Trace, TraceError, standard, trace
+from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, TraceError, standard, trace
 
 VERSION = "1.23"
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
@@ -64,6 +64,11 @@ def _unnoted(row: Row) -> Row:
     if "dt.freq" in keys and keys["dt.freq"].args[2] == 2:
         keys["dt.freq"] = Call("det", keys["dt.freq"].args[:2] + (0, 0))
     return Row(keys)
+
+
+def _swept_first(table: bytes) -> bool:
+    """Whether a pulse or filter table starts with a sweep, whose count is left from before."""
+    return bool(table) and table[0] < 0x80
 
 
 def _signed(byte: int) -> int:
@@ -531,10 +536,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             "ad": ins.attack << 4 | ins.decay,
             "sr": ins.sustain << 4 | ins.release,
             "ctrl": self.wave(ins),
-            "pw": self.pulse(ins),
         }
+        if not _swept_first(ins.pw_table):
+            fields["pw"] = self.pulse(ins)
         table = ins.filter_table
-        if table and table[0] not in (0x00, 0xFF):
+        if table and table[0] not in (0x00, 0xFF) and not _swept_first(table):  # claims
             fields["filter"] = self.filter(ins)
         fields["snd.freq"] = self.strtsnd(ins, voice)
         fields["tick.freq"] = self.call("stp")
@@ -626,6 +632,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 out["mode"] = low << 4
             elif high == 0xD0:
                 out |= self._dfx(low << 3)
+            elif high == 0x40:
+                out |= self._waveform(rec)
+            elif high == 0xC0:
+                out |= {"run": self._paced(rec, low)} if self.feats.arpspeedsupp else {}
             else:
                 raise TranscribeError(f"small FX ${value:02X}")
         fx, value = row.fx, row.fx_value
@@ -645,8 +655,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             0x0D: lambda: self._dfx(value),
             0x16: lambda: {"tick.freq": self.call("kty", c=value & 0x30)},
             0x0F: lambda: {("fx" if rec.cutfirst else "late") + ".cut": self.call("fhi", c=value)},
+            0x04: lambda: self._waveform(rec),
         }
-        if fx in (0x04, 0x07, 0x09, 0x0A, 0x0B, 0x0C, 0x0E) or 0x17 <= fx <= 0x1C or fx == 0x1F:
+        if fx == 0x0C:
+            made[fx] = lambda: {"run": self._paced(rec, value)} if self.feats.arpspeedsupp else {}
+        elif fx in (0x07, 0x09, 0x0A, 0x0B, 0x0E) or 0x17 <= fx <= 0x1C or fx == 0x1F:
             if fx != 0x07:
                 raise TranscribeError(f"FX ${fx:02X}")
         if fx == 0x07 and self.feats.chordsupport:
@@ -657,6 +670,19 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         if set(commands) & set(out) - {"ad", "sr", "run"}:
             raise TranscribeError("two FX of one cell on a row")
         return out | commands
+
+    def _waveform(self, rec) -> dict:
+        """A FX writing WFGHOST: the control byte it leaves, gated as the voice is."""
+        value, gate = rec.ctrl
+        if rec.newnote or value & 1 and not gate:
+            raise TranscribeError("a waveform FX on a note or setting a gate the voice has off")
+        return {"ctrl": value}
+
+    def _paced(self, rec, speed: int) -> str:
+        """An arp speed FX: the WF walk from where it is at its new pace."""
+        if rec.newnote or rec.ins is None:
+            raise TranscribeError("an arp speed FX on a note or before any instrument")
+        return self.resume(rec.ins, rec.arp, skip=False, reload=speed & 0x3F)
 
     def _dfx(self, detune: int) -> dict:
         if not self.feats.detunesupport:
@@ -736,7 +762,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         state["ins"] = name
         if self.hrc:
             commands["hr.freq"] = "none"
-        pulse, filt, _ = rec.kept
+        pulse, filt, routed = rec.kept
+        start = INST_WF_TABLE_POS + len(ins.wf_table) + 1
+        if pulse is None and _swept_first(ins.pw_table):
+            pulse = (start, rec.counts[0])
+        table = ins.filter_table
+        if filt is None and _swept_first(table) and table[0] and not rec.keep_filter:
+            filt, routed = (start + len(ins.pw_table) + 1, rec.counts[1]), True
+        if (pulse, filt, routed) != rec.kept:
+            rec.kept = (pulse, filt, routed)
         if rec.handover is not None:
             if "run" in commands or pulse is not None or filt is not None:
                 raise TranscribeError("a filter handover on a note that runs another table")
@@ -769,8 +803,12 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             wave, pulse, filt, jumped = rec.gate
             commands["run"] = self.resume(ins, wave, pulse, filt, skip=False)
             return Event("-" if jumped else "off", commands=commands)
-        if note in (GATE_OFF, GATE_ON):
-            return Event("off" if note == GATE_OFF else "on", commands=commands)
+        if note == GATE_OFF:
+            return Event("off", commands=commands)
+        if note == GATE_ON or 0x79 <= note <= 0x7C:
+            # NGATEON, NSYNCON/OF, NRINGON/OF write WFGHOST's bit on the tick.
+            commands |= self._waveform(rec)
+            return Event("on" if note == GATE_ON else "-", commands=commands)
         if 0x60 <= note < NPORTAM:
             byte = (note & 0x0F) << 4 | ins.vibrato & 0x0F
             if "tick.freq" in commands:
@@ -876,12 +914,25 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             return {"freq": out, "cut": [Slot("fx"), Slot("walk"), Slot("late")]}
         return {"freq": out}
 
+    def traced(self) -> tuple:
+        """:meth:`timeline` of the reference player's run, run on (its tables' state can
+        repeat later than its orderlists) until the timeline repeats."""
+        for loops in (LOOPS, 4 * LOOPS, 16 * LOOPS):
+            tr = trace(self.swm, loops=loops)
+            if tr.refused:
+                raise TranscribeError(tr.refused[0])
+            self.phrases, self.programs = {}, {"ctrl": {}, "pw": {}, "filter": {}}
+            self.ins, self.used, self.dummies = {}, [], []
+            try:
+                return self.timeline(tr)
+            except TranscribeError as exc:
+                if "does not repeat" not in str(exc) or loops == 16 * LOOPS:
+                    raise
+        raise AssertionError("unreachable")
+
     def document(self) -> str:
         """The document of the song to its loop or end."""
-        tr = trace(self.swm)
-        if tr.refused:
-            raise TranscribeError(tr.refused[0])
-        rows, loop, dummies = self.timeline(tr)
+        rows, loop, dummies = self.traced()
         phrases = Section("phrase", [(name, list(events)) for events, name in self.phrases.items()])
         song = [SongRow(rows[0], [phrases])] + [SongRow(r) for r in rows[1:]]
         defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]

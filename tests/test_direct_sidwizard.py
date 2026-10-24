@@ -146,7 +146,18 @@ BARE = {
         Row(note=37, instrument=13),
         EMPTY,
     ],
+    "a pulse table that starts with a sweep, its count left from before": (notes((37, 1))),
     "rests before the first note": [EMPTY, EMPTY, Row(note=30, instrument=1)] + [EMPTY] * 5,
+    "waveform FX and note-column sync and ring": [
+        Row(note=37, instrument=1),
+        Row(note=0x79),
+        Row(note=0x7B, fx=0x41),
+        Row(note=0x7A, fx=0x04, fx_value=0x40),
+        Row(note=0x7C),
+        Row(note=0x7E),
+        Row(note=0x7D),
+        EMPTY,
+    ],
     "instruments selected without a note": [
         Row(note=37, instrument=1),
         Row(instrument=3),
@@ -158,7 +169,10 @@ BARE = {
 
 @pytest.mark.parametrize("case", BARE)
 def test_bare_build_rows_play_exactly(case, lykia_boss):
-    exact(song(lykia_boss.read_bytes(), BARE[case]))
+    swm = song(lykia_boss.read_bytes(), BARE[case])
+    if "sweep" in case:
+        swm.instruments[0].pw_table = bytes.fromhex("100100")
+    exact(swm)
 
 
 NORMAL = {
@@ -230,6 +244,10 @@ NORMAL = {
         notes((37, 1), (40, None), (44, None), (40, 1)),
         {"i1": {"control": 0xDA, "pw_table": bytes.fromhex("8400000c2000"), "arp_speed": 0}},
     ),
+    "arp speed FX": (
+        [Row(note=37, instrument=5), Row(fx=0xC3), EMPTY, Row(fx=0x0C, fx_value=0), EMPTY, EMPTY],
+        {"i5": {"wf_table": bytes.fromhex("210000410c00110700fe1000")}},
+    ),
     "typed vibratos": (
         notes((37, 1), (40, 3), (44, 5)),
         {
@@ -296,8 +314,7 @@ def test_a_lower_voice_takes_the_filter_claimed_in_the_same_tick(mega_run):
 REFUSED = {
     "FX \\$09": [Row(note=37, instrument=1, fx=9, fx_value=1), EMPTY],
     "a note before any instrument": [Row(note=37), EMPTY],
-    "note column \\$79": [Row(note=37, instrument=1), Row(note=0x79)],
-    "small FX \\$41": [Row(note=37, instrument=1), Row(instrument=0x41)],
+    "a waveform FX on a note": [Row(note=37, instrument=1, fx=0x41), EMPTY],
     "an instrument selected before any note": [Row(note=0x7E, instrument=1), EMPTY],
     "two FX of one cell": [Row(note=37, instrument=1), Row(note=0x65, fx=0x01, fx_value=1)],
 }
@@ -323,10 +340,6 @@ def test_song_refusals(lykia_boss, csillag):
     swm.features = dataclasses.replace(SWMPlayer(swm).features, multispeedsupp=False)
     with pytest.raises(s.TranscribeError, match="without STRTSND's ARPSCNT reset"):
         s.Transcriber(swm, META)
-    swm = song(lykia_boss.read_bytes(), notes((37, 1)))
-    swm.instruments[0].pw_table = bytes.fromhex("100100")
-    with pytest.raises(s.TranscribeError, match="pw table that starts with a sweep"):
-        s.Transcriber(swm, META).document()
     swm = song(lykia_boss.read_bytes(), notes((37, 1)))
     swm.frame_speed = 2
     with pytest.raises(s.TranscribeError, match="multispeed"):
