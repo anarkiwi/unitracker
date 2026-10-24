@@ -1,6 +1,6 @@
 # unitracker
 
-Direct lifters of GoatTracker 2, SID-Wizard and defMON tunes to the generic C64 SID tracker document of
+Direct lifters of GoatTracker 2, SID-Wizard, defMON and Music Assembler tunes to the generic C64 SID tracker document of
 [unitracker-grammar](https://github.com/anarkiwi/unitracker-grammar), which names no player and
 which [unitracker-player](https://github.com/anarkiwi/unitracker-player) plays, and a generic
 optimiser over any such document. Each lifter transliterates its native player literally into
@@ -12,6 +12,7 @@ edit proved to keep the register grid.
 | [docs/direct/goattracker2.md](docs/direct/goattracker2.md) | the GoatTracker 2 transcription from pygoattracker's playroutine (`python -m unitracker.direct.goattracker2`) |
 | [docs/direct/sidwizard.md](docs/direct/sidwizard.md) | the SID-Wizard transcription from pysidwizard's playroutine (`python -m unitracker.direct.sidwizard`) |
 | [docs/direct/defmon.md](docs/direct/defmon.md) | the defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
+| [docs/direct/musicassembler.md](docs/direct/musicassembler.md) | the Music Assembler transcription from pymusicassembler's playroutine (`python -m unitracker.direct.musicassembler`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
 
 ## Install
@@ -52,7 +53,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | question | tool |
 |---|---|
 | does each tune lift to a document that plays its native player's grid, and why not (by cause) | `python tools/corpus.py check [TUNE.sid\|LIST.csv ...] [--out DIR] [--frames N] [--player RE] [--timeout S]` (default: the reference tunes) |
-| where does one lifter's document differ from its native player? | `python -m unitracker.direct.{goattracker2,sidwizard,defmon} --verify TUNE.sid ... [--frames N] [--diff RUNS] [--jobs J]` |
+| where does one lifter's document differ from its native player? | `python -m unitracker.direct.{goattracker2,sidwizard,defmon,musicassembler} --verify TUNE.sid ... [--frames N] [--diff RUNS] [--jobs J]` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
 | the native player's register grid | `pysidtracker.find_format(raw).play(raw, subtune)` |
 | do the docs' links resolve; which lines did coverage lose? | `python tools/maint.py {links,coverage BEFORE.json AFTER.json}` |

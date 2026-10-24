@@ -100,6 +100,18 @@ whammer = hvsc_tune(
     "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
 )
 
+space_invadarz = hvsc_tune(
+    "space_invadarz",
+    "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",
+    "Path to Richard Bayliss's Space Invadarz on Vacation, a Music Assembler tune with inner"
+    " programs, an arpeggio and pulse and filter sweeps.",
+)
+eastern_promise = hvsc_tune(
+    "eastern_promise",
+    "MUSICIANS/M/Merman/Eastern_Promise.sid",
+    "Path to Merman's Eastern Promise, a Music Assembler native song with transposes.",
+)
+
 
 def table(*rows) -> Table:
     """A GoatTracker 2 table of ``(left, right)`` ``rows``."""

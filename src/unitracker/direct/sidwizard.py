@@ -45,7 +45,7 @@ from unitracker.direct.swtables import (
 from unitracker.direct.swcode import STATE, mirror_templates, templates, track_templates
 from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, trace
 
-VERSION = "1.23"
+VERSION = "2.0"
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
 DUMMY = 256
 

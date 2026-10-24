@@ -45,7 +45,7 @@ from unitracker_player.player import play
 
 from unitracker.direct.gt2code import CODE, STATE
 
-VERSION = "1.23"
+VERSION = "2.0"
 CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985000}
 EVENT = "n"
 TICK = "tick.freq"
