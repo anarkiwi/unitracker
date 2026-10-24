@@ -124,6 +124,8 @@ def portamento_case(rng, calc: bool) -> tuple:
 @pytest.mark.parametrize("calc", [False, True])
 @pytest.mark.parametrize("up", [False, True])
 def test_portamento(once, calc, up):
+    """A pattern portamento's rows each zero the phase on tick 0 (``_tick0_command``); a
+    wavetable step leaves it."""
     rng = random.Random(f"{once}{calc}{up}")
     for _ in range(300):
         speed, values = portamento_case(rng, calc)
@@ -133,6 +135,8 @@ def test_portamento(once, calc, up):
         name = ("portan" if calc else "porta") + once
 
         def act(phi, chan=chan, ref=ref):
+            if not once:
+                chan.vibtime = 0
             if not once or not phi:
                 ref._tickn_command(chan)
 

@@ -64,4 +64,6 @@ for _name, _prefix, _body, _step in (
 CODE.update(
     (f"{base}1", _ONCE + CODE[base]) for base in ("porta", "portan", "tporta", "tportan", "snap")
 )
+# A pattern portamento's tick 0 zeroes the phase on each of its rows, and nothing else moves it.
+CODE.update((name, "sta t\n" + CODE[name]) for name in ("porta", "portan"))
 CODE = {name: f"{text}\n" for name, text in CODE.items()}
