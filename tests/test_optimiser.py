@@ -53,6 +53,14 @@ def test_defaults_drop_header_lines_and_spellings_at_their_defaults():
     assert "!tempo:7!vtempo:5" in out and "clock" not in out and "tempo: 5\n" in out
 
 
+def test_defaults_keep_a_clock_whose_tick_is_not_pal():
+    text = D.doc("      phrase:\n        p1: [C4, -*3]\n", mods="")
+    text = text.replace(
+        "voices: 1\n", "clock: {cycles_per_tick: 9828, clock_hz: 985248}\nvoices: 1\n"
+    )
+    assert "clock: PAL" not in labels(passes.defaults(read(text)))
+
+
 def test_defaults_drop_an_instrument_binding_equal_to_its_slot_s_default():
     text = D.HOIST.replace("voices: 1\n", "voices: 1\nslots: {pw: {pw: {mod: '2048'}}}\n")
     found = labels(passes.defaults(read(text)))
