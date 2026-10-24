@@ -1,14 +1,14 @@
-"""GoatTracker 2's code modulators fire as pygoattracker's playroutine functions, trajectory by
-trajectory over random and boundary states."""
+"""GoatTracker 2's code modulators, run by unitracker-player's 6502, fire as pygoattracker's
+playroutine functions, trajectory by trajectory over random and boundary states."""
 
 import random
 
 import pytest
-from gt2code_harness import BRANCHES, MEMORY, Routine, RoutineError, assemble, params, parse
 from pygoattracker import constants as GT
 from pygoattracker.player import Player, _Channel
+from unitracker_grammar import code
+from unitracker_player.code import Machine
 
-from unitracker.direct import goattracker2 as g
 from unitracker.direct.gt2code import CODE, STATE
 
 # pylint: disable=protected-access
@@ -18,7 +18,13 @@ TABLES = {
     "gt": list(GT.FREQ_TABLE),
     "random": [RNG_G.randrange(65536) for _ in range(128)],
 }
-STATE_NAMES = {name for cell in STATE.values() for name in cell}
+
+
+def routine(name: str, values: dict, tables: dict, cell: str):
+    """Template ``name`` bound to ``values`` on a machine of its own over ``tables``, as the
+    player compiles it for ``cell``."""
+    machine = Machine(tables, {cell: tuple(STATE[cell].items())})
+    return machine.compile(name, code.read(CODE[name]), values, cell)
 
 
 def reference(freq=(), speed=(0, 0), pulse=((), ()), simplepulse=False) -> Player:
@@ -36,15 +42,18 @@ def reference(freq=(), speed=(0, 0), pulse=((), ()), simplepulse=False) -> Playe
 
 def run_freq(name: str, values: dict, ref: Player, chan: _Channel, act, rng, firings=48):
     """Fire ``name`` beside ``act(phi)`` on the reference ``chan``, comparing the frequency and
-    the vibrato phase after each firing; between firings, other slots sometimes write both."""
+    the state (the vibrato phase and the latched note) after each firing; between firings, other
+    slots sometimes write them."""
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    routine = Routine(CODE[name], values, {"G": ref._freq_table}, STATE["freq"])
+    fire = routine(name, values, {"G": ref._freq_table}, "freq")
     for phi in range(300 if rng.random() < 0.04 else firings):
         if phi and rng.random() < 0.1:
             chan.freq, chan.vibtime = rng.randrange(65536), rng.randrange(256)
-        v, state = routine.fire(chan.freq, phi, chan.lastnote, chan.note, {"t": chan.vibtime})
+            chan.lastnote = rng.randrange(256)
+        state = bytearray((chan.vibtime, chan.lastnote))
+        v = fire(chan.freq, phi, chan.note, chan.note, state)
         act(phi)
-        assert (v, state["t"]) == (chan.freq, chan.vibtime), (name, values, phi)
+        assert (v, *state) == (chan.freq, chan.vibtime, chan.lastnote), (name, values, phi)
 
 
 def channel(rng, **fields) -> _Channel:
@@ -62,17 +71,13 @@ def shift(rng) -> int:
     return rng.choice((rng.randrange(17), rng.randrange(17, 256)))
 
 
-def test_every_template_is_code():
-    assert set(CODE) == set(g.TEMPLATES)
-    for code in CODE.values():
-        statements = parse(code)
-        assert all(line == line.strip() for line in code.split("\n"))
-        used = {
-            match.group(1)
-            for m, op in statements
-            if op and m not in BRANCHES and (match := MEMORY.match(op))
-        }
-        assert used & STATE_NAMES <= set(STATE["freq"]) or used & STATE_NAMES <= set(STATE["pw"])
+def test_every_template_is_canonical_code():
+    """Each text is its routine's one text, naming the state of one cell only."""
+    owners = {name: cell for cell, names in STATE.items() for name in names}
+    for text in CODE.values():
+        statements = code.read(text)
+        assert code.printed(statements) == text
+        assert len({owners[s] for s in code.symbols(statements) if s in owners}) <= 1
 
 
 @pytest.mark.parametrize("calc", [False, True])
@@ -98,12 +103,12 @@ def test_vibrato_delay_past_a_byte():
     ref = reference(speed=(3, 40))
     chan = _Channel(freq=4000, command=GT.CMD_DONOTHING, cmddata=1, vibdelay=255)
     values = {"c": 3, "s": 40, "l": 254}
-    routine = Routine(CODE["vib"], values, {"G": ref._freq_table}, STATE["freq"])
-    v, state = chan.freq, {"t": 0}
+    fire = routine("vib", values, {"G": ref._freq_table}, "freq")
+    v, state = chan.freq, bytearray(2)
     for phi in range(600):
-        v, state = routine.fire(v, phi, 0, 0, state)
+        v = fire(v, phi, 0, 0, state)
         ref._tickn_command(chan)
-        assert (v, state["t"]) == (chan.freq, chan.vibtime)
+        assert (v, *state) == (chan.freq, chan.vibtime, chan.lastnote)
 
 
 def portamento_case(rng, calc: bool) -> tuple:
@@ -158,12 +163,13 @@ def test_toneporta(once, form):
 
 
 def test_note():
-    """A wavetable note row: the sounding note's frequency once, the phase restarted."""
+    """A wavetable note row: the sounding note's frequency once, the phase restarted, the
+    note latched for calculated speeds."""
     rng = random.Random(5)
     for _ in range(400):
         ref = reference(rng.choice(list(TABLES.values())))
         note = rng.randrange(256)
-        chan = channel(rng, note=note, lastnote=note, wave_table_ptr=1)
+        chan = channel(rng, note=note, wave_table_ptr=1)
 
         def act(phi, chan=chan, ref=ref):
             if not phi:
@@ -197,70 +203,17 @@ def test_pulse_table(simple):
         ref = reference(pulse=(left, right), simplepulse=simple)
         tables = {"PL": [0] + left[:255], "PR": [0] + right[:255]}
         first = rng.choice((rng.randrange(1, 256), rng.randrange(1, 256), 0, 255))
-        routine = Routine(CODE["ptabs" if simple else "ptab"], {"b": first}, tables, STATE["pw"])
+        fire = routine("ptabs" if simple else "ptab", {"b": first}, tables, "pw")
         chan = _Channel(pulse=rng.randrange(4096))
-        v, state = chan.pulse, {"r": rng.randrange(256), "q": rng.randrange(256)}
+        v, state = chan.pulse, bytearray((rng.randrange(256), rng.randrange(256)))
         for phi in range(700):
             if not phi:
                 chan.pulse_table_ptr, chan.pulsetime = first, 0
             if chan.pulse_table_ptr:
                 ref._pulse_exec(chan)
-            v, state = routine.fire(v, phi, 0, 0, state)
-            assert (v & 0xFFF, state["r"], state["q"]) == (
+            v = fire(v, phi, 0, 0, state)
+            assert (v & 0xFFF, state[0], state[1]) == (
                 chan.pulse & 0xFFF,
                 chan.pulse_table_ptr,
                 chan.pulsetime,
             ), (first, phi)
-
-
-SYMBOLS = {"v": 512, "phi": 514, "nn": 516, "ne": 517, "t": 518, "G.lo": 600}
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "LDA v\nrts",
-        "lda $10\nrts",
-        "lda #$10\nrts",
-        "jsr x\nrts",
-        "lda (v),y\nrts",
-        "lda v ; c\nrts",
-        "lda v",
-        "bne nowhere\nrts",
-        "x:\nrts",
-        "lp:\nlp:\nrts",
-        "lda w\nrts",
-        "lda #z\nrts",
-        "lda #300\nrts",
-        "stx v,x\nrts",
-        "here:\n" + "nop\n" * 200 + "bne here\nrts",
-    ],
-)
-def test_refused(code):
-    with pytest.raises(RoutineError):
-        assemble(code, {}, SYMBOLS)
-
-
-def test_assemble_and_params():
-    code = "lda #<p\nldx #>p\nldy #q\nsta G.lo+2,y\nfar:\njmp far\nrts"
-    assert params(code) == ["p", "q"]
-    machine = assemble(code, {"p": -2, "q": 7}, SYMBOLS, 0x1000)
-    assert machine == bytes([0xA9, 0xFE, 0xA2, 0xFF, 0xA0, 7, 0x99, 90, 2, 0x4C, 0x09, 0x10, 0x60])
-
-
-@pytest.mark.parametrize(
-    "code",
-    ["pla\nrts", "top:\npha\njmp top", "top:\njmp top\nrts", "lda #1\npha\npha\nrts"],
-)
-def test_refused_at_run(code):
-    with pytest.raises(RoutineError):
-        Routine(code, {}, {}, {}).fire(0, 0, 0, 0, {})
-
-
-def test_writes_discarded_and_state_kept():
-    """``phi`` and tables are restored each firing; ``v`` and state carry the routine's
-    writes; the stack balances back to empty."""
-    code = "lda phi\nadc G.lo\nsta v\nsta G.lo\nsta phi\npha\npla\ninc w+1\nlda #9\nsta v+1\nrts"
-    routine = Routine(code, {}, {"G": [5]}, {"w": 2})
-    assert routine.fire(0, 3, 0, 0, {"w": 0x00FF}) == (0x0908, {"w": 0x01FF})
-    assert routine.fire(0, 3, 0, 0, {"w": 0}) == (0x0908, {"w": 0x0100})

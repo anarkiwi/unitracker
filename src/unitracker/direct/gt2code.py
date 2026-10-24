@@ -1,16 +1,17 @@
 """GoatTracker 2's per-tick modulators as format 1.23 6502 code templates.
 
-State: the freq cell's ``t`` (vibrato phase), the pw cell's ``r``, ``q`` (pulse row and time).
-Params: ``s`` step, ``k`` shift of ``G[nn + 1] - G[nn]`` (computed into ``phi``), ``g`` sign,
+State: the freq cell's ``t`` (vibrato phase) and ``m`` (the note a wavetable note row or a
+reached toneporta last set), the pw cell's ``r``, ``q`` (pulse row and time).
+Params: ``s`` step, ``k`` shift of ``G[m + 1] - G[m]`` (computed into ``phi``), ``g`` sign,
 ``c`` depth, ``l`` delay, ``b`` first pulse row; a ``1`` variant fires on ``phi`` 0 only.
 """
 
-STATE = {"freq": {"t": 1}, "pw": {"r": 1, "q": 1}}
+STATE = {"freq": {"t": 1, "m": 1}, "pw": {"r": 1, "q": 1}}
 
 _ONCE = "lda phi\nora phi+1\nbeq first\nrts\nfirst:\n"
 _DELAY = "lda phi+1\nbne go\nlda phi\ncmp #l\nbcs go\nrts\ngo:\n"
 _CALC = (
-    "lda nn\nand #127\ntax\nclc\nadc #1\nand #127\ntay\nsec\n"
+    "lda m\nand #127\ntax\nclc\nadc #1\nand #127\ntay\nsec\n"
     "lda G.lo,y\nsbc G.lo,x\nsta phi\nlda G.hi,y\nsbc G.hi,x\nsta phi+1\n"
     "ldx #k\nbeq sped\nshift:\nlsr phi+1\nror phi\ndex\nbne shift\nsped:\n"
 )
@@ -27,13 +28,13 @@ _VIB = (
 _TOWARD = (
     "lda ne\nand #127\ntay\nsec\nlda v\nsbc G.lo,y\ntax\nlda v+1\nsbc G.hi,y\nbcc up\n"
     "bne dn\ntxa\nbeq done\ndn:\n" + _SUB + "lda v\ncmp G.lo,y\nlda v+1\nsbc G.hi,y\nbcs done\n"
-    "snap:\nlda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\nlda #0\nsta t\ndone:\nrts\nup:\n"
+    "snap:\nlda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\nlda ne\nsta m\nlda #0\nsta t\ndone:\nrts\nup:\n"
     + _ADD
     + "lda G.lo,y\ncmp v\nlda G.hi,y\nsbc v+1\nbcc snap\nrts"
 )
-_SNAP = "sta t\nlda ne\nand #127\ntay\nlda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\nrts"
+_SNAP = "sta t\nlda ne\nsta m\nand #127\ntay\nlda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\nrts"
 _NOTE = (
-    "lda phi\nora phi+1\nbne done\nsta t\nlda nn\nand #127\ntay\n"
+    "lda phi\nora phi+1\nbne done\nsta t\nlda nn\nand #127\nsta m\ntay\n"
     "lda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\ndone:\nrts"
 )
 _PTAB_ROW = (
@@ -63,3 +64,4 @@ for _name, _prefix, _body, _step in (
 CODE.update(
     (f"{base}1", _ONCE + CODE[base]) for base in ("porta", "portan", "tporta", "tportan", "snap")
 )
+CODE = {name: f"{text}\n" for name, text in CODE.items()}
