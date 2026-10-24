@@ -50,7 +50,7 @@ def verify(raw: bytes, subtune: int = 0, frames: int = 20000):
 
 
 def lift_main(argv=None) -> int:
-    """Lift a GoatTracker 2, defMON, SID-Wizard or Music Assembler .sid to its generic unitracker document."""
+    """Lift a GoatTracker 2, defMON, SID-Wizard or Music Assembler .sid to its generic document."""
     parser = argparse.ArgumentParser(prog="unitracker-lift", description=lift_main.__doc__)
     parser.add_argument("sid", type=Path)
     parser.add_argument("-o", "--output", type=Path)
