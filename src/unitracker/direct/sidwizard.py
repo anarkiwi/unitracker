@@ -10,7 +10,6 @@ import sys
 from dataclasses import dataclass
 
 import numpy as np
-import yaml
 from pysidtracker import SidImage, gridcmp
 from pysidwizard import Loop, PlayPattern, SWMPlayer, parse_sid_song
 from pysidwizard.constants import INST_WF_TABLE_POS
@@ -38,7 +37,7 @@ from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
 from unitracker.direct import cli
-from unitracker.direct.goattracker2 import note_name, repeat
+from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
 from unitracker.direct.swcode import CODE, STATE
 
 VERSION = "1.23"
@@ -538,29 +537,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             loop=loop,
         )
         return printed(doc)
-
-
-REST = Event("-")
-
-
-def rests(events: list) -> list:
-    """Consecutive bare rests as one ``-*k``."""
-    out = []
-    for event in events:
-        last = out[-1] if out else None
-        if event == REST and last is not None and Event("-", steps=last.steps) == last:
-            out[-1] = Event("-", steps=(last.steps or 1) + 1)
-        else:
-            out.append(event)
-    return out
-
-
-def meta_text(value: str) -> str:
-    """A meta value as the document writes it: plain where YAML reads it back as that text,
-    else single-quoted."""
-    if yaml.safe_load(value) == value and not set(value) & set("{}[],#:'\"&*!|>%@`"):
-        return value
-    return "'" + value.replace("'", "''") + "'"
 
 
 def transcriber(raw: bytes, subtune: int = 0, frames: int = 20000) -> Transcriber:
