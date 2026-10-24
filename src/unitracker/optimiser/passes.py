@@ -195,7 +195,8 @@ def defaults(doc: Document) -> list:
     """Drop what a document spells at the default it has anyway (semantics.md): header lines,
     ``wait:0``, ``hold:1``, ``a/a`` tempos, ``*1``, a non-note's ``legato``, ``pw`` and
     ``filter`` flags, a ``none`` of a slot nothing binds (nor, of ``freq``, holds), an instrument's
-    binding equal to its slot's default, and a first row's ``note:+0`` only a note starts."""
+    ``none`` and binding equal to its slot's default, a first row's ``note:+0`` only a note
+    starts, and a row of only ``wait`` and ``hold`` folded into the hold of the row before."""
     edits = _header_defaults(doc)
     for path, node in walk(doc):
         if isinstance(node, Row):
@@ -206,12 +207,46 @@ def defaults(doc: Document) -> list:
             ]
         elif isinstance(node, Event):
             edits += _event_defaults(path, node)
-    return edits + _binding_defaults(doc) + _first_notes(doc)
+    return edits + _binding_defaults(doc) + _first_notes(doc) + _empty_rows(doc)
+
+
+def _folded(path: tuple, i: int, doc: Document) -> Document:
+    """``doc`` with row ``i`` of the program at ``path``, empty but for its timing, folded into
+    the hold of the row before it."""
+
+    def fold(program):
+        rows, empty = list(program.rows), program.rows[i]
+        ticks = empty.get("wait", 0) + empty.get("hold", 1)
+        keys = tuple(p for p in rows[i - 1].keys if p[0] != "hold")
+        rows[i - 1] = Row(keys + (("hold", rows[i - 1].get("hold", 1) + ticks),))
+        del rows[i]
+        loop = program.loop
+        return replace(program, rows=tuple(rows), loop=loop - (loop > i) if loop else loop)
+
+    return update(doc, path, fold)
+
+
+def _empty_rows(doc: Document) -> list:
+    """A program row of nothing but ``wait`` and ``hold`` folded into the hold of the row
+    before it, which then lasts as long as both (not where a loop starts at it)."""
+    edits = []
+    for path, node in walk(doc):
+        if not isinstance(node, Program):
+            continue
+        for i in reversed(range(1, len(node.rows))):  # each fold keeps the rows before it
+            keys, before = dict(node.rows[i].keys), node.rows[i - 1].get("hold", 1)
+            timing = all(isinstance(keys.get(k, 0), int) for k in ("wait", "hold"))
+            if set(keys) <= {"wait", "hold"} and timing and isinstance(before, int):
+                if node.loop != i:
+                    edit = partial(_folded, path, i)
+                    edits.append(Edit(_label(path + ("rows", i), "{}"), edit))
+    return edits
 
 
 def _binding_defaults(doc: Document) -> list:
-    """A ``none`` of a slot nothing binds (nor, of ``freq``, holds) dropped, and an
-    instrument's binding equal to its slot's default."""
+    """A ``none`` of a slot nothing binds (nor, of ``freq``, holds) dropped, an instrument's
+    ``none`` (it ends a binding only where one lasts to its note) and its binding equal to its
+    slot's default."""
     bindings = list(_bindings(doc))
     bound = {(c, s) for _, _, _, c, s, v in bindings if v not in _STOPS}
     held = any(c == "freq" and v == HOLD for _, _, _, c, _, v in bindings)
@@ -222,7 +257,7 @@ def _binding_defaults(doc: Document) -> list:
             continue
         dead = value == NONE and (cell, slot) not in bound and not (cell == "freq" and held)
         mod = default.get((cell, slot))
-        if dead or attr == "fields" and mod is not None and _expr(value) == mod:
+        if dead or attr == "fields" and (value == NONE or mod is not None and _expr(value) == mod):
             drop = partial(_drop, path, attr, (key, value))
             edits.append(Edit(_label(path, f"{key}:{value}"), drop))
     return edits
