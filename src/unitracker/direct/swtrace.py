@@ -123,7 +123,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             filt = (ref.filt_pos, ref.filter_sweep_count) if held else None
             wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
             rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
-        before, octave = v.instrument, v.octave_shift
+        before = v.instrument
         holder = ref.filter_controller_voice
         rec.cutfirst = holder is None or voices[id(v)] >= voices[id(holder)]
         rec.counts = (v.pw_sweep_count, ref.filter_sweep_count)
@@ -141,10 +141,6 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             frame = ref.frame_idx
             if before is None:
                 out.refused.append(f"an instrument selected before any note, frame {frame}")
-            elif v.octave_shift != octave:
-                out.refused.append(
-                    f"an instrument of another octave selected without a note, frame {frame}"
-                )
             held = ref.filter_controller_voice is v
             rec.switch = (
                 (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos),
@@ -152,7 +148,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
                 (ref.filt_pos, ref.filter_sweep_count) if held else None,
                 v.arp_speed_reload & 0x3F if ref.features.arpspeedsupp else 0,
             )
-        rec.note = v.note + v.octave_shift + v.transpose - 1
+        rec.note = v.dpitch - 1
         rec.adsr = (v.sid_ad, v.sid_sr)
         rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
         rec.ctrl = (v.sid_ctrl, v.ptn_gate & 1)

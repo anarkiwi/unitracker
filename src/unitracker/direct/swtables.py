@@ -128,7 +128,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             keys, hold = self._wave_row(image, pos, reload)
             first, cpos = cpos, None
             if self.feats.chordsupport and _col(image, pos + 1) == 0x7F:
-                played, looped = self._chord(ins, keys, hold, number, first)
+                played, looped = self._chord(ins, (keys, _col(image, pos + 2)), hold, number, first)
                 if looped is not None:
                     return rows + played, len(rows) + looped
                 rows += played
@@ -140,22 +140,24 @@ class Tables:  # pylint: disable=too-few-public-methods
             pos += 3
         return rows, None
 
-    def _chord(self, ins, keys: dict, hold: int, number: int, pos=None) -> tuple:
+    def _chord(self, ins, row: tuple, hold: int, number: int, pos=None) -> tuple:
         """``(rows, loop)`` of a chord row playing chord ``number``: a WF read per pitch with
-        the row's waveform, from ``pos`` (else the chord's start) to its $7E (on to the next
-        row in the tick) or its $7F (its first pitch again: ``loop`` the row it loops to)."""
+        the row's waveform and detune (PLYCHRD's, never kept), from ``pos`` (else the chord's
+        start) to its $7E (on to the next row in the tick) or its $7F (its first pitch again:
+        ``loop`` the row it loops to)."""
         # pylint: disable=protected-access
         starts, table = self.ref._chord_starts, self.ref._chord_table
         if not 1 <= number <= len(starts) or _col(table, starts[number - 1], 0x7F) == 0x7F:
             raise TranscribeError(f"chord {number}, past the chord table or empty")
         start = starts[number - 1]
+        keys, detune = row
         base = {k: v for k, v in keys.items() if k == "ctrl"}
 
         def played(at: int) -> tuple:
             rows = []
             while at < len(table) and table[at] not in (0x7E, 0x7F):
                 pitch = base | {"note": Signed(table[at]), "wave.freq": self.call("tone")}
-                rows += [Row(self._det(pitch, None, 0))] + self.skipped(ins, hold - 1)
+                rows += [Row(self._det(pitch, detune, 2, table[at]))] + self.skipped(ins, hold - 1)
                 at += 1
             return rows, at < len(table) and table[at] == 0x7F
 
@@ -178,12 +180,10 @@ class Tables:  # pylint: disable=too-few-public-methods
             keys["ctrl"] = byte
         arp, carry = _col(image, pos + 1, None), 0
         if arp is not None and not (arp == 0x80 and feats.wfarp_nop_supp):
-            if arp >= 0xE0:
-                keys["note"], carry = Signed(arp - 0x100), 2
-            elif arp >= 0x80:
+            if 0x80 <= arp < 0xE0:
                 keys["note"] = note_name((arp & 0x7F) - 1)
             else:
-                keys["note"] = Signed(arp)
+                keys["note"], carry = Signed(arp - 0x100 if arp >= 0xE0 else arp), 2
             keys["wave.freq"] = self.call("tone")
         elif arp is not None:
             carry = 1
@@ -207,7 +207,11 @@ class Tables:  # pylint: disable=too-few-public-methods
         if filt:
             runs.append(Row({"hold": 0, "run": self.filter(ins, filt[0], filt[1])}))
         lead = []
-        if not feats.frame1switch or ins.control & 0x08 and self.swm.first_frame_fixed_waveform:
+        if (
+            not feats.frame1switch
+            or ins.control & 0x08
+            and self.ref.image.quirks.first_frame_fixed_waveform
+        ):
             first["ctrl"] = 9
         elif ins.control & 0x08:
             first["ctrl"] = ins.effective_first_waveform
@@ -325,12 +329,20 @@ class Tables:  # pylint: disable=too-few-public-methods
         def bands(p):
             return {"res": image[p] & 0x0F, "mode": image[p] & 0x70}
 
+        def fladvan(p, call, **params):
+            # From 1.4 a $8x third column is FSWITCH, the routing, and no keyboard track.
+            byte = _col(image, p + 2)
+            if fswitch and 0x80 <= byte < 0x90:
+                return {self.walk: self.call(call, **params, j=0), "route": byte & 0x0F}
+            return {self.walk: self.call(call, **params, j=byte)}
+
+        fswitch = self.feats.filtkbtrack and self.ref.image.quirks.kbtrack_fswitch
+
         if self.fkb:
             rows_of = {
-                "set": lambda p: bands(p)
-                | {self.walk: self.call("fst", c=_col(image, p + 1), j=_col(image, p + 2))},
+                "set": lambda p: bands(p) | fladvan(p, "fst", c=_col(image, p + 1)),
                 "sweep": lambda p: {self.walk: self.call("fsw", d=_signed(_col(image, p + 1)))},
-                "advance": lambda p, _: {self.walk: self.call("fid", j=_col(image, p + 2))},
+                "advance": lambda p, _: fladvan(p, "fid"),
                 "jump": {self.walk: self.call("frs")},
                 "rest": [Row({self.walk: self.call("frs")})],
                 "resumed": {self.walk: self.call("frs")},
