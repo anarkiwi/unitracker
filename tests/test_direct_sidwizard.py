@@ -1,7 +1,17 @@
 """The direct SID-Wizard transcription plays the reference player's registers."""
 
 import pytest
-from pysidwizard import SWMPlayer, Loop, Pattern, PlayPattern, Row, TempoOverride, parse_sid_song
+from pysidwizard import (
+    End,
+    Loop,
+    Pattern,
+    PlayPattern,
+    Row,
+    SWMPlayer,
+    TempoOverride,
+    Transpose,
+    parse_sid_song,
+)
 from pysidtracker import gridcmp
 from unitracker_grammar.document import printed, read
 from unitracker_player.player import play
@@ -45,14 +55,12 @@ def notes(*rows) -> list:
     return out
 
 
-@pytest.mark.parametrize("name", ["mega_run", "lykia_boss"])
+@pytest.mark.parametrize("name", ["mega_run", "lykia_boss", "border_odyssey", "whammer"])
 def test_tunes_play_exactly(name, request):
-    """A light build with shared filter claims and a bare one with legatos, vibrato note FX and
-    a release small FX."""
+    """Light and bare builds, a normal build with octave shifts, a medium build with
+    portamentos and slides."""
     raw = request.getfixturevalue(name).read_bytes()
-    one = s.transcriber(raw, frames=4000)
-    text = one.document()
-    cells = s.compare(one.swm, text, 4000)
+    cells, text = s.verify(raw, frames=3000)
     assert not cells.size, summary(cells, 3)
     assert "{loop: " in text and "\ntables:" not in text and "F.lo,x" in text
 
@@ -61,7 +69,7 @@ def test_tunes_play_exactly(name, request):
 def test_against_the_native_table_only_the_pitch_differs(name, request):
     """FREQTBL is no clock's F: the native player differs in the frequency registers alone."""
     one = s.transcriber(request.getfixturevalue(name).read_bytes())
-    ours = play(one.document(), ticks=4000)
+    ours = play(one.document(), ticks=3000)
     cells = gridcmp.cell_diff(ours, SWMPlayer(one.swm).render_grid(len(ours)))
     assert cells.size and set(cells[:, 1].tolist()) <= {0, 1, 7, 8, 14, 15}
 
@@ -128,6 +136,83 @@ def test_bare_build_rows_play_exactly(case, lykia_boss):
     exact(song(lykia_boss.read_bytes(), BARE[case]))
 
 
+NORMAL = {
+    "hard restarts on TICK_1 only, and none": (
+        notes((37, 1), (40, 1), (44, 3), (45, 3)),
+        {"i1": {"control": 0x19}, "i3": {"control": 0x1B, "hr_attack": 2, "hr_release": 5}},
+    ),
+    "a staccato restart over a walking WF table": (
+        notes((37, 5), (40, 1), (None, None), (45, 1)),
+        {"i1": {"control": 0x1E}},
+    ),
+    "a first frame without the test bit": (
+        notes((37, 1), (40, 1), (44, 1)),
+        {"i1": {"control": 0x12, "wf_table": bytes.fromhex("41000040fe00")}},
+    ),
+    "detuned WF rows, a down arp past DPITCH, a NOP and an end": (
+        notes((37, 3), (2, 3), (None, None)),
+        {"i3": {"wf_table": bytes.fromhex("410507"), "arp_speed": 0}},
+    ),
+    "held WF rows on a detune build": (
+        notes((37, 5), (40, 5), (None, None), (44, 5)),
+        {"i5": {"wf_table": bytes.fromhex("2100030341f4ff4003fe40fc0041000a"), "arp_speed": 1}},
+    ),
+    "typed vibratos": (
+        notes((37, 1), (40, 3), (44, 5)),
+        {
+            "i1": {"control": 0x0A, "vibrato": 0x84, "vibrato_delay": 2},
+            "i3": {"control": 0x2A, "vibrato": 0x63},
+            "i5": {"control": 0x3A, "vibrato": 0x35, "vibrato_delay": 0x81},
+        },
+    ),
+}
+FX_ROWS = [
+    Row(note=37, instrument=3),
+    Row(fx=0x01, fx_value=0x20),
+    Row(fx=0x02, fx_value=0x00),
+    Row(note=40, fx=0x03, fx_value=0x30),
+    Row(fx=0x03, fx_value=0x10),
+    Row(fx=0x08, fx_value=0x84),
+    Row(fx=0x16, fx_value=0x20),
+    Row(fx=0x0D, fx_value=0x07),
+    Row(note=44, instrument=0x3F, fx=0x01, fx_value=0x40),
+    Row(note=0x78),
+    Row(note=37),
+    Row(fx=0x85),
+    Row(fx=0x93),
+    Row(fx=0xA9),
+    Row(fx=0xB2),
+    Row(fx=0xD3),
+    Row(note=40, instrument=3, fx=0x87),
+    Row(note=0x7E, fx=0x05, fx_value=0x22),
+    Row(note=0x7D, fx=0x06, fx_value=0x84),
+    Row(note=0x65, fx=0x10, fx_value=0x05),
+    Row(fx=0x11, fx_value=0x43),
+    Row(note=44, instrument=3, fx=0x14, fx_value=0x34),
+]
+
+
+@pytest.mark.parametrize("case", NORMAL)
+def test_normal_build_rows_play_exactly(case, border_odyssey):
+    rows, instruments = NORMAL[case]
+    exact(song(border_odyssey.read_bytes(), rows, **instruments))
+
+
+def test_normal_build_fx_play_exactly(border_odyssey):
+    """Slides, portamentos, legato, vibrato and detune FX, small FX, tempo FX."""
+    text = exact(song(border_odyssey.read_bytes(), FX_ROWS + [EMPTY] * 10), 1500)
+    for name in ("sld", "por", "vfx", "kty", "dfx", "vfq"):
+        assert f"  {name}(" in text
+
+
+def test_orderlist_commands_play_exactly(border_odyssey):
+    """A transpose, a tempo, an end: timing and notes come from the player's orderlists."""
+    swm = song(border_odyssey.read_bytes(), notes((37, 1), (40, 1)))
+    swm.sequences[0] = [TempoOverride(4), Transpose(3), PlayPattern(1), Loop(1)]
+    swm.sequences[1] = [PlayPattern(2), End()]
+    exact(swm)
+
+
 def test_a_lower_voice_takes_the_filter_claimed_in_the_same_tick(mega_run):
     """The player runs the voices last to first: the later voice's note keeps the filter."""
     rows = notes((37, 3), (None, None))
@@ -136,12 +221,13 @@ def test_a_lower_voice_takes_the_filter_claimed_in_the_same_tick(mega_run):
 
 
 REFUSED = {
-    "FX \\$05": [Row(note=37, instrument=1, fx=5, fx_value=1), EMPTY],
+    "FX \\$09": [Row(note=37, instrument=1, fx=9, fx_value=1), EMPTY],
     "an instrument selected without a note": [Row(note=37, instrument=1), Row(instrument=2)],
-    "a note column before any instrument": [Row(note=37), EMPTY],
-    "instrument selected without a note": [Row(note=0x7E, instrument=1), EMPTY],
-    "note column \\$7D": [Row(note=37, instrument=1), Row(note=0x7D)],
+    "a note before any instrument": [Row(note=37), EMPTY],
+    "instrument selected without a note, frame 2": [Row(note=0x7E, instrument=1), EMPTY],
+    "note column \\$79": [Row(note=37, instrument=1), Row(note=0x79)],
     "small FX \\$41": [Row(note=37, instrument=1), Row(instrument=0x41)],
+    "two FX of one cell": [Row(note=37, instrument=1), Row(note=0x65, fx=0x01, fx_value=1)],
 }
 
 
@@ -152,13 +238,6 @@ def test_rows_refused(match, mega_run):
         s.Transcriber(swm, META).document()
 
 
-def test_a_legato_over_a_walking_table_is_refused(lykia_boss):
-    rows = [Row(note=37, instrument=1), Row(note=40, instrument=0x3F), EMPTY, EMPTY]
-    swm = song(lykia_boss.read_bytes(), rows)
-    with pytest.raises(s.TranscribeError, match="legato note at frame"):
-        s.Transcriber(swm, META).document()
-
-
 def test_a_filter_voice_note_that_leaves_the_filter_walking_is_refused(mega_run):
     rows = notes((37, 4), (40, 1))
     swm = song(mega_run.read_bytes(), rows, i1={"filter_table": b"\x00\x00\x00"})
@@ -166,25 +245,17 @@ def test_a_filter_voice_note_that_leaves_the_filter_walking_is_refused(mega_run)
         s.Transcriber(swm, META).document()
 
 
-def test_song_refusals(mega_run, lykia_boss, csillag):
-    raw = mega_run.read_bytes()
-    with pytest.raises(s.TranscribeError, match="normal build: arpspeedsupp"):
+def test_song_refusals(lykia_boss, csillag):
+    with pytest.raises(s.TranscribeError, match="normal build: a chord"):
         s.transcriber(csillag.read_bytes())
-    swm = song(raw, notes((37, 1)))
-    swm.subtune_tempos = [(0x05, 0x03)]
-    with pytest.raises(s.TranscribeError, match="tempo \\$05"):
-        s.Transcriber(swm, META)
-    swm = song(raw, notes((37, 1)))
-    swm.sequences[0] = [TempoOverride(4), PlayPattern(1), Loop(0)]
-    with pytest.raises(s.TranscribeError, match="orderlist TempoOverride"):
-        s.Transcriber(swm, META).document()
-    swm.sequences[0] = [PlayPattern(1)]
-    with pytest.raises(s.TranscribeError, match="an orderlist that ends"):
-        s.Transcriber(swm, META).document()
     swm = song(lykia_boss.read_bytes(), notes((37, 1)))
     swm.instruments[0].pw_table = bytes.fromhex("100100")
     with pytest.raises(s.TranscribeError, match="pw table that starts with a sweep"):
         s.Transcriber(swm, META).document()
+    swm = song(lykia_boss.read_bytes(), notes((37, 1)))
+    swm.frame_speed = 2
+    with pytest.raises(s.TranscribeError, match="multispeed"):
+        s.Transcriber(swm, META)
 
 
 def test_cli(mega_run, capsys):

@@ -79,6 +79,16 @@ mega_run = hvsc_tune(
     "MUSICIANS/A/Arturo_Dente/Mega-Run.sid",
     "Path to Arturo Dente's Mega-Run, a SID-Wizard light-build export.",
 )
+border_odyssey = hvsc_tune(
+    "border_odyssey",
+    "MUSICIANS/H/Hermit/Border_Odyssey.sid",
+    "Path to Hermit's Border Odyssey, a SID-Wizard normal-build export with octave shifts.",
+)
+whammer = hvsc_tune(
+    "whammer",
+    "MUSICIANS/V/Vincenzo/Whammer.sid",
+    "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
+)
 
 
 def table(*rows) -> Table:
