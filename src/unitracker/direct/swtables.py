@@ -8,16 +8,11 @@ from unitracker_grammar.document import Call, Expr, Program, Row, Signed
 from unitracker_grammar.expr import canonical
 
 from unitracker.direct.goattracker2 import note_name
-from unitracker.direct.swtrace import TraceError
+from unitracker.direct.swtrace import TraceError, _col
 
 
 class TranscribeError(TraceError):
     """The tune uses something this transcription does not spell."""
-
-
-def _col(image: bytes, pos: int, past=0):
-    """Byte ``pos`` of ``image``, ``past`` beyond it."""
-    return image[pos] if pos < len(image) else past
 
 
 def _unnoted(row: Row) -> Row:
