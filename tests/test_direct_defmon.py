@@ -3,6 +3,7 @@
 import pytest
 from unitracker_grammar import parse
 
+from unitracker.direct import cli
 from unitracker.direct import defmon as dm
 
 TICKS = 3000
@@ -20,7 +21,7 @@ def fixture_cross(crosseyed):
 def test_the_document_plays_the_replay(request, name):
     cells, text = dm.compare(request.getfixturevalue(name).read_bytes(), frames=TICKS)
     parse(text)
-    assert not cells.size, dm.summary(cells, 3)
+    assert not cells.size, cli.summary(cells, 3)
 
 
 def test_helpers():
@@ -39,7 +40,7 @@ def test_helpers():
     assert dm.text("it's [x]") == "'it''s [x]'"
     assert dm.event_at(bytes([0x70, 3, 4, 48]), 0) == (3, 4, 48)
     assert dm.event_at(bytes([0x90, 48]), 0) == (None, None, 48)
-    assert dm.summary(dm.np.zeros((0, 4))) == "exact"
+    assert cli.summary(dm.np.zeros((0, 4))) == "exact"
 
 
 def test_a_frozen_program_ends_and_a_cycling_one_loops(cross):

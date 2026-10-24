@@ -5,24 +5,21 @@ writes it) and that next call's ACID step; an event's two sidcall layers run as 
 program, the pitch, pulse and ACID steps as code modulators (:mod:`unitracker.direct.dmcode`).
 """
 
-import argparse
 import re
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 from pydefmon import DefmonPlayer
 from pysidtracker import SidImage, gridcmp
-from tqdm import tqdm
 from unitracker_grammar import code
 from unitracker_grammar import document as d
 from unitracker_player.player import play
 
+from unitracker.direct import cli
 from unitracker.direct.dmcode import CODE, STATE
 from unitracker.lift.base import LiftError
-from unitracker.lift.defmon import locate
+from unitracker.lift.defmon import locate, row_fields
 
 VERSION = "1.23"
 PAL_HZ, NTSC_HZ = 985248, 1022727
@@ -33,20 +30,6 @@ ARMED, ARR_Y, ARR_JR, ARR_JC = 0x10D9, 0x10EB, 0x14EC, 0x14ED
 SIDTAB_LO, SIDTAB_HI, SIDTAB_DL = 0x1800, 0x1900, 0x1E00
 GATE_A, GATE_B, GATE_N = 0x40, 0x20, 0x10
 TABLES = {"G": (0x159C, 0x1638, 256), "P": (0x1583, 0x161F, 257), "R": (0x1578, 0x1614, 128)}
-COLUMNS = (  # the sidTAB walk's ($16B0) columns: (bitmap byte, bit, size, name)
-    (0, 0x40, 1, "wgh"),
-    (0, 0x80, 1, "wgl"),
-    (0, 0x20, 1, "ad"),
-    (0, 0x10, 1, "sr"),
-    (0, 0x08, 1, "tr"),
-    (0, 0x04, 1, "af"),
-    (0, 0x02, 1, "pw"),
-    (1, 0x80, 1, "ps"),
-    (1, 0x40, 1, "re"),
-    (1, 0x20, 1, "fv"),
-    (1, 0x10, 1, "cp"),
-    (1, 0x08, 2, "acid"),
-)
 SLOTS = (
     ("freq", (d.Slot("n", reset=("note",)), d.Slot("p"))),
     ("pw", (d.Slot("pw", reset=("row.pw",)),)),
@@ -162,17 +145,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return eff
 
     def columns(self, eff: int) -> dict:
-        """The columns of sidTAB row ``eff``'s body, in the walk's order."""
-        pos = self.mem[SIDTAB_LO + eff] | self.mem[SIDTAB_HI + eff] << 8
-        out, half, bitmap = {}, 0, self.mem[pos]
-        for byte, bit, size, name in COLUMNS:
-            if byte != half:
-                pos, half = pos + 1, byte
-                bitmap = self.mem[pos]
-            if bitmap & bit:
-                out[name] = int.from_bytes(bytes(self.mem[pos + 1 : pos + 1 + size]), "little")
-                pos += size
-        return out
+        """The columns of sidTAB row ``eff``'s body, in the walk's ($16B0) order."""
+        return row_fields(self.mem, self.mem[SIDTAB_LO + eff] | self.mem[SIDTAB_HI + eff] << 8)
 
     def tick(self, state: tuple) -> tuple:
         """``(state, columns)``: one call of a voice's sidcall cascade ($12DF) from ``state``,
@@ -441,51 +415,9 @@ def compare(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
     return gridcmp.cell_diff(ours, theirs), text_
 
 
-def summary(cells, runs: int = 0) -> str:
-    """``exact``, or the first differing cell and the count; with ``runs``, that many of each
-    register's differing runs."""
-    if not cells.size:
-        return "exact"
-    out = [f"first {tuple(int(c) for c in cells[0][:2])} cells {len(cells)}"]
-    for reg in gridcmp.runs(cells) if runs else ():
-        spans = ", ".join(f"{r['from']}-{r['to']} {r['values'][0][2:]}" for r in reg["runs"][:runs])
-        out.append(f"  {reg['name']} {reg['cells']}: {spans}")
-    return "\n".join(out)
-
-
-def _check(job: tuple) -> tuple:
-    path, subtune, frames, runs = job
-    try:
-        cells = compare(path.read_bytes(), subtune, frames)[0]
-        return path, not cells.size, summary(cells, runs)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        return path, False, f"{type(exc).__name__}: {exc}"
-
-
 def main(argv=None) -> int:
     """Transcribe a SID, or verify SIDs against pydefmon's replay."""
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("sids", nargs="+", type=Path)
-    parser.add_argument("--subtune", type=int, default=0)
-    parser.add_argument("--frames", type=int, default=20000)
-    parser.add_argument("--verify", action="store_true")
-    parser.add_argument("--diff", type=int, default=0, help="differing runs per register")
-    parser.add_argument("--jobs", type=int, default=1)
-    args = parser.parse_args(argv)
-    if not args.verify:
-        sys.stdout.write(transcribe(args.sids[0].read_bytes(), args.subtune))
-        return 0
-    jobs = [(path, args.subtune, args.frames, args.diff) for path in args.sids]
-    exact = 0
-    with ProcessPoolExecutor(args.jobs) as pool:
-        futures = [pool.submit(_check, job) for job in jobs]
-        progress = tqdm(as_completed(futures), total=len(jobs), unit="sid")
-        for done in progress:
-            path, ok, verdict = done.result()
-            exact += ok
-            print(f"{path}: {verdict}", flush=True)
-            progress.set_postfix(exact=exact)
-    return 0
+    return cli.main(argv, __doc__.split("\n", 1)[0], transcribe, compare)
 
 
 if __name__ == "__main__":
