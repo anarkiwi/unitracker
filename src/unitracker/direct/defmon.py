@@ -31,7 +31,14 @@ GATE_A, GATE_B, GATE_N = 0x40, 0x20, 0x10
 TABLES = {"G": (0x159C, 0x1638, 256), "P": (0x1583, 0x161F, 257), "R": (0x1578, 0x1614, 128)}
 SLOTS = (
     ("freq", (d.Slot("n", reset=("note",)), d.Slot("p"))),
-    ("pw", (d.Slot("pz", reset=("note",)), d.Slot("pm"), d.Slot("sw", reset=("row.pw",)))),
+    (
+        "pw",
+        (
+            d.Slot("pz", reset=("note",)),
+            d.Slot("pm", reset=("row.freq",)),
+            d.Slot("sw", reset=("row.pw",)),
+        ),
+    ),
     ("cut", tuple(d.Slot(f"k{v}", reset=("row.cut",)) for v in (1, 2, 3)) + (d.Slot("st"),)),
 )
 MAX_CALLS = 1 << 17

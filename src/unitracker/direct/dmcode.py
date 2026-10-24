@@ -45,9 +45,9 @@ CODE = {
     + _W,
     # a note (phi 0) clears the pitch step's mode and the pulse cell's slide accumulator
     "pzero": _FIRST.format("done") + "sta t\nsta t+1\nsta mm\ndone:\nrts\n",
-    # a row's pitch mode, and the slide accumulator the pulse step's carry reads
-    "pmode": "lda #m\nsta mm\nbpl done\nasl\nand #127\ntax\nlda #m\nand #64\nbne dn\nclc\n"
-    "lda R.lo,x\nadc t\nsta t\nlda R.hi,x\nadc t+1\nsta t+1\nrts\n"
+    # a row's pitch mode (phi 0), then the slide accumulator the pulse step's carry reads
+    "pmode": _FIRST.format("go") + "lda #m\nsta mm\ngo:\nlda mm\nbpl done\nasl\nand #127\ntax\n"
+    "lda mm\nand #64\nbne dn\nclc\nlda R.lo,x\nadc t\nsta t\nlda R.hi,x\nadc t+1\nsta t+1\nrts\n"
     "dn:\nsec\nlda t\nsbc R.lo,x\nsta t\nlda t+1\nsbc R.hi,x\nsta t+1\ndone:\nrts\n",
     # g bit 0 sets the pulse, bit 1 the step; $1495 then sweeps, down with the pitch step's carry
     "pul": _FIRST.format("step") + "lda #g\nlsr\nbcc pss\nlda #p\nsta w+1\nand #240\nsta w\n"
