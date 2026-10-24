@@ -8,7 +8,6 @@ continuing to ``rest``).
 """
 
 import functools
-import time
 
 import numpy as np
 import z3
@@ -20,7 +19,8 @@ TEST_COST = 4
 JOIN_COST = 3
 INFINITE = float("inf")
 BUDGET = 20000
-SECONDS = 60
+LIMIT = 60000
+RLIMIT = 2_000_000
 BINDS = 6
 CONNECTIVES = ("Not", "PAnd", "POr")
 
@@ -107,7 +107,6 @@ class Builder:  # pylint: disable=too-many-instance-attributes
         self.best = functools.lru_cache(maxsize=None)(self._best)
         self.decide = functools.lru_cache(maxsize=None)(self._decide)
         self.envs, self.solvers, self.states, self.own, self.regions = {}, {}, 0, {}, {}
-        self.deadline = time.monotonic() + SECONDS
 
     def values(self, term, gone: tuple):
         """``term`` over the bank of samples, each gone output's prime bound."""
@@ -141,10 +140,13 @@ class Builder:  # pylint: disable=too-many-instance-attributes
         return to_z3(term, inputs, memo)
 
     def solver(self, gone: tuple):
-        """``(solver, literals, cores)`` of ``gone``: an incremental solver where literal
-        ``literals[(atom, value)]`` assumes ``atom`` is ``value``, and the unsat cores found."""
+        """``(solver, literals, cores)`` of ``gone``: an incremental solver (each check bounded
+        by z3's deterministic resource limit, unknown read as feasible or unproved) where
+        literal ``literals[(atom, value)]`` assumes ``atom`` is ``value``, and the cores found."""
         if gone not in self.solvers:
-            self.solvers[gone] = (z3.Solver(), {}, [])
+            solver = z3.Solver()
+            solver.set("rlimit", RLIMIT)
+            self.solvers[gone] = (solver, {}, [])
         return self.solvers[gone]
 
     def assume(self, known: frozenset, gone: tuple) -> list:
@@ -166,6 +168,7 @@ class Builder:  # pylint: disable=too-many-instance-attributes
         if self.holds(known, gone).any():
             return True
         assumptions = self.assume(known, gone)
+        self.states += 1
         if solver.check(*assumptions) != z3.unsat:
             return True
         found = {str(c) for c in solver.unsat_core()}
@@ -232,8 +235,8 @@ class Builder:  # pylint: disable=too-many-instance-attributes
             if either is not None:
                 return self.best(known, either, gone)
         self.states += 1
-        if time.monotonic() > self.deadline + 2 * SECONDS:
-            raise DiagramError(f"no diagram within {3 * SECONDS} s")
+        if self.states > LIMIT:
+            raise DiagramError(f"no diagram within {LIMIT} steps")
         if self.exhausted():
             candidates = candidates[:1]
         options = [(INFINITE, 1, None)]
@@ -265,8 +268,9 @@ class Builder:  # pylint: disable=too-many-instance-attributes
         return min(options, key=lambda o: o[0])
 
     def exhausted(self) -> bool:
-        """Whether the search is past its state budget or deadline, so goes greedy."""
-        return self.states > BUDGET or time.monotonic() > self.deadline
+        """Whether the search is past its budget of steps (diagram states and z3 checks), so
+        goes greedy."""
+        return self.states > BUDGET
 
     def seq(self, known, name, first, rest, gone, written):
         """The option writing output ``name`` by diagram ``first`` and then ``rest``."""
@@ -319,6 +323,7 @@ class Builder:  # pylint: disable=too-many-instance-attributes
                     [self.z3(t, gone) != self.z3(f, gone) for (_, t), (_, f) in zip(terms, fixed)]
                 )
             )
+            self.states += 1
             proved = solver.check(*assumptions) == z3.unsat
             solver.pop()
             if proved:

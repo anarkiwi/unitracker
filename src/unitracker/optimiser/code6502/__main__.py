@@ -52,6 +52,15 @@ def table(results, found) -> str:
             f"| {sum(f.instructions is not None for _, _, f in r.searches)}/{len(r.searches)} "
             f"| {'yes' if r.proved else 'no'} | {r.differential[0]}/{r.differential[1]} |"
         )
+    searches = [f for r in results for _, _, f in r.searches]
+    if searches:
+        tried, seconds = sum(f.candidates for f in searches), sum(f.seconds for f in searches)
+        shorter = sum(f.instructions is not None for f in searches)
+        rows.append("")
+        rows.append(
+            f"superopt: {len(searches)} leaves searched, {shorter} shorter, {tried:.3g} "
+            f"candidates in {seconds:.0f} s ({tried / max(seconds, 1e-9):.3g}/s)"
+        )
     rows.append("")
     rows.append("| equivalence group | identical optimised text |")
     rows.append("|---|---|")

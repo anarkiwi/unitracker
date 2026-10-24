@@ -4,7 +4,7 @@ entry as constants) and the proved minimal sequence, if shorter, replaces it."""
 
 from jennings.opcodes import MODE_LEN, OPCODES
 from jennings.superopt.search import Problem, search
-from unitracker_grammar.code import Imm, Label, Mem, op
+from unitracker_grammar.code import Imm, Label, Mem, op, params
 
 from unitracker.optimiser.code6502.semantics import CELL, ENTRY, layout
 
@@ -35,7 +35,7 @@ class Leaves:  # pylint: disable=too-few-public-methods
 
     def _search(self, statements, outputs, known):
         machine, spec = layout(self.shape)
-        bag = dict.fromkeys(self.shape.params, 0)
+        bag = dict.fromkeys(params(statements), 0)
         routine = machine.compile("leaf", tuple(statements), bag, CELL)
         immediates, pc = {}, routine.start
         for s in statements:

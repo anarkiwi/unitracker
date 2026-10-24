@@ -31,12 +31,122 @@ The semantics core and the superoptimiser are player-agnostic and live in jennin
 
 ## Results
 
-RESULTS
+Each template of `gt2code`, `dmcode`, `macode` and SID-Wizard's `swcode` build
+(`templates(True, True) | track_templates(False) | mirror_templates()`): instructions, bytes
+and worst-case cycles (a loop at 255 trips) before → after; output-term DAG sizes as lifted, after
+`z3.simplify` and after egglog; z3 proof; player differential (agreeing / inputs inside the
+model, 2000 drawn).
+
+| routine | instructions | bytes | worst cycles | terms lifted / z3 / egglog | leaves superoptimised | proved | differential |
+|---|---|---|---|---|---|---|---|
+| gt2code.note | 13 → 14 | 26 → 27 | 41 → 41 | 19 / 14 / 16 | 0/0 | yes | 2000/2000 |
+| gt2code.snap | 10 → 10 | 20 → 20 | 33 → 33 | 7 / 6 / 6 | 0/0 | yes | 2000/2000 |
+| gt2code.porta | 19 → 18 | 34 → 33 | 32 → 31 | 34 / 19 / 9 | 0/0 | yes | 2000/2000 |
+| gt2code.portan | 39 → 39 | 73 → 73 | 3901 → 3901 | 90 / 55 / 28 | 0/0 | yes | 2000/2000 |
+| gt2code.tporta | 45 → 93 | 92 → 190 | 96 → 115 | 90 / 75 / 37 | 0/0 | yes | 2000/2000 |
+| gt2code.vib | 31 → 36 | 57 → 67 | 60 → 67 | 71 / 51 / 35 | 0/0 | yes | 2000/2000 |
+| gt2code.vibn | 51 → 56 | 96 → 106 | 3929 → 3936 | 138 / 89 / 55 | 0/0 | yes | 2000/2000 |
+| gt2code.porta1 | 22 → 21 | 39 → 38 | 38 → 36 | 41 / 24 / 12 | 0/0 | yes | 2000/2000 |
+| gt2code.portan1 | 42 → 41 | 78 → 77 | 3907 → 3904 | 97 / 60 / 32 | 0/0 | yes | 2000/2000 |
+| gt2code.snap1 | 14 → 14 | 27 → 27 | 42 → 41 | 19 / 13 / 15 | 0/0 | yes | 2000/2000 |
+| dmcode.ninit | 16 → 17 | 31 → 32 | 44 → 44 | 23 / 9 / 16 | 0/0 | yes | 2000/2000 |
+| dmcode.nr | 10 → 13 | 19 → 22 | 30 → 28 | 22 / 8 / 13 | 0/0 | yes | 2000/2000 |
+| dmcode.pitch | 31 → 43 | 59 → 85 | 66 → 60 | 50 / 40 / 35 | 0/0 | yes | 2000/2000 |
+| dmcode.slide | 54 → 127 | 106 → 248 | 108 → 114 | 144 / 89 / 36 | 0/0 | yes | 2000/2000 |
+| dmcode.por | 43 → 102 | 83 → 201 | 103 → 121 | 91 / 63 / 34 | 0/0 | yes | 1992/1992 |
+| dmcode.pinit | 18 → 23 | 35 → 44 | 51 → 49 | 22 / 8 / 13 | 0/0 | yes | 2000/2000 |
+| dmcode.pzero | 7 → 8 | 13 → 14 | 23 → 23 | 16 / 6 / 9 | 0/0 | yes | 2000/2000 |
+| dmcode.pmode | 29 → 63 | 56 → 116 | 60 → 58 | 103 / 55 / 38 | 0/0 | yes | 2000/2000 |
+| dmcode.acid | 30 → 38 | 55 → 69 | 74 → 71 | 61 / 26 / 37 | 0/0 | yes | 2000/2000 |
+| swall.tone | 27 → 49 | 51 → 95 | 77 → 78 | 51 / 25 / 22 | 0/0 | yes | 2000/2000 |
+| swall.det | 42 → 434 | 81 → 790 | 86 → 136 | 255 / 146 / 86 | 0/0 | yes | 2000/2000 |
+| swall.dfx | 36 → 258 | 69 → 469 | 72 → 117 | 172 / 104 / 50 | 0/0 | yes | 2000/2000 |
+| swall.snd | 57 → 361 | 113 → 703 | 116 → 145 | 146 / 69 / 78 | 0/0 | yes | 2000/2000 |
+| swall.hrc | 6 → 7 | 11 → 12 | 19 → 19 | 12 / 6 / 8 | 0/0 | yes | 2000/2000 |
+| swall.wt | 91 → 313 | 167 → 594 | 109 → 153 | 276 / 143 / 92 | 0/0 | yes | 2000/2000 |
+| swall.vfq | 92 → 685 | 170 → 1280 | 113 → 157 | 366 / 165 / 118 | 0/0 | yes | 2000/2000 |
+| swall.kty | 92 → 765 | 170 → 1423 | 113 → 153 | 357 / 184 / 132 | 0/0 | yes | 2000/2000 |
+| macode.pulse | 15 → 14 | 27 → 26 | 33 → 31 | 22 / 15 / 12 | 0/0 | yes | 2000/2000 |
+| macode.pong | 37 → 38 | 71 → 71 | 66 → 65 | 54 / 35 / 29 | 0/0 | yes | 2000/2000 |
+| macode.sweep | 26 → 31 | 46 → 55 | 67 → 83 | 49 / 39 / 26 | 0/0 | yes | 2000/2000 |
+
+| equivalence group | identical optimised text |
+|---|---|
+| (none) | |
+
+| failed | why |
+|---|---|
+| gt2code.ptab | DiagramError: no diagram within 60000 steps |
+| gt2code.ptabs | DiagramError: no diagram within 60000 steps |
+| gt2code.tportan | DiagramError: no diagram |
+| gt2code.tporta1 | CodegenError: no free word for an intermediate |
+| gt2code.tportan1 | DiagramError: no diagram |
+| dmcode.pul | DiagramError: no diagram within 60000 steps |
+| dmcode.cinit | DiagramError: no diagram within 60000 steps |
+| swall.stp | CodegenError: no order of the outputs computes them |
+| swall.vfx | DiagramError: no diagram within 60000 steps |
+| swall.sld | DiagramError: no diagram within 60000 steps |
+| swall.por | CodegenError: no order of the outputs computes them |
+| swall.leg | CodegenError: no order of the outputs computes them |
+| swall.npn | CodegenError: no order of the outputs computes them |
+| swall.pst | DiagramError: no diagram within 60000 steps |
+| swall.psw | DiagramError: no diagram |
+| swall.pid | DiagramError: no diagram within 60000 steps |
+| swall.pwr | DiagramError: no diagram |
+| swall.fst | DiagramError: no diagram within 60000 steps |
+| swall.fsw | DiagramError: no diagram within 60000 steps |
+| swall.fho | DiagramError: no diagram within 60000 steps |
+| swall.fid | DiagramError: no diagram within 60000 steps |
+| swall.fhi | DiagramError: no diagram within 60000 steps |
+| swall.frs | DiagramError: no diagram |
+| swall.mst | DiagramError: no diagram within 60000 steps |
+| swall.msw | DiagramError: no diagram |
+| swall.mid | DiagramError: no diagram within 60000 steps |
+| swall.mwr | DiagramError: no diagram |
+| macode.vib | DiagramError: no diagram within 60000 steps |
+
+Variant pairs written two ways (`tests/test_optimiser_code6502.py`: a note set by `ora`/`bne`
+and `x` against two `bne`s and `y`; a signed add by `bmi` and `sec`/`sbc` against `asl`/`bcs`
+and `stx` reordered) are proved equal and print identically.
+
+With `--superopt 5` (final straight-line leaves searched up to five instructions by
+`jennings.superopt` on an RTX 5080, four routines at a time), for the templates whose
+diagrams are found:
+
+| routine | instructions | bytes | worst cycles | terms lifted / z3 / egglog | leaves superoptimised | proved | differential |
+|---|---|---|---|---|---|---|---|
+| gt2code.note | 13 → 14 | 26 → 27 | 41 → 41 | 19 / 14 / 16 | 0/1 | yes | 2000/2000 |
+| gt2code.snap | 10 → 10 | 20 → 20 | 33 → 33 | 7 / 6 / 6 | 0/1 | yes | 2000/2000 |
+| gt2code.porta | 19 → 18 | 34 → 33 | 32 → 31 | 34 / 19 / 9 | 0/2 | yes | 2000/2000 |
+| gt2code.portan | 39 → 39 | 73 → 73 | 3901 → 3901 | 90 / 55 / 28 | 0/2 | yes | 2000/2000 |
+| gt2code.vib | 31 → 36 | 57 → 67 | 60 → 67 | 71 / 51 / 35 | 0/2 | yes | 2000/2000 |
+| gt2code.vibn | 51 → 56 | 96 → 106 | 3929 → 3936 | 138 / 89 / 55 | 0/2 | yes | 2000/2000 |
+| gt2code.porta1 | 22 → 21 | 39 → 38 | 38 → 36 | 41 / 24 / 12 | 0/2 | yes | 2000/2000 |
+| gt2code.portan1 | 42 → 41 | 78 → 77 | 3907 → 3904 | 97 / 60 / 32 | 0/2 | yes | 2000/2000 |
+| gt2code.snap1 | 14 → 14 | 27 → 27 | 42 → 41 | 19 / 13 / 15 | 0/1 | yes | 2000/2000 |
+| dmcode.ninit | 16 → 17 | 31 → 32 | 44 → 44 | 23 / 9 / 16 | 0/1 | yes | 2000/2000 |
+| dmcode.nr | 10 → 12 | 19 → 21 | 30 → 28 | 22 / 8 / 13 | 1/2 | yes | 2000/2000 |
+| dmcode.pitch | 31 → 43 | 59 → 85 | 66 → 60 | 50 / 40 / 35 | 0/3 | yes | 2000/2000 |
+| dmcode.pinit | 18 → 23 | 35 → 44 | 51 → 49 | 22 / 8 / 13 | 0/2 | yes | 2000/2000 |
+| dmcode.pzero | 7 → 8 | 13 → 14 | 23 → 23 | 16 / 6 / 9 | 0/1 | yes | 2000/2000 |
+| dmcode.acid | 30 → 37 | 55 → 68 | 74 → 71 | 61 / 26 / 37 | 1/2 | yes | 2000/2000 |
+| swall.tone | 27 → 49 | 51 → 95 | 77 → 78 | 51 / 25 / 22 | 0/3 | yes | 2000/2000 |
+| swall.hrc | 6 → 7 | 11 → 12 | 19 → 19 | 12 / 6 / 8 | 0/1 | yes | 2000/2000 |
+| macode.pulse | 15 → 14 | 27 → 26 | 33 → 31 | 22 / 15 / 12 | 0/2 | yes | 2000/2000 |
+| macode.pong | 37 → 37 | 71 → 70 | 66 → 63 | 54 / 35 / 29 | 1/2 | yes | 2000/2000 |
+| macode.sweep | 26 → 31 | 46 → 55 | 67 → 83 | 49 / 39 / 26 | 0/2 | yes | 2000/2000 |
+
+superopt: 36 leaves searched, 3 shorter, 1.75e+13 candidates in 1194 s (1.47e+10/s)
 
 ## Limits
 
 - Control is a decision diagram over atoms: code whose original shares a tail after a join
-  mid-computation (the table walkers `ptab`, `ptabs`, `tporta`) duplicates per path.
+  mid-computation (the table walkers `ptab`, `ptabs`, `tporta`, SID-Wizard's `det`, `kty`)
+  duplicates per path.
+- The diagram search is bounded in steps (diagram states and z3 checks, each check under z3's
+  deterministic resource limit): greedy past 20000, no diagram past 60000.
+- Flags used as data (`php`/`plp`, SID-Wizard's `_TRACK`) give terms the selector has no
+  pattern for (`CodegenError`, `DiagramError: no diagram`).
 - Only straight-line final leaves are superoptimised; exhaustive search reaches about five
   instructions at the alphabet sizes of these templates.
 - Shift loops are recognised semantically only in the counted `dex`/`dey` + `bne` form; other

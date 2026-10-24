@@ -14,6 +14,7 @@ edit proved to keep the register grid.
 | [docs/direct/defmon.md](docs/direct/defmon.md) | the defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
 | [docs/direct/musicassembler.md](docs/direct/musicassembler.md) | the Music Assembler transcription from pymusicassembler's playroutine (`python -m unitracker.direct.musicassembler`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
+| [docs/optimiser-code.md](docs/optimiser-code.md) | the code modulator optimiser prototype: 6502 templates canonicalised and proved (`python -m unitracker.optimiser.code6502`) |
 | [docs/optimiser.md#lossy-mode](docs/optimiser.md#lossy-mode) | the lossy mode: code modulators replaced by fitted expressions within a tolerance per cell (`--lossy`) |
 
 ## Install

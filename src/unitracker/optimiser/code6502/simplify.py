@@ -227,9 +227,8 @@ def saturate(outputs: dict, iterations: int = ITERATIONS, nodes: int = NODES) ->
     for ruleset, rounds in (("core", iterations), ("control", 2), ("core", iterations)):
         if _size(graph) > nodes:
             break
-        graph.parse_and_run_program(
-            f"(run-schedule (let-scheduler bo (back-off)) (repeat {rounds} (run-with bo {ruleset})))"
-        )
+        schedule = f"(repeat {rounds} (run-with bo {ruleset}))"
+        graph.parse_and_run_program(f"(run-schedule (let-scheduler bo (back-off)) {schedule})")
     results = graph.parse_and_run_program("\n".join(f"(extract $o{k})" for k in range(len(roots))))
     return {name: parse(str(r)) for name, r in zip(roots, results)}
 

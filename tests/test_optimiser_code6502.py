@@ -86,13 +86,13 @@ def test_bank_matches_concrete():
         assert got == want
 
 
-@pytest.mark.parametrize("name", ["note", "snap1", "porta1", "vib", "ptabs", "portan"])
+@pytest.mark.parametrize("name", ["note", "snap1", "porta1", "vib", "tporta", "portan"])
 def test_round_trip(name):
     result = optimise(name, CODE[name], CELLS[name], cases=500)
     assert result.proved and result.differential[0] == result.differential[1] > 400
     read(result.after)
     old, new = result.measures
-    if name != "ptabs":
+    if name != "tporta":
         assert new.size <= old.size + 10
 
 
@@ -138,9 +138,10 @@ def test_cli(tmp_path, capsys):
         encoding="utf-8",
     )
     out = tmp_path / "table.md"
-    assert cli.main([str(module), "--cases", "50", "--show", "-j", "2", "-o", str(out)]) == 0
+    args = ["--cases", "50", "--show", "-j", "2", "--superopt", "2", "--backend", "numpy"]
+    assert cli.main([str(module), *args, "-o", str(out)]) == 0
     text = out.read_text(encoding="utf-8")
-    assert "| mod.a, mod.b | yes |" in text
+    assert "| mod.a, mod.b | yes |" in text and "superopt:" in text
     assert "mod.a:" in capsys.readouterr().out
 
 
