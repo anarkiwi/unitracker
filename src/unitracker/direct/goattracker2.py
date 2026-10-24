@@ -1,7 +1,7 @@
 """A GoatTracker 2 tune transcribed to the generic document from pygoattracker's playroutine.
 
 A pattern row's step begins on tick 1; the playroutine's skips are the header's holds, its
-wave and filter tables programs, its frequency commands and pulse table format 1.23 code
+wave and filter tables programs, its frequency commands and pulse table code
 modulators (:mod:`unitracker.direct.gt2code`, docs/direct/goattracker2.md).
 """
 
@@ -45,7 +45,6 @@ from unitracker_player.player import play
 
 from unitracker.direct.gt2code import CODE, STATE
 
-VERSION = "1.23"
 CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985000}
 EVENT = "n"
 TICK = "tick.freq"
@@ -440,7 +439,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             C.CMD_SETWAVEPTR: lambda: {"run": self.wave(data, gated) if data else NONE},
             C.CMD_SETPULSEPTR: lambda: {"pw": self.pulse(data) if data else HOLD},
             C.CMD_SETFILTERPTR: lambda: {"run": self.filt(data)} if data else {"cut": HOLD},
-            C.CMD_SETFILTERCTRL: lambda: {"resfilt": (data >> 4, data & 0x0F)}
+            C.CMD_SETFILTERCTRL: lambda: {"res": data >> 4, "route": data & 0x0F}
             | ({} if data else {"cut": HOLD}),
             C.CMD_SETFILTERCUTOFF: lambda: {"cut": data << 3},
             C.CMD_SETMASTERVOL: lambda: {"vol": data} if data < 0x10 else {},
@@ -529,12 +528,12 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         defs += [Section("ctrl", tuple((n, p) for n, p in self.ctrl.items()))]
         if self.filter:
             defs.append(Section("filter", tuple(self.filter.items())))
-        song = [SongRow(rows[0], {"phrase": phrases})] + [SongRow(r) for r in rows[1:]]
+        defs.append(Section("phrase", phrases))
+        song = [SongRow(r) for r in rows]
         header = self.model.header
         meta = {k: meta_text(v) for k, v in (("title", header.name), ("author", header.author))}
         meta["released"] = meta_text(header.released)
         head = Header(
-            VERSION,
             meta,
             clock=(CLOCK["cycles_per_tick"], CLOCK["clock_hz"]),
             tempo=rowlen,

@@ -1,5 +1,5 @@
-"""Repository upkeep: the docs' relative links, the playroutine docs' generated tables, and the
-lines one coverage run executes that another does not."""
+"""Repository upkeep: the docs' relative links, and the lines one coverage run executes that
+another does not."""
 
 import argparse
 import json
@@ -66,24 +66,6 @@ def broken(root: Path) -> list[str]:
     ]
 
 
-def tables(write: bool) -> None:
-    """Print each library playroutine's command and ``ctrl`` row-key tables as its doc should
-    hold them (``tests/test_playroutine_docs.py``); ``write`` replaces them in the docs."""
-    sys.path.insert(0, str(shared.ROOT / "tests"))
-    import test_playroutine_docs as T  # pylint: disable=import-outside-toplevel,import-error
-
-    for player in T.PLAYERS:
-        path = T.DOCS / f"{player}.md"
-        lines = path.read_text(encoding="utf-8").splitlines()
-        for header, new in T.tables(player).items():
-            if header in lines:
-                start = lines.index(header)
-                lines[start : start + len(T.documented(player, header))] = new
-                print(f"{player}:\n" + "\n".join(new) + "\n")
-        if write:
-            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def lost(before: str, after: str, modules=()) -> list[str]:
     """Per module, the lines coverage report ``before`` executes and ``after`` does not (two
     ``pytest --cov-report=json:FILE`` reports)."""
@@ -111,16 +93,11 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="command", required=True)
     p = sub.add_parser("links", help="every relative link in README.md and docs/ resolves")
     p.add_argument("root", type=Path, nargs="?", default=shared.ROOT)
-    p = sub.add_parser("tables", help="the playroutine docs' generated tables")
-    p.add_argument("--write", action="store_true")
     p = sub.add_parser("coverage", help="lines a coverage run loses against an earlier one")
     p.add_argument("before")
     p.add_argument("after")
     p.add_argument("--module", nargs="*", default=[], help="only files containing these")
     args = ap.parse_args(argv)
-    if args.command == "tables":
-        tables(args.write)
-        return 0
     if args.command == "links":
         found = broken(args.root)
         print("\n".join(found) or "all links resolve")

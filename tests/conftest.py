@@ -1,17 +1,9 @@
-"""Shared fixtures: the HVSC reference tunes, each lifted once per session, and synthetic tunes;
-and the tests' failure reports, whydiff's or the porting tool's grid diff of a mismatching
-verdict, carried on the test's expected failure."""
+"""Shared fixtures: HVSC tunes by path, and synthetic GoatTracker 2 tunes."""
 
-import copy
-import os
-import pickle
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
-from filelock import FileLock
 from pygoattracker import (
     Instrument,
     Orderlist,
@@ -25,18 +17,7 @@ from pygoattracker import (
     TypedSong,
 )
 from pygoattracker import constants as GT
-from pysidtracker import find_format, gridcmp
-from pysidtracker.survey import file_oracle
-from pysidtracker.testing import default_cache, resolve_tune
-from pysidwizard import parse_sid_song
-from pysidwizard.player import INST_WF_TABLE_POS
-
-from unitracker import optimise
-from unitracker.lift import backends, verify
-from unitracker.player.vm import SongPlayer
-
-os.environ.setdefault("UNITRACKER_WORKERS", str(max(2, min(8, len(os.sched_getaffinity(0)) // 8))))
-os.environ.setdefault("UNITRACKER_CACHE", str(default_cache() / "modfit"))
+from pysidtracker.testing import resolve_tune
 
 
 def hvsc_tune(name: str, tune: str, doc: str):
@@ -88,43 +69,6 @@ csillag = hvsc_tune(
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
     "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
 )
-coca_koala = hvsc_tune(
-    "coca_koala",
-    "MUSICIANS/S/Stinsen/Coca_Koala.sid",
-    "Path to Stinsen's Coca Koala, GoatTracker 2 wavetable notes before an instrument vibrato.",
-)
-dsr_8090 = hvsc_tune(
-    "dsr_8090",
-    "MUSICIANS/T/Triace/DSR_8090.sid",
-    "Path to Triace's DSR 8090, GoatTracker 2 notes of an instrument without a pulse table.",
-)
-slime_deluxe = hvsc_tune(
-    "slime_deluxe",
-    "MUSICIANS/B/Bayliss_Richard/Slime_Deluxe.sid",
-    "Path to Richard Bayliss's Slime Deluxe, GoatTracker 2 toneporta notes over a wavetable.",
-)
-addaraya = hvsc_tune(
-    "addaraya",
-    "MUSICIANS/H/Hermit/Stalker-Addaraya_Gurza_Dreaming.sid",
-    "Path to Hermit's Stalker - Addaraya Gurza Dreaming, SID-Wizard filter and pulse jumps.",
-)
-civilization = hvsc_tune(
-    "civilization",
-    "MUSICIANS/H/Hermit/Civilization.sid",
-    "Path to Hermit's Civilization, SID-Wizard pulse table jumps.",
-)
-doom_schlager = hvsc_tune(
-    "doom_schlager",
-    "MUSICIANS/S/Spider_Jerusalem/C64-Doom-Schlager.sid",
-    "Path to Spider Jerusalem's C64-Doom-Schlager, a pre-1.8 SID-Wizard driver whose"
-    " first-frame FREQ_HI reads FREQTBH by the voice's track offset.",
-)
-third_ninja = hvsc_tune(
-    "third_ninja",
-    "MUSICIANS/S/Spiikki/Third_Ninja.sid",
-    "Path to Spiikki's Third Ninja, SID-Wizard WF table jumps.",
-)
-
 lykia_boss = hvsc_tune(
     "lykia_boss",
     "MUSICIANS/C/C0zmo/Lykia_Boss.sid",
@@ -135,114 +79,43 @@ mega_run = hvsc_tune(
     "MUSICIANS/A/Arturo_Dente/Mega-Run.sid",
     "Path to Arturo Dente's Mega-Run, a SID-Wizard light-build export.",
 )
-awakening = hvsc_tune(
-    "awakening",
-    "MUSICIANS/S/Spider_Jerusalem/Awakening.sid",
-    "Path to Spider Jerusalem's Awakening, a SID-Wizard medium-build export.",
-)
-snowballed = hvsc_tune(
-    "snowballed",
-    "MUSICIANS/W/Wemyss_Chris/Snowballed.sid",
-    "Path to Chris Wemyss' Snowballed, a SID-Wizard extra-build export.",
+border_odyssey = hvsc_tune(
+    "border_odyssey",
+    "MUSICIANS/H/Hermit/Border_Odyssey.sid",
+    "Path to Hermit's Border Odyssey, a SID-Wizard normal-build export with octave shifts.",
 )
 samwise = hvsc_tune(
     "samwise",
     "MUSICIANS/A/Ant1/Samwise.sid",
     "Path to Ant1's Samwise, a SID-Wizard extra-build export of a pre-1.8 driver.",
 )
+flowing_slowly_extended = hvsc_tune(
+    "flowing_slowly_extended",
+    "MUSICIANS/T/Toggle/Flowing_Slowly_extended.sid",
+    "Path to Toggle's Flowing Slowly (extended), a SID-Wizard extra build with staccato.",
+)
+whammer = hvsc_tune(
+    "whammer",
+    "MUSICIANS/V/Vincenzo/Whammer.sid",
+    "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
+)
+
+space_invadarz = hvsc_tune(
+    "space_invadarz",
+    "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",
+    "Path to Richard Bayliss's Space Invadarz on Vacation, a Music Assembler tune with inner"
+    " programs, an arpeggio and pulse and filter sweeps.",
+)
+eastern_promise = hvsc_tune(
+    "eastern_promise",
+    "MUSICIANS/M/Merman/Eastern_Promise.sid",
+    "Path to Merman's Eastern Promise, a Music Assembler native song with transposes.",
+)
 
 
 def table(*rows) -> Table:
     """A GoatTracker 2 table of ``(left, right)`` ``rows``."""
     return Table(left=[r[0] for r in rows], right=[r[1] for r in rows])
-
-
-def mini_song(playroutine, tracks=None, phrases=None, **extra) -> dict:
-    """A one-voice song around ``playroutine``."""
-    song = {
-        "unitracker": "ir",
-        "clock": {"cycles_per_tick": 19656, "clock_hz": 985248},
-        "voices": 1,
-        "tracks": tracks or [{"plays": [{"phrase": "a"}], "loop": 0}],
-        "phrases": phrases or {"a": [{}]},
-        "playroutine": playroutine,
-    }
-    song.update(extra)
-    return song
-
-
-def sw_fx(raw: bytes, rows: dict):
-    """SID-Wizard tune ``raw``'s first subtune with each ``{(pattern, row): (fx, value)}`` set."""
-    swm = parse_sid_song(raw, 1)
-    for (pattern, k), (fx, value) in rows.items():
-        row = swm.patterns[pattern - 1].rows[k]
-        row.fx, row.fx_value = fx, value
-    return swm
-
-
-def sw_table_byte(raw: bytes, instrument: int, which: str, offset: int, value: int) -> bytes:
-    """SID-Wizard tune ``raw`` with byte ``offset`` of instrument ``instrument``'s ``wf``, ``pw``
-    or ``filter`` table set to ``value``; the instruments lie in order in the file."""
-    pos, instruments = -1, parse_sid_song(raw, 1).instruments[:instrument]
-    for one in instruments:
-        pos = raw.index(one.memory_image(), pos + 1)
-    ins = instruments[-1]
-    tables = (ins.wf_table, ins.pw_table)[: ("wf", "pw", "filter").index(which)]
-    start = pos + INST_WF_TABLE_POS + sum(len(table) + 1 for table in tables)
-    out = bytearray(raw)
-    out[start + offset] = value
-    return bytes(out)
-
-
-def oracle(raw: bytes, frames: int):
-    """The 6502 oracle's register grid of tune ``raw``, cached by content with the oracle traces."""
-    return np.asarray(file_oracle(raw, 1, frames, work=default_cache("csv"))[1], dtype=np.uint8)
-
-
-def attach(request, text: str) -> str:
-    """``text``, attached to the test's report for its expected-failure line."""
-    request.node.failure_report = text
-    return text
-
-
-def render(who, ticks: int) -> np.ndarray:
-    """The grid of ``ticks`` ticks of a document's text, a song (the VM) or a player factory."""
-    return np.asarray((who() if callable(who) else verify.player(who)).render_grid(ticks))
-
-
-def grid_diff_of(request, ver: gridcmp.Verdict, subject=None, against=None) -> str:
-    """The grid diff of ``ver`` (``gridcmp.runs_report``), attached to the test's report; given
-    the ``subject`` it judged and what it was ``against`` (each a document's text, a song or a
-    native player factory), followed by :func:`verify.explain`'s report of its onset."""
-    text = gridcmp.runs_report(ver, **verify.REPORT)
-    if subject is not None and ver.onset is not None:
-        grids = tuple(render(who, ver.n) for who in (subject, against))
-        text += "\n\n" + verify.explain(ver, subject, grids, against).text()
-    return attach(request, text)
-
-
-def vm_mismatch(song: dict, theirs) -> tuple[int, int] | None:
-    """The first ``(tick, register)`` where ``song`` on the VM departs from grid ``theirs``, each
-    voice from its first note, under its playroutine's ``tolerance``."""
-    player = SongPlayer(song)
-    grid = player.render_grid(len(theirs))
-    return gridcmp.first_mismatch(grid, theirs, player.starts, tol=tolerance(song))
-
-
-def tolerance(song: dict):
-    """The gridcmp tolerance ``song``'s playroutine declares, or None."""
-    return song["playroutine"].get("tolerance")
-
-
-def assert_plays(request, song: dict, theirs, native) -> None:
-    """``song`` plays grid ``theirs`` on the VM from its voices' first notes; the test's failure
-    carries :func:`verify.explain`'s report of ``native``."""
-    player = SongPlayer(song)
-    grid = player.render_grid(len(theirs))
-    ver, text = gridcmp.verdict_onset(grid, player.starts, theirs, tol=tolerance(song)), None
-    if not ver.ok:
-        text = attach(request, verify.explain(ver, song, (grid, theirs), native).text())
-    assert ver.ok, text
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voice2=None, **opts):
@@ -308,98 +181,3 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
         ),
     )
     return dec, Player(song, freq_table=GT.FREQ_TABLE, state=state, pulse_step=step, **opts)
-
-
-OPTIMISED = {
-    "metal_warrior": ["programs"],
-    "crosseyed": ["instruments", "programs"],
-    "csillag": ["fields"],
-}
-REFERENCE_TICKS = {
-    "metal_warrior": 2 * 3840,
-    "crosseyed": 95 + 2 * 1152 + 100,
-    "csillag": 6 * 2304 + 600,
-}
-
-
-def once(factory, key: str, make):
-    """``make()``, computed once per test session and shared by every xdist worker."""
-    base = factory.getbasetemp()
-    root = base.parent if os.environ.get("PYTEST_XDIST_WORKER") else base
-    path = root / f"once-{key}.pkl"
-    with FileLock(f"{path}.lock"):
-        if path.is_file():
-            return pickle.loads(path.read_bytes())
-        value = make()
-        path.write_bytes(pickle.dumps(value))
-    return value
-
-
-@dataclass(frozen=True)
-class Reference:
-    """A reference tune lifted once: its path, bytes, the lifter's song, native grid and the
-    lift's generic document."""
-
-    sid: Path
-    raw: bytes
-    song: dict
-    native: np.ndarray
-    generic: str
-
-    def ir(self) -> dict:
-        """A fresh copy of the lifted song."""
-        return copy.deepcopy(self.song)
-
-
-class _Shared(dict):
-    """Each reference tune's ``make(name, sid, *needs(name))`` on first use, shared across
-    workers; ``needs`` runs before the lock, so no lock is taken while another is held."""
-
-    def __init__(self, request, kind, make, needs=lambda name: ()):
-        super().__init__()
-        self.request, self.kind, self.make, self.needs = request, kind, make, needs
-
-    def __missing__(self, name):
-        sid, args = self.request.getfixturevalue(name), self.needs(name)
-        factory = self.request.getfixturevalue("tmp_path_factory")
-        self[name] = once(factory, f"{self.kind}-{name}", lambda: self.make(name, sid, *args))
-        return self[name]
-
-
-def _reference(name, sid):
-    raw = sid.read_bytes()
-    grid = find_format(raw).play(raw).render_grid(REFERENCE_TICKS[name])
-    lift = backends.lifter(raw)
-    song = lift.run()
-    return Reference(sid, raw, song, np.asarray(grid, np.uint8), lift.document)
-
-
-@pytest.fixture(scope="session")
-def references(request) -> dict:
-    """``{tune: Reference}``: each reference tune lifted once per session."""
-    return _Shared(request, "reference", _reference)
-
-
-@pytest.fixture(scope="session")
-def optimised_tunes(request) -> dict:
-    """``{tune: (path, optimiser Result)}``: a reference tune's lift optimised by the passes of
-    :data:`OPTIMISED`, a subset that keeps the suite's run time bounded."""
-
-    def make(name, sid, reference):
-        return sid, optimise.optimise(reference.ir(), OPTIMISED[name], progress=False)
-
-    refs = request.getfixturevalue("references")
-    return _Shared(request, "optimised", make, lambda name: (refs[name],))
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_makereport(item, call):  # pylint: disable=unused-argument
-    """The report a test attached with :func:`attach`, on its expected-failure line or as its
-    failure's ``explain`` section."""
-    report = yield
-    diff = getattr(item, "failure_report", None)
-    if diff is not None and getattr(report, "wasxfail", None) is not None:
-        report.wasxfail = f"{report.wasxfail}\n\n{diff}"
-    elif diff is not None and getattr(report, "failed", False):
-        report.sections.append(("explain", diff))
-    return report

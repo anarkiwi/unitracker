@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "unitracker"
 version = "0.1.0"
-description = "A generic C64 SID tracker song format, GoatTracker 2, defMON and SID-Wizard lifters, and a generic player"
+description = "GoatTracker 2, defMON, SID-Wizard and Music Assembler lifters to the generic unitracker document, and its optimiser"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Josh Bailey" }]
 classifiers = ["Operating System :: POSIX :: Linux", "Programming Language :: Python :: 3"]
 dependencies = [
-    "pyyaml>=6",
     "numpy>=1.23",
     "tqdm>=4",
     "pysidtracker>=0.36.0",
@@ -20,32 +19,26 @@ dependencies = [
     "pygoattracker>=0.7.3",
     "pydefmon>=0.10.1",
     "pysidwizard>=0.3.5",
-    "unitracker-grammar>=0.10.0",
-    "unitracker-player>=0.17.0",
-    "z3-solver>=4.12",
-    "grimp>=3.5",
-    "sympy>=1.12",
+    "pymusicassembler>=0.8.6",
+    "unitracker-grammar>=0.12.0",
+    "unitracker-player>=0.19.0",
     "tiktoken>=0.7",
     "egglog>=11",
 ]
 
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x>=13"]
-dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "tokenizers>=0.20", "zstandard>=0.21", "filelock>=3.12", "pytest-timeout>=2.2", "import-linter>=2.15"]
+dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "zstandard>=0.21", "pytest-timeout>=2.2", "import-linter>=2.15"]
 
 [project.urls]
 Homepage = "https://github.com/anarkiwi/unitracker"
 
 [project.scripts]
 unitracker-lift = "unitracker.cli:lift_main"
-unitracker-modfit = "unitracker.analysis.cli:main"
 unitracker-code6502 = "unitracker.optimiser.code6502.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-unitracker = ["playroutines/*.yaml", "modfit/specs.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -70,14 +63,8 @@ name = "Layers"
 type = "layers"
 containers = ["unitracker"]
 layers = [
-    "cli | analysis",
-    "lift",
-    "optimise",
-    "modfit",
-    "document",
-    "player",
-    "playroutine",
-    "cache",
+    "cli",
+    "direct | optimiser",
 ]
 
 [[tool.importlinter.contracts]]
