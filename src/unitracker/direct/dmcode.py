@@ -1,0 +1,53 @@
+"""defMON's per-tick units as format 1.23 6502 code templates (docs/direct/defmon.md).
+
+Tables ``G`` (note frequencies), ``P`` (portamento) and ``R`` (slide rates) are the replay's;
+:data:`STATE` names each cell's variables.
+"""
+
+STATE = {
+    "freq": {"s": 2, "d": 1},
+    "pw": {"w": 2, "q": 1, "e": 1},
+    "cut": {"r": 2, "z": 2, "o": 1, "cp": 1, "l": 1, "b": 1},
+}
+
+_FIRST = "lda phi\nora phi+1\nbne {0}\n"
+_NOTE = "lda nn\nand #127\ntay\n"
+_SUM = _NOTE + "clc\nlda s\nadc G.lo,y\nsta v\nlda G.hi,y\nadc s+1\nsta v+1\nrts\n"
+_W = "lda w\nsta v\nlda w+1\nsta v+1\nrts\n"
+# $10B5: step the accumulator, saturate to the floor, add cp and the carry, clamp, double.
+_ACID = (
+    "lda o\nbne sb\nclc\nlda r\nadc z\nsta r\nlda r+1\nadc z+1\njmp hi\n"
+    "sb:\nclc\nlda r\nsbc z\nsta r\nlda r+1\nsbc z+1\n"
+    "hi:\nbpl keep\nlda l\nkeep:\nsta r+1\nadc cp\nbmi low\ncmp l\nbcs put\nlow:\nlda l\n"
+    "put:\nldx b\nbeq out\nasl\nout:\nsta v\nlda #0\nsta v+1\n" + "asl v\nrol v+1\n" * 3 + "rts\n"
+)
+
+CODE = {
+    # init's detune and frequency; a note (phi 0) clears the slide accumulator
+    "nr": _FIRST.format("done")
+    + "sta s\nsta s+1\nlda #k\nsta d\nlda #<f\nsta v\nlda #>f\nsta v+1\ndone:\nrts\n",
+    # $1453 mode 0: the detune adds to the low byte only
+    "pitch": _NOTE + "lda G.lo,y\nclc\nadc d\nsta v\nlda G.hi,y\nsta v+1\nrts\n",
+    # $140E mode $80+: the accumulator slides by the rate, down with bit 6
+    "slide": "lda #m\nasl\nand #127\ntax\nlda #m\nand #64\nbne dn\nclc\n"
+    "lda R.lo,x\nadc s\nsta s\nlda R.hi,x\nadc s+1\nsta s+1\njmp sum\n"
+    "dn:\nsec\nlda s\nsbc R.lo,x\nsta s\nlda s+1\nsbc R.hi,x\nsta s+1\nsum:\n" + _SUM,
+    # $1469 mode $01-$7F: the portamento step at note + mode
+    "por": _NOTE + "tya\ntax\nclc\nadc #m\ntay\nsec\nlda P.lo+1,y\nsbc P.lo,y\nsta v\n"
+    "lda P.hi+1,y\nsbc P.hi,y\nsta v+1\nclc\nlda G.lo,x\nadc v\nsta v\nlda G.hi,x\nadc v+1\n"
+    "sta v+1\nrts\n",
+    "pinit": _FIRST.format("out") + "lda #k\nsta e\nlda #<f\nsta w\nlda #>f\nsta w+1\nout:\n" + _W,
+    # g bit 0 sets the pulse, bit 1 the step; $1495 then sweeps, down with the pitch carry
+    "pul": _FIRST.format("step") + "lda #g\nlsr\nbcc pss\nlda #p\nsta w+1\nand #240\nsta w\n"
+    "pss:\nlda #g\nand #2\nbeq step\nlda #h\nsta q\n"
+    "step:\nldy q\nbeq out\nbpl dn\ntya\nand #127\nclc\nadc w\nsta w\nbcc out\nlda w+1\n"
+    "cmp #15\nbeq top\ninc w+1\njmp out\ntop:\nlda #248\nsta w\ntya\neor #128\nsta q\njmp out\n"
+    "dn:\nlda nn\nand #127\ntax\nlda G.lo,x\nclc\nadc e\nlda w\nsbc q\nsta w\nbcs out\n"
+    "lda w+1\nbeq bot\ndec w+1\njmp out\nbot:\nlda #1\nsta w\ntya\neor #128\nsta q\nout:\n" + _W,
+    "cinit": _FIRST.format("step") + "lda #u\nsta o\nlda #f\nsta l\nlda #k\nsta b\nstep:\n" + _ACID,
+    # g bit 0 sets cp, bit 1 the accumulator, bits 2/3 an adding/subtracting step
+    "acid": _FIRST.format("done") + "lda #g\nlsr\nbcc acc\nlda #c\nsta cp\n"
+    "acc:\nlda #g\nand #2\nbeq add\nlda #<j\nsta r\nlda #>j\nsta r+1\nlda #0\nsta z\nsta z+1\n"
+    "add:\nlda #g\nand #12\nbeq done\nlsr\nlsr\nlsr\nsta o\nlda #<j\nsta z\nlda #>j\nsta z+1\n"
+    "done:\nrts\n",
+}

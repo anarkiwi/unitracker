@@ -17,6 +17,7 @@ convert native pitch, pulse and filter modulations to proved integer expressions
 | [docs/porting.md](docs/porting.md) | bringing another playroutine to unitracker |
 | [docs/direct/goattracker2.md](docs/direct/goattracker2.md) | a standalone GoatTracker 2 transcription from pygoattracker's playroutine (`python -m unitracker.direct.goattracker2`) |
 | [docs/direct/sidwizard.md](docs/direct/sidwizard.md) | a standalone SID-Wizard (bare and light builds) transcription from pysidwizard's playroutine (`python -m unitracker.direct.sidwizard`) |
+| [docs/direct/defmon.md](docs/direct/defmon.md) | a standalone defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
 
 ## Install
 
