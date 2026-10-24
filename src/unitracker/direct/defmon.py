@@ -31,7 +31,7 @@ GATE_A, GATE_B, GATE_N = 0x40, 0x20, 0x10
 TABLES = {"G": (0x159C, 0x1638, 256), "P": (0x1583, 0x161F, 257), "R": (0x1578, 0x1614, 128)}
 SLOTS = (
     ("freq", (d.Slot("n", reset=("note",)), d.Slot("p"))),
-    ("pw", (d.Slot("pw", reset=("row.pw",)),)),
+    ("pw", (d.Slot("pz", reset=("note",)), d.Slot("pm"), d.Slot("sw", reset=("row.pw",)))),
     ("cut", tuple(d.Slot(f"k{v}", reset=("row.cut",)) for v in (1, 2, 3)) + (d.Slot("st"),)),
 )
 MAX_CALLS = 1 << 17
@@ -131,7 +131,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError(str(exc)) from exc
         self.absolute = "absolute" in variants
         self.check()
-        self.joints, self.names, self.runs, self.gated = {}, {}, {}, False
+        self.joints, self.names, self.runs = {}, {}, {}
 
     def __call__(self, addr: int, voice: int = 0) -> int:
         return self.mem[self.at[addr] + VOICES[voice]]
@@ -185,23 +185,31 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 state[k + 1] = cnt - 1
         return tuple(state), cols
 
-    def joint(self, state: tuple) -> tuple:
+    def joint(self, state: tuple, bits: tuple, fix: bool = False) -> tuple:
         """``(rows, loop)``: ``(ticks, columns)`` of each call that fetches from ``state`` on,
-        to both layers frozen (loop None) or a state seen before."""
-        rows, seen, last = [], {}, 0
+        to both layers frozen (loop None) or a state seen before. ``bits`` are bit 0 of
+        ``wgh`` and ``wgl``, whose exclusive or is the gate each row that writes either sets
+        (``_gate``); ``fix`` turns the gate off on the first call where no row sets it."""
+        rows, seen, last = [[1, {"_gate": 0}]] if fix else [], {}, 0
         for t in range(MAX_CALLS):
             if state[1] >= 0x80 and state[3] >= 0x80:
                 return rows, None
             after, cols = self.tick(state)
             if cols:
-                if state in seen:
+                if (state, bits) in seen:
                     rows[-1][0] = t - last
-                    return rows, seen[state]
-                seen[state] = len(rows)
+                    return rows, seen[(state, bits)]
+                if not (fix and not t):
+                    seen[(state, bits)] = len(rows)
                 if rows:
                     rows[-1][0] = t - last
-                rows += [[0, c] for c in merged(cols)[:-1]] + [[1, merged(cols)[-1]]]
-                last = t
+                for k, c in enumerate(merged(cols)):
+                    bits, c = gated(bits, c)
+                    if fix and not t and not k and rows:
+                        rows.pop()
+                        c = {"_gate": 0} | c
+                    rows.append([0, c])
+                rows[-1][0], last = 1, t
             state = after
         raise TranscribeError("a sidcall program runs without end")
 
@@ -210,18 +218,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         keys = [("hold", hold)] if hold != 1 else []
         wgh, wgl = cols.get("wgh"), cols.get("wgl")
         if wgh is not None or wgl is not None:
-            ctrl = "" if wgh is None else str(wgh if self.gated else wgh | 1)
+            ctrl = "" if wgh is None else str(wgh | 1)
             keys.append(("ctrl", ctrl + ("" if wgl is None else f"^{wgl & 0xFE}")))
-            if wgl is not None and not self.gated:
-                keys.append(("gate", wgl & 1))
+        if "_gate" in cols:
+            keys.append(("gate", cols["_gate"]))
         if "tr" in cols:
             tr = cols["tr"]
             absolute = self.absolute and tr & 0x80
             keys.append(("note", note_name(tr & 0x7F) if absolute else d.Signed(tr)))
         keys += [(k, cols[k]) for k in ("ad", "sr") if k in cols]
-        if "pw" in cols or "ps" in cols:
+        if {"pw", "ps", "af"} & cols.keys():  # any pw binding resets the sweep slot's phi
             flags = ("pw" in cols) | ("ps" in cols) << 1
-            keys.append(("pw", call("pul", g=flags, p=cols.get("pw", 0), h=cols.get("ps", 0))))
+            keys.append(("sw.pw", call("pul", g=flags, p=cols.get("pw", 0), h=cols.get("ps", 0))))
         if "cp" in cols or "acid" in cols:
             keys.append((f"k{voice + 1}.cut", acid(cols)))
         if "re" in cols:
@@ -229,66 +237,63 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if "fv" in cols:
             keys.append(("mode", cols["fv"] & 0xF0))
         if "af" in cols:
-            keys.append(("p.freq", pitch(cols["af"])))
+            keys += [("p.freq", pitch(cols["af"])), ("pm.pw", call("pmode", m=cols["af"]))]
         return d.Row(keys)
 
-    def program(self, state: tuple, voice: int) -> str:
-        """The name of the control program both layers run from ``state`` on ``voice``, the
-        voice's own where it binds its ACID slot."""
-        if state not in self.runs:
-            self.runs[state] = self.joint(state)
-        rows, loop = self.runs[state]
-        key = (state, voice if any({"cp", "acid"} & c.keys() for _, c in rows) else None)
+    def program(self, state: tuple, voice: int, bits: tuple, fix: bool) -> str:
+        """The name of the control program both layers run from ``state`` and gate ``bits``
+        on ``voice`` (see :meth:`joint`), the voice's own where it binds its ACID slot."""
+        if (state, bits, fix) not in self.runs:
+            self.runs[(state, bits, fix)] = self.joint(state, bits, fix)
+        rows, loop = self.runs[(state, bits, fix)]
+        cut = any({"cp", "acid"} & c.keys() for _, c in rows)
+        key = (state, bits, fix, voice if cut else None)
         if key not in self.names:
             self.names[key] = f"c{len(self.names) + 1}"
             self.joints[self.names[key]] = (rows, loop, voice)
         return self.names[key]
 
-    def gates(self, program: str) -> bool:
-        """Whether ``program``'s rows of its first call set the gate."""
-        for hold, cols in self.joints[program][0]:
-            if "wgl" in cols:
-                return True
-            if hold:
-                return False
-        return False  # pragma: no cover
-
-    def gate(self):
-        """Settles the gate: with no odd ``wgl`` it is always on and ``ctrl`` is ``wgh``; with
-        no odd ``wgh`` it is ``wgl``'s bit 0 and ``ctrl`` is ``wgh | 1``."""
-        cols = [c for rows, _, _ in self.joints.values() for _, c in rows]
-        odd = {k for c in cols for k in ("wgh", "wgl") if c.get(k, 0) & 1}
-        if len(odd) == 2:
-            raise TranscribeError("sidTAB rows set bit 0 of both wgh and wgl")
-        self.gated = "wgl" not in odd
-        if any(c.get("af") for c in cols) and any(c.get("ps") for c in cols):
-            raise TranscribeError("a pulse sweep beside a pitch mode")
-
     # ---- events and the document --------------------------------------------------------
 
     def song(self, calls: int = MAX_CALLS) -> tuple:
         """``(steps, loop step)``: each song step's length and per voice ``{offset: (event,
-        program)}``, to the step whose arranger position and cascades recur."""
+        program)}``, to the step whose arranger position and cascades recur. A note turns
+        the gate on: where the call's rows leave it off, the note runs the voice's program
+        from its state with the gate off."""
         states = [tuple(self(a, v) for a in (0x12EF, 0x12E0, 0x1382, 0x1373)) for v in range(3)]
+        bits = [(0, 0)] * 3
         steps, seen = [], {}
         for step in sequence(DefmonPlayer(self.raw, subtune=self.subtune), self.at, calls):
-            key = (step.key, tuple(states))
+            key = (step.key, tuple(states), tuple(bits))
             if key in seen:
                 return steps, seen[key]
             seen[key] = len(steps)
             marks = [{}, {}, {}]
             for t in range(step.length):
                 for v, events in enumerate(step.events):
-                    state = list(states[v])
-                    if t in events:
-                        a, b, _ = events[t]
-                        state[0:2] = state[0:2] if a is None else (a, 0)
-                        state[2:4] = state[2:4] if b is None else (b, 0)
-                        armed = a is not None or b is not None
-                        marks[v][t] = (events[t], self.program(tuple(state), v) if armed else None)
-                    states[v] = self.tick(tuple(state))[0]
+                    states[v], bits[v], mark = self.call(v, states[v], bits[v], events.get(t))
+                    if mark is not None:
+                        marks[v][t] = mark
             steps.append((step.length, marks))
         raise TranscribeError("the song does not loop")  # pragma: no cover
+
+    def call(self, voice: int, state: tuple, bits: tuple, ev: tuple | None) -> tuple:
+        """``(state, bits, mark)``: a voice's cascades and gate bits after one call that runs
+        pattern event ``ev`` (or None), and the event's ``(event, program)`` (or None)."""
+        state = list(state)
+        if ev is not None:
+            state[0:2] = state[0:2] if ev[0] is None else (ev[0], 0)
+            state[2:4] = state[2:4] if ev[1] is None else (ev[1], 0)
+        after, cols, sets = *self.tick(tuple(state)), False
+        out = bits
+        for c in merged(cols) if cols else ():
+            out, c = gated(out, c)
+            sets |= "_gate" in c
+        if ev is None:
+            return after, out, None
+        fix = ev[2] is not None and not sets and not out[0] ^ out[1]
+        run = ev[0] is not None or ev[1] is not None or fix
+        return after, out, (ev, self.program(tuple(state), voice, bits, fix) if run else None)
 
     def event(self, ev: tuple, program: str | None) -> d.Event:
         """The generic event of pattern event ``(a, b, n)`` starting ``program``."""
@@ -298,8 +303,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             return d.Event("-", commands=commands)
         if self.absolute and n >= 0x80:
             raise TranscribeError(f"note ${n:02X} past the note column")
-        if not self.gated and (program is None or not self.gates(program)):
-            raise TranscribeError("a note whose first row does not set the gate")
         return d.Event(note_name(n), commands=commands)
 
     def phrase(self, length: int, marks: dict, first: bool) -> tuple:
@@ -332,17 +335,22 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                         u=self.word(0x1019, 0x101A, v),
                     ),
                 ),
-                ("pw", call("pinit", k=v, f=self.word(0x1023, 0x1025, v))),
+                ("pz.pw", call("pzero")),
+                (
+                    "sw.pw",
+                    call(
+                        "pinit", k=v, f=self.word(0x1023, 0x1025, v), u=self.word(0x1019, 0x101A, v)
+                    ),
+                ),
+                ("ctrl", 1),
             ]
-            if not self.gated:
-                commands.append(("ctrl", 1))
             if not v:
                 dbl = int(self(0x10D4) == 0x0A)
                 commands += [
                     ("vol", 15),
                     ("st.cut", call("cinit", u=self(0x10B8) == 0xE9, f=self(0x10CE), k=dbl)),
                 ]
-            out.append(d.Event("on" if self.gated else "-", "i1", commands))
+            out.append(d.Event("-", "i1", commands))
         return tuple(out)
 
     def timeline(self, steps: list) -> list:
@@ -373,7 +381,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def document(self, calls: int = MAX_CALLS) -> str:
         """The document of the song to its loop."""
         steps, loop = self.song(calls)
-        self.gate()
         rows = self.timeline(steps)
         programs = {
             name: d.Program([self.row(h, c, v) for h, c in body], at)
@@ -408,6 +415,15 @@ def pitch(mode: int) -> d.Call:
     if not mode:
         return call("pitch")
     return call("slide" if mode >= 0x80 else "por", m=mode)
+
+
+def gated(bits: tuple, cols: dict) -> tuple:
+    """``(bits, cols)``: bit 0 of ``wgh`` and ``wgl`` after a row's columns, and the columns
+    with the gate it sets where it writes either."""
+    if "wgh" not in cols and "wgl" not in cols:
+        return bits, cols
+    bits = (cols.get("wgh", bits[0]) & 1, cols.get("wgl", bits[1]) & 1)
+    return bits, cols | {"_gate": bits[0] ^ bits[1]}
 
 
 def merged(cols: list) -> list:
