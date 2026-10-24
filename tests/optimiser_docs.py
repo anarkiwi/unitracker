@@ -1,6 +1,6 @@
-"""Small hand-written 1.23 documents for the optimiser's tests."""
+"""Small hand-written documents for the optimiser's tests."""
 
-HEAD = "unitracker: 1.23\nmeta: {title: T, author: A}\n"
+HEAD = "unitracker: 2.0\nmeta: {title: T, author: A}\n"
 MODS = "mod:\n  note(): F(N)\n  vib(d): v + d*(φ % 4)\n  wob(e): v + e*(φ % 4)\n"
 
 

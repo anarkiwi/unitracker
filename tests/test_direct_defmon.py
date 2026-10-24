@@ -17,7 +17,7 @@ def fixture_cross(crosseyed):
     return tune
 
 
-@pytest.mark.parametrize("name", ["crosseyed", "tractorbeam"])
+@pytest.mark.parametrize("name", ["crosseyed", "tractorbeam", "rent_a_cop", "persei", "ngc1277"])
 def test_the_document_plays_the_replay(request, name):
     cells, text = dm.compare(request.getfixturevalue(name).read_bytes(), frames=TICKS)
     parse(text)
@@ -32,10 +32,10 @@ def test_helpers():
     assert str(dm.pitch(0)) == "pitch()"
     assert str(dm.pitch(0xD8)) == "slide(216)"
     assert str(dm.pitch(3)) == "por(3)"
-    assert str(dm.acid({"cp": 4})) == "acid(1,4,0)"
-    assert str(dm.acid({"acid": 0x4000})) == "acid(2,0,16384)"
-    assert str(dm.acid({"acid": 0xC200})) == "acid(8,0,512)"
-    assert str(dm.acid({"acid": 0x8A00})) == "acid(4,0,2560)"
+    assert str(dm.acid({"cp": 4})) == "acid(1,4,0,0)"
+    assert str(dm.acid({"acid": 0x4000})) == "acid(2,0,16384,0)"
+    assert str(dm.acid({"acid": 0xC200})) == "acid(8,0,0,512)"
+    assert str(dm.acid({"acid": 0x8A00, "cp": None})) == "acid(4,0,0,2560)"
     assert dm.text("Crosseyed") == "Crosseyed"
     assert dm.text("it's [x]") == "'it''s [x]'"
     assert dm.event_at(bytes([0x70, 3, 4, 48]), 0) == (3, 4, 48)
@@ -44,10 +44,20 @@ def test_helpers():
 
 
 def test_a_frozen_program_ends_and_a_cycling_one_loops(cross):
-    rows, loop = cross.joint((2, 0, 0, 0xFF))
+    rows, loop = cross.joint((2, 0, 0, 0xFF), (0, 0))
     assert loop is None and [h for h, _ in rows] == [2, 1]
-    rows, loop = cross.joint((16, 0, 0, 0xFF))
+    rows, loop = cross.joint((16, 0, 0, 0xFF), (0, 0))
     assert loop == 2 and [h for h, _ in rows] == [1, 1, 1, 1]
+
+
+def test_the_gate_is_bit_0_of_wgh_xor_wgl(cross):
+    assert dm.gated((0, 0), {"ad": 1}) == ((0, 0), {"ad": 1})
+    assert dm.gated((1, 0), {"wgl": 3}) == ((1, 1), {"wgl": 3, "_gate": 0})
+    assert dm.gated((0, 1), {"wgh": 0x40}) == ((0, 1), {"wgh": 0x40, "_gate": 1})
+    rows, loop = cross.joint((0, 0x80, 0, 0x80), (0, 0), fix=True)
+    assert rows == [[1, {"_gate": 0}]] and loop is None
+    rows, _ = cross.joint((2, 0, 0, 0xFF), (0, 0), fix=True)
+    assert rows[0][1]["_gate"] == 1 and len(rows) == 2
 
 
 @pytest.mark.parametrize(
@@ -56,7 +66,6 @@ def test_a_frozen_program_ends_and_a_cycling_one_loops(cross):
         (0x10BF, 0x69, "ACID opcodes"),
         (0x10D4, 0x60, "cutoff output"),
         (0x101F, 9, "detune and routing"),
-        (0x1019, 1, "slide accumulator"),
     ],
 )
 def test_init_state_it_cannot_write_is_refused(cross, addr, value, message):
@@ -79,50 +88,29 @@ def test_a_row_without_body_is_refused(cross):
         cross.mem[dm.SIDTAB_HI + 40], cross.mem[dm.SIDTAB_LO + 40] = keep
 
 
-@pytest.mark.parametrize(
-    "cols, message",
-    [
-        ([{"wgh": 0x41}, {"wgl": 1}], "both wgh and wgl"),
-        ([{"af": 0x80}, {"ps": 4}], "pulse sweep beside a pitch mode"),
-    ],
-)
-def test_columns_it_cannot_write_are_refused(cross, cols, message):
-    joints = cross.joints
-    cross.joints = {"c1": ([(1, c) for c in cols], None, 0)}
-    try:
-        with pytest.raises(dm.TranscribeError, match=message):
-            cross.gate()
-    finally:
-        cross.joints = joints
-
-
-def test_notes_it_cannot_write_are_refused(cross):
-    cross.gate()
-    assert not cross.gated
+def test_notes_past_the_note_column_are_refused(cross):
     with pytest.raises(dm.TranscribeError, match="past the note column"):
         cross.event((None, None, 0x80), None)
-    with pytest.raises(dm.TranscribeError, match="does not set the gate"):
-        cross.event((None, None, 48), None)
     assert cross.event((None, None, 48), "c2").note == "C4"
 
 
-def test_both_layers_writing_one_unit_in_a_call_are_refused(cross):
-    with pytest.raises(dm.TranscribeError, match="both layers"):
-        cross.tick((17, 0, 17, 0))
+def test_both_layers_rows_of_one_call_apply_in_order():
+    a, b = {"re": 1, "acid": 0x100, "ad": 1}, {"bre": 2, "bacid": 0xC000, "ad": 2}
+    assert dm.merged([a]) == [a]
+    assert dm.merged([a, b]) == [{"re": 1, "acid": 0x100, "ad": 2, "bre": 2, "bacid": 0xC000}]
+    assert dm.filtered(None, 0x1F) == [("mode", 0x10)]
+    assert dm.filtered(0xF8, None) == [("res", 15), ("route", "+ 8")]
+
+
+def test_a_step_without_end_is_refused(cross, monkeypatch):
+    monkeypatch.setattr(dm, "MAX_STEP", 3)
+    with pytest.raises(dm.TranscribeError, match="reaches no ALT event"):
+        dm.Transcriber(cross.raw).song()
 
 
 def test_a_song_that_does_not_loop_in_time_is_refused(cross):
     with pytest.raises(dm.TranscribeError, match="does not loop within 50 calls"):
         dm.Transcriber(cross.raw).song(50)
-
-
-@pytest.mark.parametrize(
-    "name, message",
-    [("rent_a_cop", r"not the \$1000 build"), ("persei", r"a play routine at \$17C1")],
-)
-def test_other_builds_are_refused(request, name, message):
-    with pytest.raises(dm.TranscribeError, match=message):
-        dm.transcribe(request.getfixturevalue(name).read_bytes())
 
 
 def test_a_multi_sid_tune_is_refused(crosseyed):
@@ -132,9 +120,11 @@ def test_a_multi_sid_tune_is_refused(crosseyed):
         dm.Transcriber(bytes(raw))
 
 
-def test_main_transcribes_and_verifies(crosseyed, persei, capsys):
+def test_main_transcribes_and_verifies(crosseyed, tmp_path, capsys):
+    bad = tmp_path / "bad.sid"
+    bad.write_bytes(b"PSID")
     assert dm.main([str(crosseyed)]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.23\n")
-    assert dm.main(["--verify", "--frames", "300", "--diff", "2", str(crosseyed), str(persei)]) == 0
+    assert capsys.readouterr().out.startswith("unitracker: 2.0\n")
+    assert dm.main(["--verify", "--frames", "300", "--diff", "2", str(crosseyed), str(bad)]) == 0
     out = capsys.readouterr().out
-    assert f"{crosseyed}: exact" in out and f"{persei}: TranscribeError" in out
+    assert f"{crosseyed}: exact" in out and f"{bad}: SidFormatError" in out

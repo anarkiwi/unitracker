@@ -1,4 +1,4 @@
-"""Music Assembler's per-tick pulse and filter sweeps as format 1.23 6502 code templates.
+"""Music Assembler's per-tick pulse and filter sweeps as 6502 code templates.
 
 State: freq ``dl``, ``sc``, ``ph`` the arpeggio's delay, step count and phase; pw ``d``, ``q``
 the ping-pong's direction and step count; cut ``acc``, ``ctr`` the accumulator and ticks left.

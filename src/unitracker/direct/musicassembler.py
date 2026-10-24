@@ -2,7 +2,7 @@
 
 A pattern token is an event from the play call after its parse to its voice's next parse, a
 tick the voice writes nothing; each event's control program walks the inner program, and the
-pulse and filter sweeps are format 1.23 code modulators (docs/direct/musicassembler.md).
+pulse and filter sweeps are code modulators (docs/direct/musicassembler.md).
 """
 
 import math
@@ -40,7 +40,7 @@ from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat
 from unitracker.direct.macode import CODE, STATE
 
-VERSION = "1.23"
+VERSION = "2.0"
 # The clock whose F is nearest the player's note table: 53 of its notes 0-94 differ by one.
 CLOCK = (PAL_CYCLES_PER_FRAME, 985056)
 VOICES = MA.VOICES
