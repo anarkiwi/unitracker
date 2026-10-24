@@ -1,6 +1,6 @@
 # The generic optimiser
 
-`unitracker.optimiser` rewrites any canonical document (format 2.2) into a smaller one that
+`unitracker.optimiser` rewrites any canonical document (format 2.3) into a smaller one that
 plays the same register grid on unitracker-player. It knows no tracker: it reads and writes the
 document only through unitracker-grammar's model (`unitracker_grammar.document`), whose `printed` is the one canonical
 text.

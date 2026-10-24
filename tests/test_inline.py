@@ -10,7 +10,7 @@ from unitracker.optimiser import Guarantee, fit, optimise
 from unitracker.optimiser.__main__ import main
 from unitracker.optimiser.inline import candidates, cyclic, definitions, inline, inlined
 
-SHARED = """unitracker:2.2
+SHARED = """unitracker:2.3
 meta:{title:T,author:A}
 voices:2
 mod:

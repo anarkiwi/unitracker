@@ -29,13 +29,13 @@ def test_trace_records_each_code_call_s_firings_and_plays_the_grid():
     frames, fired = trace(D.EXACT, None)
     assert np.array_equal(frames, play(D.EXACT))
     assert {(str(c), cell) for c, cell in fired} == {
-        ("slide(40)", "pw"),
-        ("slide(24)", "pw"),
+        ("ramp(40)", "pw"),
+        ("ramp(24)", "pw"),
         ("start()", "freq"),
         ("wob(8)", "freq"),
         ("wob(16)", "freq"),
     }
-    rec = next(r for (c, _), r in fired.items() if str(c) == "slide(40)")
+    rec = next(r for (c, _), r in fired.items() if str(c) == "ramp(40)")
     assert np.array_equal((rec["out"] - rec["v"]) % 4096, np.full(len(rec), 40))
 
 

@@ -1,6 +1,6 @@
 """Small hand-written documents for the optimiser's tests."""
 
-HEAD = "unitracker:2.2\nmeta:{title:T,author:A}\n"
+HEAD = "unitracker:2.3\nmeta:{title:T,author:A}\n"
 MODS = "mod:\n note():F(N)\n vib(d):v + d*(phi % 4)\n wob(e):v + e*(phi % 4)\n"
 
 
@@ -119,7 +119,7 @@ TEMPLATE = doc(
 # square-wave vibrato (two calls) on a second slot and a pulse width sweep
 EXACT_CODE = (
     "mod:\n"
-    " slide(c):|\n\tclc\n\tlda v\n\tadc #<c\n\tsta v\n\tlda v+1\n\tadc #>c\n"
+    " ramp(c):|\n\tclc\n\tlda v\n\tadc #<c\n\tsta v\n\tlda v+1\n\tadc #>c\n"
     "\tsta v+1\n\trts\n"
     " start():|\n\tlda phi\n\tora phi+1\n\tbne done\n\tsta s\n\tldy nn\n"
     "\tlda F.lo,y\n\tsta v\n\tlda F.hi,y\n\tsta v+1\n\tdone:\n\trts\n"
@@ -129,8 +129,8 @@ EXACT_CODE = (
 )
 EXACT = doc(
     "      ins:\n"
-    "        i1:{ad:9,ctrl:c1,pw:slide(40),a.freq:start(),b.freq:wob(8)}\n"
-    "        i2:{ad:9,ctrl:c1,pw:slide(24),a.freq:start(),b.freq:wob(16)}\n"
+    "        i1:{ad:9,ctrl:c1,pw:ramp(40),a.freq:start(),b.freq:wob(8)}\n"
+    "        i2:{ad:9,ctrl:c1,pw:ramp(24),a.freq:start(),b.freq:wob(16)}\n"
     "      ctrl:\n"
     "        c1:[{ctrl:65},end]\n"
     "      phrase:\n"
@@ -151,14 +151,14 @@ NOISY = doc(
 )
 
 # put() keeps the frequency but stores the note that get() adds: put alone fits and is refused,
-# while slide() on the pulse width and the cutoff is kept
+# while ramp() on the pulse width and the cutoff is kept
 COUPLED = doc(
     "      ins:\n"
-    "        i1:{ad:9,ctrl:c1,pw:slide(8),filter:f1,a.freq:put(),b.freq:get()}\n"
+    "        i1:{ad:9,ctrl:c1,pw:ramp(8),filter:f1,a.freq:put(),b.freq:get()}\n"
     "      ctrl:\n"
     "        c1:[{ctrl:65},end]\n"
     "      filter:\n"
-    "        f1:[{cut:slide(3),res:12,route:1,mode:16},end]\n"
+    "        f1:[{cut:ramp(3),res:12,route:1,mode:16},end]\n"
     "      phrase:\n"
     "        p1:[C4.i1,-*5,E.i1,-*5]\n",
     head="voices:1\nslots:{freq:{a:{},b:{}}}\nstate:{freq:{s:1}}\n",

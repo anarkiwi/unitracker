@@ -56,7 +56,7 @@ def test_helpers():
     assert dm.route(0xF8) == [("res", 15), ("route_on", 8)]
     assert dm.route(0xF7) == [("res", 15), ("route", 7)]
     assert str(dm.pitch(0)) == "pitch()"
-    assert str(dm.pitch(0xD8)) == "slide(216)"
+    assert str(dm.pitch(0xD8)) == "pslide(216)"
     assert str(dm.pitch(3)) == "por(3)"
     assert str(dm.acid({"cp": 4})) == "acid(1,4,0,0)"
     assert str(dm.acid({"acid": 0x4000})) == "acid(2,0,16384,0)"
@@ -150,7 +150,7 @@ def test_main_transcribes_and_verifies(crosseyed, tmp_path, capsys):
     bad = tmp_path / "bad.sid"
     bad.write_bytes(b"PSID")
     assert dm.main([str(crosseyed)]) == 0
-    assert capsys.readouterr().out.startswith("unitracker:2.2\n")
+    assert capsys.readouterr().out.startswith("unitracker:2.3\n")
     assert dm.main(["--verify", "--frames", "300", "--diff", "2", str(crosseyed), str(bad)]) == 0
     out = capsys.readouterr().out
     assert f"{crosseyed}: exact" in out and f"{bad}: SidFormatError" in out
