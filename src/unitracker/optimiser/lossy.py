@@ -13,6 +13,7 @@ from unitracker_grammar import PAL_HZ
 from unitracker_grammar import code as _code
 from unitracker_grammar.document import Call, Code, Document, Expr, printed, read, signature
 from unitracker_grammar.expr import canonical, tree
+from unitracker_grammar.prelude import NAMES as PRELUDE
 from unitracker_player.player import load
 
 from unitracker.optimiser import fit
@@ -122,8 +123,11 @@ def _body(text: str, params: dict, varying: list, scaled: dict, names: dict) -> 
 def _template(group: list, taken: set, reserved=frozenset()) -> tuple:
     """``(signature, Expr, table, {call: new call})`` of one expression template for
     ``group``'s ``(call, form)`` pairs of one form key: a parameter per value that differs
-    between them, the rest literal, a parameter named as one of ``reserved`` renamed."""
+    between them, the rest literal, a parameter named as one of ``reserved`` renamed; a
+    prelude form's calls with no template."""
     forms = [f for _, f in group]
+    if forms[0].shape == "prelude":
+        return None, None, None, {c: Call(f.base, f.params["args"]) for c, f in group}
     params = {k: [f.params[k] for f in forms] for k in forms[0].params if k != "table"}
     table = _table(forms, params, taken) if forms[0].shape in fit.TABLES else None
     varying = [k for k, vals in params.items() if len(set(vals)) > 1]
@@ -162,7 +166,7 @@ def _scaled(params: dict, varying: list) -> dict:
 
 def _cost(template: tuple, occurrences: Counter) -> int:
     sig, body, table, calls = template
-    text = f" {sig}:{body}\n" + (f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else "")
+    text = ("" if sig is None else f" {sig}:{body}\n") + (f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else "")
     return size(text) + sum(occurrences[c] * size(str(n)) for c, n in calls.items())
 
 
@@ -179,6 +183,7 @@ class _Names:
     def of(cls, doc: Document) -> "_Names":
         """The names of ``doc``."""
         taken = {_code.signature(k)[0] for k, _ in doc.mods} | {n for n, _ in doc.tables}
+        taken |= PRELUDE
         reserved = frozenset(n for _, names in doc.header.state or () for n, _ in names)
         return cls(_occurrences(doc), taken, reserved)
 
@@ -212,35 +217,46 @@ def _replacement(name: str, options: dict, calls: dict, names: _Names) -> Replac
     for group in _choose(options, names):
         sig, body, table, calls = _template(group, names.taken, names.reserved)
         out.calls |= calls
-        out.mods.append((sig, body))
+        out.mods += [] if sig is None else [(sig, body)]
         out.tables += [table] if table else []
         errs += [form.err for _, form in group]
     out.err = np.concatenate(errs)
     return out
 
 
-def _options(calls: dict, cells: Counter, tolerances: dict, clock: int) -> dict:
+def _options(calls: dict, cells: Counter, tolerances: dict, clock: tuple, prelude: bool) -> dict:
     """``{call: fitting forms}`` of the calls of ``calls`` (each its ``(cell, firings)``) that
-    fire on one cell and fit a form."""
+    fire on one cell and fit a form (a prelude call's where ``prelude``)."""
     out = {}
     for call, (cell, rec) in calls.items():
-        forms = fit.fits(fit.Firings(rec, cell, clock), tolerances[cell])
+        forms = fit.fits(fit.Firings(rec, cell, *clock), tolerances[cell], prelude)
         if forms and cells[call] == 1:
             out[call] = forms
     return out
 
 
-def propose(doc: Document, firings: dict, tolerances: dict, progress: bool = False) -> list:
+def clock_of(doc: Document) -> tuple:
+    """``(clock_hz, rounding)`` of a document's notes."""
+    clock = doc.header.clock or (None, PAL_HZ)
+    return clock[1] or PAL_HZ, "floor" if "floor" in clock[2:] else "round"
+
+
+def propose(
+    doc: Document, firings: dict, tolerances: dict, progress: bool = False, prelude: bool = True
+) -> list:
     """A :class:`Replacement` per code template some of whose calls fit a form within its
-    cell's tolerance over every firing, those calls to calls of expression templates."""
-    clock = (doc.header.clock or (None, PAL_HZ))[1] or PAL_HZ
+    cell's tolerance over every firing, those calls to calls of expression templates or, where
+    ``prelude``, of the prelude's."""
+    clock = clock_of(doc)
     codes = {_code.signature(k)[0] for k, v in doc.mods if isinstance(v, Code)}
     by_template, cells = defaultdict(dict), Counter(call for call, _ in firings)
     for (call, cell), rec in firings.items():
         by_template[call.name][call] = (cell, rec)
     names, out = _Names.of(doc), []
     for name in tqdm(sorted(by_template), desc="lossy fit", unit="mod", disable=not progress):
-        options = _options(by_template[name], cells, tolerances, clock) if name in codes else {}
+        options = (
+            _options(by_template[name], cells, tolerances, clock, prelude) if name in codes else {}
+        )
         if options:
             out.append(_replacement(name, options, by_template[name], names))
     return out
@@ -403,9 +419,12 @@ class _Proof:  # pylint: disable=too-few-public-methods
         self.prove(replacements[half:], meter)
 
 
-def simplify(text: str, ticks: int | None, tolerances=None, progress: bool = False) -> Lossy:
+def simplify(  # pylint: disable=too-many-locals
+    text: str, ticks: int | None, tolerances=None, progress: bool = False, prelude: bool = True
+) -> Lossy:
     """``text`` with each code modulator call that fits an expression form within
-    ``tolerances`` (by cell, :data:`fit.TOLERANCES` by default) a call of that form's template,
+    ``tolerances`` (by cell, :data:`fit.TOLERANCES` by default) a call of that form's template
+    (or, where ``prelude``, a prelude call, which costs no template),
     kept where the document shrinks, every register outside the replaced calls' cells plays the
     input's and their cells keep to their tolerance over ``ticks`` (the song's end where None)."""
     tolerances = fit.TOLERANCES | (tolerances or {})
@@ -417,7 +436,7 @@ def simplify(text: str, ticks: int | None, tolerances=None, progress: bool = Fal
     def verdict(candidate: str, replacements: list) -> Check:
         return check(reference, candidate, ticks, targets(firings, replacements), tolerances)
 
-    replacements = propose(doc, firings, tolerances, progress)
+    replacements = propose(doc, firings, tolerances, progress, prelude)
     proof = _Proof(doc, verdict, tolerances)
     for r in replacements:
         r.saved = proof.size - size(printed(applied(doc, [r])))

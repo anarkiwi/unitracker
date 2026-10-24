@@ -328,7 +328,7 @@ _PARAM = r"(?<![\w.]){}(?![\w(])"
 def _alpha(body, params: tuple):
     """A template's body with its parameters named by their positions."""
     names = {p: f"_{i}" for i, p in enumerate(params)}
-    if isinstance(body, Program):
+    if isinstance(body, (Program, Instrument, tuple)):
         return transform(body, partial(_alpha_row, names))
     if isinstance(body, Code):
         out = []
@@ -345,10 +345,13 @@ def _alpha(body, params: tuple):
 
 
 def _alpha_row(names: dict, node):
-    """A program template's row or call with its parameters named by their positions."""
+    """A program, instrument or phrase template's row, field, event or call with its
+    parameters named by their positions."""
     if isinstance(node, Call):
         return Call(node.name, tuple(names.get(a, a) for a in node.args))
-    if not isinstance(node, Row):
+    if isinstance(node, Event):
+        return replace(node, note=names.get(node.note, node.note))
+    if not isinstance(node, (Row, Instrument)):
         return node
 
     def named(value):
@@ -358,7 +361,8 @@ def _alpha_row(names: dict, node):
             return value[0] + names[value[1:]]
         return names.get(value, value) if isinstance(value, str) else value
 
-    return replace(node, keys=tuple((k, named(v)) for k, v in node.keys))
+    attr = "keys" if isinstance(node, Row) else "fields"
+    return replace(node, **{attr: tuple((k, named(v)) for k, v in getattr(node, attr))})
 
 
 def merge(doc: Document) -> list:

@@ -1,6 +1,7 @@
 """The ``template`` pass: programs of one kind identical up to integers become one program
 template with a parameter per differing position, each original a call of it."""
 
+import re
 from collections import defaultdict
 from dataclasses import replace
 from functools import partial
@@ -82,16 +83,27 @@ def _members(doc: Document, kind: str) -> list:
     return out
 
 
-def _parameters(shape: tuple, differ: list, vectors: list) -> dict:
+# what a parameter may not be named: the cells' symbols, the stops and a record's name
+RESERVED = re.compile(r"v|phi|n|nn|ne|none|hold|reset|(?:pw|[cfiprs])\d+")
+
+
+def _stem(key: str) -> str:
+    return _STEMS[base(key)]
+
+
+def _parameters(shape: tuple, differ: list, vectors: list, stem=_stem) -> dict:
     """A parameter name per differing hole, holes whose members' values are equal sharing
-    one: its key's stem, then a count where the stem repeats."""
+    one: ``stem`` of its key, then a count where the stem repeats (after ``_`` where the name
+    would be :data:`RESERVED`)."""
     names, seen, by_vector = {}, defaultdict(int), {}
     holes = [s for s in shape[2] if s[3] is _HOLE]
     for k, vector in zip(differ, vectors):
         if vector not in by_vector:
-            stem = _STEMS[base(holes[k][2])]
-            seen[stem] += 1
-            by_vector[vector] = stem if seen[stem] == 1 else f"{stem}{seen[stem]}"
+            name = stem(holes[k][2])
+            seen[name] += 1
+            count = "" if seen[name] == 1 else str(seen[name])
+            sep = "_" if RESERVED.fullmatch(name + count) else ""
+            by_vector[vector] = name + sep + count
         names[k] = by_vector[vector]
     return names
 

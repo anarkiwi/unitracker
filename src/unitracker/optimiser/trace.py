@@ -1,4 +1,5 @@
-"""Each code modulator call's firings over a document's play (the lossy mode's evidence)."""
+"""Each modulator template call's firings over a document's play (the evidence of the lossy mode
+and of the ``prelude`` pass)."""
 
 from collections import defaultdict
 
@@ -23,7 +24,7 @@ MASKS = {"freq": compiler.FREQ_MASK, "pw": compiler.PW_MASK, "cut": compiler.CUT
 
 
 class _Tracer(Player):
-    """A player that records each firing of a code call's routine, by ``(call, cell)``."""
+    """A player that records each firing of a template call's modulator, by ``(call, cell)``."""
 
     def __init__(self, song, routines: dict):
         self.routines, self.firings = routines, defaultdict(list)
@@ -43,26 +44,26 @@ class _Tracer(Player):
                 if type(fn) is Routine:  # pylint: disable=unidiomatic-typecheck
                     state = self.cut_state if cell == "cut" else self.voices[mod[2]].state[cell]
                     out = fn(value, mod[1], *notes, state) & mask
-                    key = self.routines.get(fn)
-                    if key is not None:
-                        self.firings[key].append((t, mod[2], mod[1], value, out, *notes))
-                    value = out
                 else:
-                    value = fn(value, mod[1], *notes) & mask
+                    out = fn(value, mod[1], *notes) & mask
+                key = self.routines.get(id(fn))
+                if key is not None:
+                    self.firings[key].append((t, mod[2], mod[1], value, out, *notes))
+                value = out
                 mod[1] += 1
         return value
 
 
 def trace(text: str, ticks: int | None) -> tuple:
     """``(frames, firings)``: the document's register grid over ``ticks`` (to its end where
-    None) and ``{(call, cell): FIRING array}`` of every code template call that fires."""
+    None) and ``{(call, cell): FIRING array}`` of every template call that fires, of code or
+    expression (a prelude template's too)."""
     routines = {}
 
     class _Compiler(compiler._Compiler):  # pylint: disable=protected-access
         def call(self, value, cell):
             fn = super().call(value, cell)
-            if type(fn) is Routine:  # pylint: disable=unidiomatic-typecheck
-                routines[fn] = (value, cell)
+            routines[id(fn)] = (value, cell)
             return fn
 
     song = compiler.compile_document(read(text), _Compiler)

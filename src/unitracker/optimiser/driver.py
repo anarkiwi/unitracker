@@ -8,7 +8,7 @@ from tqdm import tqdm
 from unitracker_grammar.document import Document, printed, read
 
 from unitracker.optimiser import lossy as _lossy
-from unitracker.optimiser import names, passes, snap, templates, transpose
+from unitracker.optimiser import chords, names, passes, prelude, records, snap, templates, transpose
 from unitracker.optimiser.guarantee import Guarantee
 from unitracker.optimiser.inline import inline as inline_definitions
 from unitracker.optimiser.measure import Rewrite, size
@@ -21,6 +21,10 @@ PASSES = (
     ("template", templates.template),
     ("hoist", passes.hoist),
     ("once", passes.once),
+    ("prelude", prelude.prelude),
+    ("instruments", records.instruments),
+    ("phrases", records.phrases),
+    ("chords", chords.chords),
 )
 
 

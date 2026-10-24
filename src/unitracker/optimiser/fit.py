@@ -2,10 +2,14 @@
 ``v``, φ, ``N``, ``n`` and integer parameters, a fit of its parameters from the firings and its
 value on them (numpy), for the lossy mode (docs/optimiser.md)."""
 
+import functools
 from dataclasses import dataclass, field
 
 import numpy as np
-from unitracker_grammar import frequency
+from unitracker_grammar import code, expr, frequency
+from unitracker_grammar.prelude import PRELUDE
+
+from unitracker.optimiser.measure import size
 
 PHI = "phi"
 
@@ -271,16 +275,29 @@ class Form:
         return g if self.base == "0" else f"{self.base} + {g}"
 
 
-class Firings:  # pylint: disable=too-few-public-methods
+_LOW, _HIGH = -512, 768  # the notes F is tabulated for: any note and transpose a firing reads
+
+
+@functools.cache
+def words(clock_hz: int, rounding: str = "round") -> tuple:
+    """``(F, table)``: ``F(k)`` at ``clock_hz`` with ``rounding`` (cached), and its values for
+    the notes ``_LOW`` to ``_HIGH`` as an array."""
+    word = functools.cache(functools.partial(frequency, clock_hz=clock_hz, rounding=rounding))
+    return word, np.array([word(k) for k in range(_LOW, _HIGH)], dtype=np.int64)
+
+
+class Firings:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """A call's firings on one cell, with each base's value at each, and where each takes
     the value its voice's firing before left (a chain, along which errors carry)."""
 
-    def __init__(self, rec: np.ndarray, cell: str, clock_hz: int):
+    def __init__(self, rec: np.ndarray, cell: str, clock_hz: int, rounding: str = "round"):
         self.cell, self.bits = cell, BITS[cell]
         self.mask = (1 << self.bits) - 1
         order = np.lexsort((rec["t"], rec["voice"]))
         rec = rec[order]
         notes = np.array([frequency(k, clock_hz) for k in range(256)] + [0], dtype=np.int64)
+        self.word, self.table = words(clock_hz, rounding)
+        self.N, self.n = rec["N"].astype(np.int64), rec["n"].astype(np.int64)
         self.phi, self.out = rec["phi"].astype(np.int64), rec["out"].astype(np.int64)
         self.base = {"v": rec["v"].astype(np.int64), "0": np.zeros_like(self.phi)}
         if cell == "freq":
@@ -352,12 +369,195 @@ def candidates(fir: Firings) -> list:
     return out
 
 
-def fits(fir: Firings, tol: Tolerance) -> list:
-    """The forms fitted to ``fir`` whose errors keep to ``tol``."""
+def fits(fir: Firings, tol: Tolerance, prelude: bool = True) -> list:
+    """The forms fitted to ``fir`` whose errors keep to ``tol``, and where ``prelude`` the
+    prelude calls that play the firings or one of those forms' values exactly."""
     out = []
     for shape, base, delay, params in candidates(fir):
         form = Form(shape, base, delay, params, np.empty(0))
         form.err = error(fir.cell, tol, fir.predict(form), fir.out)
         if within(form.err, tol):
             out.append(form)
+    return out + (prelude_forms(fir, out) if prelude else [])
+
+
+# ---- the prelude's templates, each fitted exactly ---------------------------------------------
+
+
+@functools.cache
+def _prelude(name: str) -> tuple:
+    """``(parameters, node)`` of prelude template ``name``."""
+    key = next(k for k in PRELUDE if code.signature(k)[0] == name)
+    return code.signature(key)[1], expr.tree(PRELUDE[key])
+
+
+def plays(fir: Firings, name: str, args: tuple, v: np.ndarray, out: np.ndarray) -> bool:
+    """Whether prelude call ``name(args)``, compiled as the player compiles it and masked to
+    the cell, gives ``out`` at every firing of ``fir`` on the inputs ``v``."""
+    params, node = _prelude(name)
+    bound = expr.bind(node, dict(zip(params, args)))
+    fn = expr.compile_expr(bound, {"_F": fir.word, "_T": {}}, zero=True)
+    rows = zip(v.tolist(), fir.phi.tolist(), fir.N.tolist(), fir.n.tolist(), out.tolist())
+    return all(fn(x, p, big, small) & fir.mask == y for x, p, big, small, y in rows)
+
+
+def _note_words(fir: Firings, k: np.ndarray) -> np.ndarray:
+    return fir.table[np.clip(k, _LOW, _HIGH - 1) - _LOW]
+
+
+def _glide(fir: Firings, v: np.ndarray, out: np.ndarray) -> list:
+    """``s``: the one step every firing takes."""
+    step = np.unique(signed(out - v, fir.bits))
+    return [(int(step[0]),)] if len(step) == 1 else []
+
+
+def _slide(fir: Firings, v: np.ndarray, out: np.ndarray) -> list:
+    """``s`` the largest step; ``t`` each transpose whose note every firing that steps less
+    (arrives) plays, else (none arrives) every transpose of a tabulated note, nearest first."""
+    step = np.abs(signed(out - v, fir.bits))
+    s = int(step.max())
+    t = np.arange(_LOW - int(fir.N.min()), _HIGH - int(fir.N.max()))
+    arrived = step < s
+    if arrived.any():
+        hit = _note_words(fir, fir.N[arrived][:, None] + t[None, :]) == out[arrived][:, None]
+        t = t[hit.all(0)]
+    return [(int(x), s) for x in sorted(t.tolist(), key=lambda x: (abs(x), x))]
+
+
+def _vibrato(fir: Firings, _v: np.ndarray, out: np.ndarray) -> list:
+    """``l`` each φ before the first that leaves ``F(N)``, ``d`` that φ's residual over its
+    distance from ``l`` and ``s`` the largest residual over ``d``."""
+    r = signed(out - _note_words(fir, fir.N), fir.bits)
+    moved = r != 0
+    if not moved.any():
+        return [(0, 1, 0)]
+    p0 = int(fir.phi[moved].min())
+    r0, top = int(r[moved & (fir.phi == p0)][0]), int(np.abs(r).max())
+    found = []
+    for l in range(p0 - 1, -1, -1):
+        k = p0 - l
+        if r0 % k == 0 and top % abs(r0 // k) == 0 and top // abs(r0 // k) >= k:
+            found.append((r0 // k, top // abs(r0 // k), l))
+    return found
+
+
+def _per_phi(fir: Firings, out: np.ndarray) -> tuple | None:
+    """``(u, y)``: each φ fired at and its one value, None where a φ has two."""
+    u, first, inverse = np.unique(fir.phi, return_index=True, return_inverse=True)
+    y = out[first]
+    return (u, y) if np.array_equal(y[inverse], out) else None
+
+
+def _tremolo(fir: Firings, _v: np.ndarray, out: np.ndarray) -> list:
+    """``lo`` the first value, ``hi`` the first other one and ``s`` each half period that
+    falls between the φ of the two."""
+    found = _per_phi(fir, out)
+    if found is None:
+        return []
+    u, y = found
+    lo, change = int(y[0]), np.flatnonzero(y != y[0])
+    if not len(change):
+        return [(lo, lo, 1)]
+    j = change[0]
+    return [(lo, int(y[j]), s) for s in range(int(u[j - 1]) + 1, int(u[j]) + 1)]
+
+
+def _sweep(fir: Firings, _v: np.ndarray, out: np.ndarray) -> list:
+    """``b`` the last value, ``s`` and ``a`` the line through the first values before it."""
+    found = _per_phi(fir, out)
+    if found is None:
+        return []
+    u, y = found
+    b, moving = int(y[-1]), np.flatnonzero(y != y[-1])
+    k = int(moving[-1]) + 1 if len(moving) else 0
+    if k == 0:
+        return [(b, b, 0)]
+    if k == 1:
+        a = int(y[0])
+        return [(a, b, -(-abs(b - a) // int(u[1])))] if u[0] == 0 else []
+    rise, run = int(y[1] - y[0]), int(u[1] - u[0])
+    if rise % run:
+        return []
+    s = abs(rise) // run
+    return [(int(y[0]) - rise // run * int(u[0]), b, s)] if s else []
+
+
+def _pwm(fir: Firings, _v: np.ndarray, out: np.ndarray) -> list:
+    """``lo`` the value at φ 0; ``hi - lo`` from the largest rise to it plus up to the largest
+    step, with each ``s`` up to it that gives the value at the next φ."""
+    found = _per_phi(fir, out)
+    if found is None or len(found[0]) < 2 or found[0][0] != 0:
+        return []
+    u, y = found
+    lo, rise = int(y[0]), int(y.max() - y[0])
+    if rise <= 0:
+        return []
+    p1, e = int(u[1]), int(y[1]) - lo
+    step = int(np.abs(np.diff(y)).max())
+    out_ = []
+    for a in range(rise, rise + step + 1):
+        s = np.arange(1, a + 1)
+        ok = a - np.abs(s * p1 % (2 * a) - a) == e
+        out_ += [(lo, lo + a, int(x)) for x in s[ok]]
+    return out_
+
+
+PRELUDE_FITS = {
+    "vibrato": _vibrato,
+    "glide": _glide,
+    "slide": _slide,
+    "pwm": _pwm,
+    "sweep": _sweep,
+    "tremolo": _tremolo,
+}
+
+
+def prelude_calls(fir: Firings, v: np.ndarray | None = None, out=None) -> list:
+    """``(name, args)`` per prelude template: its first fitted call that plays ``out`` (the
+    firings' own by default) exactly from the inputs ``v`` at every firing."""
+    v = fir.base["v"] if v is None else v
+    out = fir.out if out is None else out
+    found = []
+    for name, fitter in PRELUDE_FITS.items():
+        args = next((a for a in fitter(fir, v, out) if plays(fir, name, a, v, out)), None)
+        if args is not None:
+            found.append((name, args))
+    return found
+
+
+def cheapest(calls: list) -> tuple | None:
+    """The ``(name, args)`` of ``calls`` whose text is fewest tokens, the first of equals."""
+    return min(calls, key=lambda c: size(f"{c[0]}({','.join(map(str, c[1]))})"), default=None)
+
+
+def prelude_call(firings: list) -> tuple | None:
+    """The cheapest ``(name, args)`` of a prelude template that plays every one of
+    ``firings`` (a call's on each cell it binds) exactly, None where none does."""
+    first, rest = firings[0], firings[1:]
+    calls = [
+        (name, args)
+        for name, args in prelude_calls(first)
+        if all(plays(f, name, args, f.base["v"], f.out) for f in rest)
+    ]
+    return cheapest(calls)
+
+
+def prelude_forms(fir: Firings, forms: list) -> list:
+    """A ``prelude`` :class:`Form` per prelude template, its first call that plays the firings
+    exactly, or else the values one of ``forms`` predicts (a chain's firing on the value the
+    one before predicts), with that form's errors."""
+    sources = [(fir.base["v"], fir.out, np.zeros(len(fir.out)))]
+    chained = fir.start != np.arange(len(fir.out))
+    for form in forms:
+        pred = fir.predict(form)
+        sources.append((np.where(chained, np.roll(pred, 1), fir.base["v"]), pred, form.err))
+    out, seen = [], set()
+    for v, values, err in sources:
+        key = (v.tobytes(), values.tobytes())
+        if key in seen:
+            continue
+        seen.add(key)
+        for name, args in prelude_calls(fir, v, values):
+            if name not in {f.base for f in out}:
+                out.append(Form("prelude", name, False, {"args": args}, err))
     return out
