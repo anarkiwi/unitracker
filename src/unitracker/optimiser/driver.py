@@ -7,11 +7,16 @@ from dataclasses import dataclass, field
 from tqdm import tqdm
 from unitracker_grammar.document import Document, printed, read
 
-from unitracker.optimiser import passes
+from unitracker.optimiser import passes, templates
 from unitracker.optimiser.guarantee import Guarantee
 
 ENCODING = "cl100k_base"
-PASSES = (("defaults", passes.defaults), ("merge", passes.merge), ("hoist", passes.hoist))
+PASSES = (
+    ("defaults", passes.defaults),
+    ("merge", passes.merge),
+    ("template", templates.template),
+    ("hoist", passes.hoist),
+)
 
 
 @functools.cache

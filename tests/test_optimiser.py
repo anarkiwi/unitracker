@@ -12,7 +12,7 @@ document = pytest.importorskip("unitracker_grammar.document")
 # pylint: disable=wrong-import-position,wrong-import-order
 import optimiser_docs as D  # noqa: E402
 
-from unitracker.optimiser import Guarantee, GuaranteeError, optimise, passes, size, tree
+from unitracker.optimiser import Guarantee, GuaranteeError, optimise, passes, size, templates, tree
 from unitracker.optimiser.__main__ import main
 from unitracker.optimiser.guarantee import grid, same
 
@@ -197,3 +197,23 @@ def test_merge_drops_a_top_level_definition_and_renames_its_references():
     out = edit.apply(top)
     assert [n for n, _ in out.defs[1].records] == ["c1"]
     assert out.defs[0].records[1][1].get("ctrl") == "c1"
+
+
+def test_template_makes_programs_alike_but_for_integers_one_template_of_calls():
+    found = templates.template(read(D.TEMPLATE))
+    assert labels(found) == ["ctrl ctrl_1(t, t2): 3", "restart restart_1(h, ad, sr): 3"]
+    result = optimise(D.TEMPLATE, order=(("template", templates.template),))
+    assert len(result.kept) == 2 and result.after < result.before
+    text = result.text
+    assert (
+        "ctrl_1(t, t2): [{ctrl: 65, note: +t}, {wait: 1, note: +t2}, {wait: 1, note: +0}," in text
+    )
+    assert "restart_1(h, ad, sr): [{hold: h, gate: 0, ad: 15}, {ad: ad, sr: sr}, end]" in text
+    assert "i1: {ad: 9, sr: 240, ctrl: ctrl_1(7,4), restart: restart_1(2,9,240)}" in text
+    assert "!run:ctrl_1(7,3)" in text and "c2" not in text
+    assert Guarantee(D.TEMPLATE).holds(text)
+
+
+def test_template_proposes_nothing_without_two_programs_differing_in_integers():
+    assert not templates.template(read(D.MERGE))
+    assert not templates.template(read(D.TEMPLATE.replace("unitracker: 1.23", "unitracker: 1.22")))

@@ -83,3 +83,18 @@ LOOPING_CODE = doc(
     "        p1: [C4.i1, -, D4, -]\n",
     mods=CODE,
 ).replace("  - end\n", "  - {loop: 0}\n")
+
+TEMPLATE = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, sr: 240, ctrl: c1,"
+    " restart: [{hold: 2, gate: 0, ad: 15}, {ad: 9, sr: 240}, end]}\n"
+    "        i2: {ad: 8, sr: 120, ctrl: c2, restart: [{gate: 0, ad: 15}, {ad: 8, sr: 120}, end]}\n"
+    "        i3: {ad: 7, sr: 100, ctrl: c3, restart: [{gate: 0, ad: 15}, {ad: 7, sr: 100}, end]}\n"
+    "      ctrl:\n"
+    "        c1: [{ctrl: 65, note: +7}, {wait: 1, note: +4}, {wait: 1, note: +0}, {loop: 0}]\n"
+    "        c2: [{ctrl: 65, note: +7}, {wait: 1, note: +3}, {wait: 1, note: +0}, {loop: 0}]\n"
+    "        c3: [{ctrl: 65, note: +5}, {wait: 1, note: +2}, {wait: 1, note: +0}, {loop: 0}]\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -*3, D4.i2, -*3, E4.i3, -*3, F4.i1!run:c2, -*3]\n",
+    mods="",
+)
