@@ -32,10 +32,10 @@ def test_helpers():
     assert str(dm.pitch(0)) == "pitch()"
     assert str(dm.pitch(0xD8)) == "slide(216)"
     assert str(dm.pitch(3)) == "por(3)"
-    assert str(dm.acid({"cp": 4})) == "acid(1,4,0)"
-    assert str(dm.acid({"acid": 0x4000})) == "acid(2,0,16384)"
-    assert str(dm.acid({"acid": 0xC200})) == "acid(8,0,512)"
-    assert str(dm.acid({"acid": 0x8A00})) == "acid(4,0,2560)"
+    assert str(dm.acid({"cp": 4})) == "acid(1,4,0,0)"
+    assert str(dm.acid({"acid": 0x4000})) == "acid(2,0,16384,0)"
+    assert str(dm.acid({"acid": 0xC200})) == "acid(8,0,0,512)"
+    assert str(dm.acid({"acid": 0x8A00, "acc": 7})) == "acid(6,0,7,2560)"
     assert dm.text("Crosseyed") == "Crosseyed"
     assert dm.text("it's [x]") == "'it''s [x]'"
     assert dm.event_at(bytes([0x70, 3, 4, 48]), 0) == (3, 4, 48)
@@ -56,7 +56,6 @@ def test_a_frozen_program_ends_and_a_cycling_one_loops(cross):
         (0x10BF, 0x69, "ACID opcodes"),
         (0x10D4, 0x60, "cutoff output"),
         (0x101F, 9, "detune and routing"),
-        (0x1019, 1, "slide accumulator"),
     ],
 )
 def test_init_state_it_cannot_write_is_refused(cross, addr, value, message):
@@ -106,9 +105,11 @@ def test_notes_it_cannot_write_are_refused(cross):
     assert cross.event((None, None, 48), "c2").note == "C4"
 
 
-def test_both_layers_writing_one_unit_in_a_call_are_refused(cross):
-    with pytest.raises(dm.TranscribeError, match="both layers"):
-        cross.tick((17, 0, 17, 0))
+def test_both_layers_rows_of_one_call_apply_in_order():
+    a, b = {"re": 1, "acid": 0x100, "ad": 1}, {"re": 2, "acid": 0xC000, "ad": 2}
+    assert dm.merged([a]) == [a]
+    assert dm.merged([a, b]) == [{"re": 1}, {"re": 2, "acid": 0xC000, "ad": 2, "acc": 0x100}]
+    assert dm.merged([b, a]) == [{"re": 2}, {"re": 1, "acid": 0x100, "ad": 1}]
 
 
 def test_a_song_that_does_not_loop_in_time_is_refused(cross):
@@ -118,7 +119,7 @@ def test_a_song_that_does_not_loop_in_time_is_refused(cross):
 
 @pytest.mark.parametrize(
     "name, message",
-    [("rent_a_cop", r"not the \$1000 build"), ("persei", r"a play routine at \$17C1")],
+    [("rent_a_cop", "bit 0 of both wgh and wgl"), ("persei", "pulse sweep beside")],
 )
 def test_other_builds_are_refused(request, name, message):
     with pytest.raises(dm.TranscribeError, match=message):

@@ -5,7 +5,7 @@ Tables ``G`` (note frequencies), ``P`` (portamento) and ``R`` (slide rates) are 
 """
 
 STATE = {
-    "freq": {"s": 2, "d": 1},
+    "freq": {"s": 2, "d": 1, "i": 1},
     "pw": {"w": 2, "q": 1, "e": 1},
     "cut": {"r": 2, "z": 2, "o": 1, "cp": 1, "l": 1, "b": 1},
 }
@@ -23,9 +23,13 @@ _ACID = (
 )
 
 CODE = {
-    # init's detune and frequency; a note (phi 0) clears the slide accumulator
+    # init's detune, frequency and slide accumulator; i marks them until nr's first firing
+    "ninit": _FIRST.format("done")
+    + "lda #k\nsta d\nlda #<u\nsta s\nlda #>u\nsta s+1\nlda #1\nsta i\n"
+    "lda #<f\nsta v\nlda #>f\nsta v+1\ndone:\nrts\n",
+    # a note (phi 0) clears the slide accumulator
     "nr": _FIRST.format("done")
-    + "sta s\nsta s+1\nlda #k\nsta d\nlda #<f\nsta v\nlda #>f\nsta v+1\ndone:\nrts\n",
+    + "lda i\nbne keep\nsta s\nsta s+1\nkeep:\nlda #0\nsta i\ndone:\nrts\n",
     # $1453 mode 0: the detune adds to the low byte only
     "pitch": _NOTE + "lda G.lo,y\nclc\nadc d\nsta v\nlda G.hi,y\nsta v+1\nrts\n",
     # $140E mode $80+: the accumulator slides by the rate, down with bit 6
@@ -48,6 +52,6 @@ CODE = {
     # g bit 0 sets cp, bit 1 the accumulator, bits 2/3 an adding/subtracting step
     "acid": _FIRST.format("done") + "lda #g\nlsr\nbcc acc\nlda #c\nsta cp\n"
     "acc:\nlda #g\nand #2\nbeq add\nlda #<j\nsta r\nlda #>j\nsta r+1\nlda #0\nsta z\nsta z+1\n"
-    "add:\nlda #g\nand #12\nbeq done\nlsr\nlsr\nlsr\nsta o\nlda #<j\nsta z\nlda #>j\nsta z+1\n"
+    "add:\nlda #g\nand #12\nbeq done\nlsr\nlsr\nlsr\nsta o\nlda #<k\nsta z\nlda #>k\nsta z+1\n"
     "done:\nrts\n",
 }

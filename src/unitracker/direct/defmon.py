@@ -35,6 +35,8 @@ SLOTS = (
     ("cut", tuple(d.Slot(f"k{v}", reset=("row.cut",)) for v in (1, 2, 3)) + (d.Slot("st"),)),
 )
 MAX_CALLS = 1 << 17
+PHASE = 64
+NOTE7 = "lda nn\nand #127\n"  # the absolute build's note wraps to 7 bits
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 TEXT = re.compile(r"[^\s,\[\]{}'\"#&*!|>%@`][^,\[\]{}]*")
 
@@ -64,24 +66,46 @@ class Step:
     length: int = 0
 
 
-def sequence(player, calls: int = MAX_CALLS):
-    """The song steps of the replay's calls: a call runs the arranger where init or an ALT
-    event armed it, else each voice whose counter has bit 7 runs the event at its pattern
-    pointer."""
-    mem, step = player._mem, None  # pylint: disable=protected-access
+def sequence(player, at: dict, calls: int = MAX_CALLS):
+    """The song steps of the replay's calls, its build's ``$1000`` addresses placed by ``at``.
+    A full call (it steps voice 1's counter or arms the arranger; a multispeed play routine's
+    sub-tick calls do neither) runs the arranger where init or an ALT event armed it, else each
+    voice whose counter has bit 7 runs the event at its pattern pointer. A step's key holds the
+    full calls of the last :data:`PHASE` calls, the play routine's phase."""
+    mem, step, full = player._mem, None, (1,) * PHASE  # pylint: disable=protected-access
+    marks = [at[ARMED], at[COUNTER]]
     for c in range(calls):
-        if mem[ARMED] & 0x80:
+        before = bytes(mem[a] for a in marks)
+        armed = mem[at[ARMED]]
+        key = tuple(mem[at[a]] if a in at else 0 for a in (ARR_Y, ARR_JR, ARR_JC)) + (armed, full)
+        events = pending(mem, at)
+        player.play_frame()
+        ran = bytes(mem[a] for a in marks) != before
+        full = full[1:] + (int(ran),)
+        if not ran:
+            continue
+        if armed & 0x80:
             if step is not None:
                 step.length = c - step.call
                 yield step
-            step = Step(c, (mem[ARR_Y], mem[ARR_JR], mem[ARR_JC], mem[ARMED] & 0x0F))
-        else:
-            for v in range(3):
-                if mem[COUNTER + 0x88 * v] & 0x80:
-                    ptr = mem[POINTER + 0x88 * v] | mem[POINTER + 0x88 * v + 1] << 8
-                    step.events[v][c - step.call] = event_at(mem, ptr)
-        player.play_frame()
+            step = Step(c, key)
+            continue
+        for v, ev in enumerate(events):
+            if ev is not None:
+                step.events[v][c - step.call] = ev
     raise TranscribeError(f"the song does not loop within {calls} calls")
+
+
+def pending(mem, at: dict) -> list:
+    """Each voice's pattern event the next full call runs, None where its counter runs."""
+    return [
+        (
+            event_at(mem, mem[at[POINTER + 0x88 * v]] | mem[at[POINTER + 0x88 * v + 1]] << 8)
+            if mem[at[COUNTER + 0x88 * v]] & 0x80
+            else None
+        )
+        for v in range(3)
+    ]
 
 
 def event_at(mem, ptr: int) -> tuple:
@@ -94,18 +118,23 @@ def event_at(mem, ptr: int) -> tuple:
 
 
 class Transcriber:  # pylint: disable=too-many-instance-attributes
-    """One subtune of a defMON replay of the ``$1000`` build as a generic document."""
+    """One subtune of a defMON replay, a build of the ``$1000`` build's code, as a document."""
 
     def __init__(self, raw: bytes, subtune: int = 0):
         self.raw, self.subtune = raw, subtune
         self.header = SidImage.from_bytes(raw).header
         self.player = DefmonPlayer(raw, subtune=subtune)
         self.mem = self.player._mem  # pylint: disable=protected-access
+        try:
+            self.at, variants = locate(self.mem)
+        except LiftError as exc:
+            raise TranscribeError(str(exc)) from exc
+        self.absolute = "absolute" in variants
         self.check()
         self.joints, self.names, self.runs, self.gated = {}, {}, {}, False
 
     def __call__(self, addr: int, voice: int = 0) -> int:
-        return self.mem[addr + VOICES[voice]]
+        return self.mem[self.at[addr] + VOICES[voice]]
 
     def word(self, lo: int, hi: int, voice: int = 0) -> int:
         """The word of the bytes at ``lo`` and ``hi``."""
@@ -116,14 +145,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         multi-SID tune, an init that leaves state the generic init cannot write."""
         if self.header.second_sid:
             raise TranscribeError("a multi-SID tune")
-        try:
-            at, variants = locate(self.mem)
-        except LiftError as exc:
-            raise TranscribeError(str(exc)) from exc
-        if any(k != a for k, a in at.items()) or variants != {"counted", "absolute"}:
-            raise TranscribeError("not the $1000 build of the counted arranger, absolute notes")
-        if self.header.play_address != 0x1003:
-            raise TranscribeError(f"a play routine at ${self.header.play_address:04X}")
         if self(0x10B8) != self(0x10BF) or self(0x10B8) not in (0x69, 0xE9):
             raise TranscribeError("ACID opcodes are not a matching SBC/ADC pair")
         if self(0x10D4) not in (0xEA, 0x0A):
@@ -131,38 +152,38 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         for v in range(3):
             if (self(0x101F, v), self(0x1020, v), self(0x1021, v)) != (v, 1 << v, 0xFF ^ 1 << v):
                 raise TranscribeError(f"voice {v + 1}'s detune and routing are not standard")
-            if self.word(0x1019, 0x101A, v):
-                raise TranscribeError(f"init leaves voice {v + 1}'s slide accumulator set")
 
     # ---- sidTAB programs ----------------------------------------------------------------
 
     def resolve(self, row: int) -> int:
         """The row a fetch of ``row`` reads after its jump."""
-        eff = row if self.mem[SIDTAB_HI + row] else self.mem[SIDTAB_LO + row]
-        if not self.mem[SIDTAB_HI + eff]:
+        eff = row if self.sidtab(SIDTAB_HI, row) else self.sidtab(SIDTAB_LO, row)
+        if not self.sidtab(SIDTAB_HI, eff):
             raise TranscribeError(f"sidTAB row {row} resolves to row {eff}, which has no body")
         return eff
 
     def columns(self, eff: int) -> dict:
         """The columns of sidTAB row ``eff``'s body, in the walk's ($16B0) order."""
-        return row_fields(self.mem, self.mem[SIDTAB_LO + eff] | self.mem[SIDTAB_HI + eff] << 8)
+        return row_fields(self.mem, self.sidtab(SIDTAB_LO, eff) | self.sidtab(SIDTAB_HI, eff) << 8)
+
+    def sidtab(self, column: int, row: int) -> int:
+        """sidTAB ``column``'s byte of ``row``."""
+        return self.mem[self.at[column] + row]
 
     def tick(self, state: tuple) -> tuple:
         """``(state, columns)``: one call of a voice's sidcall cascade ($12DF) from ``state``,
-        ``(row A, count A, row B, count B)``, and the columns its fetches apply, layer B's
-        last; a count of 0 fetches, $80 and over is frozen."""
+        ``(row A, count A, row B, count B)``, and the columns of each row it fetches, layer A's
+        first; a count of 0 fetches, $80 and over is frozen."""
         state, cols = list(state), []
         for k in (0, 2):
             row, cnt = state[k : k + 2]
             if not cnt:
                 eff = self.resolve(row)
-                state[k : k + 2] = (eff + 1) & 0xFF, self.mem[SIDTAB_DL + eff]
+                state[k : k + 2] = (eff + 1) & 0xFF, self.sidtab(SIDTAB_DL, eff)
                 cols.append(self.columns(eff))
             elif cnt < 0x80:
                 state[k + 1] = cnt - 1
-        if len(cols) == 2 and {"re", "acid"} & cols[0].keys() & cols[1].keys():
-            raise TranscribeError("both layers' rows of one call write $D417 or the ACID unit")
-        return tuple(state), {k: v for c in cols for k, v in c.items()} if cols else None
+        return tuple(state), cols
 
     def joint(self, state: tuple) -> tuple:
         """``(rows, loop)``: ``(ticks, columns)`` of each call that fetches from ``state`` on,
@@ -172,14 +193,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             if state[1] >= 0x80 and state[3] >= 0x80:
                 return rows, None
             after, cols = self.tick(state)
-            if cols is not None:
+            if cols:
                 if state in seen:
                     rows[-1][0] = t - last
                     return rows, seen[state]
                 seen[state] = len(rows)
                 if rows:
                     rows[-1][0] = t - last
-                rows.append([1, cols])
+                rows += [[0, c] for c in merged(cols)[:-1]] + [[1, merged(cols)[-1]]]
                 last = t
             state = after
         raise TranscribeError("a sidcall program runs without end")
@@ -195,7 +216,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 keys.append(("gate", wgl & 1))
         if "tr" in cols:
             tr = cols["tr"]
-            keys.append(("note", note_name(tr & 0x7F) if tr & 0x80 else d.Signed(tr)))
+            absolute = self.absolute and tr & 0x80
+            keys.append(("note", note_name(tr & 0x7F) if absolute else d.Signed(tr)))
         keys += [(k, cols[k]) for k in ("ad", "sr") if k in cols]
         if "pw" in cols or "ps" in cols:
             flags = ("pw" in cols) | ("ps" in cols) << 1
@@ -222,6 +244,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             self.joints[self.names[key]] = (rows, loop, voice)
         return self.names[key]
 
+    def gates(self, program: str) -> bool:
+        """Whether ``program``'s rows of its first call set the gate."""
+        for hold, cols in self.joints[program][0]:
+            if "wgl" in cols:
+                return True
+            if hold:
+                return False
+        return False  # pragma: no cover
+
     def gate(self):
         """Settles the gate: with no odd ``wgl`` it is always on and ``ctrl`` is ``wgh``; with
         no odd ``wgh`` it is ``wgl``'s bit 0 and ``ctrl`` is ``wgh | 1``."""
@@ -240,7 +271,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         program)}``, to the step whose arranger position and cascades recur."""
         states = [tuple(self(a, v) for a in (0x12EF, 0x12E0, 0x1382, 0x1373)) for v in range(3)]
         steps, seen = [], {}
-        for step in sequence(DefmonPlayer(self.raw, subtune=self.subtune), calls):
+        for step in sequence(DefmonPlayer(self.raw, subtune=self.subtune), self.at, calls):
             key = (step.key, tuple(states))
             if key in seen:
                 return steps, seen[key]
@@ -265,9 +296,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         n = ev[2]
         if n is None:
             return d.Event("-", commands=commands)
-        if n >= 0x80:
+        if self.absolute and n >= 0x80:
             raise TranscribeError(f"note ${n:02X} past the note column")
-        if not self.gated and (program is None or "wgl" not in self.joints[program][0][0][1]):
+        if not self.gated and (program is None or not self.gates(program)):
             raise TranscribeError("a note whose first row does not set the gate")
         return d.Event(note_name(n), commands=commands)
 
@@ -278,7 +309,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         for t in range(length):
             event = self.event(*marks[t]) if t in marks else d.Event("-")
             if first and not t:
-                event = d.replace(event, commands=event.commands + (("p.freq", call("pitch")),))
+                binds = (("n.freq", call("nr")), ("p.freq", call("pitch")))
+                event = d.replace(event, commands=event.commands + binds)
             if out and event == d.Event("-") and out[-1].note == "-" and not out[-1].commands:
                 out[-1] = d.replace(out[-1], steps=(out[-1].steps or 1) + 1)
             else:
@@ -291,7 +323,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         out = []
         for v in range(3):
             commands = [
-                ("n.freq", call("nr", k=v, f=self.word(0x102D, 0x102F, v))),
+                (
+                    "n.freq",
+                    call(
+                        "ninit",
+                        k=v,
+                        f=self.word(0x102D, 0x102F, v),
+                        u=self.word(0x1019, 0x101A, v),
+                    ),
+                ),
                 ("pw", call("pinit", k=v, f=self.word(0x1023, 0x1025, v))),
             ]
             if not self.gated:
@@ -342,13 +382,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         defs = [("ins", {"i1": d.Instrument({"p.freq": call("pitch")})})]
         defs += [("ctrl", programs)] if programs else []
         doc = d.Document(self.head(), self.tables(), (), defs, self.init(), rows, loop + 1)
-        return d.printed(d.replace(doc, mods=mods(d.printed(doc))))
+        return d.printed(d.replace(doc, mods=mods(d.printed(doc), self.absolute)))
 
     def tables(self) -> tuple:
         """The replay's note, portamento and rate tables as words, trailing zeros dropped."""
         out = []
         for name, (lo, hi, n) in TABLES.items():
-            words = [self.mem[lo + k] | self.mem[hi + k] << 8 for k in range(n)]
+            words = [self.mem[self.at[lo] + k] | self.mem[self.at[hi] + k] << 8 for k in range(n)]
             while len(words) > 1 and not words[-1]:
                 words.pop()
             out.append((name, tuple(words)))
@@ -370,13 +410,31 @@ def pitch(mode: int) -> d.Call:
     return call("slide" if mode >= 0x80 else "por", m=mode)
 
 
+def merged(cols: list) -> list:
+    """The columns both layers' rows of one call apply, as rows applied in order: one row
+    where layer B's columns replace layer A's, after a row of layer A's ``$D417`` column where
+    both write it; layer A's ACID accumulator stays under layer B's ACID step (``acc``)."""
+    if len(cols) == 1:
+        return cols
+    first, second = cols
+    out = first | second
+    if first.get("acid", 0x8000) < 0x8000 <= second.get("acid", 0):
+        out["acc"] = first["acid"]
+    return ([{"re": first["re"]}] if "re" in first and "re" in second else []) + [out]
+
+
 def acid(cols: dict) -> d.Call:
-    """The ACID call of a row's offset and ACID columns."""
-    flags, value = int("cp" in cols), cols.get("acid", 0)
-    if "acid" in cols:
-        flags |= 2 if value < 0x8000 else 8 if value & 0x4000 else 4
-        value &= 0x7FFF if value < 0x8000 else 0x3FFF
-    return call("acid", g=flags, c=cols.get("cp", 0), j=value)
+    """The ACID call of a row's offset and ACID columns: ``g`` bit 0 sets the offset ``c``,
+    bit 1 the accumulator ``j``, bit 2 an adding and bit 3 a subtracting step ``k``."""
+    flags, value, step = int("cp" in cols), cols.get("acc", 0), 0
+    if "acc" in cols:
+        flags |= 2
+    if "acid" in cols and cols["acid"] < 0x8000:
+        flags, value = flags | 2, cols["acid"]
+    elif "acid" in cols:
+        flags |= 8 if cols["acid"] & 0x4000 else 4
+        step = cols["acid"] & 0x3FFF
+    return call("acid", g=flags, c=cols.get("cp", 0), j=value, k=step)
 
 
 def route(re_: int) -> list:
@@ -387,15 +445,19 @@ def route(re_: int) -> list:
     return [("res", re_ >> 4), ("route", f"+ {re_ & 0x0F}" if re_ & 0x08 else re_ & 0x0F)]
 
 
-def mods(body: str) -> tuple:
-    """Each template ``body`` calls, keyed by its signature, in first-call order."""
+def mods(body: str, absolute: bool = True) -> tuple:
+    """Each template ``body`` calls, keyed by its signature, in first-call order; a build of
+    relative notes reads the note unwrapped."""
     first = {}
     for name in CODE:
         found = re.search(rf"(?<![a-z0-9_.]){name}\(", body)
         if found:
             first[name] = found.start()
     return tuple(
-        (d.signature(name, code.params(ROUTINES[name])), d.Code(ROUTINES[name]))
+        (
+            d.signature(name, code.params(ROUTINES[name])),
+            d.Code.of(CODE[name] if absolute else CODE[name].replace(NOTE7, "lda nn\n")),
+        )
         for name in sorted(first, key=first.get)
     )
 
