@@ -25,7 +25,7 @@ def test_the_document_plays_the_replay(request, name):
 
 
 def test_helpers():
-    assert [dm.note_name(k) for k in (0, 48, 127)] == ["C0", "C4", "G10"]
+    assert [dm.note_name(k) for k in (0, 24, 48, 127)] == ["C-2", "C0", "C2", "G8"]
     assert dm.route(0) == [("route_off", 0)]
     assert dm.route(0xF8) == [("res", 15), ("route_on", 8)]
     assert dm.route(0xF7) == [("res", 15), ("route", 7)]
@@ -91,7 +91,7 @@ def test_a_row_without_body_is_refused(cross):
 def test_notes_past_the_note_column_are_refused(cross):
     with pytest.raises(dm.TranscribeError, match="past the note column"):
         cross.event((None, None, 0x80), None)
-    assert cross.event((None, None, 48), "c2").note == "C4"
+    assert cross.event((None, None, 48), "c2").note == "C2"
 
 
 def test_both_layers_rows_of_one_call_apply_in_order():

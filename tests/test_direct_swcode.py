@@ -29,7 +29,7 @@ def fixture_builds(mega_run, csillag, samwise):
 
 def routine(one, call):
     """The routine of ``call`` as the player compiles it for the freq cell."""
-    machine = Machine({}, {"freq": tuple(STATE["freq"].items())}, CLOCK[1])
+    machine = Machine({}, {"freq": tuple(STATE["freq"].items())}, *CLOCK[1:])
     params = code.params(one.routines[call.name])
     return machine.compile(call.name, one.routines[call.name], dict(zip(params, call.args)), "freq")
 
@@ -231,7 +231,7 @@ def test_every_template_reads_only_its_cell_and_round_trips(builds):
 
 def cell_routine(one, call, cell: str):
     """``call``'s routine as the player compiles it for ``cell``."""
-    machine = Machine({}, {c: tuple(names.items()) for c, names in STATE.items()}, CLOCK[1])
+    machine = Machine({}, {c: tuple(names.items()) for c, names in STATE.items()}, *CLOCK[1:])
     params = code.params(one.routines[call.name])
     return machine.compile(call.name, one.routines[call.name], dict(zip(params, call.args)), cell)
 

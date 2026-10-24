@@ -127,8 +127,12 @@ Slots, in the player's order:
 | `fst`, `fsw`, `fid`, `frs` | SETFILT, FILTPRG step (11-bit with FINEFILTSWEEP), advance, the cutoff write with its track |
 | `fho`, `fhi` | a filter handover's cutoff; BIGFX0F's CTFH |
 
-The pitch is the standard note table `F` at `clock_hz: 985256`: generic note `k` is SID-Wizard
-note `k + 1`, and the reference player runs at that table (its EXPTABH built on it).
+The pitch is the standard note table `F` at `clock_hz: 985240, rounding: floor`: generic note `k`
+is SID-Wizard note `k + 1`, and the reference player runs at that table (its EXPTABH built on it).
+FREQTBL/FREQTBH is that table at notes 1-95; it differs at note 0 (263, a word under C0, where `F`
+is 0) and past note 95, where the player's unmasked index reads the image after the table. Of the
+109 exact tunes, 28 also play the native player exactly; 37 more differ only by note 0 and the
+rest read past note 95.
 
 ## Refused
 

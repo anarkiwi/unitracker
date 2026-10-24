@@ -9,8 +9,8 @@ from pysidwizard import SWMPlayer
 from pysidwizard.player import PAL_CYCLES_PER_FRAME
 from unitracker_grammar import frequency
 
-# The clock whose note table F is nearest FREQTBL/FREQTBH at note k + 1: no clock is exact.
-CLOCK = (PAL_CYCLES_PER_FRAME, 985256)
+# FREQTBL/FREQTBH at note k + 1 is F(k) rounded down at this clock, but for note 0.
+CLOCK = (PAL_CYCLES_PER_FRAME, 985240, "floor")
 VOICES = 3
 LEGATO = 0x3F
 MAX_FRAMES = 200000
@@ -71,9 +71,9 @@ class Trace:
 
 def standard(swm) -> SWMPlayer:
     """The reference player of ``swm`` with the document's note table: note k + 1 sounds
-    ``F(k)`` at :data:`CLOCK`, and SETFMOD's EXPTABH is built on it."""
+    ``F(k)`` at :data:`CLOCK`'s clock and rounding, and SETFMOD's EXPTABH is built on it."""
     ref = SWMPlayer(swm)
-    words = [frequency(k - 1, CLOCK[1]) for k in range(256)]
+    words = [frequency(k - 1, *CLOCK[1:]) for k in range(256)]
     ref.freq_lo, ref.freq_hi = bytes(w & 0xFF for w in words), bytes(w >> 8 for w in words)
     ref.exptabh = bytes(11) + ref.freq_hi
     return ref

@@ -9,7 +9,7 @@ import sys
 
 import numpy as np
 from pysidtracker import SidImage, gridcmp
-from pysidwizard import parse_sid_song
+from pysidwizard import SWMPlayer, parse_sid_song
 from pysidwizard.constants import INST_WF_TABLE_POS
 from pysidwizard.player import DEFAULT_HR_ADSR
 from unitracker_grammar import code
@@ -606,12 +606,13 @@ def transcribe(raw: bytes, subtune: int = 0) -> str:
     return transcriber(raw, subtune).document()
 
 
-def compare(swm, text: str, frames: int = 20000):
+def compare(swm, text: str, frames: int = 20000, native: bool = False):
     """The ``(tick, register, ours, theirs)`` cells where document ``text``'s grid differs
-    from the reference player's at the standard note table (:func:`standard`) over ``frames``
-    ticks."""
+    from the reference player's at the standard note table (:func:`standard`), or ``native``
+    at its own, over ``frames`` ticks."""
     ours = play(text, ticks=frames)
-    theirs = np.asarray(standard(swm).render_grid(len(ours)), dtype=np.uint8)
+    ref = SWMPlayer(swm) if native else standard(swm)
+    theirs = np.asarray(ref.render_grid(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, theirs)
 
 

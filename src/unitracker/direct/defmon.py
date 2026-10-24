@@ -27,7 +27,8 @@ COUNTER, POINTER = 0x114A, 0x1186  # voice 1's; each voice's 0x88 on
 ARMED, ARR_Y, ARR_JR, ARR_JC = 0x10D9, 0x10EB, 0x14EC, 0x14ED
 SIDTAB_LO, SIDTAB_HI, SIDTAB_DL = 0x1800, 0x1900, 0x1E00
 GATE_A, GATE_B, GATE_N = 0x40, 0x20, 0x10
-TABLES = {"G": (0x159C, 0x1638, 256), "P": (0x1583, 0x161F, 257), "R": (0x1578, 0x1614, 128)}
+NOTES, F_NOTES = (0x159C, 0x1638), range(24, 119)
+TABLES = {"P": (0x1583, 0x161F, 257), "R": (0x1578, 0x1614, 128)}
 SLOTS = (
     ("freq", (d.Slot("n", reset=("note",)), d.Slot("p"))),
     (
@@ -48,7 +49,7 @@ LAYER_B = {"cp": "bcp", "acid": "bacid", "re": "bre", "fv": "bfv"}
 ACID = {"cp", "acid", "bcp", "bacid"}
 MAX_CALLS, MAX_STEP = 1 << 20, 1 << 14
 PHASE = 64
-NOTE7 = "lda nn\nand #127\n"  # the absolute build's note wraps to 7 bits
+NOTE7 = "adc #24\nand #127\n"  # the absolute build's note wraps to 7 bits
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 TEXT = re.compile(r"[^\s,\[\]{}'\"#&*!|>%@`][^,\[\]{}]*")
 
@@ -58,7 +59,9 @@ class TranscribeError(ValueError):
 
 
 def note_name(k: int) -> str:
-    """Generic note ``k`` (12 * octave + pitch class) by name: defMON note index ``k``."""
+    """defMON note index ``k`` by its generic name: generic note ``k - 24`` (12 * octave + pitch
+    class), the replay's note table being the standard ``F`` two octaves up."""
+    k -= 24
     return f"{NAMES[k % 12]}{k // 12}"
 
 
@@ -434,10 +437,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return d.printed(d.replace(doc, mods=mods(d.printed(doc), self.absolute)))
 
     def tables(self) -> tuple:
-        """The replay's note, portamento and rate tables as words, trailing zeros dropped."""
+        """The replay's note words standard ``F`` does not give (``L``: indexes under 24 and
+        over 118, to the build's note range), portamento and slide rates, trailing zeros dropped."""
+        top = 128 if self.absolute else 256
+        spans = {"L": (*NOTES, [k for k in range(top) if k not in F_NOTES])}
+        spans |= {name: (lo, hi, range(n)) for name, (lo, hi, n) in TABLES.items()}
         out = []
-        for name, (lo, hi, n) in TABLES.items():
-            words = [self.mem[self.at[lo] + k] | self.mem[self.at[hi] + k] << 8 for k in range(n)]
+        for name, (lo, hi, ks) in spans.items():
+            words = [self.mem[self.at[lo] + k] | self.mem[self.at[hi] + k] << 8 for k in ks]
             while len(words) > 1 and not words[-1]:
                 words.pop()
             out.append((name, tuple(words)))
@@ -510,7 +517,7 @@ def mods(body: str, absolute: bool = True) -> tuple:
     return tuple(
         (
             d.signature(name, code.params(ROUTINES[name])),
-            d.Code.of(CODE[name] if absolute else CODE[name].replace(NOTE7, "lda nn\n")),
+            d.Code.of(CODE[name] if absolute else CODE[name].replace(NOTE7, "adc #24\n")),
         )
         for name in sorted(first, key=first.get)
     )

@@ -45,6 +45,16 @@ each voice's counter and pattern pointer say what the call runs. The init's note
 a legato init note; init's cleared note 0 is the absolute note of the one-row program `c0`, which
 the first relative row or note replaces.
 
+## Pitch
+
+The replay's note table is the standard `F` at PAL's `clock_hz`, rounded to the nearest, two
+octaves up: defMON note index `k` is generic note `k - 24` (index `$30` is `C2`), so notes carry
+standard pitch names. `F` gives indexes 24-118; the replay's words under them (two octaves below
+C0, named `C-2` to `B-1`) and over them (its top clamped word, then the memory a wrapped or
+relative note reaches, to index 127 in the absolute build and 255 in the relative one) are table
+`L`. The templates read the note's word from `F` or `L` by its index, and the portamento table `P`
+by the index itself.
+
 ## Programs
 
 An event arms sidcall layer A and layer B ($12DF), each a sidTAB row walked by count. Both run in
@@ -77,8 +87,8 @@ state with the gate off on that call.
 
 ## Modulators
 
-Code templates (`unitracker.direct.dmcode`) over the replay's tables `G` (note frequencies), `P`
-(portamento) and `R` (slide rates):
+Code templates (`unitracker.direct.dmcode`) over the standard note table `F` and the replay's
+tables `L` (note words `F` does not give), `P` (portamento) and `R` (slide rates):
 
 | cell | slots | template | replay |
 |---|---|---|---|
