@@ -28,6 +28,8 @@ from unitracker_grammar.document import (
 
 from unitracker.optimiser.tree import transform, update, walk
 
+PAL_CYCLES = 63 * 312
+
 TEMPO, VOICES = 6, 3
 NO_NOTE = frozenset({"-", "off", "on"})
 KINDS = ("ins", "ctrl", "pw", "filter", "restart", "phrase")
@@ -128,7 +130,7 @@ def _header_defaults(doc: Document) -> list:
         edits.append(Edit("tempo: [a, a]", partial(_header, {"tempo": head.tempo[0]})))
     if head.voices == VOICES:
         edits.append(Edit(f"voices: {VOICES}", partial(_header, {"voices": None})))
-    if head.clock is not None and head.clock[1:] == (PAL_HZ,):
+    if head.clock == (PAL_CYCLES, PAL_HZ):
         edits.append(Edit("clock: PAL", partial(_header, {"clock": None})))
     return edits
 
