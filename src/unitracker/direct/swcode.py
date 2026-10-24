@@ -1,7 +1,7 @@
 """SID-Wizard's per-tick frequency modulators as format 1.23 6502 code templates.
 
 The freq cell's state: ``o`` vibrato_offset, ``s`` set while a WF row's pitch drives the
-frequency, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``fm`` FREQMOD; ``W[k]`` is generic note k's word.
+frequency, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``fm`` FREQMOD; ``F`` is the note table.
 Params: ``d`` delay byte, ``k`` first counter, ``p`` VIBFREQU, ``f`` amplitude.
 """
 
@@ -22,10 +22,10 @@ _PORTAME = (
 )
 
 CODE = {
-    # WRPITCH: a WF pitch row (phi 0) clears the offset and drives the frequency, W[N] + o.
+    # WRPITCH: a WF pitch row (phi 0) clears the offset and drives the frequency, F(N) + o.
     "tone": (
         "lda phi\nora phi+1\nbne go\nsta o\nsta o+1\nlda #1\nsta s\ngo:\nlda s\nbeq done\n"
-        "ldx nn\nclc\nlda W.lo,x\nadc o\nsta v\nlda W.hi,x\nadc o+1\nsta v+1\ndone:\nrts\n"
+        "ldx nn\nclc\nlda F.lo,x\nadc o\nsta v\nlda F.hi,x\nadc o+1\nsta v+1\ndone:\nrts\n"
     ),
     # STRTSND (phi 0: SETVIB0, SETVIBR, the pitch held), then NORMVIB and DOVIBRA.
     "vib": _FIRST
@@ -37,7 +37,7 @@ CODE = {
     "vibfx": _FIRST + "sta o\nsta o+1\nlda #k\nsta vc\n" + _AMP + _NORMVIB,
     # Legato $3F: the offset from the new note's word, FREQMODH $7F, then PORTAME.
     "leg": _FIRST
-    + "ldx ne\nsec\nlda v\nsbc W.lo,x\nsta o\nlda v+1\nsbc W.hi,x\nsta o+1\nlda #127\nsta fm+1\n"
+    + "ldx ne\nsec\nlda v\nsbc F.lo,x\nsta o\nlda v+1\nsbc F.hi,x\nsta o+1\nlda #127\nsta fm+1\n"
     + "rts\n"
     + _PORTAME,
 }
