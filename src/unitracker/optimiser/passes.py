@@ -12,7 +12,6 @@ from unitracker_grammar.document import (
     CELLS,
     HOLD,
     NONE,
-    Bound,
     Call,
     Code,
     Document,
@@ -420,7 +419,7 @@ def hoist(doc: Document) -> list:
             if slot.mod is not None or len(values) != 1:
                 continue
             (found,) = values
-            if len(found) == 1 and found[0] not in _STOPS and not isinstance(found[0], Bound):
+            if len(found) == 1 and found[0] not in _STOPS:
                 hoisted = partial(_hoist, cell, slot.name, found[0])
                 edits.append(Edit(f"{slot.name}.{cell}: {found[0]}", hoisted))
     return edits

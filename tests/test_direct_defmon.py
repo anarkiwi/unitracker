@@ -134,7 +134,7 @@ def test_a_multi_sid_tune_is_refused(crosseyed):
 
 def test_main_transcribes_and_verifies(crosseyed, persei, capsys):
     assert dm.main([str(crosseyed)]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.23\n")
+    assert capsys.readouterr().out.startswith("unitracker: 2.0\n")
     assert dm.main(["--verify", "--frames", "300", "--diff", "2", str(crosseyed), str(persei)]) == 0
     out = capsys.readouterr().out
     assert f"{crosseyed}: exact" in out and f"{persei}: TranscribeError" in out

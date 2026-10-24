@@ -20,7 +20,7 @@ from unitracker.direct import cli
 from unitracker.direct.dmcode import CODE, STATE
 from unitracker.direct.dmimage import LiftError, locate, row_fields
 
-VERSION = "1.23"
+VERSION = "2.0"
 PAL_HZ, NTSC_HZ = 985248, 1022727
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 VOICES = (0x00, 0x31, 0x62)
