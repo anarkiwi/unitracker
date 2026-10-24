@@ -1,6 +1,6 @@
 # defMON to the generic document, directly
 
-`unitracker.direct.defmon` transcribes a defMON replay SID to the generic document (format 1.23)
+`unitracker.direct.defmon` transcribes a defMON replay SID to the generic document (format 2.0)
 from pydefmon's `DefmonPlayer`, which runs the tune's own replay on an emulated 6502. It reads
 the replay's tables and sidTAB from memory after init and its pattern events from the emulated
 calls, without the playroutine library or modfit. It is a standalone prototype: nothing else in
