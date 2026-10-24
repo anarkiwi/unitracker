@@ -322,15 +322,16 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         detune = _col(image, pos + 2, 0xFF)
         return self._det(keys, None if detune == 0xFF else detune, carry, arp or 0), hold
 
-    def wave(self, ins, chord=None, kept=(None, None)) -> str:
+    def wave(self, ins, chord=None, kept=(None, None, False)) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
         waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
-        reset switches, the pulse or filter walk ``kept`` resumed instead of restarted."""
+        reset switches, the pulse or filter walk ``kept`` resumed instead of restarted (the
+        filter's routed, or not, by SETFLTP)."""
         # pylint: disable=too-many-locals
-        feats, (pulse, filt) = self.feats, kept
+        feats, (pulse, filt, routed) = self.feats, kept
         table = ins.filter_table
         first = {"route": "+" if table and table[0] != 0xFF else "'-'"}
-        if filt is not None:
+        if filt is not None and not routed:
             del first["route"]
         runs = []
         if pulse is not None:
@@ -743,7 +744,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             state["ins"] = name
             if self.hrc:
                 commands["hr.freq"] = "none"
-            pulse, filt = rec.kept
+            pulse, filt, _ = rec.kept
             if rec.handover is not None:
                 if "run" in commands or pulse is not None or filt is not None:
                     raise TranscribeError("a filter handover on a note that runs another table")

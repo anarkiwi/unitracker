@@ -47,7 +47,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     resume: tuple = ()
     chord: tuple = None
     holder: bool = False
-    kept: tuple = (None, None)
+    kept: tuple = (None, None, False)
     handover: tuple = None
     gate: tuple = None
     switch: tuple = None
@@ -127,7 +127,7 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
             filt = None
             if feats.filtresetsw and control & 0x80:
                 filt = (ref.filt_pos, ref.filter_sweep_count) if held else ()
-            rec.kept = (pulse, filt)
+            rec.kept = (pulse, filt, False)
         apply_row(v, row)
         rec.applied, rec.ins, rec.number = True, v.instrument, v.instrument_idx
         if v.instrument is not before and not rec.newnote:
@@ -227,7 +227,7 @@ def _looped(out: Trace, frame: int) -> bool:
 
 def _claims(ref, claims: list, out: Trace) -> None:
     """Per frame: a STRTSND another voice's claim overrides keeps the filter; a note of the
-    filter's voice that leaves it walking another instrument's table is refused."""
+    filter's voice that does not take it leaves it walking, through the new instrument."""
     holder = ref.filter_controller_voice
     voices = {id(v): i for i, v in enumerate(ref.voices)}
     for v in claims:
@@ -237,6 +237,5 @@ def _claims(ref, claims: list, out: Trace) -> None:
         if took and holder is not v:
             rec.keep_filter = True
         elif not took and holder is v and not (first == 0xFF and ref.swm.filter_stop_rewinds):
-            out.refused.append(
-                f"a note of the filter's voice that does not take it, frame {ref.frame_idx}"
-            )
+            # The walk goes on from where it is, through the new instrument's bytes.
+            rec.kept = (rec.kept[0], (ref.filt_pos, ref.filter_sweep_count), True)

@@ -302,11 +302,11 @@ def test_rows_refused(match, mega_run):
         s.Transcriber(swm, META).document()
 
 
-def test_a_filter_voice_note_that_leaves_the_filter_walking_is_refused(mega_run):
-    rows = notes((37, 4), (40, 1))
-    swm = song(mega_run.read_bytes(), rows, i1={"filter_table": b"\x00\x00\x00"})
-    with pytest.raises(s.TranscribeError, match="does not take it"):
-        s.Transcriber(swm, META).document()
+def test_a_filter_voice_note_that_routes_the_filter_leaves_it_walking(mega_run):
+    """A note of the filter's voice whose instrument does not take the filter: the walk goes on
+    through the new instrument's bytes."""
+    rows = notes((37, 4), (40, 1), (None, None), (42, 4))
+    exact(song(mega_run.read_bytes(), rows, i1={"filter_table": b"\x00\x00\x00"}))
 
 
 def test_song_refusals(lykia_boss, csillag):
