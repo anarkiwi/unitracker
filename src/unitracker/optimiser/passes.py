@@ -191,6 +191,22 @@ def _event_defaults(path: tuple, event: Event) -> list:
     return edits
 
 
+def _bare(event) -> bool:
+    """Whether an event is a rest and nothing else, which a rest before it may take as steps."""
+    return isinstance(event, Event) and event == Event("-", steps=event.steps)
+
+
+def _rests(events: tuple) -> tuple:
+    """``events`` with each run of bare rests one rest of their steps."""
+    out = []
+    for event in events:
+        if out and _bare(out[-1]) and _bare(event):
+            out[-1] = replace(out[-1], steps=(out[-1].steps or 1) + (event.steps or 1))
+        else:
+            out.append(event)
+    return tuple(out)
+
+
 def defaults(doc: Document) -> list:
     """Drop what a document spells at the default it has anyway (semantics.md): header lines,
     ``wait:0``, ``hold:1``, ``a/a`` tempos, ``*1``, a non-note's ``legato``, ``pw`` and
@@ -207,6 +223,8 @@ def defaults(doc: Document) -> list:
             ]
         elif isinstance(node, Event):
             edits += _event_defaults(path, node)
+        elif isinstance(node, tuple) and node and _rests(node) != node:
+            edits.append(Edit(_label(path, "rests"), partial(update, path=path, fn=_rests)))
     return edits + _binding_defaults(doc) + _first_notes(doc) + _empty_rows(doc)
 
 
@@ -466,17 +484,27 @@ def _slot_key(doc: Document, key: str) -> tuple | None:
     return (cell, _slot(doc, key, cell)) if cell in CELLS else None
 
 
-def _onced(path: tuple, i: int, j: int, key: str, doc: Document) -> Document:
-    """``doc`` with event ``i`` of the events at ``path`` binding ``key`` once and event
-    ``j``'s ``none`` of it dropped."""
+def _starts(events: tuple) -> list:
+    """Each event's first step in its phrase, which merging bare rests leaves as it is."""
+    out, at = [], 0
+    for event in events:
+        out.append(at)
+        at += event.steps or 1
+    return out
+
+
+def _onced(path: tuple, starts: tuple, key: str, doc: Document) -> Document:
+    """``doc`` with the event of the phrase at ``path`` starting at step ``starts[0]`` binding
+    ``key`` once and the one at ``starts[1]`` without its ``none``, then its bare rests merged."""
 
     def edit(events):
+        i, j = (_starts(events).index(at) for at in starts)
         first, last = events[i], events[j]
         commands = tuple((k, Once(v) if k == key else v) for k, v in first.commands)
-        dropped = _without(last.commands, (key, NONE))
         out = list(events)
-        out[i], out[j] = replace(first, commands=commands), replace(last, commands=dropped)
-        return tuple(out)
+        out[i] = replace(first, commands=commands)
+        out[j] = replace(last, commands=_without(last.commands, (key, NONE)))
+        return _rests(tuple(out))
 
     return update(doc, path, edit)
 
@@ -506,5 +534,6 @@ def once(doc: Document) -> list:
                 j = _stopped_at(node, i, key, slot[0])
                 if j is not None:
                     label = _label(path + (i,), f"{key}:{value}!")
-                    edits.append(Edit(label, partial(_onced, path, i, j, key)))
+                    starts = _starts(node)
+                    edits.append(Edit(label, partial(_onced, path, (starts[i], starts[j]), key)))
     return edits

@@ -48,12 +48,13 @@ A candidate the grammar or the player refuses does not hold.
 
 | pass | proposes |
 |---|---|
-| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo:6`, `voices:3`, a `clock` at PAL's `clock_hz`, `tempo:[a,a]` as `a`; a row's `wait:0` and `hold:1`; ` tempo:a/a` and ` vtempo:a/a` as `a`, `*1`, and a non-note's ` legato`, ` pw`, ` filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note:+0` of a control program no `run` starts (a note clears the rows' notes as it starts it); an instrument's `none` field, one per instrument (it ends a binding only where one lasts to that instrument's note, so the guarantee decides); a program row of only `wait` and `hold` folded into the hold of the row before (`{hold:2,ctrl:65},{}` is `{hold:3,ctrl:65}`), not where a loop starts at it |
+| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo:6`, `voices:3`, a `clock` at PAL's `clock_hz`, `tempo:[a,a]` as `a`; a row's `wait:0` and `hold:1`; ` tempo:a/a` and ` vtempo:a/a` as `a`, `*1`, and a non-note's ` legato`, ` pw`, ` filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note:+0` of a control program no `run` starts (a note clears the rows' notes as it starts it); an instrument's `none` field, one per instrument (it ends a binding only where one lasts to that instrument's note, so the guarantee decides); a program row of only `wait` and `hold` folded into the hold of the row before (`{hold:2,ctrl:65},{}` is `{hold:3,ctrl:65}`), not where a loop starts at it; a run of bare rests one rest of their steps (`-*3,-` is `-*4`) |
 | `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, phrases, and templates of modulators and programs, equal up to their parameters' names |
 | `transpose` | each phrase whose events are an earlier phrase's but for one shift `k` of every note (a note atom's; a program row's notes are the instrument's and stay) becoming the first such phrase in document order, its record dropped and each play entry of it naming that phrase with `k` added to its transpose (`p2` = `p1` up 2: `p2-1` is `p1+1`) |
 | `snap` | each phrase event's frequency binding under which the voice's frequency was `F(N)` at every tick the binding lasted over the guarantee's horizon (see [Snap](#snap)) becoming the cell's own `F(N)`: the binding dropped where no frequency slot was bound as it applied, else a `none` of each slot that was |
 | `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait:0` and `hold:1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl:ctrl_1(7,4)`, `restart:restart_1(2,9,240)`, ` run:ctrl_1(7,3)` |
 | `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
+| `once` | a command binding a slot that a later event of its phrase stops with `none`, no command of the cell between, becoming a binding that fires once (`snap()!`), the `none` dropped and the rests it leaves merged |
 
 After the last round the `names` rename (`optimise(..., rename=True)`, the default) gives each
 program template the `template` pass named `{kind}_k` a name by its shape, in document order:
@@ -225,12 +226,11 @@ Definitions):
 | a play entry's phrase, `p1+2` | `[C4,-*3]+2` |
 | an instrument's `ctrl`, `restart`, `pw` or `filter` program | the program, `ctrl:[{ctrl:65},end]` |
 | a `run:` row key or command of a program | the program after its kind, `run:pw[{pw:800},end]` |
-| a `pw` or `filter` record that is a binding `b` | the program of its one row, `[{pw:b},end]` |
+| a `pw` or `filter` record that is a binding `b` | in an instrument's field the binding `b`; in a `run:` the program of its one row, `pw[{pw:b},end]` |
 | a record that is a call of a program template | the call |
 
-A binding record becomes the program of its one row, never the instrument's own binding: the
-player starts an instrument's own binding's phi at 0 on each note, while a named binding, a
-program, keeps its phi where the same note binds it again. A definition that reaches itself (a
+A binding record plays where its name stands as the binding written there (the player's
+semantics, format 2.3), so an instrument's field takes the binding itself. A definition that reaches itself (a
 program whose rows run it) has no inline form and stays named. The definitions are written
 inline together where the guarantee holds over the document the passes left (so after any
 lossy step), else in halves as the driver proves edits; a refused one stays named. A

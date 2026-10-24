@@ -262,3 +262,10 @@ INTERLEAVED = doc(
     head="voices:1\nslots:{freq:{a:{},m:{},b:{}}}\nstate:{freq:{s:1}}\n",
     mods=JOINT_CODE,
 )
+
+ONCE = doc(
+    "      ins:\n"
+    "        i1:{ad:9,sr:240}\n"
+    "      phrase:\n"
+    "        p1:[C4.i1 pw:800,-*3,- pw:none,D pw:'v + 8',-*2,- pw:none]\n"
+)
