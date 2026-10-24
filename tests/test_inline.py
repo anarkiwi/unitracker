@@ -3,9 +3,9 @@
 import pytest
 from unitracker_grammar.document import printed, read
 
-from unitracker import cli
 import optimiser_docs as D
 
+from unitracker import cli
 from unitracker.optimiser import Guarantee, fit, optimise
 from unitracker.optimiser.__main__ import main
 from unitracker.optimiser.inline import candidates, cyclic, definitions, inline, inlined
