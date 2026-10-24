@@ -5,7 +5,7 @@ from dataclasses import replace
 import pymusicassembler
 import pytest
 from pysidtracker import gridcmp
-from unitracker_grammar.document import printed, read
+from unitracker_grammar.document import VERSION, printed, read
 from unitracker_player.player import play
 
 from unitracker import cli
@@ -134,7 +134,7 @@ def test_a_pattern_of_no_end_is_refused(one):
 
 def test_cli(space_invadarz, capsys):
     assert m.main([str(space_invadarz)]) == 0
-    assert capsys.readouterr().out.startswith(f"unitracker: {m.VERSION}\nmeta: {{title: Space")
+    assert capsys.readouterr().out.startswith(f"unitracker: {VERSION}\nmeta: {{title: Space")
     assert m.main(["--verify", "--frames", "400", str(space_invadarz)]) == 0
     assert f"{space_invadarz}: first (" in capsys.readouterr().out
 

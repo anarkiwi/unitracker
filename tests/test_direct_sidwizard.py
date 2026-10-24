@@ -3,7 +3,7 @@
 import pytest
 from pysidwizard import Loop, Pattern, PlayPattern, Row, TempoOverride, parse_sid_song
 from pysidtracker import gridcmp
-from unitracker_grammar.document import printed, read
+from unitracker_grammar.document import VERSION, printed, read
 from unitracker_player.player import play
 
 from unitracker.direct import sidwizard as s
@@ -194,6 +194,6 @@ def test_song_refusals(mega_run, lykia_boss, csillag):
 
 def test_cli(mega_run, capsys):
     assert s.main([str(mega_run)]) == 0
-    assert capsys.readouterr().out.startswith(f"unitracker: {s.VERSION}\nmeta: {{title: Mega-Run")
+    assert capsys.readouterr().out.startswith(f"unitracker: {VERSION}\nmeta: {{title: Mega-Run")
     assert s.main(["--verify", "--frames", "400", str(mega_run)]) == 0
     assert f"{mega_run}: first (" in capsys.readouterr().out

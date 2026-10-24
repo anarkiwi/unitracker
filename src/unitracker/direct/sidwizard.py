@@ -40,7 +40,6 @@ from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
 from unitracker.direct.swcode import CODE, STATE
 
-VERSION = "2.0"
 # The clock whose note table F is nearest FREQTBL/FREQTBH at note k + 1: no clock is exact.
 CLOCK = (PAL_CYCLES_PER_FRAME, 985256)
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
@@ -190,7 +189,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         rows, loop = (
             self._wave_rows(self._image(n), INST_WF_TABLE_POS) if ins.wf_table else ([], None)
         )
-        first = Row({"ctrl": 9, "route": "+" if self._filtered(n) else "'-'"})
+        first = Row({"ctrl": 9, "route_on" if self._filtered(n) else "route_off": 0})
         return self._named("ctrl", "c", Program([first, *rows], None if loop is None else loop + 1))
 
     def idle(self) -> str:
@@ -500,7 +499,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             for cell, names in STATE.items()
         }
         return Header(
-            VERSION,
             self.meta,
             clock=CLOCK,
             tempo=(HR, self.tempo - HR),
@@ -514,9 +512,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if "leg" in self.used:
             self._legatos(self.frames)
         phrases = Section("phrase", [(name, list(events)) for events, name in self.phrases.items()])
-        song = [SongRow(rows[0], [phrases])] + [SongRow(r) for r in rows[1:]]
+        song = [SongRow(r) for r in rows]
         defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]
         defs += [Section(kind, store) for kind, store in self.programs.items() if store]
+        defs.append(phrases)
         named = {s for t in self.used for s in code.symbols(ROUTINES[t])}
         mods = [
             (signature(name, code.params(ROUTINES[name])), Code(ROUTINES[name]))

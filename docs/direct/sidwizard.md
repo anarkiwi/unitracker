@@ -46,7 +46,7 @@ the player runs the voices last to first, so the lower voice holds the filter.
 | SID-Wizard | generic instrument |
 |---|---|
 | AD, SR | `ad`, `sr` |
-| WF table | `ctrl`: a first row `{ctrl: 9, route}` (STRTSND's control and SETFLTP's routing), then a row per tick: the waveform as `ctrl`, the arp as `note` (`+n`, `-n`, absolute) with `wave.freq: tone()`; `$80` (with WFARP NOP) no note; `$FE` a jump taken on its tick, `{loop: k}` back, `end` past `$7F`; `$FF` `end` |
+| WF table | `ctrl`: a first row `{ctrl: 9, route_on: 0}` or `{ctrl: 9, route_off: 0}` (STRTSND's control and SETFLTP's routing), then a row per tick: the waveform as `ctrl`, the arp as `note` (`+n`, `-n`, absolute) with `wave.freq: tone()`; `$80` (with WFARP NOP) no note; `$FE` a jump taken on its tick, `{loop: k}` back, `end` past `$7F`; `$FF` `end` |
 | pulse table | `pw`: an idle first row, then a set row `{pw: w}`, a sweep `{hold: n, pw: v + d}` and its advance tick `{pw: none}`; a jump to a sweep spends a tick |
 | filter table (claimed) | `filter`: a set row `{cut, res, mode}`, a sweep `{hold: n, cut: v + 8d}` (`v + d` with FINEFILTSWEEP) and its advance tick |
 | vibrato, delay | `tick.freq: vib(d,k,f,p)` |
@@ -69,10 +69,10 @@ differ from the native player's there, and `--verify` reports those cells.
 
 | template | routine |
 |---|---|
-| `tone()` | on `φ = 0` (a WF pitch row): `o = 0`, `s = 1`; with `s`, `v = F(N) + o` |
-| `vib(d, k, f, p)` | on `φ = 0` STRTSND: `o = 0`, `s = 0`, the counters and amplitude; then NORMVIB and DOVIBRA |
+| `tone()` | on `phi = 0` (a WF pitch row): `o = 0`, `s = 1`; with `s`, `v = F(N) + o` |
+| `vib(d, k, f, p)` | on `phi = 0` STRTSND: `o = 0`, `s = 0`, the counters and amplitude; then NORMVIB and DOVIBRA |
 | `vibfx(k, f, p)` | SETVIBR from the note's amplitude, `o = 0`, the delay left running, then the vibrato's step |
-| `leg()` | on `φ = 0`: `o = v - F(n)`, FREQMODH `$7F`; then PORTAME toward the new note |
+| `leg()` | on `phi = 0`: `o = v - F(n)`, FREQMODH `$7F`; then PORTAME toward the new note |
 
 `f` is SETFMOD's amplitude of the vibrato nibble: these builds read it pitch-independent.
 
