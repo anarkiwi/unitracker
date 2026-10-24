@@ -49,6 +49,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     holder: bool = False
     kept: tuple = (None, None)
     handover: tuple = None
+    gate: tuple = None
     skips: dict = field(default_factory=dict)
 
 
@@ -133,6 +134,14 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         rec.note = v.note + v.octave_shift + v.transpose - 1
         rec.adsr = (v.sid_ad, v.sid_sr)
         rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
+        ins = v.instrument
+        if row.note == 0x7E and ref.features.gateoffptr and ins is not None:
+            held = ref.filter_controller_voice is v
+            wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
+            pulse = (v.pw_pos, v.pw_sweep_count) if ins.gateoff_pw else None
+            filt = (ref.filt_pos, ref.filter_sweep_count) if ins.gateoff_filt and held else None
+            if ins.gateoff_wf or pulse or filt:
+                rec.gate = (wave, pulse, filt, bool(ins.gateoff_wf))
 
     def run_deferred(v):
         pending = v.deferred_fx is not None

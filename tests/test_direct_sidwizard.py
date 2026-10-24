@@ -1,5 +1,7 @@
 """The direct SID-Wizard transcription plays the reference player's registers."""
 
+import dataclasses
+
 import pytest
 from pysidwizard import (
     End,
@@ -203,6 +205,13 @@ NORMAL = {
             }
         },
     ),
+    "gate-off pointers move the WF and pulse walks": (
+        notes((37, 1), (0x7E, None), (40, 3), (0x7E, None), (44, 1)),
+        {
+            "i1": {"wf_table": bytes.fromhex("410000400000"), "gateoff_wf": 19, "gateoff_pw": 26},
+            "i3": {"gateoff_pw": 26},
+        },
+    ),
     "reset switches keep the pulse and filter walking": (
         notes((37, 1), (40, None), (44, None), (40, 1)),
         {"i1": {"control": 0xDA, "pw_table": bytes.fromhex("8400000c2000"), "arp_speed": 0}},
@@ -297,8 +306,9 @@ def test_a_filter_voice_note_that_leaves_the_filter_walking_is_refused(mega_run)
 
 def test_song_refusals(lykia_boss, csillag):
     swm = song(csillag.read_bytes(), notes((37, 1)))
-    swm.instruments[0].gateoff_wf = 0x10
-    with pytest.raises(s.TranscribeError, match="normal build: gate-off table pointers"):
+    swm.instruments[0].arp_speed = 2
+    swm.features = dataclasses.replace(SWMPlayer(swm).features, multispeedsupp=False)
+    with pytest.raises(s.TranscribeError, match="without STRTSND's ARPSCNT reset"):
         s.Transcriber(swm, META)
     swm = song(lykia_boss.read_bytes(), notes((37, 1)))
     swm.instruments[0].pw_table = bytes.fromhex("100100")

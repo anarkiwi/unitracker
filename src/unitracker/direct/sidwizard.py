@@ -44,10 +44,6 @@ from unitracker.direct.swtrace import CLOCK, VOICES, Trace, TraceError, standard
 VERSION = "1.23"
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
 DUMMY = 256
-# Build flags this transcription refuses whenever the tune uses what they change.
-USED = {
-    "gateoffptr": "gate-off table pointers",
-}
 
 
 class TranscribeError(TraceError):
@@ -109,12 +105,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out.append("multispeed, a play gate or an initial filter")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
-        uses = {
-            "gateoffptr": any(
-                i.gateoff_wf or i.gateoff_pw or i.gateoff_filt for i in swm.instruments
-            ),
-        }
-        out += [USED[k] for k, used in uses.items() if used and getattr(feats, k)]
         if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
             out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
         return out
@@ -442,7 +432,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         out = {"pw": self.call("p" + kind, **params)}
         return out | ({"pm.freq": self.call("m" + kind, **params)} if self.mirror else {})
 
-    def filter(self, ins, pos=None, count=None, handover=None) -> str:
+    def filter(self, ins, pos=None, count=None, handover=None, lead=True) -> str:
         """The ``filter`` name of instrument ``ins``'s filter program, or resumed from ``pos``
         at sweep ``count``; taken on a tick the previous voice's walk stepped, from the state
         that step ``handover`` left."""
@@ -484,7 +474,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             rows_of["started"] = {"res": res, "mode": mode} | cut
         if pos is None:
             pos = INST_WF_TABLE_POS + len(ins.wf_table) + 1 + len(ins.pw_table) + 1
-        rows, loop = self._swept(image, pos, "cut", rows_of, count)
+        rows, loop = self._swept(image, pos, "cut", rows_of, count, lead)
         return self._named("filter", "f", Program(rows, loop))
 
     def resume(self, ins, wave: tuple, pulse=None, filt=None, skip: bool = True) -> str:
@@ -495,9 +485,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         # pylint: disable=too-many-locals
         lead = []
         if pulse is not None:
-            lead.append(Row({"hold": 0, "run": self.pulse(ins, *pulse)}))
+            lead.append(Row({"hold": 0, "run": self.pulse(ins, *pulse, lead=skip)}))
         if filt is not None:
-            lead.append(Row({"hold": 0, "run": self.filter(ins, *filt)}))
+            lead.append(Row({"hold": 0, "run": self.filter(ins, *filt, lead=skip)}))
         pos, counter, chord, cpos = wave
         held = counter if self.feats.arpspeedsupp and counter < 0x80 else 0
         lead += ([Row({})] if skip else []) + self.skipped(ins, held)
@@ -713,7 +703,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
 
     def apply(self, rec, voice: int, state: dict) -> Event:
         """The TICK_2 event of an applied row."""
-        # pylint: disable=too-many-branches
+        # pylint: disable=too-many-branches,too-many-return-statements
         ins, note = rec.ins, rec.row.note
         commands = self.fx(rec)
         if rec.newnote and "dt.freq" in commands:
@@ -743,6 +733,12 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             )
         if 0 < note < 0x60:
             return self.glide(rec, commands)
+        if note == GATE_OFF and rec.gate is not None:
+            if "run" in commands:
+                raise TranscribeError("a gate-off pointer on a row that runs another table")
+            wave, pulse, filt, jumped = rec.gate
+            commands["run"] = self.resume(ins, wave, pulse, filt, skip=False)
+            return Event("-" if jumped else "off", commands=commands)
         if note in (GATE_OFF, GATE_ON):
             return Event("off" if note == GATE_OFF else "on", commands=commands)
         if 0x60 <= note < NPORTAM:
