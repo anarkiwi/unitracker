@@ -303,7 +303,8 @@ class Firings:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         rec = rec[order]
         notes = np.array([frequency(k, clock_hz) for k in range(256)] + [0], dtype=np.int64)
         self.word, self.table = words(clock_hz, rounding)
-        self.N, self.n = rec["N"].astype(np.int64), rec["n"].astype(np.int64)
+        self.N = rec["N"].astype(np.int64)  # pylint: disable=invalid-name
+        self.n = rec["n"].astype(np.int64)
         self.phi, self.out = rec["phi"].astype(np.int64), rec["out"].astype(np.int64)
         self.base = {"v": rec["v"].astype(np.int64), "0": np.zeros_like(self.phi)}
         if cell == "freq":
@@ -518,7 +519,7 @@ def _tremolo(fir: Firings, _v: np.ndarray, out: np.ndarray) -> list:
         return []
     u, y = found
     lo, change = int(y[0]), np.flatnonzero(y != y[0])
-    if not len(change):
+    if change.size == 0:
         return [(lo, lo, 1)]
     j = change[0]
     return [(lo, int(y[j]), s) for s in range(int(u[j - 1]) + 1, int(u[j]) + 1)]

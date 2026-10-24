@@ -51,9 +51,11 @@ def test_code_that_is_exactly_an_expression_is_fitted_exactly():
         "v + step - 2*step*(phi // half % 2)"
     )
     assert "b.freq:stepsq(8,2)" in result.text and "b.freq:stepsq(16,2)" in result.text
-    assert "pw:ramp(40)" in result.text and "a.freq:note()" in result.text
+    assert "pw:glide(40)" in result.text and "a.freq:note()" in result.text
     assert np.array_equal(play(result.text), play(D.EXACT))
     assert result.after < result.before and all(s == (0, 0, 0) for s in result.stats.values())
+    own = lossy.simplify(D.EXACT, None, EXACT, prelude=False)
+    assert "pw:ramp(40)" in own.text and "glide" not in own.text and own.after > result.after
 
 
 def test_a_looser_tolerance_trades_fidelity_for_a_simpler_form():
@@ -182,9 +184,9 @@ def test_a_group_sharing_state_is_fitted_jointly_and_its_state_dropped():
     result = lossy.simplify(D.JOINT, None, EXACT)
     assert [(r.name, r.templates) for r in result.kept] == [("add+set", ("add", "set"))]
     doc = read(result.text)
-    assert dict((k, str(v)) for k, v in doc.mods) == {"ramp(step)": "v + step"}
+    assert not doc.mods
     assert doc.header.state is None and "b.freq" not in result.text
-    assert "a.freq:ramp(8)" in result.text and "a.freq:ramp(16)" in result.text
+    assert "a.freq:glide(8)" in result.text and "a.freq:glide(16)" in result.text
     assert np.array_equal(play(result.text), play(D.JOINT)) and not result.unfit
 
 
@@ -198,7 +200,7 @@ def test_a_group_another_slot_fires_inside_is_unfit_and_falls_back():
     result = lossy.simplify(D.INTERLEAVED, None, EXACT)
     assert result.unfit == ["add+set (freq): slot m fires between the group's slots"]
     assert sorted(r.name for r in result.kept) == ["add", "set"]
-    assert "a.freq" not in result.text and "b.freq:ramp(8)" in result.text
+    assert "a.freq" not in result.text and "b.freq:glide(8)" in result.text
     assert np.array_equal(play(result.text), play(D.INTERLEAVED))
 
 

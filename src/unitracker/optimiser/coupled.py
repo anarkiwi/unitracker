@@ -152,8 +152,7 @@ def _firings(rows: np.ndarray, v: np.ndarray, out: np.ndarray) -> np.ndarray:
     return rec
 
 
-# pylint: disable-next=too-many-locals
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+# pylint: disable-next=too-many-locals,too-many-arguments,too-many-positional-arguments
 def plan(
     group: Group, tr: Trace, slots: tuple, tol: fit.Tolerance, clock: int, prelude: bool = True
 ) -> tuple:

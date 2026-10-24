@@ -305,9 +305,9 @@ PHRASES = doc(
     "        i1:{ad:9,ctrl:[{ctrl:65},end]}\n"
     "        i2:{ad:8,ctrl:[{ctrl:65},end]}\n"
     "      phrase:\n"
-    "        p1:[C4.i1,-,E4,G4 pw:800,[C5,D5]x2]\n"
-    "        p2:[D4.i1,-,E4,A4 pw:800,[D5,E5]x2]\n"
-    "        p3:[F4.i2,-,E4,C5 pw:800,[F5,G5]x2]\n",
+    "        p1:[C4.i1,-,E4,G4 pw:800,[C5,D5]x2,-*3,E4 pw:900,-,G4 pw:1000,-*2,off]\n"
+    "        p2:[D4.i1,-,E4,A4 pw:800,[D5,E5]x2,-*3,E4 pw:900,-,G4 pw:1000,-*2,off]\n"
+    "        p3:[F4.i2,-,E4,C5 pw:800,[F5,G5]x2,-*3,E4 pw:900,-,G4 pw:1000,-*2,off]\n",
     play="[p1]\n - play:[p2]\n - play:[p3]",
     mods="",
 )

@@ -54,6 +54,10 @@ A candidate the grammar or the player refuses does not hold.
 | `snap` | each phrase event's frequency binding under which the voice's frequency was `F(N)` at every tick the binding lasted over the guarantee's horizon (see [Snap](#snap)) becoming the cell's own `F(N)`: the binding dropped where no frequency slot was bound as it applied, else a `none` of each slot that was |
 | `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait:0` and `hold:1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl:ctrl_1(7,4)`, `restart:restart_1(2,9,240)`, ` run:ctrl_1(7,3)` |
 | `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
+| `prelude` | per template of the document's own (code or expression), each call whose firings over the guarantee's horizon (`trace.record(..., every=True)`) a prelude template plays exactly becoming that prelude call, the template dropped where no call names it: `fit.prelude_calls` solves each prelude template's integers from the firings (`glide` the one step; `slide` the largest step and the transposes of the notes the firings that step less arrive at; `vibrato` each φ before the first off `F(N)`, the depth from that residual and the width from the largest; `pwm`, `sweep`, `tremolo` from the one value per φ), verifying each candidate compiled as the player compiles it, masked to the cell; the cheapest call in tokens is kept |
+| `instruments` | each group of two or more instrument records alike but for integers (`ad`, `sr`, an integer binding, a call's integer arguments) becoming one template `ins_k` with a parameter per position whose values differ (positions of equal values sharing one, named by the callee's parameter or the field's stem, `_2` after a stem where a count would spell a record's name), each record a call of it: ` i1:ins_1(9,800)` of ` ins_1(ad,p):{ad:ad,sr:240,ctrl:c1,pw:p,restart:hr(ad,240)}` |
+| `chords` | per program template whose parameters a row reads only as `note:+p`, and per instrument template passing parameters only to such positions, its note parameters permuted (signature and every call) where every call gives them in one order not ascending, and each call's run of them that is a chord's intervals (music21's name, root position, where `CHORDS` gives exactly that run) written as the chord's name, fewest arguments first: `arp(3,7,10)` is `arp(min7)` |
+| `phrases` | each group of two or more phrase records alike but for their notes (rests, `off`/`on`, instruments, commands, flags, steps and groups equal) becoming one template `ph_k` with a parameter (`x`, `y`, `z`, `u`, `w`, `x2`, ...) per differing note position, positions of equal notes sharing one and those equal in every record literal, each record a call of it: ` p1:ph_1(C4,G4)` |
 
 After the last round the `names` rename (`optimise(..., rename=True)`, the default) gives each
 program template the `template` pass named `{kind}_k` a name by its shape, in document order:
@@ -98,7 +102,8 @@ bound as it was (until something binds or stops that slot). Each such binding be
 `lossy.simplify(text, ticks, tolerances)`, off by default, trades a bounded loss of fidelity
 for simplicity: each call of a code template (`vib(0,4,32)`) becomes a call of an expression
 template fitted to what the call did, or, where code templates share state, to what they did
-together, and nothing else in the document changes. The exact passes then run on its result,
+together, or of a prelude template (no template to define), and nothing else in the document
+changes. The exact passes then run on its result,
 their guarantee taken against it.
 
 1. **Record** (`trace.py`): the document plays over `ticks` (to its end where it ends; a looping
@@ -158,7 +163,11 @@ their guarantee taken against it.
    and, where a role's name is taken, by an alternate (`step`, `inc`, `delta`, then `step2`);
    a parameter that is an integer multiple of another in every call is written as that
    multiple, and the rest are literal (`vib(0,4,32)`, `vib(0,4,64)` → `stepsq(32,2)`,
-   `stepsq(64,2)` of `stepsq(step,half):v - 2*(phi // half % 2)*step + step`). A form that
+   `stepsq(64,2)` of `stepsq(step,half):v - 2*(phi // half % 2)*step + step`). A prelude
+   form (`simplify(..., prelude=True)`, the default) is a prelude call that plays the firings
+   exactly, or a fitted form's values (a chain's firing on the value the one before gave), with
+   that form's errors: it costs its calls alone, and each call's cheapest form is chosen with
+   and without the prelude's, so the output converges on prelude names. A form that
    keeps its input (`keep` on `v`) ends its call's binding (`none`). A table form's tables are
    one new table, each call's offset `k`.
 5. **Prove**: each replacement (a code template's, or a group's best plan) is screened alone for
@@ -211,7 +220,7 @@ language model) learns the format from without resolving names
 |---|---|
 | `named` | nothing (the default) |
 | `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record; shared ones and templates stay named |
-| `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad:9}`, `freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`); a definition the song never reaches is dropped, so no section is left |
+| `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad:9}`, `freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`; a record that is a template's call and its template at once: `C4.i1=ins_1(ad,p)={...}(9,800)`, `p1=ph_1(x,y)=[...](C4,E4)`); a definition the song never reaches is dropped, so no section is left |
 
 In `single`, templates (`mod:` records and program templates) are the format's shared
 vocabulary and stay named, and a call is already an inline use and stays a call. Its anonymous
@@ -227,6 +236,7 @@ Definitions):
 | a `run:` row key or command of a program | the program after its kind, `run:pw[{pw:800},end]` |
 | a `pw` or `filter` record that is a binding `b` | the program of its one row, `[{pw:b},end]` |
 | a record that is a call of a program template | the call |
+| an instrument or phrase record that is its template's call, `C4.i1`, `p1` | the call, `C4.ins_1(9,240)`, `play:[ph_1(G1,E1)]` |
 
 A binding record becomes the program of its one row, never the instrument's own binding: the
 player starts an instrument's own binding's phi at 0 on each note, while a named binding, a
@@ -249,6 +259,13 @@ fallback, shape and parameter names, the parameter policy, each shape fitted, an
 refused by size or by the guarantee) and every pass on lifted documents of the four direct
 lifters; `python tools/passes_eval.py DOC.yaml ...` tabulates the tokens each pass saves over
 each song's length and lists the kept edits.
+`tests/test_templates23.py`: the `prelude`, `instruments`, `chords` and `phrases` passes on
+hand-written documents (kept, and refused where a fit does not hold or shapes differ), each
+prelude template fitted exactly from its own values and refused one value off, the lossy mode's
+prelude forms, the inline modes of templates and call records, and the reference documents
+(`out/ref22/lifted`, or `$UNITRACKER_REF_DOCS`) optimised over 3000 ticks;
+`python tools/pass_savings.py DOC.yaml ... [--lossy [--no-prelude]]` tabulates the tokens each
+pass saves.
 `tests/test_optimiser.py`: each pass on the hand-written documents of `tests/optimiser_docs.py`,
 kept and refused; the guarantee's horizons; `tests/test_inline.py` each inline mode on a
 hand-written document and on lifted documents of the four direct lifters; the CLI; and, for

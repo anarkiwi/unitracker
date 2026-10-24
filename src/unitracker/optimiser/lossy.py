@@ -196,7 +196,9 @@ def _scaled(params: dict, varying: list) -> dict:
 
 def _cost(made: tuple, occurrences: Counter) -> int:
     sig, body, table, calls = made
-    text = ("" if sig is None else f" {sig}:{body}\n") + (f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else "")
+    text = ("" if sig is None else f" {sig}:{body}\n") + (
+        f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else ""
+    )
     return size(text) + sum(occurrences[c] * size(str(n)) for c, n in calls.items())
 
 
@@ -221,21 +223,29 @@ class Names:
 def _choose(options: dict, names: Names) -> list:
     """The ``(call, form)`` groups, one template each, for one code template's calls and
     their fitting forms: the cheapest of each form key fitting every call, and each call's
-    cheapest form grouped by key."""
+    cheapest form grouped by key, of every form and of the templates' own (no prelude call)."""
 
     def cost(plan):
         return sum(
-            _cost(template(g, set(names.taken), names.reserved), names.occurrences) for g in plan
+            (
+                sum(names.occurrences[c] for c, _ in g) * size(NONE)
+                if g[0][1].key == coupled.IDENTITY
+                else _cost(template(g, set(names.taken), names.reserved), names.occurrences)
+            )
+            for g in plan
         )
 
     keyed = {c: {f.key: f for f in forms} for c, forms in options.items()}
     common = set.intersection(*(set(k) for k in keyed.values()))
     plans = [[[(c, keyed[c][key]) for c in options]] for key in sorted(common)]
-    groups = defaultdict(list)
-    for call, forms in options.items():
-        best = min(forms, key=lambda f, c=call: cost([[(c, f)]]))
-        groups[best.key].append((call, best))
-    plans.append(list(groups.values()))
+    for own in (False, True):
+        groups = defaultdict(list)
+        for call, forms in options.items():
+            forms = [f for f in forms if f.shape != "prelude"] if own else forms
+            best = min(forms, key=lambda f, c=call: cost([[(c, f)]]), default=None)
+            groups[None if best is None else best.key].append((call, best))
+        if None not in groups:
+            plans.append(list(groups.values()))
     return min(plans, key=cost)
 
 
@@ -296,9 +306,9 @@ def propose(
 ) -> tuple:
     """``(replacements, unfit)``: a :class:`Replacement` per code template sharing no state
     some of whose calls fit a form within its cell's tolerance over every firing, those calls
-    to calls of expression templates (or of the prelude's where ``prelude``), and per group of code templates sharing state whose
-    calls all fit a plan (:mod:`coupled`), its other plans its alternatives; ``unfit`` the
-    report line of each group no plan fits."""
+    to calls of expression templates (or the prelude's, where ``prelude``), and per group of
+    code templates sharing state whose calls all fit a plan (:mod:`coupled`), its other plans
+    its alternatives; ``unfit`` the report line of each group no plan fits."""
     clock = (doc.header.clock or (None, PAL_HZ))[1] or PAL_HZ
     codes = {_code.signature(k)[0] for k, v in doc.mods if isinstance(v, Code)}
     by_template, cells = defaultdict(dict), Counter(call for call, _ in tr.firings)
@@ -322,7 +332,7 @@ def propose(
     return list(own.values()) + list(found.values()), unfit
 
 
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+# pylint: disable-next=too-many-locals,too-many-arguments,too-many-positional-arguments
 def _groups(doc: Document, tr: Trace, groups: list, tolerances: dict, names, flags) -> tuple:
     """``(replacements, unfit)`` of the coupled ``groups``: each group's first plan by its name,
     the rest its alternatives, and why each group no plan fits is unfit; ``flags``
@@ -565,13 +575,14 @@ class Proof:  # pylint: disable=too-few-public-methods
                 del self.refused[refused:]
 
 
-def simplify(
+def simplify(  # pylint: disable=too-many-locals
     text: str, ticks: int | None, tolerances=None, progress: bool = False, prelude: bool = True
 ) -> Lossy:
     """``text`` with each code modulator call that fits an expression form within
     ``tolerances`` (by cell, :data:`fit.TOLERANCES` by default) a call of that form's template
-    (where ``prelude``, a prelude call's when one plays the form exactly: no template), kept where the document shrinks, every register outside the replaced calls' cells plays the
-    input's and their cells keep to their tolerance over ``ticks`` (the song's end where None)."""
+    (or, where ``prelude``, a prelude call playing the form exactly), kept where the document
+    shrinks, every register outside the replaced calls' cells plays the input's and their cells
+    keep to their tolerance over ``ticks`` (the song's end where None)."""
     tolerances = fit.TOLERANCES | (tolerances or {})
     if ticks is None and load(text).loop is not None:
         raise GuaranteeError("the lossy mode needs ticks for a looping song")

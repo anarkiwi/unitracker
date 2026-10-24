@@ -12,7 +12,6 @@ from unitracker_grammar import code
 from unitracker_grammar.document import (
     Call,
     Document,
-    Event,
     Expr,
     Group,
     Instrument,
@@ -29,6 +28,7 @@ from unitracker.optimiser.templates import _HOLE, RESERVED, _parameters
 _FIELD_STEMS = {"ctrl": "c", "pw": "p", "filter": "k", "freq": "f", "restart": "rs"}
 _NOTE = re.compile(r"[A-G]#?-?\d+")
 _LETTERS = "xyzuw"
+_STEM = {"ins": "ins", "phrase": "ph"}
 
 
 def taken(doc: Document) -> set:
@@ -49,7 +49,9 @@ def _signatures(doc: Document) -> dict:
     """``{name: parameters}`` of every template a call may name."""
     out = {code.signature(k)[0]: code.signature(k)[1] for k in PRELUDE}
     out |= {_named(k): code.signature(k)[1] for k, _ in doc.mods}
-    return out | {_named(k): code.signature(k)[1] for s in doc.defs for k, _ in s.records if "(" in k}
+    return out | {
+        _named(k): code.signature(k)[1] for s in doc.defs for k, _ in s.records if "(" in k
+    }
 
 
 def _integer(value) -> bool:
@@ -105,9 +107,7 @@ def _filled(shape, names, keyed: bool = False):
 
 
 def _body(fields: tuple, names) -> Instrument:
-    return Instrument(
-        tuple((k, _filled(v, names, base(k) in ("ad", "sr"))) for k, v in fields)
-    )
+    return Instrument(tuple((k, _filled(v, names, base(k) in ("ad", "sr"))) for k, v in fields))
 
 
 def _records(doc: Document, kind: str, calls: dict, template: tuple) -> Document:
@@ -122,21 +122,39 @@ def _records(doc: Document, kind: str, calls: dict, template: tuple) -> Document
     return replace(doc, defs=tuple(defs))
 
 
-def _groups(members: list) -> list:
-    """``(shape, group)`` of each shape two or more members of whose values differ, in
-    document order, each member ``(name, values)``."""
+def _edits(kind: str, members: list, names: set, naming, fill) -> list:
+    """Per shape of two or more ``members``, ``(name, shape, values)``, whose values differ, an
+    edit adding a template of a parameter per differing position (``naming(shape, differ,
+    vectors)`` names them by position) and ``fill(shape, values)``'s body, each member record a
+    call of it."""
     groups = defaultdict(list)
     for name, shape, values in members:
         groups[shape].append((name, values))
-    return [(s, g) for s, g in groups.items() if len({v for _, v in g}) > 1]
+    edits = []
+    for shape, group in groups.items():
+        values = [v for _, v in group]
+        differ = [k for k in range(len(values[0])) if len({v[k] for v in values}) > 1]
+        if differ:
+            params = naming(shape, differ, [tuple(v[k] for v in values) for k in differ])
+            body = fill(shape, iter([params.get(k, x) for k, x in enumerate(values[0])]))
+            edits.append(_edit(kind, group, params, body, names))
+    return edits
 
 
-def _differ(group: list) -> tuple:
-    """``(differ, vectors)``: the positions whose values differ across ``group`` and each one's
-    values."""
-    values = [v for _, v in group]
-    differ = [k for k in range(len(values[0])) if len({v[k] for v in values}) > 1]
-    return differ, [tuple(v[k] for v in values) for k in differ]
+def _edit(kind: str, group: list, params: dict, body, names: set) -> Edit:
+    """The edit adding template ``{stem}_k`` of ``body`` and parameters ``params`` (by
+    position), each record of ``group``, ``(name, values)``, a call of it."""
+    order = list(dict.fromkeys(params.values()))
+    first = {p: k for k, p in reversed(params.items())}
+    key = signature(_fresh(_STEM[kind], names), order)
+    calls = {n: Call(_named(key), tuple(v[first[p]] for p in order)) for n, v in group}
+    apply = partial(_records, kind=kind, calls=calls, template=(key, body))
+    return Edit(f"{kind} {key}: {len(group)}", apply)
+
+
+def _stemmed(shape: tuple, differ: list, vectors: list) -> dict:
+    holes = (0, None, tuple((0, 0, s, _HOLE) for s in shape[1]))
+    return _parameters(holes, differ, vectors, lambda s: s)
 
 
 def instruments(doc: Document) -> list:
@@ -144,28 +162,12 @@ def instruments(doc: Document) -> list:
     an integer binding, a call's integer arguments) becomes one template ``ins_k`` with a
     parameter per differing position, those of equal values sharing one named by the field's
     stem (or the callee's parameter), and each record a call of it."""
-    signatures, names = _signatures(doc), taken(doc)
-    members, stems = [], {}
+    signatures, members = _signatures(doc), []
     for name, value in doc.records("ins").items():
         if "(" not in name and isinstance(value, Instrument):
-            shape, stems[name], values = _instrument(value, signatures)
-            members.append((name, shape, values))
-    edits = []
-    for shape, group in _groups(members):
-        differ, vectors = _differ(group)
-        holes = stems[group[0][0]]
-        params = _parameters(
-            (0, None, tuple((0, 0, s, _HOLE) for s in holes)), differ, vectors, lambda s: s
-        )
-        order = list(dict.fromkeys(params[k] for k in differ))
-        first = {p: k for k, p in reversed(list(params.items()))}
-        literal = group[0][1]
-        body = _body(shape, iter([params.get(k, literal[k]) for k in range(len(holes))]))
-        key = signature(_fresh("ins", names), order)
-        calls = {n: Call(_named(key), tuple(v[first[p]] for p in order)) for n, v in group}
-        label = f"ins {key}: {len(group)}"
-        edits.append(Edit(label, partial(_records, kind="ins", calls=calls, template=(key, body))))
-    return edits
+            fields, stems, values = _instrument(value, signatures)
+            members.append((name, (fields, stems), values))
+    return _edits("ins", members, taken(doc), _stemmed, lambda shape, it: _body(shape[0], it))
 
 
 # ---- phrases ------------------------------------------------------------------------------
@@ -178,7 +180,9 @@ def _note_holes(events: tuple, notes: list) -> tuple:
     for e in events:
         if isinstance(e, Group):
             body = _note_holes(e.body, notes)
-            out.append(replace(e, body=body, endings=tuple(_note_holes(x, notes) for x in e.endings)))
+            out.append(
+                replace(e, body=body, endings=tuple(_note_holes(x, notes) for x in e.endings))
+            )
         elif _NOTE.fullmatch(e.note):
             notes.append(e.note)
             out.append(replace(e, note=_HOLE))
@@ -192,7 +196,9 @@ def _note_filled(events: tuple, notes) -> tuple:
     for e in events:
         if isinstance(e, Group):
             body = _note_filled(e.body, notes)
-            out.append(replace(e, body=body, endings=tuple(_note_filled(x, notes) for x in e.endings)))
+            out.append(
+                replace(e, body=body, endings=tuple(_note_filled(x, notes) for x in e.endings))
+            )
         else:
             out.append(replace(e, note=next(notes)) if e.note is _HOLE else e)
     return tuple(out)
@@ -204,31 +210,22 @@ def _note_parameters():
         yield from (f"{a}{k if k > 1 else ''}" for a in _LETTERS)
 
 
+def _lettered(_shape, differ: list, vectors: list) -> dict:
+    by_vector, fresh = {}, _note_parameters()
+    for v in vectors:
+        if v not in by_vector:
+            by_vector[v] = next(fresh)
+    return {k: by_vector[v] for k, v in zip(differ, vectors)}
+
+
 def phrases(doc: Document) -> list:
     """Each group of two or more phrase records alike but for their notes becomes one template
     ``ph_k`` with a parameter per differing note (``x``, ``y``, ...; notes equal in every
     record shared, the same in all literal), each record a call of it."""
-    names, members = taken(doc), []
+    members = []
     for name, value in doc.records("phrase").items():
         if "(" not in name and not isinstance(value, Call):
             notes = []
             shape = _note_holes(value, notes)
             members.append((name, shape, tuple(notes)))
-    edits = []
-    for shape, group in _groups(members):
-        differ, vectors = _differ(group)
-        by_vector, fresh = {}, _note_parameters()
-        for v in vectors:
-            if v not in by_vector:
-                by_vector[v] = next(fresh)
-        params = {k: by_vector[v] for k, v in zip(differ, vectors)}
-        order = list(by_vector.values())
-        first = {p: k for k, p in reversed(list(params.items()))}
-        literal = group[0][1]
-        body = _note_filled(shape, iter([params.get(k, literal[k]) for k in range(len(literal))]))
-        key = signature(_fresh("ph", names), order)
-        calls = {n: Call(_named(key), tuple(v[first[p]] for p in order)) for n, v in group}
-        label = f"phrase {key}: {len(group)}"
-        edits.append(Edit(label, partial(_records, kind="phrase", calls=calls, template=(key, body))))
-    return edits
-
+    return _edits("phrase", members, taken(doc), _lettered, _note_filled)
