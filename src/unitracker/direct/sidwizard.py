@@ -47,8 +47,6 @@ DUMMY = 256
 # Build flags this transcription refuses whenever the tune uses what they change.
 USED = {
     "gateoffptr": "gate-off table pointers",
-    "portavibra": "vibrato portamento",
-    "allghostregs": "all-ghost-register small FX",
 }
 
 
@@ -84,11 +82,17 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         refused = self._unsupported() if check else []
         if refused:
             raise TranscribeError(f"{self.feats.name} build: {', '.join(refused)}")
-        self.code = templates(self.feats.calcvibrato, self.feats.vibratotypes)
+        feats = self.feats
+        self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
         self.pwkb = self.feats.pwkeybtrack and _tracked(swm, "pw_table")
         self.fkb = self.feats.filtkbtrack and _tracked(swm, "filter_table")
         feats = self.feats
-        self.hrc = feats.arpspeedsupp and feats.detunesupport and self._held_rows()
+        self.hrc = (
+            feats.arpspeedsupp
+            and feats.detunesupport
+            and not feats.vibslidealways
+            and self._held_rows()
+        )
         self.mirror = self.hrc and self.pwkb
         if self.pwkb or self.fkb:
             self.code |= track_templates(self.feats.finefiltsweep)
@@ -105,27 +109,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out.append("multispeed, a play gate or an initial filter")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
-        rows = [r for p in swm.patterns for r in p.rows]
         uses = {
             "gateoffptr": any(
                 i.gateoff_wf or i.gateoff_pw or i.gateoff_filt for i in swm.instruments
-            ),
-            "portavibra": any(
-                r.instrument == LEGATO or r.fx == 0x03 or r.note == NPORTAM for r in rows
-            ),
-            "allghostregs": any(
-                r.instrument is not None
-                and 0x50 <= r.instrument < 0x70
-                or r.fx is not None
-                and 0x20 <= r.fx < 0x70
-                for r in rows
             ),
         }
         out += [USED[k] for k, used in uses.items() if used and getattr(feats, k)]
         if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
             out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
-        if feats.fastspeedbind or feats.vibslidealways:
-            out.append("fast speed binding or tables walking on hard-restart ticks")
         return out
 
     def reload(self, ins) -> int:
@@ -367,12 +358,16 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         program = Program([*runs, Row(first), *lead, *rows], None if loop is None else loop + skip)
         return self._named("ctrl", "c", program)
 
-    def _swept(self, image: bytes, pos: int, cell: str, rows_of: dict, count=None) -> tuple:
+    def _swept(
+        self, image: bytes, pos: int, cell: str, rows_of: dict, count=None, lead=True
+    ) -> tuple:
         """``(rows, loop)`` of a pulse or filter program from ``pos``; ``rows_of`` gives the
         keys of a ``set`` row and of a ``sweep``'s ticks, its ``advance`` tick, a ``jump`` to a
         sweep and the ``rest`` a tracked table keeps writing. Resumed with sweep ``count``, it
         leaves STRTSND's tick to the voice's bindings."""
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
         rows, at = [Row(rows_of["started"] if count is None else rows_of["resumed"])], {}
+        rows = rows if lead else []
         first = True
         while True:
             if pos >= len(image) or image[pos] == 0xFF:
@@ -410,7 +405,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         steps = [Row({"hold": ticks} | rows_of["sweep"](pos))] if ticks > 0 else []
         return steps + [Row(rows_of["advance"](pos, ticks > 0))]
 
-    def pulse(self, ins, pos=None, count=None) -> str:
+    def pulse(self, ins, pos=None, count=None, lead=True) -> str:
         """The ``pw`` name of instrument ``ins``'s pulse program, from the tick after
         STRTSND's, or resumed from ``pos`` at sweep ``count``."""
         image = self.ref._image(ins)  # pylint: disable=protected-access
@@ -426,7 +421,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 "jump": self._pulsed("wr"),
                 "rest": [Row(self._pulsed("wr"))],
                 "resumed": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
-                "started": {},
+                "started": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
             }
         else:
             rows_of = {
@@ -436,10 +431,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 "jump": {},
                 "rest": [],
                 "resumed": {"pw": "none"},
-                "started": {},
+                "started": {"pw": "none"},
             }
         start = INST_WF_TABLE_POS + len(ins.wf_table) + 1 if pos is None else pos
-        rows, loop = self._swept(image, start, "pw", rows_of, count)
+        rows, loop = self._swept(image, start, "pw", rows_of, count, lead)
         return self._named("pw", "pw", Program(rows, loop))
 
     def _pulsed(self, kind: str, **params) -> dict:
@@ -479,7 +474,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 "jump": {},
                 "rest": [],
                 "resumed": {"cut": "none"},
-                "started": {},
+                "started": {"cut": "none"},
             }
         if handover is not None:
             high, low, res, mode, track = handover
@@ -587,6 +582,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         if not out:
             raise TranscribeError("an idle walk that ends at once")
         out[0] = Row(dict(out[0].keys) | {"wave.freq": self.call("tone")})
+        if self.feats.vibslidealways:
+            # The hard-restart ticks walk the pulse table too: the header's, from PWTPOS 0.
+            out.insert(0, Row({"hold": 0, "run": self.pulse(dummy, 0, 0, lead=False)}))
         instrument = Instrument({"ctrl": self._named("ctrl", "c", Program(out))})
         for name, held in self.ins.items():
             if held == instrument:
@@ -665,34 +663,43 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             return {}
         return {"dt.freq": self.call("dfx", d=detune & 0xFF)}
 
+    def setup(self, rec, state: dict, tick: int) -> Event:
+        """The event of a read row's TICK_0 or TICK_1 (``tick``): HARDRST's hard restart and
+        the tables it holds, the dummy walk before a voice's first note, a staccato skip."""
+        commands, atom = {}, "-"
+        new = rec.newnote and not rec.dummy and not self.feats.vibslidealways
+        if new and not tick:
+            commands = {"pw": "hold", "cut": "hold"} | ({"pm.freq": "none"} if self.mirror else {})
+        if new and tick and self.fkb and rec.holder:
+            # The cutoff is written every tick: its track follows the note STRTSND sets.
+            commands = {"cut": self.call("frs")}
+        if rec.newnote and rec.dummy and not tick:
+            state["dummy"] = state["dummy"] or self.dummy(rec.hr)
+            commands["run"] = self.ins[state["dummy"]].get("ctrl")
+        if rec.newnote and not tick and self.hrc:
+            fx = rec.row.instrument or 0
+            carry = fx >= 0x3F if fx or not self.feats.hardrestypes else (rec.row.fx or 0) >= 3
+            commands["hr.freq"] = self.call("hrc", c=int(carry))
+        if rec.newnote and self.hr(rec.hr, tick):
+            commands |= self.hr_commands(rec.hr)
+            atom = "-" if rec.dummy else "off"
+        if tick in rec.skips:
+            wave, ins, pulse, filt = rec.skips[tick]
+            if self.feats.vibslidealways:
+                # The staccato tick walks no table and no vibrato, which this build would.
+                commands["run"] = self.resume(ins, wave, pulse, filt)
+                commands["tick.freq"] = self.call("wt")
+            else:
+                commands["run"] = self.resume(ins, wave)
+        return Event(atom, commands=commands)
+
     def events(self, rec, voice: int, state: dict, length: int) -> list:
         """The events of one read row on ``voice``, ``length`` ticks from its TICK_0."""
-        out = []
-        for tick in (0, 1):
-            commands, atom = {}, "-"
-            if rec.newnote and not tick and not rec.dummy:
-                commands = {"pw": "hold", "cut": "hold"}
-                if self.mirror:
-                    commands["pm.freq"] = "none"
-            if rec.newnote and tick and not rec.dummy and self.fkb and rec.holder:
-                # The cutoff is written every tick: its track follows the note STRTSND sets.
-                commands = {"cut": self.call("frs")}
-            if rec.newnote and rec.dummy and not tick:
-                state["dummy"] = state["dummy"] or self.dummy(rec.hr)
-                commands["run"] = self.ins[state["dummy"]].get("ctrl")
-            if rec.newnote and not tick and self.hrc:
-                fx = rec.row.instrument or 0
-                carry = fx >= 0x3F if fx or not self.feats.hardrestypes else (rec.row.fx or 0) >= 3
-                commands["hr.freq"] = self.call("hrc", c=int(carry))
-            if rec.newnote and self.hr(rec.hr, tick):
-                commands |= self.hr_commands(rec.hr)
-                atom = "-" if rec.dummy else "off"
-            if tick in rec.skips:
-                commands["run"] = self.resume(rec.skips[tick][1], rec.skips[tick][0])
-            out.append(Event(atom, commands=commands))
+        out = [self.setup(rec, state, 0), self.setup(rec, state, 1)]
         if rec.applied:
             out.append(self.apply(rec, voice, state))
-            if any(key == "tick.freq" for key, _ in out[2].commands):
+            rebound = any(key == "tick.freq" for key, _ in out[1].commands)
+            if not rebound and any(key == "tick.freq" for key, _ in out[2].commands):
                 # A binding the slot already holds would keep its phi: rebind it first.
                 out[1] = Event(
                     out[1].note, commands=dict(out[1].commands) | {"tick.freq": self.call("stp")}
@@ -826,7 +833,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         held = ("note", "legato")
         out = [
             Slot("snd"),
-            Slot("tick", hold=("note-2", "note-1", "note")),
+            Slot(
+                "tick",
+                hold=("note",) if self.feats.vibslidealways else ("note-2", "note-1", "note"),
+            ),
             Slot("wave", hold=held, reset=("row.note",)),
         ]
         if self.hrc:

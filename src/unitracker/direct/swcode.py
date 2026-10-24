@@ -4,7 +4,8 @@ The freq cell's state is the player's: ``o`` vibrato_offset, ``s`` set once a WF
 drives the frequency, ``z`` FREQLO/FREQHI, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``p`` VIBFREQU,
 ``fm`` FREQMOD, ``k`` SLIDEVIB, ``dd`` DETUNER, ``cm``/``ca``/``cv`` WRPITCH's carry; the pw
 cell's ``pl`` PWLOGHO/PWHIGHO, ``pk`` PKBDTRK, mirrored in the freq cell's ``ml``/``mk`` for
-WRPULS's carry ``cs`` (``mt`` its scratch); the cut cell's ``ch``, ``cl``, ``ck`` CTFH, CTFL and its
+WRPULS's carry ``cs`` (``mt`` its scratch), ``vt``/``vi``/``vq``/``vr``/``vg`` the instrument's
+vibrato a portamento's end restores; the cut cell's ``ch``, ``cl``, ``ck`` CTFH, CTFL and its
 keyboard track.
 """
 
@@ -28,6 +29,11 @@ STATE = {
         "mk": 1,
         "mt": 2,
         "cs": 1,
+        "vt": 1,
+        "vi": 1,
+        "vq": 1,
+        "vr": 1,
+        "vg": 2,
     },
     "pw": {"pl": 2, "pk": 1},
     "cut": {"ch": 1, "cl": 1, "ck": 1},
@@ -38,7 +44,7 @@ _ADD = "clc\nlda o\nadc fm\nsta o\nlda o+1\nadc fm+1\nsta o+1\nrts\n"
 _SUB = "sec\nlda o\nsbc fm\nsta o\nlda o+1\nsbc fm+1\nsta o+1\nrts\n"
 _INCVIBR = "clc\nlda fm\nadc dc\nsta fm\nlda fm+1\nadc #0\nsta fm+1\njmp dov\n"
 _STEP = (
-    "step:\nlda k\ncmp #131\nbeq pm\ncmp #255\nbeq pm\ncmp #129\nbeq up\ncmp #130\nbeq dn\ntax\n"
+    "step:\nlda k\ncmp #131\nbeq pm\ncmp #255\n{np}cmp #129\nbeq up\ncmp #130\nbeq dn\ntax\n"
     "bmi done\nbne nv\n{inc}nv:\nlda dc\nbmi dov\ndec dc\ndone:\nrts\ndov:\nlda vc\nbne cnt\n"
     "lda p\nsta vc\ncnt:\ndec vc\nlda vc\nasl\ncmp p\nbcc up\ndn:\n"
     + _SUB
@@ -48,6 +54,13 @@ _STEP = (
     "lda o\nsbc fm\nsta o\nlda o+1\nsbc fm+1\nsta o+1\nrts\nneg:\nsec\nlda #0\nsbc o\ntax\n"
     "lda #0\nsbc o+1\ncpx fm\nsbc fm+1\nbcc zero\nsec\nlda o\nadc fm\nsta o\nlda o+1\nadc fm+1\n"
     "sta o+1\nrts\nzero:\nlda #0\nsta o\nsta o+1\nrts\n"
+)
+# PORTAME with PORTAVIBRA: tested one unit nearer, its end (PORTEND) the instrument's vibrato.
+_PORTAVIBRA = (
+    "pm:\nlda o+1\nbmi neg\nlda o\ncmp fm\nlda o+1\nsbc fm+1\nbcc zero\nclc\nlda o\nsbc fm\nsta o\n"
+    "lda o+1\nsbc fm+1\nsta o+1\nrts\nneg:\nlda o\neor #255\ntax\nlda o+1\neor #255\ncpx fm\n"
+    "sbc fm+1\nbcc zero\nsec\nlda o\nadc fm\nsta o\nlda o+1\nadc fm+1\nsta o+1\nrts\nzero:\n"
+    "lda #0\nsta o\nsta o+1\nlda vt\nsta k\nlda vi\nsta vc\nlda vq\nsta p\n{amp}rts\n"
 )
 # SETFMOD with CALCVIBRATO: FREQMOD at ceil(A / 2) + DPITCH, r that half + 1 (0: none).
 _CALC = (
@@ -142,10 +155,20 @@ def track_templates(finefiltsweep: bool) -> dict:
     }
 
 
-def templates(calcvibrato: bool, vibratotypes: bool) -> dict:
-    """The templates' texts for a build: its SETFMOD and whether SLIDEVIB 0 is INCVIBR."""
+def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -> dict:
+    """The templates' texts for a build: its SETFMOD, whether SLIDEVIB 0 is INCVIBR, and
+    whether a portamento ends in the instrument's vibrato."""
     amp = _CALC if calcvibrato else _CONST
-    step = _STEP.format(inc=_INCVIBR if vibratotypes else "")
+    target = "bne nf\nlda #0\nsta o\nsta o+1\nrts\nnf:\n" if portavibra else "beq pm\n"
+    step = _STEP.format(inc=_INCVIBR if vibratotypes else "", np=target)
+    keep = ""
+    if portavibra:
+        held = _CALC.replace("#r", "vr") if calcvibrato else _CONST.replace("#<g", "vg")
+        held = re.sub(r"\ba([zyrd])\b", r"p\1", held.replace("#>g", "vg+1"))
+        tail = step[step.index("pm:\n") :]
+        step = step.replace(tail, _PORTAVIBRA.format(amp=held))
+        stored = "lda #r\nsta vr\n" if calcvibrato else "lda #<g\nsta vg\nlda #>g\nsta vg+1\n"
+        keep = "lda #c\nsta vt\nlda #i\nsta vi\nlda #q\nsta vq\n" + stored
     return {
         # FREQLO/FREQHI of the note masked to 7 bits; a WF pitch row (phi 0) clears the offset.
         "tone": (
@@ -163,10 +186,13 @@ def templates(calcvibrato: bool, vibratotypes: bool) -> dict:
         "sta k\n"
         "lda #255\nsta cv\n"
         "lda #d\nsta dc\nlda #i\nsta vc\nlda #q\nsta p\n"
+        + keep
         + amp
         + "lda #h\nbeq nh\nldx ne\ncmp #1\nbeq hw\nldx #t\nhw:\nlda F.hi,x\nsta v+1\nnh:\nrts\n",
         # HARDRST's carry on a new note's skipped WF ticks.
         "hrc": "lda phi\nora phi+1\nbne kept\nlda #c\nsta cv\nkept:\nrts\n",
+        # VIBSLIDE from the next tick: a tick the player's hard restart skips it.
+        "wt": _FIRST + "rts\n" + step,
         # VIBSLIDE: the vibrato or slide SLIDEVIB selects.
         "stp": step,
         # FORCVIB and SETVIBR (w 1 also clears the offset, as a note-column vibrato), then step.

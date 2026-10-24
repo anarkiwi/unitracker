@@ -59,14 +59,27 @@ def notes(*rows) -> list:
     return out
 
 
-@pytest.mark.parametrize("name", ["mega_run", "lykia_boss", "border_odyssey", "whammer", "csillag"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "mega_run",
+        "lykia_boss",
+        "border_odyssey",
+        "whammer",
+        "csillag",
+        "samwise",
+        "flowing_slowly_extended",
+    ],
+)
 def test_tunes_play_exactly(name, request):
     """Light and bare builds, a normal build with octave shifts, a medium build with
-    portamentos and slides, a normal build with chords and chord FX."""
+    portamentos and slides, a normal build with chords and chord FX, extra builds (one of a
+    pre-1.8 driver, one with staccato restarts)."""
     raw = request.getfixturevalue(name).read_bytes()
     cells, text = s.verify(raw, frames=3000)
     assert not cells.size, summary(cells, 3)
-    assert "{loop: " in text and "\ntables:" not in text and "F.lo,x" in text
+    assert "{loop: " in text or text.endswith("  - end\n")
+    assert "\ntables:" not in text and "F.lo,x" in text
 
 
 @pytest.mark.parametrize("name", ["mega_run", "lykia_boss"])

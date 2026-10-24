@@ -166,7 +166,10 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         if fires:
             rec = out.reads[voices[id(v)]][-1]
             wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
-            rec.skips[ref.frame_idx - rec.frame] = (wave, v.instrument)
+            held = ref.filter_controller_voice is v
+            filt = (ref.filt_pos, ref.filter_sweep_count) if held else None
+            pulse = (v.pw_pos, v.pw_sweep_count)
+            rec.skips[ref.frame_idx - rec.frame] = (wave, v.instrument, pulse, filt)
         return fires
 
     ref._advance_row, ref._apply_row, ref._run_deferred_fx = read, applied, run_deferred
