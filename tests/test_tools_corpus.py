@@ -4,7 +4,37 @@ import csv
 from pathlib import Path
 
 import corpus
+import pytest
 import shared
+from conftest import gt_tune
+
+
+def _sid(raw: bytes, version: int, at: int = 0, value: int = 0) -> bytes:
+    """``raw`` with header version ``version`` and byte ``at`` set to ``value``."""
+    out = bytearray(raw)
+    out[4:6], out[at] = version.to_bytes(2, "big"), value or out[at]
+    return bytes(out)
+
+
+@pytest.mark.parametrize(
+    "version, at, multi",
+    [(2, 0x7A, False), (3, 0x7A, True), (3, 0x7B, False), (4, 0x7B, True), (4, 0x7C, False)],
+)
+def test_a_tune_is_multi_sid_by_its_header_sid_addresses(metal_warrior, version, at, multi):
+    assert shared.multi_sid(_sid(metal_warrior.read_bytes(), version, at, 0x42)) == multi
+
+
+@pytest.mark.parametrize("voices, multi", [((0, 7, 14), False), ((0, 7, 0x20), True)])
+def test_a_goattracker_build_past_three_voices_is_multi_sid(
+    metal_warrior, monkeypatch, voices, multi
+):
+    dec = gt_tune([(0x41, 0)], voices=voices)[0]
+    monkeypatch.setattr(shared, "decompile_sid", lambda raw: dec)
+    assert shared.multi_sid(metal_warrior.read_bytes()) == multi
+
+
+def test_other_formats_and_unreadable_tunes_are_single_sid(mega_run):
+    assert not shared.multi_sid(mega_run.read_bytes()) and not shared.multi_sid(b"PSID" + bytes(9))
 
 
 def _csv(path: Path, fields: list, rows: list) -> Path:
@@ -61,3 +91,18 @@ def test_tunes_are_checked_and_reported(metal_warrior, tmp_path, capsys):
 def test_the_survey_renderer_plays_the_lifted_document(mega_run):
     played, info = corpus.render(mega_run.read_bytes(), 1, 50)
     assert played.shape == (50, 25) and info["backend"] == "sidwizard" and info["chars"] > 0
+
+
+def test_multi_sid_tunes_are_excluded_unless_asked_for(metal_warrior, tmp_path, capsys):
+    sid = tmp_path / "multi.sid"
+    sid.write_bytes(_sid(metal_warrior.read_bytes(), 3, 0x7A, 0x50))
+    out = tmp_path / "out"
+    argv = ["check", str(sid), "--jobs", "1", "--frames", "100", "--out", str(out)]
+    assert corpus.main(argv) == 0 and "1 multi-SID tunes excluded" in capsys.readouterr().out
+    assert corpus.main([*argv, "--multi-sid"]) == 0
+    assert "goattracker2: 1/1 verified" in capsys.readouterr().out
+    argv = ["forms", str(sid), "--out", str(out), "--jobs", "1", "--forms", "lifted"]
+    assert corpus.main(argv) == 0 and "1 multi-SID tunes excluded" in capsys.readouterr().out
+    assert not (out / "lifted" / "multi.err").exists()
+    with pytest.raises(ValueError, match="multi-SID"):
+        corpus.render(sid.read_bytes(), 1, 10)

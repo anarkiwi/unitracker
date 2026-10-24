@@ -139,13 +139,6 @@ def test_a_song_that_does_not_loop_in_time_is_refused(cross):
         dm.Transcriber(cross.raw).song(50)
 
 
-def test_a_multi_sid_tune_is_refused(crosseyed):
-    raw = bytearray(crosseyed.read_bytes())
-    raw[0x7A] = 0x50
-    with pytest.raises(dm.TranscribeError, match="multi-SID"):
-        dm.Transcriber(bytes(raw))
-
-
 def test_main_transcribes_and_verifies(crosseyed, tmp_path, capsys):
     bad = tmp_path / "bad.sid"
     bad.write_bytes(b"PSID")
