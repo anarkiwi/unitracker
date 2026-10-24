@@ -26,6 +26,14 @@ reference player's (`decompile_sid(raw).player()`) over `--frames` ticks; `--dif
 | orderlist transpose | the play entry's `+t` |
 | orderlist loop | `{loop: k}`, the earliest row from which the timeline repeats |
 
+## Order
+
+`_play_channel` runs a voice's tick as tick-0 work, the wavetable, the realtime command, the
+pulse table, then the fetch, where a hard restart turns the gate off and writes its AD/SR. The
+document declares that order, `order: [events, ctrl, pulse, filter, freq, pw, cut, read]`: a
+restart's first row (the fetch) applies after the voice's programs, so it overwrites a wavetable
+row's AD or SR on the same tick.
+
 ## Holds
 
 `_play_channel` skips the realtime command and the pulse table on fixed ticks; each skip is a

@@ -15,10 +15,9 @@ import numpy as np
 import yaml
 from pygoattracker import constants as C
 from pygoattracker import decompile_sid
-from pygoattracker.player import _Channel
 from pysidtracker import gridcmp
 from tqdm import tqdm
-from unitracker_grammar.expr import canonical
+from unitracker_grammar.expr import ExpressionError, canonical
 from unitracker_player.player import play
 
 from unitracker.document.yamlstyle import Atom, Dumper, Flow, FlowMap
@@ -34,43 +33,72 @@ FREQ_CMDS = (C.CMD_PORTAUP, C.CMD_PORTADOWN, C.CMD_TONEPORTA, C.CMD_VIBRATO)
 LEAD = 2
 CALC = "((G[(N + 1) % 128] - G[N % 128]) % 65536) // d"
 TO = f"G[{EVENT} % 128]"
-WALK = f"min({PHI}, a) + ({PHI} >= a)*(({PHI} - a) % p)"
-LAGGED = f"min({PHI} - l, a) + ({PHI} - l >= a)*(({PHI} - l - a) % p)"
 
 
-def _toward(s: str) -> str:
-    return f"(v < {TO})*min(v + {s}, {TO}) + (v > {TO})*max(v - ({s}), {TO}) + (v == {TO})*v"
+def _toward(s: str) -> dict:
+    """Toneporta by ``s``: the phase ``t`` restarts when it crosses its note."""
+    reached = f"(v < {TO})*(v + {s} > {TO}) + (v > {TO})*(v - {s} < {TO})"
+    out = f"(v < {TO})*min(v + {s}, {TO}) + (v > {TO})*max(v - {s}, {TO}) + (v == {TO})*v"
+    return {"t": f"t*(1 - ({reached}))", "out": out}
 
 
-def _vibrate(s: str) -> str:
-    return f"v + ({PHI} >= l)*(({s}) - 2*({s})*V[o + {LAGGED}])"
+def _vibrato(s: str) -> dict:
+    """GoatTracker's vibrato on phase ``t``, depth ``c``, step ``s``, after ``l`` firings."""
+    return {
+        "w": f"({PHI} >= l)",
+        "f": "(c < t)*(t < 128)",
+        "u": "((t ^ (255*f)) + 2) & 255",
+        "t": "t + w*(u - t)",
+        "out": f"v + w*{s}*(1 - 2*(u & 1))",
+    }
 
 
-def _walk(carried: str) -> str:
-    return f"{carried}*(1 - P[o + {WALK}] // 4096) + P[o + {WALK}] % 4096"
-
-
-def _packed(t: str) -> str:
-    byte = f"(({t}) + ({t}) // 256) % 256"
-    return f"(({byte}) % 16)*256 + {byte}"
+def _ptab(out: dict) -> dict:
+    """The pulse table from row ``b``: row ``r`` and time ``q`` as state, a jump resolved,
+    then a set row or one step of a modulation row."""
+    return {
+        "ra": f"({PHI} < 1)*b + ({PHI} >= 1)*r",
+        "j": "(PL[ra] == 255)",
+        "rb": "j*PR[ra] + (1 - j)*ra",
+        "qa": f"({PHI} >= 1)*q",
+        "go": "(rb != 0)",
+        "st": "go*(qa == 0)*(PL[rb] >= 128)",
+        "md": "go*(1 - st)",
+        "qb": "((qa == 0)*PL[rb] + (qa != 0)*qa - 1) & 255",
+        "q": "md*qb",
+        "r": "(rb + st + md*(qb == 0)) & 255",
+    } | out
 
 
 TEMPLATES = {
-    "note": f"G[N % 128]*({PHI} < 1) + v*({PHI} >= 1)",
-    "porta": "v + g*s",
-    "portan": f"v + g*({CALC})",
+    "note": {"t": f"t*({PHI} >= 1)", "out": f"({PHI} < 1)*G[N % 128] + v*({PHI} >= 1)"},
+    "porta": {"t": 0, "out": "v + g*s"},
+    "portan": {"t": 0, "out": f"v + g*({CALC})"},
     "tporta": _toward("s"),
-    "tportan": _toward(CALC),
-    "snap": TO,
-    "vib": _vibrate("s"),
-    "vibn": _vibrate(CALC),
-    "walk": _walk("v"),
-    "walks": _packed(_walk("(v % 256)")),
+    "tportan": _toward(f"({CALC})"),
+    "snap": {"t": 0, "out": TO},
+    "vib": _vibrato("s"),
+    "vibn": _vibrato(f"({CALC})"),
+    "ptab": _ptab(
+        {
+            "sp": "PR[rb] - 256*(PR[rb] >= 128)",
+            "out": "st*(((PL[rb] & 15) << 8) | PR[rb]) + (1 - st)*(v + md*sp)",
+        }
+    ),
+    "ptabs": _ptab(
+        {
+            "xb": "(v & 255) + PR[rb]",
+            "zb": "st*PR[rb] + md*((xb + (xb >> 8)) & 255)",
+            "out": "(st + md)*(((zb & 15) << 8) | zb) + (1 - st - md)*v",
+        }
+    ),
 }
 TEMPLATES.update(
-    (f"{base}1", f"v + ({PHI} < 1)*({TEMPLATES[base]} - v)")
+    (f"{base}1", f"v + ({PHI} < 1)*({TEMPLATES[base]['out']} - v)")
     for base in ("porta", "portan", "tporta", "tportan", "snap")
 )
+STATE = "{freq: {t: 0}, pw: {r: 0, q: 0}}"
+ORDER = "[events, ctrl, pulse, filter, freq, pw, cut, read]"
 SLOTS = (
     "{freq: {wave: {reset: [row.note, row.freq]}, tick: {hold: [%s]}}, "
     "pw: {pulse: {hold: [%s]}}}"
@@ -84,36 +112,6 @@ class TranscribeError(ValueError):
 def note_name(k: int) -> str:
     """Generic note ``k`` (12 * octave + pitch class) by name."""
     return f"{NAMES[k % 12]}{k // 12}"
-
-
-def letters(i: int) -> str:
-    """``i`` as lowercase letters, a table name's suffix."""
-    out = ""
-    while True:
-        out = chr(ord("a") + i % 26) + out
-        i = i // 26 - 1
-        if i < 0:
-            return out
-
-
-def orbit(step, state):
-    """``(outputs, prefix, period)`` of ``state -> (state', out)`` iterated from ``state``
-    until a state recurs: output ``i`` is the ``i``-th step's."""
-    seen, outs = {}, []
-    while state not in seen:
-        seen[state] = len(outs)
-        state, out = step(state)
-        outs.append(out)
-    return outs, seen[state], len(outs) - seen[state]
-
-
-def index(prefix: int, period: int, phi: str = PHI) -> str:
-    """The orbit index of firing ``phi``: ``phi`` in the prefix, then around the cycle."""
-    if period == 1:
-        return f"min({phi}, {prefix})"
-    if not prefix:
-        return f"{phi} % {period}"
-    return f"min({phi}, {prefix}) + ({phi} >= {prefix})*(({phi} - {prefix}) % {period})"
 
 
 def _ordered(keys: dict) -> FlowMap:
@@ -193,9 +191,12 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def __init__(self, model):
         self.model = model
         self.ref = model.player()
-        freq = self.ref._freq_table  # pylint: disable=protected-access
-        self.tables = {"G": list(freq[:128])}
-        self.walks, self.vibs = [], []
+        ref = self.ref
+        self.tables = {
+            "G": list(ref._freq_table[:128]),  # pylint: disable=protected-access
+            "PL": _trimmed([0] + ref._ltable[C.PTBL][:255]),  # pylint: disable=protected-access
+            "PR": _trimmed([0] + ref._rtable[C.PTBL][:255]),  # pylint: disable=protected-access
+        }
         self.ctrl, self.filter, self.x, self.ins, self.used = {}, {}, {}, {}, set()
         self.phrases, self.entered = {}, set()
         self.funk = [t + 1 for t in self.ref._funktable]  # pylint: disable=protected-access
@@ -213,16 +214,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.used.add(template)
         bag = ", ".join(f"{k}: {v}" for k, v in params.items())
         return self._named(self.x, "x", Atom(f"{template} {{{bag}}}" if bag else template))
-
-    @staticmethod
-    def _offset(cat: list, values: list) -> int:
-        """The offset of ``values`` in the concatenated table ``cat``, appended once."""
-        n = len(values)
-        for o in range(len(cat) - n + 1):
-            if cat[o : o + n] == values:
-                return o
-        cat.extend(values)
-        return len(cat) - n
 
     def _speed(self, idx: int) -> tuple:
         """``(note-relative, params)`` of speed table entry ``idx``: a 16-bit step ``s``, or
@@ -245,65 +236,24 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             params = {"g": 1 if cmd == C.CMD_PORTAUP else -1} | params
         return self.instance(template + ("1" if once else ""), **params)
 
-    def vibrato(self, idx: int, lag: int = 0, phase: int = 0) -> str:
-        """The ``x`` name of the vibrato of speed entry ``idx`` from ``phase``, after ``lag``
-        firings that change nothing."""
+    def vibrato(self, idx: int, lag: int = 0) -> str:
+        """The ``x`` name of the vibrato of speed entry ``idx`` after ``lag`` firings that
+        change nothing; its phase is the voice's state ``t``."""
         cmp, right = (self._lt(C.STBL, idx), self._rt(C.STBL, idx)) if idx else (0, 0)
-        calc = cmp >= 0x80
-        cmp &= 0x7F
+        if cmp >= 0x80:
+            return self.instance("vibn", d=1 << right, c=cmp & 0x7F, l=lag)
+        return self.instance("vib", s=right, c=cmp, l=lag)
 
-        def fire(vt):
-            if cmp < vt < 0x80:
-                vt ^= 0xFF
-            vt = (vt + 2) & 0xFF
-            return vt, vt & 1
-
-        bits, prefix, period = orbit(fire, phase)
-        speed = {"d": 1 << right} if calc else {"s": right}
-        return self.instance(
-            "vibn" if calc else "vib",
-            **speed,
-            l=lag,
-            o=self._offset(self.vibs, bits),
-            a=prefix,
-            p=period,
-        )
-
-    def command(self, cmd: int, data: int, phase: int = 0) -> str:
+    def command(self, cmd: int, data: int) -> str:
         """The ``x`` name of realtime command ``cmd`` with ``data``."""
         if cmd == C.CMD_VIBRATO:
-            return self.vibrato(data, phase=phase)
+            return self.vibrato(data)
         return self.portamento(cmd, data)
 
-    def _pulse_step(self, state: tuple, start: int) -> tuple:
-        """``(state', width)`` of one pulse table execution from ``state`` and width ``start``."""
-        chan = _Channel(pulse_table_ptr=state[0], pulsetime=state[1], pulse=start)
-        if chan.pulse_table_ptr:
-            self.ref._pulse_exec(chan)  # pylint: disable=protected-access
-        return (chan.pulse_table_ptr, chan.pulsetime), chan.pulse
-
-    def _pulse_firing(self, state: tuple) -> tuple:
-        """``(state', (set, value))`` of one pulse table execution: a set value, or an added
-        step, the same from any width; SIMPLEPULSE's value is its packed byte."""
-        simple = self.ref.simplepulse
-        a, b = (0, 0x9AB) if simple else (0x123, 0x9AB)
-        (s1, p1), (s2, p2) = self._pulse_step(state, a), self._pulse_step(state, b)
-        if s1 != s2:
-            raise TranscribeError(f"pulse table {state[0]}: the step depends on the width")
-        if p1 == p2 or simple:
-            return s1, (int(p1 == p2), p1 & 0xFF if simple else p1)
-        if (p1 - a) & 0xFFF != (p2 - b) & 0xFFF:
-            raise TranscribeError(f"pulse table {state[0]}: neither a set nor a step")
-        return s1, (0, (p1 - a) & 0xFFF)
-
     def pulse(self, pos: int) -> str:
-        """The ``x`` name of the pulse table walk from position ``pos``: per firing a set
-        value (bit 12 of ``P``) or an added step, at the walk's offset, from the reference
-        player's own pulse execution."""
-        outs, prefix, period = orbit(self._pulse_firing, (pos, 0))
-        o = self._offset(self.walks, outs)
-        template = "walks" if self.ref.simplepulse else "walk"
-        return self.instance(template, o=o, a=prefix, p=period)
+        """The ``x`` name of the pulse table from row ``pos``, read from ``PL``/``PR``, the
+        player's own pulse table."""
+        return self.instance("ptabs" if self.ref.simplepulse else "ptab", b=pos)
 
     # ---- programs -----------------------------------------------------------------------
 
@@ -441,12 +391,12 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     def tick(self, n: int, state: tuple | None = None) -> str:
         """Instrument ``n``'s binding of the tick slot: its vibrato after its delay, or from
-        vibrato ``state`` ``(phase, delay left)`` it carries; ``none`` without one."""
+        delay left in vibrato ``state`` ``(phase, delay)`` it carries; ``none`` without one."""
         ins = self.ref._instr[n]  # pylint: disable=protected-access
         if not ins.speed_ptr:
             return "none"
-        phase, delay = state or (0, ins.vibdelay)
-        return self.vibrato(ins.speed_ptr, max(delay - 1, 0), phase)
+        delay = state[1] if state else ins.vibdelay
+        return self.vibrato(ins.speed_ptr, max(delay - 1, 0))
 
     def gated(self, n: int) -> bool:
         """Whether a note of instrument ``n`` leaves the gate on: a first wave sets it on, or
@@ -499,7 +449,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             cur, bound = None, True
         if cmd in FREQ_CMDS:
             if cur != (cmd, data):
-                text = f"!{TICK}:{self.command(cmd, data, 0 if noted else state[0])}"
+                text = f"!{TICK}:{self.command(cmd, data)}"
             cur, bound = (cmd, data), False
         elif cmd == C.CMD_DONOTHING:
             if not bound:
@@ -593,6 +543,20 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             + [Atom(f"{first}{intro}")] * (C.MAX_CHN - 1)
         )
 
+    def _defs(self, rowlen: int) -> dict:
+        """The definitions: the lead-in and the patterns' phrases, the instruments, the
+        programs, the templates used and their instances."""
+        phrases = {"p0": Flow([Atom("-"), Atom(f"-!tempo:{rowlen}")])}
+        phrases.update((name, Flow(events)) for events, name in self.phrases.items())
+        self.used.add("note")
+        defs = {"phrase": phrases, "ins": self.ins, "ctrl": self.ctrl}
+        if self.filter:
+            defs["filter"] = self.filter
+        defs["mod"] = {k: _template(t) for k, t in TEMPLATES.items() if k in self.used}
+        if self.x:
+            defs["x"] = self.x
+        return defs
+
     def document(self, frames: int = 200000) -> str:
         """The document of the song to its loop, sequenced over at most ``frames`` frames."""
         run = sequence(self.model, frames)
@@ -604,20 +568,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError(f"first patterns start at {sorted(first)}")
         rows, loop = self.timeline(run)
         init = self.init()
-        phrases = {"p0": Flow([Atom("-"), Atom(f"-!tempo:{rowlen}")])}
-        phrases.update((name, Flow(events)) for events, name in self.phrases.items())
-        self.used.add("note")
-        defs = {"phrase": phrases, "ins": self.ins, "ctrl": self.ctrl}
-        if self.filter:
-            defs["filter"] = self.filter
-        defs["mod"] = {k: canonical(v) for k, v in TEMPLATES.items() if k in self.used}
-        if self.x:
-            defs["x"] = self.x
-        if self.walks:
-            self.tables["P"] = [k << 12 | v for k, v in self.walks]
-        if self.vibs:
-            self.tables["V"] = self.vibs
-        song = [{"def": defs, "play": rows[0]}] + [{"play": r} for r in rows[1:]]
+        song = [{"def": self._defs(rowlen), "play": rows[0]}] + [{"play": r} for r in rows[1:]]
         song.append(Atom("end") if loop is None else FlowMap(loop=loop))
         header = self.model.header
         doc = {
@@ -630,7 +581,28 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         }
         text = yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
         head, rest = text.split("tables:", 1)
-        return f"{head}slots: {self.slots()}\ntables:{rest}"
+        return f"{head}slots: {self.slots()}\nstate: {STATE}\norder: {ORDER}\ntables:{rest}"
+
+
+def _trimmed(values: list) -> list:
+    """``values`` without its trailing zeros, which a table reads past its end anyway."""
+    end = len(values)
+    while end > 1 and not values[end - 1]:
+        end -= 1
+    return values[:end]
+
+
+def _template(template):
+    """A template's text: its ordered entries as a flow map, or an expression in its one
+    text where the expression language prints it."""
+    return FlowMap(template) if isinstance(template, dict) else _printed(template)
+
+
+def _printed(text):
+    try:
+        return canonical(str(text)) if isinstance(text, str) else text
+    except (ExpressionError, KeyError):
+        return text
 
 
 def rests(events: list) -> list:
