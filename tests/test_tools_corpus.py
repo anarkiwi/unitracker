@@ -55,7 +55,7 @@ def test_tunes_are_checked_and_reported(metal_warrior, tmp_path, capsys):
     assert "goattracker2: 1/1 verified" in printed and "gap: FileNotFoundError" in printed
     rows = {r["doc"]: r for r in csv.DictReader((out / "results.csv").open())}
     assert rows[f"00000000-{metal_warrior.stem}"]["verified"] == "yes"
-    assert (out / f"00000000-{metal_warrior.stem}.yaml").read_text().startswith("unitracker: ")
+    assert (out / f"00000000-{metal_warrior.stem}.yaml").read_text().startswith("unitracker:")
 
 
 def test_the_survey_renderer_plays_the_lifted_document(mega_run):

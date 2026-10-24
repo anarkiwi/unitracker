@@ -1,6 +1,6 @@
 # The generic optimiser
 
-`unitracker.optimiser` rewrites any canonical document (format 2.1) into a smaller one that
+`unitracker.optimiser` rewrites any canonical document (format 2.2) into a smaller one that
 plays the same register grid on unitracker-player. It knows no tracker: it reads and writes the
 document only through unitracker-grammar's model (`unitracker_grammar.document`), whose `printed` is the one canonical
 text.
@@ -48,9 +48,9 @@ A candidate the grammar or the player refuses does not hold.
 
 | pass | proposes |
 |---|---|
-| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo: 6`, `voices: 3`, a `clock` at PAL's `clock_hz`, `tempo: [a, a]` as `a`; a row's `wait: 0` and `hold: 1`; `!tempo:a/a` and `!vtempo:a/a` as `a`, `*1`, and a non-note's `!legato`, `!pw`, `!filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note: +0` of a control program no `run` starts (a note clears the rows' notes as it starts it) |
+| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo:6`, `voices:3`, a `clock` at PAL's `clock_hz`, `tempo:[a,a]` as `a`; a row's `wait:0` and `hold:1`; `tempo:a/a` and `vtempo:a/a` as `a`, `*1`, and a non-note's `legato`, `pw`, `filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note:+0` of a control program no `run` starts (a note clears the rows' notes as it starts it) |
 | `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, phrases, and templates of modulators and programs, equal up to their parameters' names |
-| `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait: 0` and `hold: 1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl: ctrl_1(7,4)`, `restart: restart_1(2,9,240)`, `!run:ctrl_1(7,3)` |
+| `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait:0` and `hold:1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl:ctrl_1(7,4)`, `restart:restart_1(2,9,240)`, `run:ctrl_1(7,3)` |
 | `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
 
 A `tails` pass (a program ending in another's rows running that one) is not exact: a `run:` row
@@ -80,11 +80,11 @@ then run on its result, their guarantee taken against it.
    | `keep` | `0` | none |
    | `off` | `q` | weighted median |
    | `lin` | `q + s*phi` | weighted least squares, slope rounded |
-   | `up`, `down` | `min(q + s*phi, m)`, `max(...)` | the line short of the extreme, held at it |
+   | `up`, `down` | `min(q + s*phi,m)`, `max(...)` | the line short of the extreme, held at it |
    | `sq` | `q + w*((phi + o) // h % 2)` | every half period `h` to 64 and offset `o` |
    | `tri` | `q + s*abs((phi + o) % (2*h) - h)` | as `sq`, `q` and `s` by least squares |
-   | `tab` | `T[k + min(phi, l)] - z` | the residual per phi to its last change, held after |
-   | `loop` | `T[k + min(phi, l) + max(phi - l, 0) % p] - z` | the shortest preperiod `l` and period `p` over two periods or more |
+   | `tab` | `T[k + min(phi,l)] - z` | the residual per phi to its last change, held after |
+   | `loop` | `T[k + min(phi,l) + max(phi - l,0) % p] - z` | the shortest preperiod `l` and period `p` over two periods or more |
    | `first` | `v + (phi < l)*(B + q - v)` | the base `B` until phi `l`, the input after |
 
    A shape on a base whose residual is 0 before some phi `d` is also fitted from `d` on, as
@@ -95,7 +95,7 @@ then run on its result, their guarantee taken against it.
    calls and each call's cheapest form, grouped by key. Each group is one expression template
    named by its shape with a parameter per value its calls differ in, a parameter that is an
    integer multiple of another written as that multiple, and the rest literal
-   (`vib(0,4,32)`, `vib(0,4,64)` → `sq(32)`, `sq(64)` of `sq(q): v - 2*(phi // 2 % 2)*q + q`). A table
+   (`vib(0,4,32)`, `vib(0,4,64)` → `sq(32)`, `sq(64)` of `sq(q):v - 2*(phi // 2 % 2)*q + q`). A table
    form's tables are one new table, each call's offset `k`.
 4. **Prove**: each code template's replacement is screened alone for size, then the
    replacements are proved together and, refused, in halves, as the driver's edits: kept where
@@ -137,7 +137,7 @@ language model) learns the format from without resolving names
 |---|---|
 | `named` | nothing (the default) |
 | `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record; shared ones and templates stay named |
-| `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad: 9}`, `!freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`); a definition the song never reaches is dropped, so no section is left |
+| `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad:9}`, `freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`); a definition the song never reaches is dropped, so no section is left |
 
 In `single`, templates (`mod:` records and program templates) are the format's shared
 vocabulary and stay named, and a call is already an inline use and stays a call. Its anonymous
@@ -147,11 +147,11 @@ Definitions):
 
 | reference | inline |
 |---|---|
-| an event's instrument, `C4.i1` | `C4.{ad: 9, ...}` |
-| a play entry's phrase, `p1+2` | `[C4, -*3]+2` |
-| an instrument's `ctrl`, `restart`, `pw` or `filter` program | the program, `ctrl: [{ctrl: 65}, end]` |
-| a `run:` or `!run:` of a program | the program after its kind, `run: pw[{pw: 800}, end]` |
-| a `pw` or `filter` record that is a binding `b` | the program of its one row, `[{pw: b}, end]` |
+| an event's instrument, `C4.i1` | `C4.{ad:9,...}` |
+| a play entry's phrase, `p1+2` | `[C4,-*3]+2` |
+| an instrument's `ctrl`, `restart`, `pw` or `filter` program | the program, `ctrl:[{ctrl:65},end]` |
+| a `run:` row key or command of a program | the program after its kind, `run:pw[{pw:800},end]` |
+| a `pw` or `filter` record that is a binding `b` | the program of its one row, `[{pw:b},end]` |
 | a record that is a call of a program template | the call |
 
 A binding record becomes the program of its one row, never the instrument's own binding: the

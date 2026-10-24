@@ -11,7 +11,7 @@ import numpy as np
 from tqdm import tqdm
 from unitracker_grammar import PAL_HZ
 from unitracker_grammar import code as _code
-from unitracker_grammar.document import Call, Code, Document, Expr, printed, read
+from unitracker_grammar.document import Call, Code, Document, Expr, printed, read, signature
 from unitracker_grammar.expr import canonical, tree
 from unitracker_player.player import load
 
@@ -140,7 +140,7 @@ def _template(group: list, taken: set, reserved=frozenset()) -> tuple:
         call: Call(name, tuple(int(params[k][i]) for k in varying))
         for i, (call, _) in enumerate(group)
     }
-    sig = f"{name}({', '.join(names.values())})"
+    sig = signature(name, names.values())
     return sig, _body(text, params, varying, scaled, names), table, calls
 
 
@@ -162,7 +162,7 @@ def _scaled(params: dict, varying: list) -> dict:
 
 def _cost(template: tuple, occurrences: Counter) -> int:
     sig, body, table, calls = template
-    text = f"  {sig}: {body}\n" + (f"  {table[0]}: {list(table[1])}\n" if table else "")
+    text = f" {sig}:{body}\n" + (f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else "")
     return size(text) + sum(occurrences[c] * size(str(n)) for c, n in calls.items())
 
 

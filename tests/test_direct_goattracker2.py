@@ -164,29 +164,29 @@ def test_synthetic_tunes_play_exactly(case):
 @pytest.mark.parametrize(
     "case, state",
     [
-        ("a plain note", "{freq: {t: 1, m: 1}}"),
-        ("a pulse table", "{freq: {t: 1, m: 1}, pw: {r: 1, q: 1}}"),
+        ("a plain note", "{freq:{t:1,m:1}}"),
+        ("a pulse table", "{freq:{t:1,m:1},pw:{r:1,q:1}}"),
     ],
 )
 def test_state_and_code_of_the_templates_used(case, state):
     """The state line declares the variables the used routines name; each ``mod:`` record is
     a code block, its routine's one text."""
     text = exact(gt_tune(**CASES[case]))
-    assert f"\norder: {g.ORDER}\nstate: {state}\ntables:" in text
+    assert f"\norder:[{','.join(g.PHASES)}]\nstate:{state}\ntables:" in text
     templates = code.templates(parse(text))
     assert templates and all(code.printed(t) == g.CODE[name] for name, t in templates.items())
-    assert f"\nclock: {{cycles_per_tick: 19656, clock_hz: {g.CLOCK['clock_hz']}}}\n" in text
-    tables = text[text.index("\ntables:\n") : text.index("\nmod:\n  ")]
-    assert "  G:" not in tables and "wave.freq: note()" in text
+    assert f"\nclock:{{cycles_per_tick:19656,clock_hz:{g.CLOCK['clock_hz']}}}\n" in text
+    tables = text[text.index("\ntables:\n") : text.index("\nmod:\n ")]
+    assert " G:" not in tables and "wave.freq:note()" in text
 
 
 @pytest.mark.parametrize(
     "case, value",
     [
-        ("an arpeggio down", "{note: -2}, {note: -64}"),
-        ("a filter table", "{hold: 4, cut: v - 32}"),
-        ("vibrato", "!tick.freq:vib(0,3,48)"),
-        ("porta down, then command 0 holds", "!tick.freq:porta(-1,48)"),
+        ("an arpeggio down", "{note:-2},{note:-64}"),
+        ("a filter table", "{hold:4,cut:v - 32}"),
+        ("vibrato", " tick.freq:vib(0,3,48)"),
+        ("porta down, then command 0 holds", " tick.freq:porta(-1,48)"),
     ],
 )
 def test_values_as_played(case, value):
@@ -197,8 +197,8 @@ def test_values_as_played(case, value):
 def test_holds_follow_the_build():
     text = exact(gt_tune(WAVE))
     assert (
-        "slots: {freq: {wave: {reset: [row.note, row.freq]}, tick: {hold: [step-1, row]}}, "
-        "pw: {pulse: {hold: [read, note-1, last-1]}}}\n" in text
+        "slots:{freq:{wave:{reset:[row.note,row.freq]},tick:{hold:[step-1,row]}},"
+        "pw:{pulse:{hold:[read,note-1,last-1]}}}\n" in text
     )
 
 
@@ -218,9 +218,9 @@ V2 = [(31, 1, 0, 0)] + [REST] * 15
 def test_voice_layouts(build, voices):
     """A build's played channels are the voices they write, in voice order."""
     text = exact(gt_tune(WAVE, voice2=V2, **build))
-    assert ("\nvoices: " in text) == (voices is not None)
+    assert ("\nvoices:" in text) == (voices is not None)
     if voices:
-        assert f"\nvoices: {voices}\n" in text
+        assert f"\nvoices:{voices}\n" in text
 
 
 @pytest.mark.parametrize(
@@ -248,11 +248,11 @@ def test_unsupported_wavetable_commands_are_refused():
 def test_metal_warrior(metal_warrior):
     cells, text = g.verify(metal_warrior.read_bytes(), frames=2 * 3840)
     assert not cells.size, g.summary(cells, 3)
-    assert "{loop: " in text
+    assert "{loop:" in text
 
 
 def test_cli(metal_warrior, capsys):
     assert g.main([str(metal_warrior)]) == 0
-    assert capsys.readouterr().out.startswith(f"unitracker: {VERSION}\n")
+    assert capsys.readouterr().out.startswith(f"unitracker:{VERSION}\n")
     assert g.main(["--verify", "--frames", "400", str(metal_warrior)]) == 0
     assert ": exact" in capsys.readouterr().out

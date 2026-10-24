@@ -22,7 +22,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      # until they are released
+      # format 2.2: from their branches until unitracker-grammar 0.14.0 and unitracker-player 0.21.0 are released
+      - run: pip install "unitracker-grammar @ git+https://github.com/anarkiwi/unitracker-grammar@format-2.2" "unitracker-player @ git+https://github.com/anarkiwi/unitracker-player@format-2.2"
       - run: pip install -e ".[dev]"
       - uses: anarkiwi/pysidtracker/.github/actions/cache@v0.30.0
         with:

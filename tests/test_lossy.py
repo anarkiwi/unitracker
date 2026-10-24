@@ -48,14 +48,14 @@ def test_code_that_is_exactly_an_expression_is_fitted_exactly():
     assert dict((k, str(v)) for k, v in doc.mods)["sq(q)"] == canonical(
         "v + q - 2*q*(phi // 2 % 2)"
     )
-    assert "b.freq: sq(8)" in result.text and "b.freq: sq(16)" in result.text
+    assert "b.freq:sq(8)" in result.text and "b.freq:sq(16)" in result.text
     assert np.array_equal(play(result.text), play(D.EXACT))
     assert result.after < result.before and all(s == (0, 0, 0) for s in result.stats.values())
 
 
 def test_a_looser_tolerance_trades_fidelity_for_a_simpler_form():
     result = lossy.simplify(D.EXACT, None)
-    assert "b.freq: keep()" in result.text and "sq(" not in result.text
+    assert "b.freq:keep()" in result.text and "sq(" not in result.text
     p50, p95, top = result.stats["freq"]
     assert 0 < p95 <= fit.TOLERANCES["freq"].p95 and top <= fit.TOLERANCES["freq"].max
     assert p50 <= p95
@@ -101,7 +101,7 @@ def test_check_refuses_a_text_that_does_not_play_or_differs_elsewhere():
     reference = play(D.EXACT)
     assert not lossy.check(reference, "nonsense", None, {}, fit.TOLERANCES).exact
     assert not lossy.check(reference[:-1], D.EXACT, None, {}, fit.TOLERANCES).exact
-    other = D.EXACT.replace("ad: 9", "ad: 8", 1)
+    other = D.EXACT.replace("ad:9", "ad:8", 1)
     verdict = lossy.check(reference, other, None, {("freq", 0): np.array([0])}, fit.TOLERANCES)
     assert not verdict.exact and not verdict.holds(fit.TOLERANCES)
     assert lossy.check(reference, D.EXACT, None, {("pw", 0): np.array([0])}, EXACT).holds(EXACT)

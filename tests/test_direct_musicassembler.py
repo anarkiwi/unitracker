@@ -32,12 +32,12 @@ def test_tunes_play_exactly(name, request):
     assert printed(read(text)) == text
     cells = standard_cells(one, text)
     assert not cells.size, summary(cells, 3)
-    assert "{loop: " in text and "!run:c" in text
+    assert "{loop:" in text and " run:c" in text
 
 
 def test_the_templates_bound(space_invadarz):
     text = m.transcribe(space_invadarz.read_bytes())
-    for bound in ("vib(", "pong(", "pulse(", "!cut:sweep(", "pw: 2056"):
+    for bound in ("vib(", "pong(", "pulse(", " cut:sweep(", "pw:2056"):
         assert bound in text
 
 
@@ -134,7 +134,7 @@ def test_a_pattern_of_no_end_is_refused(one):
 
 def test_cli(space_invadarz, capsys):
     assert m.main([str(space_invadarz)]) == 0
-    assert capsys.readouterr().out.startswith(f"unitracker: {VERSION}\nmeta: {{title: Space")
+    assert capsys.readouterr().out.startswith(f"unitracker:{VERSION}\nmeta:{{title:Space")
     assert m.main(["--verify", "--frames", "400", str(space_invadarz)]) == 0
     assert f"{space_invadarz}: first (" in capsys.readouterr().out
 
@@ -158,4 +158,4 @@ def test_rests_and_gate_offs_play_exactly(one):
     ours = play(text, ticks=1000)
     cells = gridcmp.cell_diff(ours, ref.render_grid(len(ours)))
     assert not cells.size, summary(cells, 3)
-    assert "-!run:c2*6" in text and "off!run:c3*9" in text
+    assert "- run:c2*6" in text and "off run:c3*9" in text

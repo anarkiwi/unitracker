@@ -21,33 +21,33 @@ index the player reads its frequency table at sounds `F(k)`.
 
 | Music Assembler | generic |
 |---|---|
-| a play call | a tick, `tempo: 1` |
+| a play call | a tick, `tempo:1` |
 | the row tick (every `n + 1` calls, `n` the tempo reload) where a voice's duration runs out | the voice parses its next token and writes nothing: the last tick of its event |
 | a token of duration `d` | an event of `(d + 1)(n + 1)` ticks, `*k`, from the call after its parse |
 | the first call, which parses every voice | phrase `p0`, one tick of `-` |
 | the orderlists' pattern starts (each repeat a start) | the timeline: a row where some voice starts a pattern, `~` elsewhere |
-| orderlist loop | `{loop: k}`, the earliest row from which the timeline repeats |
+| orderlist loop | `{loop:k}`, the earliest row from which the timeline repeats |
 
 ## Tokens
 
 | token | event |
 |---|---|
-| a note (`< $60`) and its control byte, after any instrument `$80-$9F` | the note at its index (transpose + note), `.iN`, `!run:cK` |
-| `$60-$7F`, or an instrument then a duration (the voice's instrument) | `off!run:cK` |
-| `$A0-$FE` | `-!run:cK`: the gate is kept |
+| a note (`< $60`) and its control byte, after any instrument `$80-$9F` | the note at its index (transpose + note), `.iN`, `run:cK` |
+| `$60-$7F`, or an instrument then a duration (the voice's instrument) | `off run:cK` |
+| `$A0-$FE` | `- run:cK`: the gate is kept |
 
 Every event runs its own control program `cK`, a row per tick it lasts, as the player's output
 call writes them:
 
 | tick | row |
 |---|---|
-| a note's first (the trigger) | `{ctrl: waveform}` |
-| a later one, inner program running | `{ctrl: wave, note: N}`: the row's pitch, absolute or added to the note's index, `& $7F` |
-| one with the program stopped and the instrument's `$10` flag, the first | `{freq: vib(w,m,s,k)}` |
+| a note's first (the trigger) | `{ctrl:waveform}` |
+| a later one, inner program running | `{ctrl:wave,note:N}`: the row's pitch, absolute or added to the note's index, `& $7F` |
+| one with the program stopped and the instrument's `$10` flag, the first | `{freq:vib(w,m,s,k)}` |
 | any other | none: the row before holds |
-| the last (the next parse) | `{ad: AD}`, the AD the trigger wrote: nothing changes, and every slot holds on `row.ad` |
+| the last (the next parse) | `{ad:AD}`, the AD the trigger wrote: nothing changes, and every slot holds on `row.ad` |
 
-The note table is `F` at `clock_hz: 985056`, the clock whose table is nearest the player's 96
+The note table is `F` at `clock_hz:985056`, the clock whose table is nearest the player's 96
 words; no clock reproduces it (53 of notes 0-94 differ by one), so `--verify` reports the
 frequency registers.
 
@@ -56,21 +56,21 @@ frequency registers.
 | Music Assembler | generic instrument |
 |---|---|
 | AD, SR | `ad`, `sr` |
-| pulse byte `p`, flag `$40` (or a build that always sweeps) | `pw: pulse(p,s)`: `p` in both width bytes, then `+ 257 s` a tick |
-| flag `$20` | `pw: pong(p,s,k)`: `- s` then `+ s` a tick, turning every `k = s & $0F` ticks |
-| neither | `pw: 257 p & $FFF` |
-| every note resets the frequency to the table | `freq: none` |
+| pulse byte `p`, flag `$40` (or a build that always sweeps) | `pw:pulse(p,s)`: `p` in both width bytes, then `+ 257 s` a tick |
+| flag `$20` | `pw:pong(p,s,k)`: `- s` then `+ s` a tick, turning every `k = s & $0F` ticks |
+| neither | `pw:257 p & $FFF` |
+| every note resets the frequency to the table | `freq:none` |
 
 ## Code modulators
 
 [`macode.py`](../../src/unitracker/direct/macode.py) transcribes the player's per-tick
-functions; each slot holds on the voice's parse ticks (`hold: [row.ad]`).
+functions; each slot holds on the voice's parse ticks (`hold:[row.ad]`).
 
 | template | cell | state | routine |
 |---|---|---|---|
-| `pulse(p, s)`, `pong(p, s, k)` | pw | `d`, `q`: direction and count | the trigger's width, then `_pulse` |
-| `vib(w, m, s, k)` | freq | `dl`, `sc`, `ph`: delay, count, phase | `_arp`: after `w = speed >> 3` calls, the word steps by `s` down or up as bit `phase & 3` of `m` (the player's 4-byte table), the phase turning every `k = speed & $0F` |
-| `sweep(u, c, s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, reset on its notes (`reset: [note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
+| `pulse(p,s)`, `pong(p,s,k)` | pw | `d`, `q`: direction and count | the trigger's width, then `_pulse` |
+| `vib(w,m,s,k)` | freq | `dl`, `sc`, `ph`: delay, count, phase | `_arp`: after `w = speed >> 3` calls, the word steps by `s` down or up as bit `phase & 3` of `m` (the player's 4-byte table), the phase turning every `k = speed & $0F` |
+| `sweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
 
 ## Not transcribed
 

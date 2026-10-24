@@ -53,7 +53,6 @@ FREQ_CMDS = (C.CMD_PORTAUP, C.CMD_PORTADOWN, C.CMD_TONEPORTA, C.CMD_VIBRATO)
 LEAD = 2
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 PHASES = ("events", "ctrl", "pulse", "filter", "freq", "pw", "cut", "read")
-ORDER = f"[{', '.join(PHASES)}]"
 _PLAIN = re.compile(r"[^\s,\[\]{}'\"#&*!|>%@`:?-][^,\[\]{}]*")
 _YAML_WORDS = re.compile(r"(?i:y|n|yes|no|true|false|on|off|null|~)|[-+]?\d[\d_.:eE+-]*")
 
