@@ -7,10 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-document = pytest.importorskip("unitracker_grammar.document")
+from unitracker_grammar import document
 
-# pylint: disable=wrong-import-position,wrong-import-order
-import optimiser_docs as D  # noqa: E402
+import optimiser_docs as D
 
 from unitracker.optimiser import Guarantee, GuaranteeError, optimise, passes, size, templates, tree
 from unitracker.optimiser.__main__ import main
@@ -143,7 +142,7 @@ def test_the_guarantee_plays_to_an_end_a_proved_loop_or_a_tick_count():
 
 def test_a_looping_document_with_code_is_optimised_over_its_tick_count():
     text = D.LOOPING_CODE.replace(
-        "        i1:", "        i2: {ad: 9, ctrl: [{ctrl: 65}, end], pw: up(3)}\n        i1:"
+        "\n  i1:", "\n  i2: {ad: 9, ctrl: [{ctrl: 65}, end], pw: up(3)}\n  i1:"
     )
     text = text.replace("D4, -]", "D4.i2, -]")
     result = optimise(text, ticks=100)
@@ -154,8 +153,8 @@ def test_a_looping_document_with_code_is_optimised_over_its_tick_count():
 def test_the_tree_walks_and_rebuilds_a_document():
     doc = read(D.MERGE)
     paths = dict(tree.walk(doc))
-    assert isinstance(paths[("rows", 0, "defs", 0, "records", 0, 1)], document.Instrument)
-    path = ("rows", 0, "defs", 0, "records", 0, 1)
+    assert isinstance(paths[("defs", 0, "records", 0, 1)], document.Instrument)
+    path = ("defs", 0, "records", 0, 1)
     assert tree.at(doc, path).get("ad") == 9
     edited = tree.update(doc, path, lambda ins: document.replace(ins, fields={"ad": 1}))
     assert tree.at(edited, path).fields == (("ad", 1),)
@@ -189,12 +188,8 @@ def test_a_lifted_goattracker_document_shrinks_and_plays_its_grid(path):
 
 def test_merge_drops_a_top_level_definition_and_renames_its_references():
     doc = read(D.MERGE)
-    top = document.replace(doc, defs=doc.rows[0].defs[:2])
-    top = document.replace(
-        top, rows=(document.replace(doc.rows[0], defs=doc.rows[0].defs[2:]), *doc.rows[1:])
-    )
-    edit = next(e for e in passes.merge(top) if e.label == "ctrl c2 -> c1")
-    out = edit.apply(top)
+    edit = next(e for e in passes.merge(doc) if e.label == "ctrl c2 -> c1")
+    out = edit.apply(doc)
     assert [n for n, _ in out.defs[1].records] == ["c1"]
     assert out.defs[0].records[1][1].get("ctrl") == "c1"
 

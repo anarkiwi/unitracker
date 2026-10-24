@@ -4,9 +4,26 @@ HEAD = "unitracker: 1.23\nmeta: {title: T, author: A}\n"
 MODS = "mod:\n  note(): F(N)\n  vib(d): v + d*(φ % 4)\n  wob(e): v + e*(φ % 4)\n"
 
 
+TOP = ("restart", "ins", "ctrl", "pw", "filter")
+
+
 def doc(defs: str, play: str = "[p1]", head: str = "voices: 1\n", mods: str = MODS) -> str:
-    """A one-row ending document of ``defs`` (each section's lines) playing ``play``."""
-    return f"{HEAD}{head}{mods}song:\n  - def:\n{defs}    play: {play}\n  - end\n"
+    """A one-row ending document of ``defs`` (sections as a row's ``def`` writes them) playing
+    ``play``: each section but ``phrase`` top-level, after the templates, in the grammar's order."""
+    sections, kind = {}, None
+    for line in defs.splitlines(keepends=True):
+        if not line.startswith("        "):
+            kind = line.strip()[:-1]
+            sections[kind] = ""
+        else:
+            sections[kind] += line
+    top = "".join(
+        f"{k}:\n" + "".join(l[6:] for l in sections[k].splitlines(keepends=True))
+        for k in TOP
+        if k in sections
+    )
+    row = f"  - def:\n      phrase:\n{sections['phrase']}"
+    return f"{HEAD}{head}{mods}{top}song:\n{row}    play: {play}\n  - end\n"
 
 
 DEFAULTS = doc(

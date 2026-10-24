@@ -23,6 +23,7 @@ from unitracker.optimiser.passes import Edit, _dropped, _named, _renamed
 from unitracker.optimiser.tree import transform, walk
 
 PROGRAM_KINDS = ("ctrl", "restart", "pw", "filter")
+TOP_KINDS = ("restart", "ins", "ctrl", "pw", "filter")
 # a row key that takes an integer a parameter may stand for, and the parameter's stem
 _STEMS = {
     "wait": "w",
@@ -115,15 +116,13 @@ def _template(program: Program, names: dict) -> Program:
 
 
 def _section_added(doc: Document, kind: str, record: tuple) -> Document:
-    """``doc`` with ``record`` appended to its first section of ``kind`` (a new one in the first
-    row, or at the top where definitions are)."""
-    if doc.defs:
-        top = list(doc.defs)
-        for i, s in enumerate(top):
-            if s.kind == kind:
-                top[i] = replace(s, records=s.records + (record,))
-                return replace(doc, defs=tuple(top))
-        return replace(doc, defs=tuple(top) + (Section(kind, (record,)),))
+    """``doc`` with ``record`` appended to its section of ``kind``: top-level from format 1.23
+    on (a new one in the grammar's order of kinds), else the first row's."""
+    if doc.header.version >= "1.23":
+        top = {s.kind: s for s in doc.defs}
+        current = top.get(kind, Section(kind))
+        top[kind] = replace(current, records=current.records + (record,))
+        return replace(doc, defs=tuple(top[k] for k in TOP_KINDS if k in top))
     rows = list(doc.rows)
     for r, row in enumerate(rows):
         for i, s in enumerate(row.defs):
