@@ -1,18 +1,13 @@
-"""What the tools share: tunes by path, HVSC name or tune list, lifts, and profiles."""
+"""What the tools share: tunes by path, HVSC name or tune list."""
 
-import cProfile
 import csv
-import os
-import pstats
 import re
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCES = (
     "MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid",
-    "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
-    "MUSICIANS/I/Ilkke/Crosseyed.sid",
+    "MUSICIANS/A/Arturo_Dente/Mega-Run.sid",
 )
 
 
@@ -55,24 +50,3 @@ def rows(sources, player: str = "", subtunes: int | None = None) -> list:
                 and (subtunes is None or int(r.get("songs") or 1) <= subtunes)
             ]
     return out
-
-
-def lift(source, subtune=None, expressions: bool = True) -> dict:
-    """The lifter's song of a tune (with ``expressions``, converted; else its native
-    modulations)."""
-    from unitracker.lift import backends  # pylint: disable=import-outside-toplevel
-
-    return backends.lift(tune(source).read_bytes(), subtune, expressions=expressions)
-
-
-def single_worker() -> None:
-    """Keep a conversion in this process (the caller parallelises over tunes)."""
-    os.environ["UNITRACKER_WORKERS"] = "1"
-
-
-def profile_report(prof: cProfile.Profile, out=None, top: int = 30) -> None:
-    """Print a profile's top functions by cumulative and by own time; write it to ``out``."""
-    if out:
-        prof.dump_stats(out)
-    for order in ("cumulative", "tottime"):
-        pstats.Stats(prof, stream=sys.stdout).sort_stats(order).print_stats(top)

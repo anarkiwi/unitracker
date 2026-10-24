@@ -25,7 +25,7 @@ jobs:
       - run: pip install -e ".[dev]"
       - uses: anarkiwi/pysidtracker/.github/actions/cache@v0.30.0
         with:
-          key: ${{ hashFiles('tests/*.py', 'tests/*.json', 'tools/shared.py', 'src/unitracker/modfit/**') }}
+          key: ${{ hashFiles('tests/*.py', 'tools/shared.py') }}
           sidtrace: "true"
           tunes: tests tools/shared.py
       - run: black --check src tests tools
