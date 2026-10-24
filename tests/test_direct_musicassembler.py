@@ -37,7 +37,7 @@ def test_tunes_play_exactly(name, request):
 
 def test_the_templates_bound(space_invadarz):
     text = m.transcribe(space_invadarz.read_bytes())
-    for bound in ("vib(", "pong(", "pulse(", " cut:sweep(", "pw:2056"):
+    for bound in ("vib(", "pong(", "pulse(", " cut:csweep(", "pw:2056"):
         assert bound in text
 
 

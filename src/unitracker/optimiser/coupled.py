@@ -152,10 +152,13 @@ def _firings(rows: np.ndarray, v: np.ndarray, out: np.ndarray) -> np.ndarray:
     return rec
 
 
-# pylint: disable-next=too-many-locals
-def plan(group: Group, tr: Trace, slots: tuple, tol: fit.Tolerance, clock: int) -> tuple:
+# pylint: disable-next=too-many-locals,too-many-arguments,too-many-positional-arguments
+def plan(
+    group: Group, tr: Trace, slots: tuple, tol: fit.Tolerance, clock: int, prelude: bool = True
+) -> tuple:
     """``(plans, reasons)``: each :class:`Plan` of ``group`` whose calls all fit within ``tol``
-    (``slots`` the names of its cell's slots), and why each other plan was refused."""
+    (``slots`` the names of its cell's slots; prelude forms where ``prelude``), and why each
+    other plan was refused."""
     ticks = _Ticks.of(tr, group)
     calls = {k: call for k, (call, _) in enumerate(tr.keys) if call.name in group.templates}
     cells = {call.name for call, cell in tr.keys if cell != group.cell}
@@ -171,7 +174,7 @@ def plan(group: Group, tr: Trace, slots: tuple, tol: fit.Tolerance, clock: int) 
     out, reasons = [], []
     for h in np.unique(rows["slot"][member]):
         for own in (False, True):
-            got = _plan(ticks, calls, int(h), own, tol, clock, group.cell)
+            got = _plan(ticks, calls, (int(h), own), tol, (clock, prelude), group.cell)
             if isinstance(got, str):
                 reasons.append(f"host {slots[h]}{' after own' if own else ''}: {got}")
             else:
@@ -183,9 +186,10 @@ def plan(group: Group, tr: Trace, slots: tuple, tol: fit.Tolerance, clock: int) 
 
 
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
-def _plan(ticks: _Ticks, calls: dict, h: int, own: bool, tol, clock: int, cell: str):
-    """The :class:`Plan` of host slot index ``h`` (``own``: the slots before it keep their
-    own output), or why there is none."""
+def _plan(ticks: _Ticks, calls: dict, host: tuple, tol, clock: tuple, cell: str):
+    """The :class:`Plan` of ``host``, ``(h, own)``: host slot index ``h`` (``own``: the slots
+    before it keep their own output), or why there is none; ``clock`` ``(clock_hz, prelude)``."""
+    (h, own), (clock, prelude) = host, clock
     rows, member = ticks.rows, ticks.member
     at = np.flatnonzero(member & (rows["slot"] == h))
     v_in = rows["v"][at] if own else rows["v"][ticks.first[at]]
@@ -195,7 +199,7 @@ def _plan(ticks: _Ticks, calls: dict, h: int, own: bool, tol, clock: int, cell: 
         sel = rows["key"][at] == k
         rec = _firings(rows[at][sel], v_in[sel], target[sel])
         fir = fit.Firings(rec, cell, clock)
-        forms = fit.fits(fir, tol)
+        forms = fit.fits(fir, tol, prelude)
         if not forms:
             return f"{calls[k]} fits no form (nearest {fit.nearest(fir, tol)})"
         result.hosted[calls[k]] = forms
@@ -204,7 +208,7 @@ def _plan(ticks: _Ticks, calls: dict, h: int, own: bool, tol, clock: int, cell: 
         before = rows["slot"][sel] < h
         if own and before.all():
             rec = _firings(rows[sel], rows["v"][sel], rows["out"][sel])
-            forms = fit.fits(fit.Firings(rec, cell, clock), tol)
+            forms = fit.fits(fit.Firings(rec, cell, clock), tol, prelude)
             if not forms:
                 return f"{calls[k]} fits no form of its own"
             if any(f.key == IDENTITY for f in forms):

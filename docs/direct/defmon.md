@@ -1,6 +1,6 @@
 # defMON to the generic document, directly
 
-`unitracker.direct.defmon` transcribes a defMON replay SID to the generic document (format 2.2)
+`unitracker.direct.defmon` transcribes a defMON replay SID to the generic document (format 2.3)
 from pydefmon's `DefmonPlayer`, which runs the tune's own replay on an emulated 6502. It reads
 the replay's tables and sidTAB from memory after init and its pattern events from the emulated
 calls, without the playroutine library or modfit. It is a standalone prototype: nothing else in
@@ -73,7 +73,7 @@ the cascades' state recurs. A note is a note event; the instrument `i1` binds on
 | `wgh`, `wgl` | `ctrl:c`, `mask:m`, `gate` (see Gate) |
 | `ad`, `sr` | `ad`, `sr` |
 | `tr` | `note`: `+tr`, or with bit 7 in the absolute build the absolute note `tr & $7F` |
-| `af` | `p.freq`: `pitch()`, `slide(m)` ($80+), `por(m)` ($01-$7F); `pm.pw:pmode(m)` |
+| `af` | `p.freq`: `pitch()`, `pslide(m)` ($80+), `por(m)` ($01-$7F); `pm.pw:pmode(m)` |
 | `pw`, `ps` | `sw.pw:pul(g,p,h)` |
 | `re`, `fv` | layer A's: `res`, `route` (`route_off:0` for 0, `route_on:m` with bit 3), `mode`; layer B's: `run:` a one-row pulse-slot program of them |
 | `cp`, `acid` | `kNa.cut`, `kNb.cut:acid(g,c,j,k)`, voice `N`'s layer A and B ACID slots |

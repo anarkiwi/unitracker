@@ -36,7 +36,7 @@ CODE = {
     # $1453 mode 0: the detune adds to the low byte only
     "pitch": _NOTE + "lda fq\nclc\nadc d\nsta v\nlda fq+1\nsta v+1\nrts\n",
     # $140E mode $80+: the accumulator slides by the rate, down with bit 6
-    "slide": "lda #m\nasl\nand #127\ntax\nlda #m\nand #64\nbne dn\nclc\n"
+    "pslide": "lda #m\nasl\nand #127\ntax\nlda #m\nand #64\nbne dn\nclc\n"
     "lda R.lo,x\nadc s\nsta s\nlda R.hi,x\nadc s+1\nsta s+1\njmp sum\n"
     "dn:\nsec\nlda s\nsbc R.lo,x\nsta s\nlda s+1\nsbc R.hi,x\nsta s+1\nsum:\n" + _SUM,
     # $1469 mode $01-$7F: the portamento step at note + mode

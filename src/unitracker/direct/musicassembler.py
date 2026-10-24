@@ -50,7 +50,7 @@ SLOTS = {
     "pw": [Slot("pw", hold=(FROZEN,))],
     "cut": [Slot("cut", hold=(FROZEN,), reset=("note",))],
 }
-CELL = {"vib": "freq", "pulse": "pw", "pong": "pw", "sweep": "cut"}
+CELL = {"vib": "freq", "pulse": "pw", "pong": "pw", "csweep": "cut"}
 
 
 class TranscribeError(ValueError):
@@ -318,7 +318,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         rd, lay = self._rd, self.lay
         owner, count = rd(lay.trigger_owner), rd(lay.trigger_ctr)
         if owner < VOICES and count:
-            sweep = self.call("sweep", u=rd(lay.trigger_acc), c=count, s=rd(lay.sweep_step))
+            sweep = self.call("csweep", u=rd(lay.trigger_acc), c=count, s=rd(lay.sweep_step))
             events[owner]["cut"] = sweep
         return [Event("-", commands=c) for c in events]
 

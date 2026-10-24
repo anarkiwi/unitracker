@@ -70,7 +70,7 @@ functions; each slot holds on the voice's parse ticks (`hold:[row.ad]`).
 |---|---|---|---|
 | `pulse(p,s)`, `pong(p,s,k)` | pw | `d`, `q`: direction and count | the trigger's width, then `_pulse` |
 | `vib(w,m,s,k)` | freq | `dl`, `sc`, `ph`: delay, count, phase | `_arp`: after `w = speed >> 3` calls, the word steps by `s` down or up as bit `phase & 3` of `m` (the player's 4-byte table), the phase turning every `k = speed & $0F` |
-| `sweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
+| `csweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
 
 ## Not transcribed
 
