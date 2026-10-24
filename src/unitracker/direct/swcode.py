@@ -1,4 +1,4 @@
-"""SID-Wizard's per-tick frequency modulators as format 2.0 6502 code templates.
+"""SID-Wizard's per-tick frequency modulators as 6502 code templates.
 
 The freq cell's state is the player's: ``o`` vibrato_offset, ``s`` set once a WF row's pitch
 drives the frequency, ``z`` FREQLO/FREQHI, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``p`` VIBFREQU,
