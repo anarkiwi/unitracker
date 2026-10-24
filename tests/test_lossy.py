@@ -44,7 +44,7 @@ def test_code_that_is_exactly_an_expression_is_fitted_exactly():
     doc = read(result.text)
     assert not any(isinstance(body, Code) for _, body in doc.mods)
     assert doc.header.state is None and not result.refused
-    assert {r.name for r in result.kept} == {"slide", "start", "wob"}
+    assert {r.name for r in result.kept} == {"ramp", "start", "wob"}
     assert dict((k, str(v)) for k, v in doc.mods)["sq(q)"] == canonical(
         "v + q - 2*q*(phi // 2 % 2)"
     )
@@ -77,7 +77,7 @@ def test_noise_is_refused_at_a_tight_tolerance_and_kept_at_a_loose_one():
 def test_a_replacement_that_breaks_code_reading_its_state_is_refused():
     result = lossy.simplify(D.COUPLED, None)
     assert [r.name for r in result.refused] == ["put"]
-    assert [r.name for r in result.kept] == ["slide"] and set(result.stats) == {"pw", "cut"}
+    assert [r.name for r in result.kept] == ["ramp"] and set(result.stats) == {"pw", "cut"}
     assert "lossy refused: put" in result.report() and "put()" in result.text
     keep = [r for r in range(25) if r not in (2, 3, 21, 22)]
     assert np.array_equal(play(D.COUPLED)[:, keep], play(result.text)[:, keep])
