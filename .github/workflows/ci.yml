@@ -50,8 +50,8 @@ jobs:
       - run: pip install -e ".[dev]"
       # the document model and format 1.23's player, until they are released
       - run: >-
-          pip install --no-deps
-          "unitracker-grammar @ git+https://github.com/anarkiwi/unitracker-grammar@document"
+          pip install --no-deps --force-reinstall
+          "unitracker-grammar @ git+https://github.com/anarkiwi/unitracker-grammar@main"
           "unitracker-player @ git+https://github.com/anarkiwi/unitracker-player@code-mods"
       - run: black --check src/unitracker/optimiser tests/test_optimiser.py tests/optimiser_docs.py
       - run: pylint src/unitracker/optimiser
