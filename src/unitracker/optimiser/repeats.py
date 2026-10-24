@@ -8,6 +8,7 @@ from functools import lru_cache, partial
 
 import numpy as np
 from unitracker_grammar.document import (  # pylint: disable=protected-access
+    Call,
     Document,
     Group,
     Part,
@@ -164,6 +165,11 @@ def built(items: tuple, leaf, single=None) -> tuple:
 # ---- phrases --------------------------------------------------------------------------------
 
 
+def _events_of(value) -> bool:
+    """Whether a phrase record's value is its events, not its template's call."""
+    return isinstance(value, tuple) and not isinstance(value, Call)
+
+
 @lru_cache(maxsize=None)
 def _event_cost(event) -> int:
     """An event's tokens alone, its note with its octave (an upper bound of its cost)."""
@@ -182,7 +188,7 @@ def _phrase_record(name: str, played: tuple, new: tuple, doc: Document) -> Docum
         if s.kind != "phrase":
             return s
         records = tuple(
-            (k, new if k == name and isinstance(v, tuple) and flat(v) == played else v)
+            (k, new if k == name and _events_of(v) and flat(v) == played else v)
             for k, v in s.records
         )
         return replace(s, records=records)
@@ -203,7 +209,7 @@ def _phrase_edits(doc: Document) -> list:
     """One edit per phrase record and per distinct inline phrase whose encoding changes."""
     edits = []
     for name, value in doc.records("phrase").items():
-        if isinstance(value, tuple) and (new := grouped(value)) != value:
+        if _events_of(value) and (new := grouped(value)) != value:
             edits.append(Edit(f"phrase {name}", partial(_phrase_record, name, flat(value), new)))
     found, changed = {}, {}
     for _, node in walk(doc):

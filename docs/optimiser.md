@@ -235,7 +235,7 @@ language model) learns the format from without resolving names
 |---|---|
 | `named` | nothing (the default) |
 | `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record, a section (its items in place in the song or the section that plays it, the loop item kept); shared ones and templates stay named |
-| `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad:9}`, `freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`; a record that is a template's call and its template at once: `C4.i1=ins_1(ad,p)={...}(9,800)`, `p1=ph_1(x,y)=[...](C4,E4)`); a definition the song never reaches is dropped, so no section is left |
+| `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad:9}`, `freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`; a record that is a template's call and its template at once: `C4.i1=ins_1(ad,p)={...}(9,800)`, and a phrase's alike); a definition the song never reaches is dropped, so no section is left |
 
 In `single`, templates (`mod:` records and program templates) are the format's shared
 vocabulary and stay named, and a call is already an inline use and stays a call. Its anonymous
