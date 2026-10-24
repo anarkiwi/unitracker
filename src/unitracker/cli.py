@@ -9,7 +9,7 @@ from pathlib import Path
 from pysidtracker import find_format
 from pysidtracker.errors import SidParseError
 
-from unitracker.optimiser import optimise
+from unitracker.optimiser import lossy, optimise
 
 # format name: (direct lifter module, its verify function)
 LIFTERS = {
@@ -59,6 +59,7 @@ def lift_main(argv=None) -> int:
         "--optimise", action="store_true", help="rewrite the document smaller with the same grid"
     )
     parser.add_argument("--ticks", type=int, help="--optimise: the guarantee's horizon")
+    lossy.add_arguments(parser)
     args = parser.parse_args(argv)
     try:
         text = lift(args.sid.read_bytes(), args.subtune)
@@ -66,7 +67,9 @@ def lift_main(argv=None) -> int:
         print(f"{args.sid}: {exc}", file=sys.stderr)
         return 1
     if args.optimise:
-        result = optimise(text, args.ticks, progress=True)
+        result = optimise(text, args.ticks, progress=True, lossy=lossy.tolerances_of(args))
+        for line in result.lossy.report() if result.lossy else ():
+            print(line, file=sys.stderr)
         print(f"{result.before} -> {result.after} tokens", file=sys.stderr)
         text = result.text
     if args.output:

@@ -7,14 +7,17 @@ text.
 
 ```sh
 python -m unitracker.optimiser IN.yaml [-o OUT.yaml] [--ticks N] [--rounds R]
+    [--lossy [--freq-tol P95,MAX] [--pw-tol P95,MAX] [--cut-tol P95,MAX]]
 ```
 
 prints the kept edits, the refused count and the size before and after (stderr), and writes the
-document to `OUT.yaml` or stdout.
+document to `OUT.yaml` or stdout. `--lossy` runs the [lossy mode](#lossy-mode) first
+(`unitracker-lift ... --optimise --lossy` takes the same options).
 
 ```python
 from unitracker.optimiser import optimise
-result = optimise(text, ticks=None)   # Result: doc, text, before, after, kept, refused
+result = optimise(text, ticks=None)   # Result: doc, text, before, after, kept, refused, lossy
+result = optimise(text, ticks, lossy={"freq": Tolerance(10, 25)})   # optimiser.fit.Tolerance
 ```
 
 ## Driver
@@ -58,8 +61,76 @@ Each pass's edits are what the semantics make equal in general; whether the song
 is the guarantee's to decide (a default binding is bound from tick 0, an instrument's from its
 note; merged templates keep the φ of one call where two names restarted it).
 
+## Lossy mode
+
+`lossy.simplify(text, ticks, tolerances)`, off by default, trades a bounded loss of fidelity
+for simplicity: each call of a code template (`vib(0,4,32)`) becomes a call of an expression
+template fitted to what the call did, and nothing else in the document changes. The exact passes
+then run on its result, their guarantee taken against it.
+
+1. **Record** (`trace.py`): the document plays over `ticks` (to its end where it ends; a looping
+   song needs `ticks`), and each firing of each call's routine is recorded by call and cell:
+   tick, voice, φ, input `v`, output, `N`, `n`.
+2. **Fit** (`fit.py`): per call, residuals of the output against each base (`v`, `0`, `F(N)`,
+   `F(n)`; the notes for the frequency only) are summarised per φ, and each shape's integer
+   parameters fitted:
+
+   | shape | form (added to the base) | fit |
+   |---|---|---|
+   | `keep` | `0` | none |
+   | `off` | `q` | weighted median |
+   | `lin` | `q + s*φ` | weighted least squares, slope rounded |
+   | `up`, `down` | `min(q + s*φ, m)`, `max(...)` | the line short of the extreme, held at it |
+   | `sq` | `q + w*((φ + o) // h % 2)` | every half period `h` to 64 and offset `o` |
+   | `tri` | `q + s*abs((φ + o) % (2*h) - h)` | as `sq`, `q` and `s` by least squares |
+   | `tab` | `T[k + min(φ, l)] - z` | the residual per φ to its last change, held after |
+   | `loop` | `T[k + min(φ, l) + max(φ - l, 0) % p] - z` | the shortest preperiod `l` and period `p` over two periods or more |
+   | `first` | `v + (φ < l)*(B + q - v)` | the base `B` until φ `l`, the input after |
+
+   A shape on a base whose residual is 0 before some φ `d` is also fitted from `d` on, as
+   `(φ >= d)*(...)`. A form is kept when its error over every firing keeps to the cell's
+   tolerance; along a chain (a firing whose input is what the voice's firing before left) the
+   form's own output feeds the next firing, so a form that drifts is refused.
+3. **Template**: per code template, the cheaper (in tokens) of one form key fitting all its
+   calls and each call's cheapest form, grouped by key. Each group is one expression template
+   named by its shape with a parameter per value its calls differ in, a parameter that is an
+   integer multiple of another written as that multiple, and the rest literal
+   (`vib(0,4,32)`, `vib(0,4,64)` → `sq(32)`, `sq(64)` of `sq(q): v + q - 2*q*(...)`). A table
+   form's tables are one new table, each call's offset `k`.
+4. **Prove**: each code template's replacement is screened alone for size, then the
+   replacements are proved together and, refused, in halves, as the driver's edits: kept where
+   the document (its replaced code templates no call names any more dropped, with the state
+   variables and tables nothing reads) shrinks and the check holds.
+
+The check plays the candidate over the same horizon: every register outside the targeted cells
+(the frequency, pulse width or cutoff of each voice a replaced call fired on) must equal the
+input's, and each targeted cell's error over the ticks a replaced call fired on, and every tick
+it differs, must keep to its tolerance at its 95th percentile and maximum:
+
+| cell | error | default `P95,MAX` |
+|---|---|---|
+| `freq` | cents, infinite where exactly one of the two is 0 | `10,25` |
+| `pw` | register units (12 bits), or percent of the input's value with a `%` suffix | `32,128` |
+| `cut` | register units (11 bits), or percent as for `pw` | `16,64` |
+
+The report (stderr) gives, per replaced code template, its calls, the templates they became, the
+tokens it saves alone and its fitted error (p50, p95, max), each refused one, each targeted
+cell's error and the size before and after.
+
+A call fitted from its own firings cannot follow state another code template writes: a template
+that only feeds another's state fits `keep` and is refused by the check, and a call bound on two
+cells is left as it is. The guarantee covers the horizon only: a form fitted to the φ a song
+reaches may differ past it.
+
+`python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR [--seconds S]]` tabulates the
+tokens of the exact passes against the lossy mode with them, what each code template became and
+the cells' errors, and renders each document before and after to WAV (pysidtracker on a 6581).
+
 ## Tests
 
+`tests/test_lossy.py`: code that is exactly an expression fitted exactly, a looser tolerance
+picking a simpler form, noise refused at a tight tolerance and kept at a loose one, a replacement
+that breaks code reading its state refused, each shape fitted, and the CLIs.
 `tests/test_optimiser.py`: each pass on the hand-written documents of `tests/optimiser_docs.py`,
 kept and refused; the guarantee's horizons; the CLI; and, for each `.tunecache/direct/*.yaml`
 (or `$UNITRACKER_DIRECT_DOCS`), a lifted document optimised over 3000 ticks. Those are written by
