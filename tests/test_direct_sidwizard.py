@@ -337,10 +337,21 @@ def test_a_filter_voice_note_that_routes_the_filter_leaves_it_walking(mega_run):
     exact(song(mega_run.read_bytes(), rows, i1={"filter_table": b"\x00\x00\x00"}))
 
 
+@pytest.mark.parametrize("third", [0x84, 0x20])
+def test_a_filter_row_routes_by_its_fswitch_column(samwise, third):
+    """From 1.4 a filter row's $8x third column is FSWITCH: the routing of every voice, and no
+    keyboard track; any other byte is the track."""
+    rows = notes((37, 1), (40, 1))
+    text = exact(song(samwise.read_bytes(), rows, i1={"filter_table": bytes((0x91, 0x40, third))}))
+    assert ("route: 4" in text) == (third == 0x84)
+
+
 def test_song_refusals(lykia_boss, csillag):
     swm = song(csillag.read_bytes(), notes((37, 1)))
     swm.instruments[0].arp_speed = 2
-    swm.features = dataclasses.replace(SWMPlayer(swm).features, multispeedsupp=False)
+    swm.player = dataclasses.replace(
+        swm.player, features=dataclasses.replace(swm.player.features, multispeedsupp=False)
+    )
     with pytest.raises(s.TranscribeError, match="without STRTSND's ARPSCNT reset"):
         s.Transcriber(swm, META)
     swm = song(lykia_boss.read_bytes(), notes((37, 1)))

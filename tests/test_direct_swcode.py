@@ -34,14 +34,11 @@ def routine(one, call):
     return machine.compile(call.name, one.routines[call.name], dict(zip(params, call.args)), "freq")
 
 
-def state_of(v: VoiceState, held: bool = True) -> dict:
+def state_of(v: VoiceState) -> dict:
     """The routines' state of ``v``, by name."""
-    o, z = v.vibrato_offset, v.zp_freq_hi << 8 | v.zp_freq_lo
     fm = v.vibrato_freqmod_hi << 8 | v.vibrato_freqmod_lo
     return {
-        "o": o,
-        "s": int(not held),
-        "z": z,
+        "z": v.zp_freq_hi << 8 | v.zp_freq_lo,
         "dc": v.vibrato_delay_counter & 0xFF,
         "vc": v.vibrato_freq_counter,
         "p": v.vibrato_period,
@@ -70,14 +67,14 @@ def unpack(state: bytearray) -> dict:
 
 
 def voice(rng, one) -> VoiceState:
-    """A voice on a copy of instrument 1 with a random vibrato, type, counters and offset."""
+    """A voice on a copy of instrument 1 with a random vibrato, type, counters and pitch."""
     ins = copy.copy(one.swm.instruments[0])
     ins.vibrato, ins.vibrato_delay = rng.randrange(256), rng.choice((0, 1, 5, 0x7F, 0x80, 0xFF))
     ins.control = rng.choice((0x00, 0x10, 0x20, 0x30, 0x18, 0x08))
     ins.ram = b""
     one.ref._zp_images.clear()
     v = VoiceState(instrument=ins, note=rng.randrange(1, 0x60))
-    v.vibrato_offset = rng.randrange(65536)
+    v.dpitch = v.note
     v.vibrato_freq_counter, v.vibrato_period = rng.randrange(256), rng.randrange(0, 32, 2)
     v.vibrato_freqmod_lo, v.vibrato_freqmod_hi = rng.randrange(256), rng.randrange(256)
     v.vibrato_delay_counter = rng.randrange(-128, 128)
@@ -107,9 +104,9 @@ def test_stp_is_vibslide(builds, build, seed):
     fire, state = routine(one, one.call("stp")), pack(state_of(v) | held_vibrato(one, v))
     for phi in range(200):
         value = rng.randrange(65536)
-        assert fire(value, phi, 0, v.note - 1, state) == value
+        assert fire(value, phi, 0, v.dpitch - 1, state) == value
         one.ref._tick_vibrato(v)
-        compare(state, v, "o dc vc fm k", phi)
+        compare(state, v, "z dc vc fm k", phi)
 
 
 @pytest.mark.parametrize("seed", range(30))
@@ -118,12 +115,12 @@ def test_snd_is_strtsnd(builds, build, seed):
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
     call = one.strtsnd(v.instrument, rng.randrange(3))
-    state = pack(state_of(v) | {"s": 1})
+    state = pack(state_of(v))
     value = rng.randrange(65536)
-    out = routine(one, call)(value, 0, 0, v.note - 1, state)
+    out = routine(one, call)(value, 0, 0, v.dpitch - 1, state)
     one.ref._setup_vibrato(v)
     v.detune = 0
-    compare(state, v, "o s dc vc p fm k dd", 0)
+    compare(state, v, "z dc vc p fm k dd", 0)
     params = dict(zip(code.params(one.routines["snd"]), call.args))
     index = {0: None, 1: v.note, 2: (params["t"] + 1) & 0xFF}[params["h"]]
     expect = value if index is None else one.ref.freq_hi[index] << 8 | value & 0xFF
@@ -135,16 +132,14 @@ def test_snd_is_strtsnd(builds, build, seed):
 def test_vfx_is_setvibr_then_vibslide(builds, build, seed):
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
-    byte, clear = rng.randrange(256), rng.random() < 0.5
-    call = one.vibrato_byte(v.instrument, byte, clear)
-    fire, state = routine(one, call), pack(state_of(v))
+    byte = rng.randrange(256)
+    fire, state = routine(one, one.vibrato_byte(v.instrument, byte)), pack(state_of(v))
     for phi in range(100):
         if not phi:
             one.ref._apply_vibrato_byte(v, byte)
-            v.vibrato_offset = 0 if clear else v.vibrato_offset
-        fire(0, phi, 0, v.note - 1, state)
+        fire(0, phi, 0, v.dpitch - 1, state)
         one.ref._tick_vibrato(v)
-        compare(state, v, "o dc vc p fm k", phi)
+        compare(state, v, "z dc vc p fm k", phi)
 
 
 @pytest.mark.parametrize("seed", range(30))
@@ -157,18 +152,16 @@ def test_por_and_leg_are_portame(builds, build, seed):
     call = one.call("leg") if legato else one.call("por", m=0x83, **one.amp(value, False))
     fire, state = routine(one, call), pack(state_of(v) | held_vibrato(one, v))
     fire(0, 0, 0, note - 1, state)
-    v.note = note
+    v.note = v.dpitch = note
     if legato:
-        prev = v.zp_freq_hi << 8 | v.zp_freq_lo
-        v.vibrato_offset = (prev - one.ref._dpitch_freq(note)) & 0xFFFF
         v.slide_vib, v.vibrato_freqmod_hi = 0x83, 0x7F
     else:
         one.ref._begin_portamento(v, value)
-    compare(state, v, "o fm k", 0)
+    compare(state, v, "z fm k", 0)
     for phi in range(1, 60):
         fire(0, phi, 0, note - 1, state)
         one.ref._tick_vibrato(v)
-        compare(state, v, "o fm k", phi)
+        compare(state, v, "z fm k vc p", phi)
 
 
 @pytest.mark.parametrize("seed", range(30))
@@ -181,43 +174,38 @@ def test_sld_is_setslid(builds, build, seed):
     state = pack(state_of(v) | held_vibrato(one, v))
     one.ref._apply_fx_columns(v, None, fx, value, False)
     for phi in range(40):
-        fire(0, phi, 0, v.note - 1, state)
+        fire(0, phi, 0, v.dpitch - 1, state)
         one.ref._tick_vibrato(v)
-        compare(state, v, "o fm k", phi)
+        compare(state, v, "z fm k", phi)
 
 
 @pytest.mark.parametrize("seed", range(40))
 @pytest.mark.parametrize("build", [0, 1])
 def test_tone_and_det_are_wrpitch(builds, build, seed):
-    """FREQLO/FREQHI of the masked note (held while the pitch is), then the detune and the
-    carry of the WF row: none, set, or a relative note down past DPITCH."""
-    # pylint: disable=too-many-locals
+    """FREQLO/FREQHI a WF pitch row loads from the masked note, else kept; then the detune and
+    the carry of the WF row: none, set, or a relative note down past DPITCH."""
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
     tone = routine(one, one.call("tone"))
-    held = rng.random() < 0.5
     for phi in range(30):
-        v.note = rng.randrange(1, 0x60)
-        v.wf_arp_pitch = rng.randrange(-v.note, 0x100 - v.note)
+        v.note = v.dpitch = rng.randrange(1, 0x60)
+        arp = rng.randrange(-v.note, 0x100 - v.note)
         written = not phi or rng.random() < 0.2
+        state = pack(state_of(v))
+        zp = tone(0, 0 if written else phi, (v.dpitch + arp - 1) & 0xFF, 0, state)
         if written:
-            v.vibrato_offset = 0
-        v.wf_did_pitch_write, v.pitch_held, v.hr_timer = written, held, 0
-        state = pack(state_of(v, held))
-        nn = (v.note + v.wf_arp_pitch - 1) & 0xFF
-        zp = tone(0, 0 if written else phi, nn, 0, state)
-        one.ref._compose_sid_writes(v)
-        held = v.pitch_held
+            one.ref._load_freq(v, v.dpitch + arp)
+        v.hr_timer = 0
         assert zp == v.zp_freq_hi << 8 | v.zp_freq_lo == unpack(state)["z"], phi
         if not one.feats.detunesupport:
             continue
         arp = rng.choice((0, rng.randrange(0xE0, 0x100)))
         mode = rng.choice((0, 1)) if arp < 0xE0 else 2
-        v.wf_pitch_carry = bool(mode) if mode < 2 else arp + v.note > 0xFF
+        v.wf_pitch_carry = bool(mode) if mode < 2 else arp + v.dpitch > 0xFF
         v.detune = rng.randrange(-128, 128)
         det = routine(one, one.call("det", f=1, d=v.detune & 0xFF, c=mode, b=arp))
         one.ref._compose_sid_writes(v)
-        assert det(0, 0, 0, v.note - 1, state) == v.sid_freq_hi << 8 | v.sid_freq_lo, phi
+        assert det(0, 0, 0, v.dpitch - 1, state) == v.sid_freq_hi << 8 | v.sid_freq_lo, phi
 
 
 def test_every_template_reads_only_its_cell_and_round_trips(builds):
@@ -254,7 +242,7 @@ def test_pulse_tracking_is_wrpuls(builds, seed):
             "pwr": one.call("pwr"),
         }[kind]
         state = bytearray(((v.pw_hi << 8 | v.pw_lo) & 0xFF, v.pw_hi & 0xFF, v.pw_kbd_track))
-        v.note = rng.randrange(1, 0x60)
+        v.note = v.dpitch = rng.randrange(1, 0x60)
         out = cell_routine(one, call, "pw")(0, 0, 0, v.note - 1, state)
         if kind == "pst":
             v.pw_hi, v.pw_lo, v.pw_kbd_track = width >> 8 & 0x7F, width & 0xFF, track
@@ -291,7 +279,7 @@ def test_filter_tracking_is_the_cutoff_write(builds, seed, fine):
             "frs": one.call("frs"),
         }[kind]
         state = bytearray((ref.filter_cutoff_hi, ref.filter_cutoff_lo, ref.filter_kbd_track))
-        v.note = rng.randrange(1, 0x60)
+        v.note = v.dpitch = rng.randrange(1, 0x60)
         out = cell_routine(one, call, "cut")(0, 0, 0, v.note - 1, state)
         if kind == "fst":
             ref.filter_cutoff_hi, ref.filter_kbd_track = cut, track
