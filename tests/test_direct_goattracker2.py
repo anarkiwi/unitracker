@@ -234,7 +234,8 @@ def test_voice_layouts(build, voices):
     ],
 )
 def test_unsupported_layouts_are_refused(build, match):
-    """Multispeed and control-masked builds, and channels on a second SID, on no voice or past a gap are refused."""
+    """Multispeed and control-masked builds, and channels on a second SID, on no voice or past a
+    gap, are refused."""
     with pytest.raises(g.TranscribeError, match=match):
         g.Transcriber(gt_tune(WAVE, voice2=V2, **build)[0]).document()
 
