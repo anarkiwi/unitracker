@@ -55,6 +55,6 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
-        os.environ.setdefault(var, "2")
+    THREADS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+    os.environ.update({var: os.environ.get(var, "2") for var in THREADS})
     sys.exit(main())
