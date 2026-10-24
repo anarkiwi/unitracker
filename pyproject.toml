@@ -15,7 +15,7 @@ dependencies = [
     "numpy>=1.23",
     "tqdm>=4",
     "pysidtracker>=0.36.0",
-    "pygoattracker>=0.7.3",
+    "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker@37c3e03cbf5c24a5e58721f308fe667ceddf09f5",
     "pydefmon>=0.10.1",
     "pysidwizard>=0.3.5",
     "pymusicassembler>=0.8.6",

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from pygoattracker import (
+    Build,
     Instrument,
     Orderlist,
     Pattern,
@@ -125,9 +126,9 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
     ``instruments`` keyword dicts of :class:`pygoattracker.Instrument` (default one instrument
     on the wavetable's first row); ``rows`` the pattern's ``(note, instrument, command, data)``
     rows, a note as an offset from ``FIRSTNOTE`` or None for a rest; ``voice2`` voice 2's, which
-    otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``),
-    ``pulse_step`` and other :class:`pygoattracker.player.Player` options (``optimize_realtime``
-    and the like).
+    otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``)
+    and :class:`pygoattracker.Build` fields (``pulse_step``, ``optimize_realtime``, ``voices``,
+    ``idle``, ``calls`` and the like).
     """
     # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     instruments = instruments or [{"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
@@ -155,29 +156,15 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
         filtertable=table(*filt),
         speedtable=table(*speed),
     )
-    build = SimpleNamespace(adparam=None, srparam=None, deftempo=None)
-    state, step = opts.pop("state", None), opts.pop("pulse_step", 1)
-    info = SimpleNamespace(
-        simplepulse=False,
-        state=state,
-        init_regs=(),
-        live_vibrato=False,
-        build=build,
-        note_read=GT.FREQ_TABLE,
-    )
+    state = opts.pop("state", None)
+    build = Build(**opts)
+    info = SimpleNamespace(playback=build, state=state, note_read=GT.FREQ_TABLE)
     header = SimpleNamespace(name="synthetic", author="", released="", flags=0)
+
+    def player():
+        return Player(song, build=build, state=state, freq_table=GT.FREQ_TABLE)
+
     dec = SimpleNamespace(
-        info=info,
-        typed=TypedSong.from_song(song),
-        subtune=0,
-        header=header,
-        player=lambda: Player(
-            song,
-            freq_table=GT.FREQ_TABLE,
-            default_tempo=build.deftempo,
-            state=state,
-            pulse_step=step,
-            **opts,
-        ),
+        info=info, typed=TypedSong.from_song(song), subtune=0, header=header, player=player
     )
-    return dec, Player(song, freq_table=GT.FREQ_TABLE, state=state, pulse_step=step, **opts)
+    return dec, player()
