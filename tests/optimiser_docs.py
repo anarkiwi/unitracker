@@ -1,15 +1,15 @@
 """Small hand-written documents for the optimiser's tests."""
 
-HEAD = "unitracker: 2.0\nmeta: {title: T, author: A}\n"
-MODS = "mod:\n  note(): F(N)\n  vib(d): v + d*(φ % 4)\n  wob(e): v + e*(φ % 4)\n"
+HEAD = "unitracker: 2.1\nmeta: {title: T, author: A}\n"
+MODS = "mod:\n  note(): F(N)\n  vib(d): v + d*(phi % 4)\n  wob(e): v + e*(phi % 4)\n"
 
 
-TOP = ("restart", "ins", "ctrl", "pw", "filter")
+TOP = ("restart", "ins", "ctrl", "pw", "filter", "phrase")
 
 
 def doc(defs: str, play: str = "[p1]", head: str = "voices: 1\n", mods: str = MODS) -> str:
-    """A one-row ending document of ``defs`` (sections as a row's ``def`` writes them) playing
-    ``play``: each section but ``phrase`` top-level, after the templates, in the grammar's order."""
+    """A one-row ending document of ``defs`` (sections at 6 spaces, records at 8) playing
+    ``play``: each section top-level, after the templates, in the grammar's order."""
     sections, kind = {}, None
     for line in defs.splitlines(keepends=True):
         if not line.startswith("        "):
@@ -22,8 +22,7 @@ def doc(defs: str, play: str = "[p1]", head: str = "voices: 1\n", mods: str = MO
         for k in TOP
         if k in sections
     )
-    row = f"  - def:\n      phrase:\n{sections['phrase']}"
-    return f"{HEAD}{head}{mods}{top}song:\n{row}    play: {play}\n  - end\n"
+    return f"{HEAD}{head}{mods}{top}song:\n  - play: {play}\n  - end\n"
 
 
 DEFAULTS = doc(
@@ -45,7 +44,7 @@ DEFAULTS_BOUND = doc(
     "      phrase:\n"
     "        p1: [C4.i1!tick.freq:vib(3), -, D4, -*3]\n",
     head="voices: 1\nslots: {freq: {base: {}, tick: {}}}\n",
-    mods="mod:\n  vib(d): v + d*(φ % 4)\n",
+    mods="mod:\n  vib(d): v + d*(phi % 4)\n",
 )
 
 MERGE = doc(
@@ -90,7 +89,7 @@ LOOPING = doc(
 ).replace("  - end\n", "  - {loop: 0}\n")
 
 CODE = (
-    "mod:\n  note(): F(N)\n  vib(d): v + d*(φ % 4)\n  wob(e): v + e*(φ % 4)\n"
+    "mod:\n  note(): F(N)\n  vib(d): v + d*(phi % 4)\n  wob(e): v + e*(phi % 4)\n"
     "  up(c): |\n    lda v\n    clc\n    adc #c\n    sta v\n    rts\n"
 )
 LOOPING_CODE = doc(

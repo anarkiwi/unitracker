@@ -3,7 +3,7 @@
 import pytest
 from pygoattracker import constants as GT
 from unitracker_grammar import code, parse
-from unitracker_grammar.document import Event
+from unitracker_grammar.document import VERSION, Event
 
 from conftest import gt_tune
 from unitracker.direct import goattracker2 as g
@@ -215,6 +215,6 @@ def test_metal_warrior(metal_warrior):
 
 def test_cli(metal_warrior, capsys):
     assert g.main([str(metal_warrior)]) == 0
-    assert capsys.readouterr().out.startswith(f"unitracker: {g.VERSION}\n")
+    assert capsys.readouterr().out.startswith(f"unitracker: {VERSION}\n")
     assert g.main(["--verify", "--frames", "400", str(metal_warrior)]) == 0
     assert ": exact" in capsys.readouterr().out

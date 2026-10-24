@@ -79,6 +79,26 @@ mega_run = hvsc_tune(
     "MUSICIANS/A/Arturo_Dente/Mega-Run.sid",
     "Path to Arturo Dente's Mega-Run, a SID-Wizard light-build export.",
 )
+border_odyssey = hvsc_tune(
+    "border_odyssey",
+    "MUSICIANS/H/Hermit/Border_Odyssey.sid",
+    "Path to Hermit's Border Odyssey, a SID-Wizard normal-build export with octave shifts.",
+)
+samwise = hvsc_tune(
+    "samwise",
+    "MUSICIANS/A/Ant1/Samwise.sid",
+    "Path to Ant1's Samwise, a SID-Wizard extra-build export of a pre-1.8 driver.",
+)
+flowing_slowly_extended = hvsc_tune(
+    "flowing_slowly_extended",
+    "MUSICIANS/T/Toggle/Flowing_Slowly_extended.sid",
+    "Path to Toggle's Flowing Slowly (extended), a SID-Wizard extra build with staccato.",
+)
+whammer = hvsc_tune(
+    "whammer",
+    "MUSICIANS/V/Vincenzo/Whammer.sid",
+    "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
+)
 
 space_invadarz = hvsc_tune(
     "space_invadarz",

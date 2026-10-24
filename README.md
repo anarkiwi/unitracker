@@ -10,7 +10,7 @@ edit proved to keep the register grid.
 | doc | content |
 |---|---|
 | [docs/direct/goattracker2.md](docs/direct/goattracker2.md) | the GoatTracker 2 transcription from pygoattracker's playroutine (`python -m unitracker.direct.goattracker2`) |
-| [docs/direct/sidwizard.md](docs/direct/sidwizard.md) | the SID-Wizard (bare and light builds) transcription from pysidwizard's playroutine (`python -m unitracker.direct.sidwizard`) |
+| [docs/direct/sidwizard.md](docs/direct/sidwizard.md) | the SID-Wizard transcription from pysidwizard's playroutine (`python -m unitracker.direct.sidwizard`) |
 | [docs/direct/defmon.md](docs/direct/defmon.md) | the defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
 | [docs/direct/musicassembler.md](docs/direct/musicassembler.md) | the Music Assembler transcription from pymusicassembler's playroutine (`python -m unitracker.direct.musicassembler`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |

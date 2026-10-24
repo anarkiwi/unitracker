@@ -135,7 +135,7 @@ def test_the_guarantee_plays_to_an_end_a_proved_loop_or_a_tick_count():
     with pytest.raises(GuaranteeError):
         Guarantee(D.LOOPING_CODE)
     guarantee = Guarantee(D.LOOPING)
-    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker: 2.0\n")
+    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker: 2.1\n")
     assert not guarantee.holds(D.LOOPING.replace("D4.i2", "E4.i2"))
 
 
@@ -173,7 +173,7 @@ def test_the_cli_writes_the_optimised_document_and_its_sizes(tmp_path, capsys):
     assert "before:" in err and "after:" in err and "merge: ins i2 -> i1" in err
     assert Guarantee(D.MERGE).holds(out.read_text(encoding="utf-8"))
     assert main([str(source), "--ticks", "40", "--rounds", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 2.0\n")
+    assert capsys.readouterr().out.startswith("unitracker: 2.1\n")
 
 
 @pytest.mark.parametrize("path", sorted(LIFTED.glob("*.yaml")), ids=lambda p: p.stem)

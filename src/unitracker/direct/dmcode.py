@@ -1,4 +1,4 @@
-"""defMON's per-tick units as format 1.23 6502 code templates (docs/direct/defmon.md).
+"""defMON's per-tick units as 6502 code templates (docs/direct/defmon.md).
 
 Tables ``G`` (note frequencies), ``P`` (portamento) and ``R`` (slide rates) are the replay's;
 :data:`STATE` names each cell's variables.

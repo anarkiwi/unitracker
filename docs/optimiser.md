@@ -1,6 +1,6 @@
 # The generic optimiser
 
-`unitracker.optimiser` rewrites any canonical document (format 2.0) into a smaller one that
+`unitracker.optimiser` rewrites any canonical document (format 2.1) into a smaller one that
 plays the same register grid on unitracker-player. It knows no tracker: it reads and writes the
 document only through unitracker-grammar's model (`unitracker_grammar.document`), whose `printed` is the one canonical
 text.
@@ -49,9 +49,9 @@ A candidate the grammar or the player refuses does not hold.
 | pass | proposes |
 |---|---|
 | `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo: 6`, `voices: 3`, a `clock` at PAL's `clock_hz`, `tempo: [a, a]` as `a`; a row's `wait: 0` and `hold: 1`; `!tempo:a/a` and `!vtempo:a/a` as `a`, `*1`, and a non-note's `!legato`, `!pw`, `!filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note: +0` of a control program no `run` starts (a note clears the rows' notes as it starts it) |
-| `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, `x` instances, phrases, and templates of modulators and programs, equal up to their parameters' names |
-| `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `gate`, `ad`, `sr`, `res`, `route`, `mode`, `vol`, a relative `note`, a constant cell value; `wait: 0` and `hold: 1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl: ctrl_1(7,4)`, `restart: restart_1(2,9,240)`, `!run:ctrl_1(7,3)` |
-| `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads φ, its fields dropped |
+| `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, phrases, and templates of modulators and programs, equal up to their parameters' names |
+| `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait: 0` and `hold: 1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl: ctrl_1(7,4)`, `restart: restart_1(2,9,240)`, `!run:ctrl_1(7,3)` |
+| `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
 
 A `tails` pass (a program ending in another's rows running that one) is not exact: a `run:` row
 starts the program at its own tick, so the shorter program's first row would apply a `hold` early,
@@ -59,7 +59,7 @@ and a row's `run` of its own slot's kind applies within the phase that runs it; 
 
 Each pass's edits are what the semantics make equal in general; whether the song plays the same
 is the guarantee's to decide (a default binding is bound from tick 0, an instrument's from its
-note; merged templates keep the φ of one call where two names restarted it).
+note; merged templates keep the phi of one call where two names restarted it).
 
 ## Lossy mode
 

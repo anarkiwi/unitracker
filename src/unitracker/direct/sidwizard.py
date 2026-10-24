@@ -1,540 +1,600 @@
 """A SID-Wizard tune transcribed to the generic document from pysidwizard's playroutine.
 
-A pattern row is two steps: its TICK_0 and TICK_1, the hard restart's, then its TICK_2 onward,
-when the row applies; the WF, pulse and filter tables are programs, the vibrato and the frequency
-compose format 1.23 code modulators (:mod:`unitracker.direct.swcode`, docs/direct/sidwizard.md).
+Every tick is a step: a pattern row's TICK_0 and TICK_1 (the hard restart's) and TICK_2 (the row
+applied) carry its events, its tempo the rests after them; the WF, pulse and filter tables are
+programs, the vibrato, slides and WRPITCH code modulators (docs/direct/sidwizard.md).
 """
 
-import math
 import sys
-from dataclasses import dataclass
 
 import numpy as np
 from pysidtracker import SidImage, gridcmp
-from pysidwizard import Loop, PlayPattern, SWMPlayer, parse_sid_song
+from pysidwizard import parse_sid_song
 from pysidwizard.constants import INST_WF_TABLE_POS
-from pysidwizard.player import DEFAULT_HR_ADSR, PAL_CYCLES_PER_FRAME
-from unitracker_grammar import code, frequency
+from pysidwizard.player import DEFAULT_HR_ADSR
+from unitracker_grammar import code
 from unitracker_grammar.document import (
+    CONT,
+    END,
     Call,
     Code,
     Document,
     Event,
-    Expr,
     Header,
     Instrument,
     Play,
     Program,
     Row,
     Section,
-    Signed,
     Slot,
     SongRow,
     printed,
     signature,
 )
-from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
 from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
-from unitracker.direct.swcode import CODE, STATE
+from unitracker.direct.swtables import (
+    Tables,
+    TranscribeError,
+    _rows3,
+    _swept_first,
+    _unnoted,
+)
+from unitracker.direct.swcode import STATE, mirror_templates, templates, track_templates
+from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, trace
 
-VERSION = "2.0"
-# The clock whose note table F is nearest FREQTBL/FREQTBH at note k + 1: no clock is exact.
-CLOCK = (PAL_CYCLES_PER_FRAME, 985256)
-ROUTINES = {name: code.read(text) for name, text in CODE.items()}
-SLOTS = {
-    "freq": [
-        Slot("tick", hold=("note-1", "note-2")),
-        Slot("wave", hold=("legato",), reset=("row.note",)),
-    ]
-}
-VOICES = 3
-HR = 2
-GATE_OFF, LEGATO, VIBFX = 0x7E, 0x3F, range(0x60, 0x78)
-REFUSED = (
-    "arpspeedsupp calcvibrato chordsupport detunesupport hardrestypes frame1switch octaveshift"
-    " vibratotypes portavibra gateoffptr pwresetsw filtresetsw pwkeybtrack filtkbtrack"
-    " fastspeedbind allghostregs vibslidealways"
-).split()
+LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
+DUMMY = 256
 
 
-class TranscribeError(ValueError):
-    """The tune uses something this transcription does not spell."""
-
-
-@dataclass
-class Voice:
-    """A voice's context as its rows are written: its instrument, whether it played a note, and
-    the ticks a lower voice's STRTSND takes the filter on after its own."""
-
-    ins: int = 0
-    noted: bool = False
-    shadow: frozenset = frozenset()
-
-
-def _col(image: bytes, pos: int, past=0):
-    """Byte ``pos`` of ``image``, ``past`` beyond it."""
-    return image[pos] if pos < len(image) else past
-
-
-def _signed(byte: int) -> int:
-    return byte - 0x100 if byte >= 0x80 else byte
-
-
-class Transcriber:  # pylint: disable=too-many-instance-attributes
+class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     """The first subtune of a SID-Wizard module as a generic document."""
 
-    def __init__(self, swm, meta: tuple = (), frames: int = 20000):
-        self.swm, self.ref, self.meta, self.frames = swm, SWMPlayer(swm), meta, frames
-        feats = self.ref.features
-        refused = [name for name in REFUSED if getattr(feats, name)]
+    def __init__(self, swm, meta: tuple = (), frames: int = 20000, check: bool = True):
+        self.swm, self.ref, self.meta, self.frames = swm, standard(swm), meta, frames
+        self.feats = self.ref.features
+        refused = self._unsupported() if check else []
         if refused:
-            raise TranscribeError(f"{feats.name} build: {', '.join(refused)}")
-        if swm.frame_speed != 1 or swm.play_gate or any(swm.filter_init):
-            raise TranscribeError("multispeed, a play gate or an initial filter")
-        if not swm.instruments or len(swm.sequences) < VOICES:
-            raise TranscribeError("no instruments, or fewer orderlists than voices")
-        left, _ = swm.subtune_tempos[0] if swm.subtune_tempos else (0x86, 0x86)
-        self.tempo = (left & 0x7F) or 6
-        if not left & 0x80 or self.tempo < 3:
-            raise TranscribeError(f"tempo ${left:02X}")
+            raise TranscribeError(f"{self.feats.name} build: {', '.join(refused)}")
+        feats = self.feats
+        self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
+        # A table walk can read any instrument byte as a track amount: write as the player.
+        self.pwkb, self.fkb = self.feats.pwkeybtrack, self.feats.filtkbtrack
+        # BIGFX0F writes CTFH under the filter walk: the walk keeps its cutoff in code.
+        self.cutfx = any(r.fx == 0x0F for p in swm.patterns for r in p.rows)
+        self.fkb = self.fkb or self.cutfx
+        self.walk = "walk.cut" if self.cutfx else "cut"
+        feats = self.feats
+        self.hrc = (
+            feats.arpspeedsupp
+            and feats.detunesupport
+            and not feats.vibslidealways
+            and self._held_rows()
+        )
+        held = feats.arpspeedsupp and feats.detunesupport and self._held_rows()
+        self.mirror = held and self.pwkb
+        if self.pwkb or self.fkb:
+            self.code |= track_templates(self.feats.finefiltsweep)
+        if self.mirror:
+            self.code |= mirror_templates()
+        self.routines = {name: code.read(text) for name, text in self.code.items()}
         self.programs = {"ctrl": {}, "pw": {}, "filter": {}}
-        self.ins, self.used, self.phrases = {}, [], {}
+        self.ins, self.used, self.phrases, self.dummies = {}, [], {}, []
+
+    def _unsupported(self) -> list:
+        """What the tune uses that this transcription refuses."""
+        swm, feats, out = self.swm, self.feats, []
+        if swm.frame_speed != 1 or swm.play_gate or any(swm.filter_init):
+            out.append("multispeed, a play gate or an initial filter")
+        if not swm.instruments or len(swm.sequences) < VOICES:
+            out.append("no instruments, or fewer orderlists than voices")
+        if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
+            out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
+        return out
+
+    def _held_rows(self) -> bool:
+        """Whether a WF row lasts more than a tick: an arp speed or a hold row."""
+        return any(
+            i.arp_speed & 0x3F or any(r[0] < 0x10 for r in _rows3(i.wf_table))
+            for i in self.swm.instruments
+        )
 
     # ---- modulators ---------------------------------------------------------------------
 
-    def call(self, template: str, **params) -> Call:
-        """The call of ``template`` with ``params``, its arguments in its signature's order."""
-        if template not in self.used:
-            self.used.append(template)
-        return Call(template, tuple(params[k] for k in code.params(ROUTINES[template])))
+    def amp(self, raw: int, zero: bool = True) -> dict:
+        """SETFMOD's argument for raw amplitude ``raw`` (0 none where ``zero``): ``r`` one more
+        than the half the build adds to the note, else ``g`` the pitch-independent FREQMOD."""
+        if self.feats.calcvibrato:
+            return {"r": ((raw + 1) >> 1) + 1 if raw or not zero else 0}
+        if not raw:
+            return {"g": 0}
+        lo, hi = self.ref._freqmod(raw, 0)  # pylint: disable=protected-access
+        return {"g": hi << 8 | lo}
 
-    def _amplitude(self, amp: int) -> int:
-        """SETFMOD's FREQMOD of an amplitude nibble, which this build reads pitch-independent."""
-        if not amp:
-            return 0
-        lo, hi = self.ref._freqmod(amp << 3, 0)  # pylint: disable=protected-access
-        return hi << 8 | lo
+    def _counter(self, kind: int, freq: int) -> int:
+        """SETVIBR's first VIBRACNT for SLIDEVIB ``kind`` and frequency nibble ``freq``."""
+        if not self.feats.vibratotypes or kind < 0x20:
+            return freq >> 1
+        return 0 if kind == 0x30 else freq
 
-    def vibrato(self, n: int) -> Call:
-        """Instrument ``n``'s STRTSND vibrato: its delay, counter, amplitude and period."""
-        ins = self.swm.instruments[n - 1]
-        freq = ins.vibrato & 0x0F
+    def strtsnd(self, ins, voice: int) -> Call:
+        """Instrument ``ins``'s STRTSND on ``voice``: SLIDEVIB, the vibrato, FREQHI's write."""
+        kind, freq = ins.control & 0x30, ins.vibrato & 0x0F
+        high, index = 0, 0
+        if (
+            self.feats.frame1switch
+            and ins.control & 0x08
+            and not self.swm.first_frame_fixed_waveform
+        ):
+            high = 1
+            if self.swm.first_frame_freq_by_track:
+                high, index = 2, (voice * 7 - 1) & 0xFF
         return self.call(
-            "vib",
+            "snd",
+            c=kind,
             d=ins.vibrato_delay & 0xFF,
-            k=freq >> 1,
-            f=self._amplitude(ins.vibrato >> 4),
-            p=2 * freq,
+            i=self._counter(kind, freq),
+            q=2 * freq,
+            h=high,
+            t=index,
+            **self.amp((ins.vibrato >> 4) << 3),
         )
 
-    def vibfx(self, n: int, note: int) -> Call:
-        """Note-column vibrato ``note`` on instrument ``n``: the note's amplitude, its period."""
-        freq = self.swm.instruments[n - 1].vibrato & 0x0F
-        return self.call("vibfx", k=freq >> 1, f=self._amplitude(note & 0x0F), p=2 * freq)
-
-    # ---- tables -------------------------------------------------------------------------
-
-    def _image(self, n: int) -> bytes:
-        """The bytes PLAYERZP reads for instrument ``n``."""
-        return self.ref._image(self.swm.instruments[n - 1])  # pylint: disable=protected-access
-
-    def _named(self, kind: str, prefix: str, program: Program) -> str:
-        store = self.programs[kind]
-        for name, held in store.items():
-            if held == program:
-                return name
-        name = f"{prefix}{len(store)}"
-        store[name] = program
-        return name
-
-    def _wave_rows(self, image: bytes, pos: int, limit: int = 256) -> tuple:
-        """``(rows, loop)`` of WFARPTB from ``pos``: a row per tick, jumps taken on the tick."""
-        nop = self.ref.features.wfarp_nop_supp
-        rows, at = [], {}
-        while len(rows) < limit:
-            for _ in range(4):
-                if pos >= len(image) or image[pos] == 0xFF:
-                    return rows, None
-                if image[pos] != 0xFE:
-                    break
-                target = _col(image, pos + 1)
-                if target >= 0x80 or target >= len(image) or target == pos:
-                    return rows, None
-                pos = target
-            else:
-                raise TranscribeError("a WF jump chain")
-            if pos in at:
-                return rows, at[pos]
-            at[pos] = len(rows)
-            keys = {"ctrl": image[pos]}
-            arp = _col(image, pos + 1, None)
-            if arp is not None and not (arp == 0x80 and nop):
-                if arp >= 0xE0:
-                    keys["note"] = Signed(arp - 0x100)
-                elif arp >= 0x80:
-                    keys["note"] = note_name((arp & 0x7F) - 1)
-                else:
-                    keys["note"] = Signed(arp)
-                keys["wave.freq"] = self.call("tone")
-            rows.append(Row(keys))
-            pos += 3
-        return rows, None
-
-    def wave(self, n: int) -> str:
-        """The ``ctrl`` name of instrument ``n``'s WF program, after STRTSND's tick: control
-        $09 and SETFLTP's routing."""
-        ins = self.swm.instruments[n - 1]
-        rows, loop = (
-            self._wave_rows(self._image(n), INST_WF_TABLE_POS) if ins.wf_table else ([], None)
+    def vibrato_byte(self, ins, byte: int, clear: bool) -> Call:
+        """FORCVIB and SETVIBR of vibrato ``byte`` on instrument ``ins``."""
+        kind, freq = ins.control & 0x30, byte & 0x0F
+        return self.call(
+            "vfx",
+            c=kind,
+            w=int(clear),
+            i=self._counter(kind, freq),
+            q=2 * freq,
+            **self.amp((byte >> 4) << 3),
         )
-        first = Row({"ctrl": 9, "route": "+" if self._filtered(n) else "'-'"})
-        return self._named("ctrl", "c", Program([first, *rows], None if loop is None else loop + 1))
 
-    def idle(self) -> str:
-        """The ``ctrl`` name of the dummy instrument's WF walk on a voice's first HR ticks."""
-        dummy = self.ref._dummy  # pylint: disable=protected-access
-        image = self.ref._image(dummy)  # pylint: disable=protected-access
-        rows, _ = self._wave_rows(image, 0, HR)
-        if not rows:
-            raise TranscribeError("an idle walk that ends at once")
-        rows[0] = Row(dict(rows[0].keys) | {"gate": 0, "wave.freq": self.call("tone")})
-        return self._named("ctrl", "c", Program(rows))
+    # ---- instruments ---------------------------------------------------------------------
 
-    def _filtered(self, n: int) -> bool:
-        """Whether SETFLTP routes instrument ``n``'s voice through the filter."""
-        table = self.swm.instruments[n - 1].filter_table
-        return bool(table) and table[0] != 0xFF
-
-    def _swept(self, image: bytes, pos: int, row, cell: str, step) -> tuple:
-        """``(rows, loop)`` of a pulse or filter program from ``pos``: ``row(pos)`` gives a set
-        row's keys, ``step(byte)`` a sweep's per-tick expression."""
-        rows, at = [Row({})], {}
-        first = True
-        while True:
-            if pos >= len(image) or image[pos] == 0xFF:
-                return rows, None
-            if image[pos] == 0xFE:
-                target = _col(image, pos + 1)
-                if target == pos or target >= len(image):
-                    return rows, None
-                if image[target] in (0xFE, 0xFF):
-                    raise TranscribeError(f"a {cell} jump to a jump or an end")
-                if image[target] < 0x80:
-                    rows.append(Row({}))
-                pos = target
-            if pos in at:
-                return rows, at[pos]
-            at[pos] = len(rows)
-            byte = image[pos]
-            if byte & 0x80:
-                rows.append(Row(row(pos)))
-            elif first:
-                raise TranscribeError(f"a {cell} table that starts with a sweep")
-            else:
-                if byte:
-                    rows.append(Row({"hold": byte, cell: step(_col(image, pos + 1))}))
-                    rows.append(Row({cell: "none"}))
-                else:
-                    rows.append(Row({}))
-            first = False
-            pos += 3
-
-    def pulse(self, n: int) -> str:
-        """The ``pw`` name of instrument ``n``'s pulse program (SETPWID), from the tick after
-        STRTSND's."""
-        ins = self.swm.instruments[n - 1]
-        image = self._image(n)
-        rows, loop = self._swept(
-            image,
-            INST_WF_TABLE_POS + len(ins.wf_table) + 1,
-            lambda p: {"pw": ((image[p] & 0x7F) << 8 | _col(image, p + 1)) & 0xFFF},
-            "pw",
-            lambda d: Expr(canonical(f"v + {_signed(d)}")),
-        )
-        return self._named("pw", "pw", Program(rows, loop))
-
-    def filter(self, n: int) -> str:
-        """The ``filter`` name of instrument ``n``'s filter program (FILTPRG)."""
-        ins = self.swm.instruments[n - 1]
-        image = self._image(n)
-        scale = 1 if self.ref.features.finefiltsweep else 8
-
-        def row(p):
-            return {"res": image[p] & 0x0F, "mode": image[p] & 0x70, "cut": _col(image, p + 1) << 3}
-
-        start = INST_WF_TABLE_POS + len(ins.wf_table) + 1 + len(ins.pw_table) + 1
-        rows, loop = self._swept(
-            image, start, row, "cut", lambda d: Expr(canonical(f"v + {scale * _signed(d)}"))
-        )
-        return self._named("filter", "f", Program(rows, loop))
-
-    # ---- instruments and phrases --------------------------------------------------------
-
-    def instrument(self, n: int) -> str:
-        """The name of SID-Wizard instrument ``n``."""
-        name = f"i{n}"
+    def instrument(self, ins, number: int, voice: int) -> str:
+        """The name of SID-Wizard instrument ``ins`` (number ``number``) on ``voice``."""
+        name = f"i{number}"
+        if self.swm.first_frame_freq_by_track and self.feats.frame1switch:
+            name = f"i{number + 64 * (voice + 1)}"
         if name in self.ins:
             return name
-        if not 1 <= n <= len(self.swm.instruments):
-            raise TranscribeError(f"instrument {n} past the instruments")
-        ins = self.swm.instruments[n - 1]
         fields = {
             "ad": ins.attack << 4 | ins.decay,
             "sr": ins.sustain << 4 | ins.release,
-            "ctrl": self.wave(n),
-            "pw": self.pulse(n),
+            "ctrl": self.wave(ins),
         }
+        if not _swept_first(ins.pw_table):
+            fields["pw"] = self.pulse(ins)
         table = ins.filter_table
-        if table and table[0] not in (0x00, 0xFF):
-            fields["filter"] = self.filter(n)
-        fields["tick.freq"] = self.vibrato(n)
+        if table and table[0] not in (0x00, 0xFF) and not _swept_first(table):  # claims
+            fields["filter"] = self.filter(ins)
+        fields["snd.freq"] = self.strtsnd(ins, voice)
+        fields["tick.freq"] = self.call("stp")
         self.ins[name] = Instrument(fields)
         return name
 
-    def dummy(self) -> str:
-        """The name of the instrument a voice's first HR ticks walk: the header of instrument 0."""
-        if "i0" not in self.ins:
-            hr = DEFAULT_HR_ADSR
-            self.ins["i0"] = Instrument({"ad": hr >> 8, "sr": hr & 0xFF, "ctrl": self.idle()})
-        return "i0"
+    def hr(self, ins, tick: int) -> bool:
+        """Whether HRGTOFF fires on TICK_0 or TICK_1 (``tick``) for upcoming instrument
+        ``ins``."""
+        if not self.feats.hardrestypes:
+            return True
+        return bool(ins.control & (0x02 if tick == 0 else 0x01))
 
-    def _small_fx(self, fx: int, n: int) -> dict:
-        """The commands of instrument-column small FX ``fx`` on instrument ``n``."""
-        high, low = fx & 0xF0, fx & 0x0F
-        if high not in (0x50, 0x60) or not n:
-            raise TranscribeError(f"small FX ${fx:02X}")
-        ins = self.swm.instruments[n - 1]
-        if high == 0x50:
-            return {"sr": low << 4 | ins.release}
-        return {"sr": ins.sustain << 4 | low}
+    def _hr_commands(self, ins) -> dict:
+        """HRGTOFF's commands: the hard-restart envelope, $18 for a staccato instrument."""
+        if self.feats.hardrestypes:
+            out = {
+                "ad": ins.hr_attack << 4 | ins.hr_decay,
+                "sr": ins.hr_sustain << 4 | ins.hr_release,
+            }
+            return out | ({"ctrl": 0x18} if ins.control & 0x04 else {})
+        return {"ad": DEFAULT_HR_ADSR >> 8, "sr": DEFAULT_HR_ADSR & 0xFF}
 
-    def events(self, row, voice: Voice, tick: int) -> list:
-        """The two events of one pattern row on ``voice`` from ``tick``: its HR ticks' and its
-        TICK_2's."""
-        note, ins, fx = row.note, row.instrument, row.fx
-        if fx is not None:
-            raise TranscribeError(f"FX ${fx:02X}")
-        commands = {}
-        if ins is not None and 1 <= ins < LEGATO:
-            if note is None or note >= 0x60:
-                if ins != voice.ins:
-                    raise TranscribeError("an instrument selected without a note")
+    def dummy(self, ins) -> str:
+        """The instrument whose WF program a voice's first HR ticks walk: the header of
+        instrument 0 read as WF rows from DPITCH 0, gated as PTNGATE (0 after INITER) is."""
+        # pylint: disable=too-many-locals
+        staccato = self.feats.hardrestypes and ins.control & 0x04
+        dummy = self.ref._dummy  # pylint: disable=protected-access
+        image = self.ref._image(dummy)  # pylint: disable=protected-access
+        rows, _ = self.wave_rows(image, 0, dummy, 2, reload=0)
+        masks = [0xFE if self.hr(ins, 0) else 0]
+        masks.append(0xFE if self.hr(ins, 1) or masks[0] else 0)
+        ticks = []
+        for row in rows:
+            keys = dict(row.keys)
+            ticks += [keys] + [{}] * (keys.pop("hold", 1) - 1)
+        for k in (0, 1):
+            if staccato and self.hr(ins, k):
+                # HRGTOFF's staccato exit walks no table on its tick.
+                ticks.insert(k, {})
+        out = []
+        for k, keys in enumerate(ticks[:2]):
+            if "ctrl" in keys:
+                keys["ctrl"] &= masks[k]
+            out.append(_unnoted(Row(keys)))
+        first = next((k for k, r in enumerate(out) if r.keys), None)
+        if first is None:
+            raise TranscribeError("an idle walk that reads no row")
+        out[first] = Row(dict(out[first].keys) | {"wave.freq": self.call("tone")})
+        if self.feats.vibslidealways:
+            # The hard-restart ticks walk the pulse table too: the header's, from PWTPOS 0.
+            out.insert(0, Row({"hold": 0, "run": self.pulse(dummy, 0, 0, lead=False)}))
+        instrument = Instrument({"ctrl": self._named("ctrl", "c", Program(out))})
+        for name, held in self.ins.items():
+            if held == instrument:
+                return name
+        name = f"i{DUMMY + len(self.dummies)}"
+        self.dummies.append(name)
+        self.ins[name] = instrument
+        return name
+
+    # ---- events -------------------------------------------------------------------------
+
+    def fx(self, rec) -> dict:
+        """The commands of a row's instrument-column small FX and FX column."""
+        # pylint: disable=too-many-branches
+        row, ins, out = rec.row, rec.ins, {}
+        codes = []
+        if row.instrument is not None and row.instrument > LEGATO:
+            codes.append(row.instrument)
+        if row.fx is not None and row.fx >= 0x20:
+            codes.append(row.fx)
+        for value in codes:
+            high, low = value & 0xF0, value & 0x0F
+            if high in (0x20, 0x30, 0x50, 0x60):
+                out["ad"], out["sr"] = rec.adsr
+            elif high == 0x70 and self.feats.chordsupport:
+                out["run"] = self.rechord(rec)
+            elif high in (0x70, 0xE0):
+                pass
+            elif high == 0x80 and ins is not None:
+                out["tick.freq"] = self.vibrato_byte(ins, low << 4 | ins.vibrato & 0x0F, False)
+            elif high == 0x90:
+                out["tick.freq"] = self.call("vfq", q=low << 1)
+            elif high == 0xA0:
+                out["vol"] = low
+            elif high == 0xB0:
+                out["mode"] = low << 4
+            elif high == 0xD0:
+                out |= self._dfx(low << 3)
+            elif high == 0x40:
+                out |= self._waveform(rec)
+            elif high == 0xC0:
+                out |= {"run": self._paced(rec, low)} if self.feats.arpspeedsupp else {}
             else:
-                voice.ins = ins
-        elif ins is not None and ins > LEGATO:
-            commands = self._small_fx(ins, voice.ins)
-        if note is None:
-            return [Event("-"), Event("-", commands=commands)]
-        if not voice.ins:
-            raise TranscribeError("a note column before any instrument")
-        if note == GATE_OFF:
-            return [Event("-"), Event("off", commands=commands)]
-        if note in VIBFX:
-            return [
-                Event("-"),
-                Event("-", commands=commands | {"tick.freq": self.vibfx(voice.ins, note)}),
-            ]
-        if not 1 <= note < 0x60:
-            raise TranscribeError(f"note column ${note:02X}")
-        return self._pitched(note, ins == LEGATO, voice, tick, commands)
+                raise TranscribeError(f"small FX ${value:02X}")
+        fx, value = row.fx, row.fx_value
+        if fx is None or fx >= 0x20 or value is None:
+            return out
+        made = {
+            0x01: lambda: {"tick.freq": self.call("sld", m=0x81, **self.amp(value))},
+            0x02: lambda: {"tick.freq": self.call("sld", m=0x82, **self.amp(value))},
+            0x03: lambda: (
+                {}
+                if rec.tick2
+                else {"tick.freq": self.call("sld", m=0x83, **self.amp(value, False))}
+            ),
+            0x05: lambda: {"ad": value},
+            0x06: lambda: {"sr": value},
+            0x08: lambda: {"tick.freq": self.vibrato_byte(ins, value, False)} if ins else None,
+            0x0D: lambda: self._dfx(value),
+            0x16: lambda: {"tick.freq": self.call("kty", c=value & 0x30)},
+            0x0F: lambda: {("fx" if rec.cutfirst else "late") + ".cut": self.call("fhi", c=value)},
+            0x04: lambda: self._waveform(rec),
+        }
+        if fx == 0x0C:
+            made[fx] = lambda: {"run": self._paced(rec, value)} if self.feats.arpspeedsupp else {}
+        elif fx in (0x07, 0x09, 0x0A, 0x0B, 0x0E) or 0x17 <= fx <= 0x1C or fx == 0x1F:
+            if fx != 0x07:
+                raise TranscribeError(f"FX ${fx:02X}")
+        if fx == 0x07 and self.feats.chordsupport:
+            made[fx] = lambda: {"run": self.rechord(rec)}
+        commands = made[fx]() if fx in made else {}
+        if commands is None:
+            raise TranscribeError(f"FX ${fx:02X} before any instrument")
+        if set(commands) & set(out) - {"ad", "sr", "run"}:
+            raise TranscribeError("two FX of one cell on a row")
+        return out | commands
 
-    def _pitched(self, note: int, legato: bool, voice: Voice, tick: int, commands: dict) -> list:
-        """The two events of a row that plays ``note`` (1-95) on ``voice`` from ``tick``."""
-        # pylint: disable=too-many-arguments,too-many-positional-arguments
-        name = note_name(note - 1)
-        if legato:
-            commands |= {"tick.freq": self.call("leg"), "legato": True}
-            return [Event("-"), Event(name, commands=commands)]
-        if voice.noted:
-            first = Event("off", commands={"pw": "hold", "cut": "hold", "ad": 15, "sr": 0})
-        else:
-            first = Event("B-1", self.dummy())
-        voice.noted = True
-        keep = tick + HR in voice.shadow
-        return [first, Event(name, self.instrument(voice.ins), commands, keep_filter=keep)]
+    def _waveform(self, rec) -> dict:
+        """A FX writing WFGHOST: the control byte it leaves, gated as the voice is."""
+        value, gate = rec.ctrl
+        if rec.newnote or value & 1 and not gate:
+            raise TranscribeError("a waveform FX on a note or setting a gate the voice has off")
+        return {"ctrl": value}
 
-    def phrase(self, pattern: int, voice: Voice, tick: int) -> str:
-        """The name of the phrase one occurrence of ``pattern`` from ``tick`` plays on ``voice``."""
-        events = []
-        for k, row in enumerate(self.swm.patterns[pattern - 1].rows):
-            events += self.events(row, voice, tick + k * self.tempo)
-        return self.phrases.setdefault(tuple(rests(events)), f"p{len(self.phrases) + 1}")
+    def _paced(self, rec, speed: int) -> str:
+        """An arp speed FX: the WF walk from where it is at its new pace."""
+        if rec.newnote or rec.ins is None:
+            raise TranscribeError("an arp speed FX on a note or before any instrument")
+        return self.resume(rec.ins, rec.arp, skip=False, reload=speed & 0x3F)
 
-    def _legatos(self, frames: int) -> None:
-        """Refuses a legato note whose TICK_2, which walks no table, the reference player
-        reaches with its WF, pulse or (held) filter table still walking, over ``frames``."""
-        ref = SWMPlayer(self.swm)
-        apply_row = ref._apply_row  # pylint: disable=protected-access
+    def _dfx(self, detune: int) -> dict:
+        if not self.feats.detunesupport:
+            return {}
+        return {"dt.freq": self.call("dfx", d=detune & 0xFF)}
 
-        def ended(image: bytes, pos: int, wave: bool) -> bool:
-            byte = image[pos] if pos < len(image) else 0xFF
-            target = image[pos + 1] if byte == 0xFE and pos + 1 < len(image) else 0
-            jumped = byte == 0xFE and (
-                target in (pos,) or target >= len(image) or wave and target >= 0x80
+    def setup(self, rec, state: dict, tick: int) -> Event:
+        """The event of a read row's TICK_0 or TICK_1 (``tick``): HARDRST's hard restart and
+        the tables it holds, the dummy walk before a voice's first note, a staccato skip."""
+        commands, atom = {}, "-"
+        new = rec.newnote and not rec.dummy and not self.feats.vibslidealways
+        if new and not tick:
+            commands = {"pw": "hold", "cut": "hold"} | ({"pm.freq": "none"} if self.mirror else {})
+        if new and tick and self.fkb and rec.holder:
+            # The cutoff is written every tick: its track follows the note STRTSND sets.
+            commands = {self.walk: self.call("frs")}
+        if rec.newnote and rec.dummy and not tick:
+            state["dummy"] = state["dummy"] or self.dummy(rec.hr)
+            commands["run"] = self.ins[state["dummy"]].get("ctrl")
+        if rec.newnote and not tick and self.hrc:
+            fx = rec.row.instrument or 0
+            carry = fx >= 0x3F if fx or not self.feats.hardrestypes else (rec.row.fx or 0) >= 3
+            commands["hr.freq"] = self.call("hrc", c=int(carry))
+        if rec.newnote and self.hr(rec.hr, tick):
+            commands |= self._hr_commands(rec.hr)
+            atom = "-" if rec.dummy else "off"
+        if tick in rec.skips and not rec.dummy:
+            wave, ins, pulse, filt = rec.skips[tick]
+            if self.feats.vibslidealways:
+                # The staccato tick walks no table and no vibrato, which this build would.
+                commands["run"] = self.resume(ins, wave, pulse, filt)
+                commands["tick.freq"] = self.call("wt")
+            else:
+                commands["run"] = self.resume(ins, wave)
+        return Event(atom, commands=commands)
+
+    def events(self, rec, voice: int, state: dict, length: int) -> list:
+        """The events of one read row on ``voice``, ``length`` ticks from its TICK_0."""
+        out = [self.setup(rec, state, 0), self.setup(rec, state, 1)]
+        if rec.applied:
+            out.append(self.apply(rec, voice, state))
+            if rec.switch is not None:
+                out[2] = self.switch(rec, voice, state, out[2])
+            # A binding the slot already holds would keep its phi: rebind it the tick before.
+            before, applied = dict(out[1].commands), dict(out[2].commands)
+            for key, rebind in (("tick.freq", self.call("stp")), ("fx.cut", "none")):
+                if key in applied and key not in before:
+                    before[key] = rebind
+            if "late.cut" in applied:
+                before["late.cut"] = "none"
+            out[1] = Event(out[1].note, out[1].ins, before, out[1].keep_pw, out[1].keep_filter)
+        if length < len(out):
+            if rec.applied:
+                raise TranscribeError(f"a {length}-tick row")
+            out = out[:length]
+        out += [Event("-")] * (length - len(out))
+        return out
+
+    def switch(self, rec, voice: int, state: dict, event: Event) -> Event:
+        """``event`` on a row that selects instrument ``rec.ins`` without a note: its tables
+        walk on from where they are, through the new instrument's bytes."""
+        commands = dict(event.commands)
+        if "run" in commands or event.ins is not None:
+            raise TranscribeError(
+                "an instrument selected without a note on a row that runs a table"
             )
-            return byte == 0xFF or jumped
+        wave, pulse, filt, reload = rec.switch
+        commands["run"] = self.resume(rec.ins, wave, pulse, filt, skip=False, reload=reload)
+        name = self.instrument(rec.ins, rec.number, voice)
+        state["ins"] = name
+        return Event(event.note, name, commands, event.keep_pw, event.keep_filter, event.steps)
 
-        def check(v, row):
-            if row.instrument == LEGATO and row.note and row.note < 0x60 and v.instrument:
-                image = ref._image(v.instrument)  # pylint: disable=protected-access
-                walking = not ended(image, v.wf_pos, True) or not ended(image, v.pw_pos, False)
-                if ref.filter_controller_voice is v and not ended(image, ref.filt_pos, False):
-                    walking = True
-                if walking:
-                    raise TranscribeError(
-                        f"a legato note at frame {ref.frame_idx} over walking tables"
-                    )
-            apply_row(v, row)
+    def strtsnd_event(self, rec, voice: int, state: dict, commands: dict) -> Event:
+        """The event of a note STRTSND starts: its instrument, the tables it keeps walking
+        (reset switches, a filter it does not take) or the filter it takes over."""
+        ins = rec.ins
+        name = self.instrument(ins, rec.number, voice)
+        given = name if state["ins"] != name else None
+        state["ins"] = name
+        if self.hrc:
+            commands["hr.freq"] = "none"
+        pulse, filt, routed = rec.kept
+        start = INST_WF_TABLE_POS + len(ins.wf_table) + 1
+        if pulse is None and _swept_first(ins.pw_table):
+            pulse = (start, rec.counts[0])
+        table = ins.filter_table
+        if filt is None and _swept_first(table) and table[0] and not rec.keep_filter:
+            filt, routed = (start + len(ins.pw_table) + 1, rec.counts[1]), True
+        if (pulse, filt, routed) != rec.kept:
+            rec.kept = (pulse, filt, routed)
+        if rec.handover is not None:
+            if "run" in commands or pulse is not None or filt is not None:
+                raise TranscribeError("a filter handover on a note that runs another table")
+            commands["run"] = self.filter(ins, handover=rec.handover)
+        if pulse is not None or filt is not None:
+            # A chord FX (its own run) picks the chord the kept walk plays.
+            chord = rec.chord[2] if "run" in commands else None
+            commands["run"] = self.wave(ins, chord, rec.kept)
+        keep = rec.keep_filter or filt is not None
+        return Event(self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep)
 
-        ref._apply_row = check  # pylint: disable=protected-access
-        ref.render_grid(frames)
+    def apply(self, rec, voice: int, state: dict) -> Event:
+        """The TICK_2 event of an applied row."""
+        # pylint: disable=too-many-branches,too-many-return-statements
+        ins, note = rec.ins, rec.row.note
+        commands = self.fx(rec)
+        if rec.newnote and "dt.freq" in commands:
+            raise TranscribeError("a detune FX on a note")
+        if rec.newnote and ins is None:
+            raise TranscribeError("a note before any instrument")
+        if note is None or ins is None:
+            return Event("-", commands=commands)
+        if rec.newnote:
+            return self.strtsnd_event(rec, voice, state, commands)
+        if 0 < note < 0x60:
+            return self.glide(rec, commands)
+        if note == GATE_OFF and rec.gate is not None:
+            if "run" in commands:
+                raise TranscribeError("a gate-off pointer on a row that runs another table")
+            wave, pulse, filt, jumped = rec.gate
+            commands["run"] = self.resume(ins, wave, pulse, filt, skip=False)
+            return Event("-" if jumped else "off", commands=commands)
+        if note == GATE_OFF:
+            return Event("off", commands=commands)
+        if note == GATE_ON or 0x79 <= note <= 0x7C:
+            # NGATEON, NSYNCON/OF, NRINGON/OF write WFGHOST's bit on the tick.
+            commands |= self._waveform(rec)
+            return Event("on" if note == GATE_ON else "-", commands=commands)
+        if 0x60 <= note < NPORTAM:
+            byte = (note & 0x0F) << 4 | ins.vibrato & 0x0F
+            if "tick.freq" in commands:
+                raise TranscribeError("two FX of one cell on a row")
+            return Event("-", commands=commands | {"tick.freq": self.vibrato_byte(ins, byte, True)})
+        if note == NPORTAM:
+            return Event(
+                "-",
+                commands=commands | {"tick.freq": self.call("sld", m=0xFF, **self.amp(110, False))},
+            )
+        raise TranscribeError(f"note column ${note:02X}")
+
+    def glide(self, rec, commands: dict) -> Event:
+        """A note without STRTSND (legato, BIGFX03, after NPORTAM): toward its word, the
+        tables resumed past TICK_2."""
+        fx, value = rec.row.fx, rec.row.fx_value or 0
+        slid = commands.pop("tick.freq", None)
+        if fx == 0x03:
+            call = self.call("por", m=0x83, **self.amp(value, False))
+        elif rec.row.instrument == LEGATO and fx in (0x01, 0x02):
+            call = self.call("por", m=0x80 + fx, **self.amp(value))
+        elif slid is not None:
+            raise TranscribeError("a legato note with a vibrato FX")
+        elif rec.row.instrument == LEGATO:
+            call = self.call("leg")
+        else:
+            call = self.call("npn")
+        commands |= {"tick.freq": call, "legato": True}
+        wave, pulse, filt = rec.resume
+        commands["run"] = self.resume(rec.ins, wave, pulse, filt)
+        return Event(self.pitch(rec), commands=commands)
+
+    def pitch(self, rec) -> str:
+        """The note name of a row's pitch with its octave shift and transpose."""
+        if not -1 <= rec.note < 0x80:
+            raise TranscribeError(f"a note sounding at {rec.note}")
+        return note_name(rec.note)
 
     # ---- the song -----------------------------------------------------------------------
 
-    def _starts(self, voice: int, horizon: int) -> list:
-        """``(tick, pattern)`` of each pattern ``voice``'s orderlist starts before ``horizon``."""
-        seq, pos, tick, out = self.swm.sequences[voice], 0, 0, []
-        while tick < horizon:
-            if pos >= len(seq):
-                raise TranscribeError("an orderlist that ends")
-            cmd = seq[pos]
-            pos += 1
-            if isinstance(cmd, Loop):
-                pos = cmd.position
-            elif isinstance(cmd, PlayPattern):
-                if not 1 <= cmd.pattern <= len(self.swm.patterns):
-                    raise TranscribeError(f"pattern {cmd.pattern}")
-                out.append((tick, cmd.pattern))
-                tick += len(self.swm.patterns[cmd.pattern - 1].rows) * self.tempo
-            else:
-                raise TranscribeError(f"orderlist {type(cmd).__name__}")
-        return out
+    def occurrences(self, tr: Trace, voice: int) -> tuple:
+        """``(plays, end, horizon)`` of ``voice``: ``(tick, phrase)`` of each pattern it plays
+        whole, the tick it ends (None), the start of the pattern the trace cut."""
+        reads, end = tr.reads[voice], tr.ended[voice]
+        frames = [r.frame for r in reads] + ([end] if end is not None else [])
+        state, plays, events, tick = {"ins": None, "dummy": None}, [], [], None
+        for k, rec in enumerate(reads):
+            if rec.start and tick is not None:
+                plays.append((tick, self._phrase(events)))
+                events = []
+            if rec.start:
+                tick = rec.frame
+            if k + 1 >= len(frames):
+                return plays, None, tick, state["dummy"]
+            events += self.events(rec, voice, state, frames[k + 1] - rec.frame)
+        if tick is not None:
+            plays.append((tick, self._phrase(events)))
+        return plays, end, None, state["dummy"]
 
-    def _period(self, voice: int) -> tuple:
-        """``(intro, loop)`` ticks of ``voice``'s orderlist."""
-        seq, rows = self.swm.sequences[voice], []
-        for cmd in seq:
-            if isinstance(cmd, PlayPattern) and 1 <= cmd.pattern <= len(self.swm.patterns):
-                rows.append(len(self.swm.patterns[cmd.pattern - 1].rows) * self.tempo)
-            else:
-                rows.append(0)
-        loop = next((c.position for c in seq if isinstance(c, Loop)), None)
-        if loop is None:
-            raise TranscribeError("an orderlist that ends")
-        return sum(rows[:loop]), sum(rows[loop:])
+    def _phrase(self, events: list) -> str:
+        return self.phrases.setdefault(tuple(rests(events)), f"p{len(self.phrases) + 1}")
 
-    def _strtsnd(self, starts: list) -> list:
-        """``(tick, voice, first filter table byte)`` of every STRTSND, in the player's order."""
-        out = []
-        for v, voice_starts in enumerate(starts):
-            ins = 0
-            for tick, pattern in voice_starts:
-                for k, row in enumerate(self.swm.patterns[pattern - 1].rows):
-                    note = row.note
-                    pitched = note is not None and 1 <= note < 0x60
-                    if pitched and row.instrument is not None and 1 <= row.instrument < LEGATO:
-                        ins = row.instrument
-                    if (
-                        pitched
-                        and row.instrument != LEGATO
-                        and 1 <= ins <= len(self.swm.instruments)
-                    ):
-                        table = self.swm.instruments[ins - 1].filter_table
-                        out.append((tick + k * self.tempo + HR, -v, table[0] if table else 0xFF))
-        return sorted(out)
-
-    def _shadows(self, starts: list) -> list:
-        """Per voice, the ticks a lower voice's STRTSND takes the filter after its own in the
-        same tick, as the player runs the voices last to first. Refuses a note of the voice
-        that holds the filter that leaves the filter walking another instrument's table."""
-        out, holder, ticks = [set() for _ in range(VOICES)], None, {}
-        for tick, neg, first in self._strtsnd(starts):
-            ticks.setdefault(tick, []).append((-neg, first))
-        for tick, notes in ticks.items():
-            claims = [voice for voice, first in notes if first not in (0x00, 0xFF)]
-            if claims:
-                holder = claims[-1]
-                for voice in claims[:-1]:
-                    out[voice].add(tick)
-            elif any(
-                v == holder and not (f == 0xFF and self.swm.filter_stop_rewinds) for v, f in notes
-            ):
-                raise TranscribeError("a note of the filter's voice that does not take it")
-        return [frozenset(s) for s in out]
-
-    def _horizon(self) -> int:
-        """The ticks over which the orderlists, intros played, loop together four times."""
-        periods = [self._period(v) for v in range(VOICES)]
-        if not all(p for _, p in periods):
-            raise TranscribeError("an orderlist that loops no pattern")
-        cycle = math.lcm(*(p for _, p in periods))
-        if cycle > 1 << 20:
-            raise TranscribeError("orderlists of incommensurate loops")
-        return max(i for i, _ in periods) + 4 * cycle
-
-    def timeline(self) -> tuple:
-        """``(rows, loop row)`` of the orderlists' pattern starts."""
-        horizon = self._horizon()
-        starts = [self._starts(v, horizon) for v in range(VOICES)]
-        shadows = self._shadows(starts)
-        plays = {}
-        for v, voice_starts in enumerate(starts):
-            voice = Voice(shadow=shadows[v])
-            for tick, pattern in voice_starts:
-                entry = Play(self.phrase(pattern, voice, tick))
-                plays.setdefault(tick, [None] * VOICES)[v] = entry
-        ticks = sorted(plays)
-        rows = [tuple(p or "~" for p in plays[t]) for t in ticks[:-1]]
-        loop = repeat(rows, [b - a for a, b in zip(ticks, ticks[1:])])
+    def timeline(self, tr: Trace) -> tuple:
+        """``(rows, loop row or None, each voice's dummy instrument)``."""
+        entries, horizon, dummies = {}, None, []
+        for v in range(VOICES):
+            plays, end, cut, dummy = self.occurrences(tr, v)
+            dummies.append(dummy)
+            for tick, phrase in plays:
+                entries.setdefault(tick, [CONT] * VOICES)[v] = Play(phrase)
+            if end is not None:
+                entries.setdefault(end, [CONT] * VOICES)[v] = END
+            if cut is not None:
+                horizon = cut if horizon is None else min(horizon, cut)
+        ticks = sorted(t for t in entries if horizon is None or t < horizon)
+        rows = [tuple(entries[t]) for t in ticks]
+        if horizon is None:
+            return rows, None, dummies
+        loop = repeat(rows, [b - a for a, b in zip(ticks, ticks[1:] + [horizon])])
         if loop is None:
             raise TranscribeError("a timeline that does not repeat")
-        return rows[: loop[0] + loop[1]], loop[0]
+        return rows[: loop[0] + loop[1]], loop[0], dummies
 
-    def _header(self, named: set) -> Header:
-        """The header: the build's tempo as its HR steps and the rest, the state ``named``."""
+    def slots(self) -> dict:
+        """The frequency's slots in the player's order: VIBSLIDE, WFARPTB, WRPITCH."""
+        held = ("note", "legato")
+        out = [
+            Slot("snd"),
+            Slot(
+                "tick",
+                hold=("note",) if self.feats.vibslidealways else ("note-2", "note-1", "note"),
+            ),
+            Slot("wave", hold=held, reset=("row.note",)),
+        ]
+        if self.hrc:
+            out.append(Slot("hr"))
+        if self.mirror:
+            out.append(Slot("pm"))
+        if self.feats.detunesupport:
+            out.append(Slot("dt", hold=held, reset=("row.freq",)))
+        if self.cutfx:
+            # BIGFX0F applies before the filter walk on a later voice, after it on an earlier.
+            return {"freq": out, "cut": [Slot("fx"), Slot("walk"), Slot("late")]}
+        return {"freq": out}
+
+    def traced(self) -> tuple:
+        """:meth:`timeline` of the reference player's run, run on (its tables' state can
+        repeat later than its orderlists) until the timeline repeats."""
+        for loops in (LOOPS, 4 * LOOPS, 16 * LOOPS):
+            tr = trace(self.swm, loops=loops)
+            if tr.refused:
+                raise TranscribeError(tr.refused[0])
+            self.phrases, self.programs = {}, {"ctrl": {}, "pw": {}, "filter": {}}
+            self.ins, self.used, self.dummies = {}, [], []
+            try:
+                return self.timeline(tr)
+            except TranscribeError as exc:
+                if "does not repeat" not in str(exc) or loops == 16 * LOOPS:
+                    raise
+        raise AssertionError("unreachable")
+
+    def document(self) -> str:
+        """The document of the song to its loop or end."""
+        rows, loop, dummies = self.traced()
+        phrases = Section("phrase", [(name, list(events)) for events, name in self.phrases.items()])
+        song = [SongRow(r) for r in rows]
+        defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]
+        defs += [Section(kind, store) for kind, store in self.programs.items() if store]
+        defs.append(phrases)
+        named = {s for t in self.used for s in code.symbols(self.routines[t])}
         state = {
             cell: [(k, size) for k, size in names.items() if k in named]
             for cell, names in STATE.items()
         }
-        return Header(
-            VERSION,
+        header = Header(
             self.meta,
             clock=CLOCK,
-            tempo=(HR, self.tempo - HR),
-            slots=SLOTS,
-            state={c: n for c, n in state.items() if n} or None,
+            tempo=1,
+            slots=self.slots(),
+            state={cell: names for cell, names in state.items() if names} or None,
         )
-
-    def document(self) -> str:
-        """The document of the song to its loop."""
-        rows, loop = self.timeline()
-        if "leg" in self.used:
-            self._legatos(self.frames)
-        phrases = Section("phrase", [(name, list(events)) for events, name in self.phrases.items()])
-        song = [SongRow(rows[0], [phrases])] + [SongRow(r) for r in rows[1:]]
-        defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]
-        defs += [Section(kind, store) for kind, store in self.programs.items() if store]
-        named = {s for t in self.used for s in code.symbols(ROUTINES[t])}
         mods = [
-            (signature(name, code.params(ROUTINES[name])), Code(ROUTINES[name]))
+            (signature(name, code.params(self.routines[name])), Code(self.routines[name]))
             for name in self.used
         ]
-        doc = Document(
-            self._header(named),
-            mods=mods,
-            defs=defs,
-            init=[Event("-", commands={"vol": 15})] + [Event("-")] * (VOICES - 1),
-            rows=song,
-            loop=loop,
-        )
+        init = [Event("-", dummy) for dummy in dummies]
+        init[0] = Event("-", dummies[0], {"vol": 15})
+        doc = Document(header, mods=mods, defs=defs, init=init, rows=song, loop=loop)
         return printed(doc)
 
 
 def transcriber(raw: bytes, subtune: int = 0, frames: int = 20000) -> Transcriber:
-    """The transcriber of one subtune of a SID, its legatos checked over ``frames``."""
+    """The transcriber of one subtune of a SID."""
     psid = SidImage.from_bytes(raw).header
     meta = (("title", psid.name), ("author", psid.author), ("released", psid.released))
     swm = parse_sid_song(raw, subtune + 1)
@@ -546,32 +606,12 @@ def transcribe(raw: bytes, subtune: int = 0) -> str:
     return transcriber(raw, subtune).document()
 
 
-def standard(swm) -> SWMPlayer:
-    """The reference player of ``swm`` with the document's note table: note k + 1 sounds
-    ``F(k)`` at :data:`CLOCK`; SETFMOD's amplitudes still read the native table."""
-    ref = SWMPlayer(swm)
-    native = ref.freq_lo, ref.freq_hi
-    words = [frequency(k - 1, CLOCK[1]) for k in range(256)]
-    table = bytes(w & 0xFF for w in words), bytes(w >> 8 for w in words)
-    ref.freq_lo, ref.freq_hi = table
-    freqmod = ref._freqmod  # pylint: disable=protected-access
-
-    def native_freqmod(raw: int, dpitch: int) -> tuple:
-        ref.freq_lo, ref.freq_hi = native
-        try:
-            return freqmod(raw, dpitch)
-        finally:
-            ref.freq_lo, ref.freq_hi = table
-
-    ref._freqmod = native_freqmod  # pylint: disable=protected-access
-    return ref
-
-
 def compare(swm, text: str, frames: int = 20000):
     """The ``(tick, register, ours, theirs)`` cells where document ``text``'s grid differs
-    from the reference player's over ``frames`` ticks."""
+    from the reference player's at the standard note table (:func:`standard`) over ``frames``
+    ticks."""
     ours = play(text, ticks=frames)
-    theirs = np.asarray(SWMPlayer(swm).render_grid(len(ours)), dtype=np.uint8)
+    theirs = np.asarray(standard(swm).render_grid(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, theirs)
 
 
