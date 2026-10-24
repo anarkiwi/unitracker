@@ -31,6 +31,12 @@ the document and the guarantee holds; a refused composite is split in halves, ea
 on the result of the one before, so `k` refusals of `n` candidates cost `O(k log n)` proofs. tqdm
 shows each pass's progress.
 
+An edit the guarantee refuses alone is remembered (`refusals.py`) by its pass, its label and the
+values of the parts of the document it touches (the templates, records and lines its application
+changes), the definitions those reference, transitively, and the header, tables, init row and
+rows. A later round's candidate of the same key is not proved again, and is reported refused; any
+change to one of those parts proposes it afresh.
+
 ## The guarantee
 
 `Guarantee(text, ticks)` holds for a candidate whose grid (`guarantee.grid`) equals the input's:

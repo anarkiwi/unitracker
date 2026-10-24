@@ -1,5 +1,6 @@
 """The optimiser's passes over documents: the tokens each pass saved, each over the song's
-length (its first loop at most ``--limit`` ticks), the edits each kept and the renames.
+length (its first loop at most ``--limit`` ticks), the edits each kept and the renames, and
+the seconds each optimisation took.
 
     python tools/passes_eval.py DOC.yaml ... [--limit N] [--jobs J] [--out DIR]
 """
@@ -7,6 +8,7 @@ length (its first loop at most ``--limit`` ticks), the edits each kept and the r
 import argparse
 import os
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -22,12 +24,15 @@ def evaluate(path: Path, limit: int, out: Path | None) -> tuple:
     edits, the optimised text written to ``out``."""
     text = path.read_text(encoding="utf-8")
     ticks = song_ticks(text, limit)
+    start = time.perf_counter()
     result = optimise(text, ticks)
+    seconds = time.perf_counter() - start
     if out is not None:
         (out / path.name).write_text(result.text, encoding="utf-8")
     counts = {name: sum(n == name for n, _ in result.kept) for name, _ in PASSES + (("names", 0),)}
     cells = [f"{-result.saved[n]:+d} ({counts[n]})" for n, _ in PASSES + (("names", 0),)]
-    row = f"| {path.stem} | {ticks} | {result.before} | {' | '.join(cells)} | {result.after} |"
+    head = f"| {path.stem} | {ticks} | {result.before} |"
+    row = f"{head} {' | '.join(cells)} | {result.after} | {seconds:.1f} |"
     return row, [f"{n}: {label}" for n, label in result.kept] + [f"refused: {len(result.refused)}"]
 
 
@@ -42,8 +47,8 @@ def main(argv=None) -> int:
     if args.out:
         args.out.mkdir(parents=True, exist_ok=True)
     names = [n for n, _ in PASSES] + ["names"]
-    print(f"| tune | ticks | tokens | {' | '.join(names)} | after |")
-    print("|---" * (len(names) + 4) + "|")
+    print(f"| tune | ticks | tokens | {' | '.join(names)} | after | seconds |")
+    print("|---" * (len(names) + 5) + "|")
     run = partial(evaluate, limit=args.limit, out=args.out)
     with ProcessPoolExecutor(args.jobs) as pool:
         results = list(tqdm(pool.map(run, args.documents), total=len(args.documents), unit="doc"))
