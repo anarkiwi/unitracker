@@ -114,3 +114,55 @@ TEMPLATE = doc(
     "        p1: [C4.i1, -*3, D4.i2, -*3, E4.i3, -*3, F4.i1!run:c2, -*3]\n",
     mods="",
 )
+
+# code modulators that are exactly expressions: a 16-bit slide, a note on φ 0 kept after, a
+# square-wave vibrato (two calls) on a second slot and a pulse width sweep
+EXACT_CODE = (
+    "mod:\n"
+    "  slide(c): |\n    clc\n    lda v\n    adc #<c\n    sta v\n    lda v+1\n    adc #>c\n"
+    "    sta v+1\n    rts\n"
+    "  start(): |\n    lda phi\n    ora phi+1\n    bne done\n    sta s\n    ldy nn\n"
+    "    lda F.lo,y\n    sta v\n    lda F.hi,y\n    sta v+1\n    done:\n    rts\n"
+    "  wob(c): |\n    lda phi\n    and #2\n    bne dn\n    clc\n    lda v\n    adc #c\n"
+    "    sta v\n    lda v+1\n    adc #0\n    sta v+1\n    rts\n    dn:\n    sec\n    lda v\n"
+    "    sbc #c\n    sta v\n    lda v+1\n    sbc #0\n    sta v+1\n    rts\n"
+)
+EXACT = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: c1, pw: slide(40), a.freq: start(), b.freq: wob(8)}\n"
+    "        i2: {ad: 9, ctrl: c1, pw: slide(24), a.freq: start(), b.freq: wob(16)}\n"
+    "      ctrl:\n"
+    "        c1: [{ctrl: 65}, end]\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -*9, E4.i2, -*9, G4.i1, -*9]\n",
+    head="voices: 1\nslots: {freq: {a: {}, b: {}}}\nstate: {freq: {s: 1}}\n",
+    mods=EXACT_CODE,
+)
+
+# a pulse width of 2048 plus 0 to 7 of a shift register's noise
+NOISY = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: [{ctrl: 65}, end], pw: jit()}\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -*30]\n",
+    head="voices: 1\nstate: {pw: {r: 1}}\n",
+    mods="mod:\n  jit(): |\n    lda r\n    bne go\n    lda #1\n    go:\n    asl\n    bcc nx\n"
+    "    eor #29\n    nx:\n    sta r\n    and #7\n    sta v\n    lda #8\n    sta v+1\n    rts\n",
+)
+
+# put() keeps the frequency but stores the note that get() adds: put alone fits and is refused,
+# while slide() on the pulse width and the cutoff is kept
+COUPLED = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: c1, pw: slide(8), filter: f1, a.freq: put(), b.freq: get()}\n"
+    "      ctrl:\n"
+    "        c1: [{ctrl: 65}, end]\n"
+    "      filter:\n"
+    "        f1: [{cut: slide(3), res: 12, route: 1, mode: 16}, end]\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -*5, E4.i1, -*5]\n",
+    head="voices: 1\nslots: {freq: {a: {}, b: {}}}\nstate: {freq: {s: 1}}\n",
+    mods="mod:\n  put(): |\n    lda nn\n    sta s\n    rts\n"
+    "  get(): |\n    clc\n    lda v\n    adc s\n    sta v\n    lda v+1\n    adc #0\n    sta v+1\n"
+    "    rts\n" + EXACT_CODE[5 : EXACT_CODE.index("  start")],
+)

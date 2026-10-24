@@ -4,7 +4,9 @@ import pytest
 from unitracker_grammar.document import printed, read
 
 from unitracker import cli
-from unitracker.optimiser import Guarantee, optimise
+import optimiser_docs as D
+
+from unitracker.optimiser import Guarantee, fit, optimise
 from unitracker.optimiser.__main__ import main
 from unitracker.optimiser.inline import candidates, cyclic, definitions, inline, inlined
 
@@ -139,3 +141,11 @@ def test_a_lifted_document_inline_plays_its_grid(tune, mode, request, tmp_path):
     doc = read(text)
     assert printed(doc) == text and (mode == "single" or not doc.defs and not doc.mods)
     assert Guarantee(cli.lift(path.read_bytes()), 3000).holds(text)
+
+
+def test_the_inline_pass_follows_the_lossy_mode():
+    exact = {cell: fit.Tolerance(0, 0) for cell in fit.BITS}
+    lossy = optimise(D.EXACT, lossy=exact)
+    result = optimise(D.EXACT, lossy=exact, inline="all")
+    assert result.lossy.text == lossy.lossy.text and not result.doc.defs and not result.doc.mods
+    assert Guarantee(lossy.lossy.text).holds(result.text)

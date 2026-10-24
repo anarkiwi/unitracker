@@ -1,17 +1,17 @@
 """The driver: passes in a fixed order propose edits of the document model; an edit is kept
 when the document shrinks and the guarantee holds, proved in groups split on refusal."""
 
-import functools
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from tqdm import tqdm
 from unitracker_grammar.document import Document, printed, read
 
+from unitracker.optimiser import lossy as _lossy
 from unitracker.optimiser import passes, templates
 from unitracker.optimiser.guarantee import Guarantee
 from unitracker.optimiser.inline import inline as inline_definitions
+from unitracker.optimiser.measure import Rewrite, size
 
-ENCODING = "cl100k_base"
 PASSES = (
     ("defaults", passes.defaults),
     ("merge", passes.merge),
@@ -20,29 +20,12 @@ PASSES = (
 )
 
 
-@functools.cache
-def _encoding():
-    import tiktoken  # pylint: disable=import-outside-toplevel
-
-    return tiktoken.get_encoding(ENCODING)
-
-
-def size(doc: Document | str) -> int:
-    """A document's size: its canonical text's token count under :data:`ENCODING`."""
-    return len(_encoding().encode(doc if isinstance(doc, str) else printed(doc)))
-
-
 @dataclass
-class Result:
+class Result(Rewrite):
     """The optimised document, its text, the sizes before and after, each kept edit as
-    ``(pass, label)`` and each refused edit's label."""
+    ``(pass, label)``, each refused edit's label, and the lossy mode's result where it ran."""
 
-    doc: Document
-    text: str
-    before: int
-    after: int
-    kept: list = field(default_factory=list)
-    refused: list = field(default_factory=list)
+    lossy: _lossy.Lossy | None = None
 
 
 class _Run:
@@ -94,22 +77,27 @@ def optimise(  # pylint: disable=too-many-arguments
     ticks: int | None = None,
     order=PASSES,
     rounds: int = 8,
-    progress: bool = False,
     *,
+    progress: bool = False,
+    lossy: dict | None = None,
     inline: str = "named",
 ) -> Result:
     """``text`` rewritten by the passes of ``order``, repeated until a round keeps no edit
-    (at most ``rounds``), every kept edit playing the input's grid (:class:`Guarantee`), then
-    the definitions of ``inline``'s mode written inline (:mod:`unitracker.optimiser.inline`)."""
+    (at most ``rounds``), every kept edit playing the input's grid (:class:`Guarantee`).
+    With ``lossy`` tolerances by cell, the lossy mode (:func:`lossy.simplify`) rewrites
+    ``text`` first, and the passes keep its result's grid; then the definitions of ``inline``'s
+    mode are written inline (:mod:`unitracker.optimiser.inline`)."""
+    before, kept, simplified = size(text), [], None
+    if lossy is not None:
+        simplified = _lossy.simplify(text, ticks, lossy, progress)
+        text = simplified.text
     run = _Run(read(text), Guarantee(text, ticks), progress)
-    before, kept = size(text), []
     for round_ in range(1, rounds + 1):
         found = [(name, e.label) for name, propose in order for e in run.run(name, propose, round_)]
         kept += found
         if not found:
             break
     if inline != "named":
-        holds = Guarantee(printed(run.doc), ticks).holds
-        run.doc, refused = inline_definitions(run.doc, inline, holds)
+        run.doc, refused = inline_definitions(run.doc, inline, run.guarantee.holds)
         run.size, run.refused = size(run.doc), run.refused + refused
-    return Result(run.doc, printed(run.doc), before, run.size, kept, run.refused)
+    return Result(run.doc, printed(run.doc), before, run.size, kept, run.refused, simplified)
