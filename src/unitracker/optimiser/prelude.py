@@ -5,14 +5,14 @@ no call names any more is dropped (docs/optimiser.md)."""
 from collections import defaultdict
 from functools import partial
 
-from unitracker_grammar import code
+from unitracker_grammar import PAL_HZ, code
 from unitracker_grammar.chords import CHORDS
 from unitracker_grammar.document import Call, Document, printed
 
 from unitracker.optimiser import fit
-from unitracker.optimiser.lossy import clock_of, pruned
+from unitracker.optimiser.lossy import pruned
 from unitracker.optimiser.passes import Edit
-from unitracker.optimiser.trace import trace
+from unitracker.optimiser.trace import record
 from unitracker.optimiser.tree import transform, walk
 
 
@@ -22,6 +22,12 @@ def core(call: Call) -> Call:
     for a in call.args:
         args += CHORDS[a] if isinstance(a, str) and a in CHORDS else [a]
     return Call(call.name, tuple(args))
+
+
+def clock_of(doc: Document) -> tuple:
+    """``(clock_hz, rounding)`` of a document's notes."""
+    clock = doc.header.clock or (None, PAL_HZ)
+    return clock[1] or PAL_HZ, "floor" if "floor" in clock[2:] else "round"
 
 
 def _renamed(calls: dict, name: str, doc: Document) -> Document:
@@ -38,7 +44,7 @@ def prelude(doc: Document, ticks: int) -> list:
     calls = sorted((c for c in calls if all(isinstance(a, int) for a in core(c).args)), key=str)
     if not calls:
         return []
-    _, firings = trace(printed(doc), ticks)
+    firings = record(printed(doc), ticks, every=True).firings
     cells = defaultdict(list)
     for (call, cell), rec in sorted(firings.items(), key=lambda kv: kv[0][1]):
         cells[call].append(fit.Firings(rec, cell, *clock_of(doc)))

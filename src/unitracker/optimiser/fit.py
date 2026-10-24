@@ -247,16 +247,18 @@ SHAPES = {
     ),
 }
 TABLES = ("tab", "loop")
+LATE, HELD = 1, 2
 
 
 @dataclass
 class Form:
-    """A fitted form: its shape, base, whether it waits ``d`` φ before acting (``delay``), its
-    parameters and its errors over the firings it was fitted to."""
+    """A fitted form: its shape, base, how it waits ``d`` φ before acting (``delay``: 0 not,
+    :data:`LATE` adding nothing to its base, :data:`HELD` passing its input), its parameters
+    and its errors over the firings it was fitted to."""
 
     shape: str
     base: str
-    delay: bool
+    delay: int
     params: dict
     err: np.ndarray = field(repr=False)
 
@@ -269,9 +271,13 @@ class Form:
         """The form's template text, every parameter by its name."""
         if self.shape == "first":
             return f"v + ({PHI} < l)*({self.base} + q - v)"
+        if self.shape == "toward":
+            return f"v + max(-s, min(s, {self.base} - v))"
         g = SHAPES[self.shape][0]
-        if self.delay:
+        if self.delay & LATE:
             g = f"({PHI} >= d)*({g})"
+        if self.delay & HELD:
+            return f"v + ({PHI} >= {'e' if self.delay & LATE else 'd'})*({self.base} + {g} - v)"
         return g if self.base == "0" else f"{self.base} + {g}"
 
 
@@ -318,9 +324,15 @@ class Firings:  # pylint: disable=too-few-public-methods,too-many-instance-attri
             at = np.maximum.accumulate(np.where(anchor, np.arange(len(phi)), 0))
             first = (self.base[form.base] + p["q"]) & self.mask
             return np.where(phi < p["l"], first, v)[at]
+        if form.shape == "toward":
+            start = self.start == np.arange(len(phi))
+            return approach(start, v, self.base[form.base], p["s"]) & self.mask
         g = SHAPES[form.shape][2](phi, p)
-        if form.delay:
+        if form.delay & LATE:
             g = np.where(phi >= p["d"], g, 0)
+        if form.delay & HELD:
+            held = p["e"] if form.delay & LATE else p["d"]
+            return np.where(phi >= held, (self.base[form.base] + g) & self.mask, v)
         if form.base != "v":
             return (self.base[form.base] + g) & self.mask
         total = np.cumsum(g)
@@ -345,40 +357,90 @@ def _first(fir: Firings) -> list:
     return out
 
 
+def _toward(fir: Firings) -> list:
+    """The ``toward`` forms: the input moved toward a note by at most ``s`` per firing, ``s``
+    the median move."""
+    moves = np.abs(signed(fir.out - fir.base["v"], fir.bits))
+    if not moves.any() or fir.cell != "freq":
+        return []
+    s = int(np.median(moves[moves > 0]))
+    return [("toward", base, 0, {"s": s}) for base in ("F(N)", "F(n)")]
+
+
+def approach(start: np.ndarray, v: np.ndarray, target: np.ndarray, s: int) -> np.ndarray:
+    """Each firing's input moved toward ``target`` by at most ``s``, a firing not ``start``ing
+    a chain taking the one before's output as its input."""
+    out = np.empty_like(v)
+    prev = 0
+    for i, given in enumerate(v):
+        x = given if start[i] else prev
+        prev = x + min(s, max(-s, target[i] - x))
+        out[i] = prev
+    return out
+
+
+def _delays(shape: str, base: str, late: int, held: int, after: int) -> dict:
+    """``{delay: its parameters}`` a ``shape`` on ``base`` is fitted with: none, adding nothing
+    until φ ``late``, passing the input until φ ``held``, and that then nothing until
+    ``after``."""
+    out = {0: {}}
+    shaped = shape not in ("keep", *TABLES)
+    if late and shaped:
+        out[LATE] = {"d": late}
+    if held and base != "v":
+        out[HELD] = {"d": held}
+        if after > held and shaped:
+            out[HELD | LATE] = {"e": held, "d": after}
+    return out
+
+
+# pylint: disable-next=too-many-locals
 def candidates(fir: Firings) -> list:
     """``(shape, base, delay, params)`` of every form fitted to ``fir``."""
-    out = _first(fir)
+    out = _first(fir) + _toward(fir)
+    moves = fir.out != fir.base["v"]
+    held = int(fir.phi[moves].min()) if moves.any() else 0
     for base, value in fir.base.items():
         r = fir.out if base == "0" else signed(fir.out - value, fir.bits)
         u, m, w = summary(fir.phi, r)
         moved = u[m != 0]
-        d = int(moved.min()) if base != "0" and len(moved) else 0
+        late = int(moved.min()) if base != "0" and len(moved) else 0
+        later = moved[moved >= held] if held and base not in ("0", "v") else ()
+        after = int(later.min()) if len(later) else 0
         for shape, (_, fit, _) in SHAPES.items():
-            if (
-                shape == "keep"
-                and base == "0"
-                or shape == "off"
-                and (base, fir.cell) == ("0", "freq")
-            ):
+            if (shape, base) == ("keep", "0") or (shape, base, fir.cell) == ("off", "0", "freq"):
                 continue
-            for delay in (False, True) if d and shape not in ("keep", *TABLES) else (False,):
-                keep = u >= d if delay else slice(None)
+            for delay, wait in _delays(shape, base, late, held, after).items():
+                keep = u >= wait.get("d", 0)
                 params = fit(u[keep], m[keep], w[keep])
                 if params is not None:
-                    out.append((shape, base, delay, params | ({"d": d} if delay else {})))
+                    out.append((shape, base, delay, params | wait))
+    return out
+
+
+def forms(fir: Firings, tol: Tolerance) -> list:
+    """Every form fitted to ``fir``, with its errors under ``tol``'s measure."""
+    out = []
+    for shape, base, delay, params in candidates(fir):
+        form = Form(shape, base, delay, params, np.empty(0))
+        form.err = error(fir.cell, tol, fir.predict(form), fir.out)
+        out.append(form)
     return out
 
 
 def fits(fir: Firings, tol: Tolerance, prelude: bool = True) -> list:
     """The forms fitted to ``fir`` whose errors keep to ``tol``, and where ``prelude`` the
     prelude calls that play the firings or one of those forms' values exactly."""
-    out = []
-    for shape, base, delay, params in candidates(fir):
-        form = Form(shape, base, delay, params, np.empty(0))
-        form.err = error(fir.cell, tol, fir.predict(form), fir.out)
-        if within(form.err, tol):
-            out.append(form)
+    out = [f for f in forms(fir, tol) if within(f.err, tol)]
     return out + (prelude_forms(fir, out) if prelude else [])
+
+
+def nearest(fir: Firings, tol: Tolerance) -> str:
+    """The form fitted to ``fir`` of least maximum error, and its 95th percentile and maximum
+    error, as text."""
+    best = min(forms(fir, tol), key=lambda f: (stats(f.err)[2], stats(f.err)[1]))
+    _, p95, top = stats(best.err)
+    return f"{stem(*best.key)} p95 {p95:.1f} max {top:.1f}"
 
 
 # ---- the prelude's templates, each fitted exactly ---------------------------------------------
@@ -542,13 +604,13 @@ def prelude_call(firings: list) -> tuple | None:
     return cheapest(calls)
 
 
-def prelude_forms(fir: Firings, forms: list) -> list:
+def prelude_forms(fir: Firings, fitted: list) -> list:
     """A ``prelude`` :class:`Form` per prelude template, its first call that plays the firings
-    exactly, or else the values one of ``forms`` predicts (a chain's firing on the value the
+    exactly, or else the values one of ``fitted`` predicts (a chain's firing on the value the
     one before predicts), with that form's errors."""
     sources = [(fir.base["v"], fir.out, np.zeros(len(fir.out)))]
     chained = fir.start != np.arange(len(fir.out))
-    for form in forms:
+    for form in fitted:
         pred = fir.predict(form)
         sources.append((np.where(chained, np.roll(pred, 1), fir.base["v"]), pred, form.err))
     out, seen = [], set()
@@ -559,5 +621,94 @@ def prelude_forms(fir: Firings, forms: list) -> list:
         seen.add(key)
         for name, args in prelude_calls(fir, v, values):
             if name not in {f.base for f in out}:
-                out.append(Form("prelude", name, False, {"args": args}, err))
+                out.append(Form("prelude", name, 0, {"args": args}, err))
     return out
+
+
+# ---- names: a template's name by its shape and base, its parameters' by their role ------------
+
+_KIND = {"v": "v", "0": "0", "F(N)": "N", "F(n)": "n"}
+_STEMS = {
+    "keep": {"v": "thru", "N": "pitch"},
+    "off": {"v": "ramp", "0": "level", "N": "detune"},
+    "lin": {"v": "accel", "0": "line", "N": "glide"},
+    "up": {"v": "accelup", "0": "rise", "N": "glideup"},
+    "down": {"v": "acceldown", "0": "fall", "N": "glidedown"},
+    "sq": {"v": "stepsq", "0": "square", "N": "vibsq"},
+    "tri": {"v": "steptri", "0": "tri", "N": "vib"},
+    "tab": {"v": "steps", "0": "seq", "N": "pitchseq"},
+    "loop": {"v": "stepcycle", "0": "cycle", "N": "pitchcycle"},
+    "first": {"0": "start", "N": "note"},
+    "toward": {"N": "glideto"},
+}
+_ROLES = {
+    "q": {"v": "step", "0": "lo", "N": "offset"},
+    "s": {"v": "accel", "0": "step", "N": "step"},
+    "m": "limit",
+    "w": "depth",
+    "o": "phase",
+    "h": "half",
+    "k": "at",
+    "l": "last",
+    "p": "period",
+    "z": "bias",
+    "d": "after",
+    "e": "held",
+}
+_ALTERNATES = {
+    "step": ("inc", "delta"),
+    "lo": ("low", "floor"),
+    "offset": ("shift", "detune"),
+    "accel": ("rate", "curve"),
+    "limit": ("cap", "bound"),
+    "depth": ("amp", "swing"),
+    "phase": ("skew", "lag"),
+    "half": ("width", "span"),
+    "at": ("pos", "origin"),
+    "last": ("tail", "stop"),
+    "period": ("cycle", "repeat"),
+    "bias": ("lift", "raise"),
+    "after": ("delay", "onset"),
+    "held": ("hold2", "keepin"),
+    "value": ("val", "amount"),
+    "len": ("count", "ticks"),
+}
+_NEUTRAL = {"q": 0, "o": 0, "k": 0}
+
+
+def natural(shape: str, param: str, values) -> bool:
+    """Whether ``param`` of a ``shape`` form stays a parameter of its template with
+    ``values`` in its calls: any but a table's ``z`` and one at its neutral value in all."""
+    neutral = 1 if (shape, param) == ("first", "l") else _NEUTRAL.get(param)
+    return param != "z" and any(x != neutral for x in values)
+
+
+def stem(shape: str, base: str, delay: int) -> str:
+    """A form's template name by what it does: ``ramp`` a constant step on the input,
+    ``level`` a constant, ``vib`` a triangle about the note; ``ev`` before one about the event
+    note, ``late`` before one adding nothing, ``held`` one passing its input, until φ ``d``."""
+    kind = _KIND[base]
+    name = _STEMS[shape].get("N" if kind == "n" else kind, shape)
+    return ("", "late", "held", "heldlate")[delay] + ("ev" if kind == "n" else "") + name
+
+
+def role(shape: str, base: str, param: str) -> str:
+    """Parameter ``param``'s name in a form of ``shape`` on ``base``."""
+    if shape == "first":
+        return {"q": "value" if base == "0" else "offset", "l": "len"}[param]
+    if shape == "off" and base == "0":
+        return "value"
+    named = _ROLES[param]
+    return named if isinstance(named, str) else named[_KIND[base] if base != "F(n)" else "N"]
+
+
+def vacant(name: str, taken) -> str:
+    """``name``, else its first alternate, else ``name`` and the least count, not in
+    ``taken``."""
+    for option in (name, *_ALTERNATES.get(name, ())):
+        if option not in taken:
+            return option
+    k = 2
+    while f"{name}{k}" in taken:
+        k += 1
+    return f"{name}{k}"
