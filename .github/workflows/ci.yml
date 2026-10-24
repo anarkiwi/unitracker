@@ -33,4 +33,3 @@ jobs:
       - run: pylint src
       - run: pylint --disable=missing-function-docstring tests tools
       - run: pytest -n auto --cov=unitracker --cov-fail-under=85
-
