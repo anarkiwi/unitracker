@@ -16,6 +16,7 @@ convert native pitch, pulse and filter modulations to proved integer expressions
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser over any canonical document: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
 | [docs/porting.md](docs/porting.md) | bringing another playroutine to unitracker |
 | [docs/direct/goattracker2.md](docs/direct/goattracker2.md) | a standalone GoatTracker 2 transcription from pygoattracker's playroutine (`python -m unitracker.direct.goattracker2`) |
+| [docs/direct/sidwizard.md](docs/direct/sidwizard.md) | a standalone SID-Wizard (bare and light builds) transcription from pysidwizard's playroutine (`python -m unitracker.direct.sidwizard`) |
 
 ## Install
 
