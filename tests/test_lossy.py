@@ -47,18 +47,18 @@ def test_code_that_is_exactly_an_expression_is_fitted_exactly():
     assert not any(isinstance(body, Code) for _, body in doc.mods)
     assert doc.header.state is None and not result.refused
     assert {r.name for r in result.kept} == {"slide", "start", "wob"}
-    assert dict((k, str(v)) for k, v in doc.mods)["stepsq(step, half)"] == canonical(
+    assert dict((k, str(v)) for k, v in doc.mods)["stepsq(step,half)"] == canonical(
         "v + step - 2*step*(phi // half % 2)"
     )
-    assert "b.freq: stepsq(8,2)" in result.text and "b.freq: stepsq(16,2)" in result.text
-    assert "pw: ramp(40)" in result.text and "a.freq: note()" in result.text
+    assert "b.freq:stepsq(8,2)" in result.text and "b.freq:stepsq(16,2)" in result.text
+    assert "pw:ramp(40)" in result.text and "a.freq:note()" in result.text
     assert np.array_equal(play(result.text), play(D.EXACT))
     assert result.after < result.before and all(s == (0, 0, 0) for s in result.stats.values())
 
 
 def test_a_looser_tolerance_trades_fidelity_for_a_simpler_form():
     result = lossy.simplify(D.EXACT, None)
-    assert "a.freq: pitch()" in result.text and "b.freq" not in result.text
+    assert "a.freq:pitch()" in result.text and "b.freq" not in result.text
     assert "stepsq(" not in result.text
     p50, p95, top = result.stats["freq"]
     assert 0 < p95 <= fit.TOLERANCES["freq"].p95 and top <= fit.TOLERANCES["freq"].max
@@ -108,7 +108,7 @@ def test_check_refuses_a_text_that_does_not_play_or_differs_elsewhere():
     reference = play(D.EXACT)
     assert not lossy.check(reference, "nonsense", None, {}, fit.TOLERANCES).exact
     assert not lossy.check(reference[:-1], D.EXACT, None, {}, fit.TOLERANCES).exact
-    other = D.EXACT.replace("ad: 9", "ad: 8", 1)
+    other = D.EXACT.replace("ad:9", "ad:8", 1)
     verdict = lossy.check(reference, other, None, {("freq", 0): np.array([0])}, fit.TOLERANCES)
     assert not verdict.exact and not verdict.holds(fit.TOLERANCES)
     assert lossy.check(reference, D.EXACT, None, {("pw", 0): np.array([0])}, EXACT).holds(EXACT)
@@ -184,7 +184,7 @@ def test_a_group_sharing_state_is_fitted_jointly_and_its_state_dropped():
     doc = read(result.text)
     assert dict((k, str(v)) for k, v in doc.mods) == {"ramp(step)": "v + step"}
     assert doc.header.state is None and "b.freq" not in result.text
-    assert "a.freq: ramp(8)" in result.text and "a.freq: ramp(16)" in result.text
+    assert "a.freq:ramp(8)" in result.text and "a.freq:ramp(16)" in result.text
     assert np.array_equal(play(result.text), play(D.JOINT)) and not result.unfit
 
 
@@ -198,7 +198,7 @@ def test_a_group_another_slot_fires_inside_is_unfit_and_falls_back():
     result = lossy.simplify(D.INTERLEAVED, None, EXACT)
     assert result.unfit == ["add+set (freq): slot m fires between the group's slots"]
     assert sorted(r.name for r in result.kept) == ["add", "set"]
-    assert "a.freq" not in result.text and "b.freq: ramp(8)" in result.text
+    assert "a.freq" not in result.text and "b.freq:ramp(8)" in result.text
     assert np.array_equal(play(result.text), play(D.INTERLEAVED))
 
 
@@ -233,24 +233,24 @@ def test_a_group_refused_tries_its_other_plans_then_its_templates_own():
 def test_added_templates_are_merged_and_renumbered_from_their_stem():
     before = lossy.Names.of(read(D.JOINT))
     text = (
-        D.JOINT.replace("mod:\n", "mod:\n  ramp3(step): v + step\n  ramp4(step): v + step\n")
-        .replace("a.freq: set(8)", "a.freq: ramp3(8)")
-        .replace("a.freq: set(16)", "a.freq: ramp4(16)")
+        D.JOINT.replace("mod:\n", "mod:\n ramp3(step):v + step\n ramp4(step):v + step\n")
+        .replace("a.freq:set(8)", "a.freq:ramp3(8)")
+        .replace("a.freq:set(16)", "a.freq:ramp4(16)")
     )
     doc, names = lossy.renumbered(read(text), before)
     assert names == {"ramp3": "ramp", "ramp4": "ramp"}
     assert [k for k, _ in doc.mods] == ["ramp(step)", "set(d)", "add()"]
-    assert "a.freq: ramp(8)" in printed(doc) and "a.freq: ramp(16)" in printed(doc)
+    assert "a.freq:ramp(8)" in printed(doc) and "a.freq:ramp(16)" in printed(doc)
     assert lossy.renumbered(read(D.JOINT), before) == (read(D.JOINT), {})
 
 
 def test_a_replaced_template_s_name_is_free_again():
     before = lossy.Names.of(read(D.JOINT))
-    text = D.JOINT.replace(D.JOINT_CODE, "mod:\n  set2(step): v + step\n").replace(
-        "b.freq: add()", "b.freq: none"
+    text = D.JOINT.replace(D.JOINT_CODE, "mod:\n set2(step):v + step\n").replace(
+        "b.freq:add()", "b.freq:none"
     )
     doc, names = lossy.renumbered(read(text.replace("set(", "set2(")), before)
-    assert names == {"set2": "set"} and "a.freq: set(16)" in printed(doc)
+    assert names == {"set2": "set"} and "a.freq:set(16)" in printed(doc)
 
 
 @pytest.mark.parametrize(
@@ -287,7 +287,7 @@ def test_parameters_are_named_by_role_clear_of_reserved_names():
 def test_a_shape_keeps_its_natural_parameters_but_neutral_ones():
     form = fit.Form("sq", "F(N)", 0, {"q": 0, "w": 6, "o": 0, "h": 4}, np.zeros(1))
     sig, body, _, calls = lossy.template([(Call("x"), form)], set())
-    assert sig == "vibsq(depth, half)" and calls == {Call("x"): Call("vibsq", (6, 4))}
+    assert sig == "vibsq(depth,half)" and calls == {Call("x"): Call("vibsq", (6, 4))}
     assert str(body) == canonical("F(N) + depth*(phi // half % 2)")
     note = fit.Form("first", "F(N)", 0, {"q": 0, "l": 1}, np.zeros(1))
     assert lossy.template([(Call("x"), note)], set())[0] == "note()"

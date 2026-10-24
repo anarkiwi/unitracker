@@ -125,13 +125,13 @@ def _label(path: tuple, what: str) -> str:
 def _header_defaults(doc: Document) -> list:
     head, edits = doc.header, []
     if head.tempo in (TEMPO, (TEMPO, TEMPO)):
-        edits.append(Edit(f"tempo: {TEMPO}", partial(_header, {"tempo": None})))
+        edits.append(Edit(f"tempo:{TEMPO}", partial(_header, {"tempo": None})))
     elif isinstance(head.tempo, tuple) and head.tempo[0] == head.tempo[1]:
-        edits.append(Edit("tempo: [a, a]", partial(_header, {"tempo": head.tempo[0]})))
+        edits.append(Edit("tempo:[a,a]", partial(_header, {"tempo": head.tempo[0]})))
     if head.voices == VOICES:
-        edits.append(Edit(f"voices: {VOICES}", partial(_header, {"voices": None})))
+        edits.append(Edit(f"voices:{VOICES}", partial(_header, {"voices": None})))
     if head.clock == (PAL_CYCLES, PAL_HZ):
-        edits.append(Edit("clock: PAL", partial(_header, {"clock": None})))
+        edits.append(Edit("clock:PAL", partial(_header, {"clock": None})))
     return edits
 
 
@@ -149,7 +149,7 @@ def _started_by_notes(doc: Document) -> set:
 
 
 def _first_notes(doc: Document) -> list:
-    """A first row's ``note: +0`` dropped from each control program only a note starts: the
+    """A first row's ``note:+0`` dropped from each control program only a note starts: the
     note clears the rows' notes as it starts the program."""
     names, programs = _started_by_notes(doc), []
     for path, node in walk(doc):
@@ -168,7 +168,7 @@ def _first_notes(doc: Document) -> list:
         note = program.rows[0].get("note") if program.rows else None
         if isinstance(note, int) and note == 0:
             row = path + ("rows", 0)
-            edits.append(Edit(_label(row, "note: +0"), partial(_drop, row, "keys", ("note", note))))
+            edits.append(Edit(_label(row, "note:+0"), partial(_drop, row, "keys", ("note", note))))
     return edits
 
 
@@ -177,11 +177,11 @@ def _event_defaults(path: tuple, event: Event) -> list:
     for key, value in event.commands:
         if key in ("tempo", "vtempo") and isinstance(value, tuple) and value[0] == value[1]:
             respell = partial(_respelled, path, "commands", (key, value), (key, value[0]))
-            edits.append(Edit(_label(path, f"!{key}:a/a"), respell))
+            edits.append(Edit(_label(path, f"{key}:a/a"), respell))
     if event.note in NO_NOTE:
         if ("legato", True) in event.commands:
             legato = partial(_drop, path, "commands", ("legato", True))
-            edits.append(Edit(_label(path, "!legato"), legato))
+            edits.append(Edit(_label(path, "legato"), legato))
         for flag in ("keep_pw", "keep_filter"):
             if getattr(event, flag):
                 edits.append(Edit(_label(path, flag), partial(_set, path, {flag: False})))
@@ -192,15 +192,15 @@ def _event_defaults(path: tuple, event: Event) -> list:
 
 def defaults(doc: Document) -> list:
     """Drop what a document spells at the default it has anyway (semantics.md): header lines,
-    ``wait: 0``, ``hold: 1``, ``a/a`` tempos, ``*1``, a non-note's ``!legato``, ``!pw`` and
-    ``!filter``, a ``none`` of a slot nothing binds (nor, of ``freq``, holds), an instrument's
-    ``none`` and binding equal to its slot's default, a first row's ``note: +0`` only a note
+    ``wait:0``, ``hold:1``, ``a/a`` tempos, ``*1``, a non-note's ``legato``, ``pw`` and
+    ``filter`` flags, a ``none`` of a slot nothing binds (nor, of ``freq``, holds), an instrument's
+    ``none`` and binding equal to its slot's default, a first row's ``note:+0`` only a note
     starts, and a row of only ``wait`` and ``hold`` folded into the hold of the row before."""
     edits = _header_defaults(doc)
     for path, node in walk(doc):
         if isinstance(node, Row):
             edits += [
-                Edit(_label(path, f"{k}: {v}"), partial(_drop, path, "keys", (k, v)))
+                Edit(_label(path, f"{k}:{v}"), partial(_drop, path, "keys", (k, v)))
                 for k, v in node.keys
                 if (k, v) in (("wait", 0), ("hold", 1))
             ]
@@ -258,7 +258,7 @@ def _binding_defaults(doc: Document) -> list:
         mod = default.get((cell, slot))
         if dead or attr == "fields" and (value == NONE or mod is not None and _expr(value) == mod):
             drop = partial(_drop, path, attr, (key, value))
-            edits.append(Edit(_label(path, f"{key}: {value}"), drop))
+            edits.append(Edit(_label(path, f"{key}:{value}"), drop))
     return edits
 
 
@@ -452,5 +452,5 @@ def hoist(doc: Document) -> list:
             (found,) = values
             if len(found) == 1 and found[0] not in _STOPS:
                 hoisted = partial(_hoist, cell, slot.name, found[0])
-                edits.append(Edit(f"{slot.name}.{cell}: {found[0]}", hoisted))
+                edits.append(Edit(f"{slot.name}.{cell}:{found[0]}", hoisted))
     return edits

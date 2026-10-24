@@ -26,46 +26,44 @@ def labels(edits) -> list:
 def test_defaults_drop_what_a_document_spells_at_its_default():
     result = optimise(D.DEFAULTS, order=(("defaults", passes.defaults),))
     assert result.after < result.before and not result.refused
-    assert "tempo" not in result.text and "tick.freq: none" not in result.text
-    assert "c1: [{ctrl: 65}, {ctrl: 64}, end]" in result.text
-    assert "p1: [C4.i1, -, D4, -*3]" in result.text
+    assert "tempo" not in result.text and "tick.freq:none" not in result.text
+    assert "c1:[{ctrl:65},{ctrl:64},end]" in result.text
+    assert "p1:[C4.i1,-,D,-*3]" in result.text
     assert Guarantee(D.DEFAULTS).holds(result.text)
 
 
 def test_defaults_keep_a_none_of_a_slot_something_binds():
     result = optimise(D.DEFAULTS_BOUND, order=(("defaults", passes.defaults),))
-    assert "tick.freq: none}" in result.text
-    assert any(label.endswith("tick.freq: none") for label in result.refused)
+    assert "tick.freq:none}" in result.text
+    assert any(label.endswith("tick.freq:none") for label in result.refused)
 
 
 def test_defaults_drop_header_lines_and_spellings_at_their_defaults():
-    text = D.doc("      phrase:\n        p1: [C4!tempo:7/7!vtempo:5/5, -*3]\n", mods="")
+    text = D.doc("      phrase:\n        p1:[C4 tempo:7/7 vtempo:5/5,-*3]\n", mods="")
     text = text.replace(
-        "voices: 1\n",
-        "clock: {cycles_per_tick: 19656, clock_hz: 985248}\nvoices: 3\ntempo: [5, 5]\n",
+        "voices:1\n",
+        "clock:{cycles_per_tick:19656,clock_hz:985248}\nvoices:3\ntempo:[5,5]\n",
     )
     found = labels(passes.defaults(read(text)))
-    assert {"clock: PAL", "voices: 3", "tempo: [a, a]"} <= set(found)
+    assert {"clock:PAL", "voices:3", "tempo:[a,a]"} <= set(found)
     assert sum("a/a" in label for label in found) == 2
     edited = read(text)
     for edit in passes.defaults(edited):
         edited = edit.apply(edited)
     out = printed(edited)
-    assert "!tempo:7!vtempo:5" in out and "clock" not in out and "tempo: 5\n" in out
+    assert " tempo:7 vtempo:5" in out and "clock" not in out and "tempo:5\n" in out
 
 
 def test_defaults_keep_a_clock_whose_tick_is_not_pal():
-    text = D.doc("      phrase:\n        p1: [C4, -*3]\n", mods="")
-    text = text.replace(
-        "voices: 1\n", "clock: {cycles_per_tick: 9828, clock_hz: 985248}\nvoices: 1\n"
-    )
-    assert "clock: PAL" not in labels(passes.defaults(read(text)))
+    text = D.doc("      phrase:\n        p1:[C4,-*3]\n", mods="")
+    text = text.replace("voices:1\n", "clock:{cycles_per_tick:9828,clock_hz:985248}\nvoices:1\n")
+    assert "clock:PAL" not in labels(passes.defaults(read(text)))
 
 
 def test_defaults_drop_an_instrument_binding_equal_to_its_slot_s_default():
-    text = D.HOIST.replace("voices: 1\n", "voices: 1\nslots: {pw: {pw: {mod: '2048'}}}\n")
+    text = D.HOIST.replace("voices:1\n", "voices:1\nslots:{pw:{pw:{mod:'2048'}}}\n")
     found = labels(passes.defaults(read(text)))
-    assert sum(label.endswith("pw: 2048") for label in found) == 5
+    assert sum(label.endswith("pw:2048") for label in found) == 5
 
 
 def test_merge_makes_identical_definitions_one_and_renames_their_references():
@@ -77,7 +75,7 @@ def test_merge_makes_identical_definitions_one_and_renames_their_references():
         "phrase p2 -> p1",
     ]
     assert "i2" not in result.text and "c2" not in result.text and "wob" not in result.text
-    assert "  - play: [p1]\n" in result.text
+    assert " - play:[p1]\n" in result.text
 
 
 def test_merge_refuses_templates_whose_bindings_keep_their_phase_once_one():
@@ -88,43 +86,43 @@ def test_merge_refuses_templates_whose_bindings_keep_their_phase_once_one():
 def test_merge_names_program_templates_and_their_calls_by_position():
     text = D.doc(
         "      ins:\n"
-        "        i1: {ad: 9, ctrl: arp(7,4)}\n"
-        "        i2: {ad: 9, ctrl: hop(7,4)}\n"
+        "        i1:{ad:9,ctrl:arp(7,4)}\n"
+        "        i2:{ad:9,ctrl:hop(7,4)}\n"
         "      ctrl:\n"
-        "        arp(a, b): [{ctrl: 65, note: +a}, {note: -b}, {pw: walk(b)}, end]\n"
-        "        hop(c, d): [{ctrl: 65, note: +c}, {note: -d}, {pw: walk(d)}, end]\n"
+        "        arp(a,b):[{ctrl:65,note:+a},{note:-b},{pw:walk(b)},end]\n"
+        "        hop(c,d):[{ctrl:65,note:+c},{note:-d},{pw:walk(d)},end]\n"
         "      phrase:\n"
-        "        p1: [C4.i1, -, D4.i2, -*3]\n",
-        mods="mod:\n  walk(s): v + s\n",
+        "        p1:[C4.i1,-,D.i2,-*3]\n",
+        mods="mod:\n walk(s):v + s\n",
     )
     doc = read(text)
     found = passes.merge(doc)
     assert labels(found) == ["ctrl hop -> arp"]
     out = printed(found[0].apply(doc))
-    assert "hop" not in out and "i2: {ad: 9, ctrl: arp(7,4)}" in out
+    assert "hop" not in out and "i2:{ad:9,ctrl:arp(7,4)}" in out
 
 
 def test_hoist_moves_a_binding_every_instrument_carries_into_its_slot_s_default():
     result = optimise(D.HOIST, order=(("hoist", passes.hoist),))
-    assert result.kept == [("hoist", "pw.pw: 2048")]
-    assert "slots: {pw: {pw: {mod: '2048'}}}\n" in result.text and "pw: 2048" not in result.text
+    assert result.kept == [("hoist", "pw.pw:2048")]
+    assert "slots:{pw:{pw:{mod:'2048'}}}\n" in result.text and "pw:2048" not in result.text
 
 
 def test_hoist_is_refused_where_the_default_plays_before_the_first_note():
     result = optimise(D.HOIST_LATE, order=(("hoist", passes.hoist),))
-    assert result.refused == ["pw.pw: 2048"] and not result.kept
+    assert result.refused == ["pw.pw:2048"] and not result.kept
 
 
 def test_hoist_resets_on_note_a_binding_that_reads_phi():
-    text = D.HOIST.replace("pw: 2048", "pw: vib(2)")
-    text = text.replace("voices: 1\n", "voices: 1\n" + D.MODS.split("  wob", maxsplit=1)[0])
+    text = D.HOIST.replace("pw:2048", "pw:vib(2)")
+    text = text.replace("voices:1\n", "voices:1\n" + D.MODS.split(" wob", maxsplit=1)[0])
     (edit,) = passes.hoist(read(text))
-    assert "slots: {pw: {pw: {mod: vib(2), reset: [note]}}}" in printed(edit.apply(read(text)))
+    assert "slots:{pw:{pw:{mod:vib(2),reset:[note]}}}" in printed(edit.apply(read(text)))
 
 
 def test_hoist_proposes_nothing_without_a_common_binding():
     assert not passes.hoist(read(D.MERGE))
-    assert not passes.hoist(read(D.doc("      phrase:\n        p1: [C4, -*3]\n", mods="")))
+    assert not passes.hoist(read(D.doc("      phrase:\n        p1:[C4,-*3]\n", mods="")))
 
 
 def test_the_guarantee_compares_eventually_periodic_grids_forever():
@@ -144,15 +142,13 @@ def test_the_guarantee_plays_to_an_end_a_proved_loop_or_a_tick_count():
     with pytest.raises(GuaranteeError):
         Guarantee(D.LOOPING_CODE)
     guarantee = Guarantee(D.LOOPING)
-    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker: 2.1\n")
-    assert not guarantee.holds(D.LOOPING.replace("D4.i2", "E4.i2"))
+    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker:2.2\n")
+    assert not guarantee.holds(D.LOOPING.replace("D.i2", "E.i2"))
 
 
 def test_a_looping_document_with_code_is_optimised_over_its_tick_count():
-    text = D.LOOPING_CODE.replace(
-        "\n  i1:", "\n  i2: {ad: 9, ctrl: [{ctrl: 65}, end], pw: up(3)}\n  i1:"
-    )
-    text = text.replace("D4, -]", "D4.i2, -]")
+    text = D.LOOPING_CODE.replace("\n i1:", "\n i2:{ad:9,ctrl:[{ctrl:65},end],pw:up(3)}\n i1:")
+    text = text.replace("D,-]", "D.i2,-]")
     result = optimise(text, ticks=100)
     assert ("merge", "ins i1 -> i2") in result.kept
     assert Guarantee(text, 100).holds(result.text)
@@ -182,7 +178,7 @@ def test_the_cli_writes_the_optimised_document_and_its_sizes(tmp_path, capsys):
     assert "before:" in err and "after:" in err and "merge: ins i2 -> i1" in err
     assert Guarantee(D.MERGE).holds(out.read_text(encoding="utf-8"))
     assert main([str(source), "--ticks", "40", "--rounds", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 2.1\n")
+    assert capsys.readouterr().out.startswith("unitracker:2.2\n")
 
 
 @pytest.mark.parametrize("path", sorted(LIFTED.glob("*.yaml")), ids=lambda p: p.stem)
@@ -204,16 +200,14 @@ def test_merge_drops_a_top_level_definition_and_renames_its_references():
 
 def test_template_makes_programs_alike_but_for_integers_one_template_of_calls():
     found = templates.template(read(D.TEMPLATE))
-    assert labels(found) == ["ctrl ctrl_1(t, t2): 3", "restart restart_1(h, ad, sr): 3"]
+    assert labels(found) == ["ctrl ctrl_1(t,t2): 3", "restart restart_1(h,ad,sr): 3"]
     result = optimise(D.TEMPLATE, order=(("template", templates.template),), rename=False)
     assert len(result.kept) == 2 and result.after < result.before
     text = result.text
-    assert (
-        "ctrl_1(t, t2): [{ctrl: 65, note: +t}, {wait: 1, note: +t2}, {wait: 1, note: +0}," in text
-    )
-    assert "restart_1(h, ad, sr): [{hold: h, gate: 0, ad: 15}, {ad: ad, sr: sr}, end]" in text
-    assert "i1: {ad: 9, sr: 240, ctrl: ctrl_1(7,4), restart: restart_1(2,9,240)}" in text
-    assert "!run:ctrl_1(7,3)" in text and "c2" not in text
+    assert "ctrl_1(t,t2):[{ctrl:65,note:+t},{wait:1,note:+t2},{wait:1,note:+0}," in text
+    assert "restart_1(h,ad,sr):[{hold:h,gate:0,ad:15,sr:0},{ad:ad,sr:sr},end]" in text
+    assert "i1:{ad:9,sr:240,ctrl:ctrl_1(7,4),restart:restart_1(2,9,240)}" in text
+    assert " run:ctrl_1(7,3)" in text and "c2" not in text
     assert Guarantee(D.TEMPLATE).holds(text)
 
 

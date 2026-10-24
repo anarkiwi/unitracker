@@ -42,7 +42,7 @@ def _keyed(names: dict, section):
         name = _named(key)
         if name in names:
             params = key[len(name) + 1 : -1]
-            key = signature(names[name], params.split(", ") if params else ())
+            key = signature(names[name], params.split(",") if params else ())
         records.append((key, value))
     return replace(section, records=tuple(records))
 

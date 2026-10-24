@@ -20,7 +20,7 @@ def test_a_goattracker_tune_is_lifted_and_optimised(metal_warrior, tmp_path, cap
     out = tmp_path / "out.yaml"
     argv = [str(metal_warrior), "-o", str(out), "--optimise", "--ticks", "64"]
     assert cli.lift_main(argv) == 0
-    assert out.read_text().startswith("unitracker: ")
+    assert out.read_text().startswith("unitracker:")
     assert " tokens" in capsys.readouterr().err
 
 

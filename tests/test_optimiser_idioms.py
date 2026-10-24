@@ -24,76 +24,76 @@ def test_transpose_folds_a_phrase_shifted_by_a_constant_into_the_first():
     assert [e.label for e in edits] == ["phrase p2 -> p1+2"]
     result = only("transpose", transpose, D.TRANSPOSE)
     assert result.kept == [("transpose", "phrase p2 -> p1+2")] and result.after < result.before
-    assert "p2:" not in result.text and "  - play: [p1+1]\n" in result.text
+    assert "p2:" not in result.text and " - play:[p1+1]\n" in result.text
     assert "p3:" in result.text and Guarantee(D.TRANSPOSE).holds(result.text)
 
 
 def test_transpose_writes_no_zero_transpose_and_skips_phrases_without_notes():
-    text = D.TRANSPOSE.replace("[p2-1]", "[p2-2]").replace("p3: [C4.i1,", "p3: [off,")
-    text = text.replace("F4, G4, -, C5,", "-, -, -, -,")
+    text = D.TRANSPOSE.replace("[p2-1]", "[p2-2]").replace("p3:[C4.i1,", "p3:[off,")
+    text = text.replace("F,G,-,C5,", "-,-,-,-,")
     out = transpose(read(text))[0].apply(read(text))
-    assert "  - play: [p1]\n  - play: [p1]\n" in printed(out)
+    assert " - play:[p1]\n - play:[p1]\n" in printed(out)
     assert len(transpose(read(text))) == 1
 
 
 def test_transpose_keeps_a_phrase_whose_fold_costs_more_than_it_saves():
-    text = D.TRANSPOSE.replace("p1: [C4.i1, -, E4, G4, -, C5, -*3]", "p1: [C4.i1, -]")
-    text = text.replace("p2: [D4.i1, -, F#4, A4, -, D5, -*3]", "p2: [D4.i1, -]")
-    text = text.replace("[p2-1]", "[p2]" + "\n  - play: [p2]" * 8)
+    text = D.TRANSPOSE.replace("p1:[C4.i1,-,E4,G4,-,C5,-*3]", "p1:[C4.i1,-]")
+    text = text.replace("p2:[D4.i1,-,f4,A4,-,D5,-*3]", "p2:[D4.i1,-]")
+    text = text.replace("[p2-1]", "[p2]" + "\n - play:[p2]" * 8)
     result = only("transpose", transpose, text)
     assert not result.kept and result.text == text
 
 
 def test_snap_drops_a_jump_to_the_note_or_ends_the_bindings_it_followed():
     edits = snap.snap(read(D.SNAP), 100)
-    assert [e.label for e in edits] == ["p1/2: tick.freq: snap()", "p1/6: tick.freq: snap()"]
+    assert [e.label for e in edits] == ["p1/2: tick.freq:snap()", "p1/6: tick.freq:snap()"]
     result = only("snap", snap.snap, D.SNAP)
     assert len(result.kept) == 2 and Guarantee(D.SNAP).holds(result.text)
-    assert "E4!legato, -, D4.i2, -, G4!freq:none!legato" in result.text
-    assert "E4!tick.freq:up()!legato" in result.text
-    unbound = D.SNAP.replace("D4.i2, -, E4!tick.freq:up()", "C4.i1, -, E4!tick.freq:up()")
-    assert [e.label for e in snap.snap(read(unbound), 100)] == ["p1/2: tick.freq: snap()"]
+    assert "E legato,-,D.i2,-,G freq:none legato" in result.text
+    assert "E tick.freq:up() legato" in result.text
+    unbound = D.SNAP.replace("D.i2,-,E tick.freq:up()", "C4.i1,-,E tick.freq:up()")
+    assert [e.label for e in snap.snap(read(unbound), 100)] == ["p1/2: tick.freq:snap()"]
 
 
 def test_snap_is_refused_where_the_modulator_writes_state_read_later():
     sites = snap.sites(D.SNAP_STATE, 100)
     assert [s.exact for s in sites.values()] == [True, False]
     result = only("snap", snap.snap, D.SNAP_STATE)
-    assert result.refused == ["p1/2: freq: snapc()"] and result.text == D.SNAP_STATE
+    assert result.refused == ["p1/2: freq:snapc()"] and result.text == D.SNAP_STATE
 
 
 def test_defaults_drop_an_instrument_none_that_ends_no_binding():
     result = only("defaults", passes.defaults, D.INS_NONE)
-    assert "i1: {ad: 9, ctrl: c1}" in result.text
-    assert "i2: {ad: 8, ctrl: c1, freq: none}" in result.text
-    assert "defs/0/records/1/1: freq: none" in result.refused
-    assert "c1: [{hold: 3, ctrl: 65}, {ctrl: 64}, end]" in result.text
+    assert "i1:{ad:9,ctrl:c1}" in result.text
+    assert "i2:{ad:8,ctrl:c1,freq:none}" in result.text
+    assert "defs/0/records/1/1: freq:none" in result.refused
+    assert "c1:[{hold:3,ctrl:65},{ctrl:64},end]" in result.text
     assert Guarantee(D.INS_NONE).holds(result.text)
 
 
 def test_defaults_fold_empty_rows_together_and_refuse_a_restart_s_last():
-    text = D.INS_NONE.replace("{}, {ctrl: 64}", "{}, {wait: 1}, {ctrl: 64}")
+    text = D.INS_NONE.replace("{},{ctrl:64}", "{},{wait:1},{ctrl:64}")
     result = only("defaults", passes.defaults, text)
-    assert "c1: [{hold: 5, ctrl: 65}, {ctrl: 64}, end]" in result.text
-    looped = read(D.INS_NONE.replace("{ctrl: 64}, end]", "{ctrl: 64}, {}, {loop: 1}]"))
+    assert "c1:[{hold:5,ctrl:65},{ctrl:64},end]" in result.text
+    looped = read(D.INS_NONE.replace("{ctrl:64},end]", "{ctrl:64},{},{loop:1}]"))
     found = [e.label for e in passes.defaults(looped) if "{}" in e.label]
     assert found == ["defs/1/records/0/1/rows/3: {}"]
     result = only("defaults", passes.defaults, D.RESTART_EMPTY)
     assert any(label.endswith("rows/2: {}") for label in result.refused)
-    assert "{hold: 2, ad: 9, sr: 240}, {}, end]" in result.text
+    assert "{hold:2,ad:9,sr:240},{},end]" in result.text
 
 
 def test_names_name_generated_templates_by_their_shape():
     result = optimise(D.TEMPLATE, order=(("template", templates.template),))
     assert ("names", "ctrl_1 -> arp") in result.kept and ("names", "restart_1 -> hr") in result.kept
-    assert "arp(t, t2): [{ctrl: 65" in result.text and "!run:arp(7,3)" in result.text
-    assert "ctrl_1" not in result.text and "hr(h, ad, sr): [" in result.text
+    assert "arp(t,t2):[{ctrl:65" in result.text and " run:arp(7,3)" in result.text
+    assert "ctrl_1" not in result.text and "hr(h,ad,sr):[" in result.text
     assert Guarantee(D.TEMPLATE).holds(result.text)
 
 
 def test_names_number_a_taken_stem_and_keep_other_names():
-    text = D.TEMPLATE.replace("  - end\n", "  - end\n").replace(
-        "ins:\n", "mod:\n  arp(d): v + d\nins:\n", 1
+    text = D.TEMPLATE.replace(" - end\n", " - end\n").replace(
+        "ins:\n", "mod:\n arp(d):v + d\nins:\n", 1
     )
     doc = read(text)
     for edit in templates.template(doc):

@@ -1,6 +1,6 @@
 # defMON to the generic document, directly
 
-`unitracker.direct.defmon` transcribes a defMON replay SID to the generic document (format 2.1)
+`unitracker.direct.defmon` transcribes a defMON replay SID to the generic document (format 2.2)
 from pydefmon's `DefmonPlayer`, which runs the tune's own replay on an emulated 6502. It reads
 the replay's tables and sidTAB from memory after init and its pattern events from the emulated
 calls, without the playroutine library or modfit. It is a standalone prototype: nothing else in
@@ -36,9 +36,9 @@ call.
 | a play call's SID band writes the state the call before left | tick `t` is call `t - 1`'s pattern, sidcall, pitch and pulse work |
 | the ACID step and cutoff write, before the call's other work | the `cut` slots, after the tick's programs: call `t`'s step |
 | init's carried frequency, pulse cell, slide accumulator and note base | `init` and the lead-in phrase `p0` |
-| a pattern event: a counter reaching bit 7 on a full call | an event on its call's tick; a step is one tick (`tempo: 1`) |
+| a pattern event: a counter reaching bit 7 on a full call | an event on its call's tick; a step is one tick (`tempo:1`) |
 | the arranger, armed by init or an ALT event | the timeline: one row per song step, a phrase per voice |
-| the arranger position, the voices' sidcall layers and gate bits recurring | `{loop: k}` |
+| the arranger position, the voices' sidcall layers and gate bits recurring | `{loop:k}` |
 
 The pattern step is read off the emulated calls: before each call, the arranger flag `$10D9` and
 each voice's counter and pattern pointer say what the call runs. The init's note base `$12ED` is
@@ -70,13 +70,13 @@ the cascades' state recurs. A note is a note event; the instrument `i1` binds on
 
 | sidTAB column | row key |
 |---|---|
-| `wgh`, `wgl` | `ctrl: c`, `mask: m`, `gate` (see Gate) |
+| `wgh`, `wgl` | `ctrl:c`, `mask:m`, `gate` (see Gate) |
 | `ad`, `sr` | `ad`, `sr` |
 | `tr` | `note`: `+tr`, or with bit 7 in the absolute build the absolute note `tr & $7F` |
-| `af` | `p.freq`: `pitch()`, `slide(m)` ($80+), `por(m)` ($01-$7F); `pm.pw: pmode(m)` |
-| `pw`, `ps` | `sw.pw: pul(g, p, h)` |
-| `re`, `fv` | layer A's: `res`, `route` (`route_off: 0` for 0, `route_on: m` with bit 3), `mode`; layer B's: `run:` a one-row pulse-slot program of them |
-| `cp`, `acid` | `kNa.cut`, `kNb.cut: acid(g, c, j, k)`, voice `N`'s layer A and B ACID slots |
+| `af` | `p.freq`: `pitch()`, `slide(m)` ($80+), `por(m)` ($01-$7F); `pm.pw:pmode(m)` |
+| `pw`, `ps` | `sw.pw:pul(g,p,h)` |
+| `re`, `fv` | layer A's: `res`, `route` (`route_off:0` for 0, `route_on:m` with bit 3), `mode`; layer B's: `run:` a one-row pulse-slot program of them |
+| `cp`, `acid` | `kNa.cut`, `kNb.cut:acid(g,c,j,k)`, voice `N`'s layer A and B ACID slots |
 
 The replay applies every voice's layer A, then every voice's layer B: layer B's ACID slots fire
 after every voice's layer A slots, and its `$D417`/`$D418` columns run in the pulse slot, whose
@@ -84,7 +84,7 @@ phase follows every voice's control program.
 
 ## Gate
 
-The replay writes `wgh ^ wgl` to the control register: `ctrl` is `wgh | 1` (`!ctrl:1` at init),
+The replay writes `wgh ^ wgl` to the control register: `ctrl` is `wgh | 1` (`ctrl:1` at init),
 the mask `wgl & $FE`, and a row writing either sets `gate` to bit 0 of `wgh ^ wgl`, tracked
 through each program from the bits at its start (part of the program's key). A note turns the
 gate on; where its call leaves the replay's gate off, the note runs the voice's program from its
@@ -97,9 +97,9 @@ tables `P` (portamento) and `R` (slide rates):
 
 | cell | slots | template | replay |
 |---|---|---|---|
-| `freq` | `n` (reset on `note`), `p` | `ninit(k, u, f)`: init's detune, slide accumulator and frequency; `nr()`: a note clears the slide accumulator `s`; `pitch`, `slide`, `por` | the pitch step ($1405) |
-| `pw` | `pz` (reset on `note`), `pm` (reset on `row.freq`), `sw` (reset on `row.pw`) | `pzero`, `pmode(m)`: the pitch mode and slide accumulator mirrored for the pulse step's carry; `pinit(k, f, u)`, `pul(g, p, h)` over the 16-bit cell `w` and step `q` | the pulse step ($1495) |
-| `cut` | `k1a`-`k3a`, `k1b`-`k3b` (reset on `row.cut`), `st` | `acid(g, c, j, k)` sets the offset, accumulator or step; `cinit(u, f, k)` steps it | the ACID step ($10B5) |
+| `freq` | `n` (reset on `note`), `p` | `ninit(k,u,f)`: init's detune, slide accumulator and frequency; `nr()`: a note clears the slide accumulator `s`; `pitch`, `slide`, `por` | the pitch step ($1405) |
+| `pw` | `pz` (reset on `note`), `pm` (reset on `row.freq`), `sw` (reset on `row.pw`) | `pzero`, `pmode(m)`: the pitch mode and slide accumulator mirrored for the pulse step's carry; `pinit(k,f,u)`, `pul(g,p,h)` over the 16-bit cell `w` and step `q` | the pulse step ($1495) |
+| `cut` | `k1a`-`k3a`, `k1b`-`k3b` (reset on `row.cut`), `st` | `acid(g,c,j,k)` sets the offset, accumulator or step; `cinit(u,f,k)` steps it | the ACID step ($10B5) |
 
 A row's `pw` and `cut` bindings reset on their row, so the same call re-applies its columns; a
 row binding any `pw` or `cut` slot binds each of its voice's (a call of no columns keeps the

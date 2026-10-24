@@ -22,7 +22,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      # until they are released
       - run: pip install -e ".[dev]"
       - uses: anarkiwi/pysidtracker/.github/actions/cache@v0.30.0
         with:

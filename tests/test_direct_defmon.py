@@ -143,7 +143,7 @@ def test_main_transcribes_and_verifies(crosseyed, tmp_path, capsys):
     bad = tmp_path / "bad.sid"
     bad.write_bytes(b"PSID")
     assert dm.main([str(crosseyed)]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 2.1\n")
+    assert capsys.readouterr().out.startswith("unitracker:2.2\n")
     assert dm.main(["--verify", "--frames", "300", "--diff", "2", str(crosseyed), str(bad)]) == 0
     out = capsys.readouterr().out
     assert f"{crosseyed}: exact" in out and f"{bad}: SidFormatError" in out

@@ -79,7 +79,7 @@ def test_tunes_play_exactly(name, request):
     raw = request.getfixturevalue(name).read_bytes()
     cells, text = s.verify(raw, frames=3000)
     assert not cells.size, summary(cells, 3)
-    assert "{loop: " in text or text.endswith("  - end\n")
+    assert "{loop:" in text or text.endswith(" - end\n")
     assert "\ntables:" not in text and "F.lo-1,x" in text
 
 
@@ -296,7 +296,7 @@ def test_normal_build_fx_play_exactly(border_odyssey):
     """Slides, portamentos, legato, vibrato and detune FX, small FX, tempo FX."""
     text = exact(song(border_odyssey.read_bytes(), FX_ROWS + [EMPTY] * 10), 1500)
     for name in ("sld", "por", "vfx", "kty", "dfx", "vfq"):
-        assert f"  {name}(" in text
+        assert f" {name}(" in text
 
 
 def test_orderlist_commands_play_exactly(border_odyssey):
@@ -311,7 +311,7 @@ def test_a_lower_voice_takes_the_filter_claimed_in_the_same_tick(mega_run):
     """The player runs the voices last to first: the later voice's note keeps the filter."""
     rows = notes((37, 3), (None, None))
     text = exact(song(mega_run.read_bytes(), notes((37, 4), (None, None)), [rows, rows]))
-    assert ".i3!filter" in text
+    assert ".i3 filter" in text
 
 
 REFUSED = {
@@ -343,7 +343,7 @@ def test_a_filter_row_routes_by_its_fswitch_column(samwise, third):
     keyboard track; any other byte is the track."""
     rows = notes((37, 1), (40, 1))
     text = exact(song(samwise.read_bytes(), rows, i1={"filter_table": bytes((0x91, 0x40, third))}))
-    assert ("route: 4" in text) == (third == 0x84)
+    assert ("route:4" in text) == (third == 0x84)
 
 
 def test_song_refusals(lykia_boss, csillag):
@@ -362,7 +362,7 @@ def test_song_refusals(lykia_boss, csillag):
 
 def test_cli(mega_run, capsys):
     assert s.main([str(mega_run)]) == 0
-    assert capsys.readouterr().out.startswith(f"unitracker: {VERSION}\nmeta: {{title: Mega-Run")
+    assert capsys.readouterr().out.startswith(f"unitracker:{VERSION}\nmeta:{{title:Mega-Run")
     assert s.main(["--verify", "--frames", "400", str(mega_run)]) == 0
     assert f"{mega_run}: exact" in capsys.readouterr().out
 

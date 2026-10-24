@@ -1,5 +1,5 @@
 """The ``snap`` pass: a phrase event's frequency binding under which the voice's frequency is
-``F(N)`` at every tick it lasts, as a lifted "change pitch without retrigger" (a ``!legato``
+``F(N)`` at every tick it lasts, as a lifted "change pitch without retrigger" (a ``legato``
 note bound to a modulator that jumps to the note) is, becomes the cell's own ``F(N)``: the
 binding dropped, or a ``none`` of each frequency slot bound as it applied (docs/optimiser.md)."""
 
@@ -135,7 +135,7 @@ def snap(doc: Document, ticks: int) -> list:
         if len(pairs) != 1 or pairs[0][1] == NONE:
             continue
         nones = tuple((names[k] + ".freq" if k else "freq", NONE) for k in sorted(site.bound))
-        label = _label((phrase, index), f"{pairs[0][0]}: {pairs[0][1]}")
+        label = _label((phrase, index), f"{pairs[0][0]}:{pairs[0][1]}")
         edits.append(Edit(label, partial(_snapped, phrase, index, pairs[0], nones)))
     return edits
 

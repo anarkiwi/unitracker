@@ -193,7 +193,7 @@ def _scaled(params: dict, varying: list) -> dict:
 
 def _cost(made: tuple, occurrences: Counter) -> int:
     sig, body, table, calls = made
-    text = f"  {sig}: {body}\n" + (f"  {table[0]}: {list(table[1])}\n" if table else "")
+    text = f" {sig}:{body}\n" + (f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else "")
     return size(text) + sum(occurrences[c] * size(str(n)) for c, n in calls.items())
 
 
