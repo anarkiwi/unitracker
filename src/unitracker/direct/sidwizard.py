@@ -20,20 +20,17 @@ from unitracker_grammar.document import (
     Code,
     Document,
     Event,
-    Expr,
     Header,
     Instrument,
     Play,
     Program,
     Row,
     Section,
-    Signed,
     Slot,
     SongRow,
     printed,
     signature,
 )
-from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
 from unitracker.direct import cli
@@ -41,14 +38,12 @@ from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
 from unitracker.direct.swtables import (
     Tables,
     TranscribeError,
-    _col,
     _rows3,
-    _signed,
     _swept_first,
     _unnoted,
 )
 from unitracker.direct.swcode import STATE, mirror_templates, templates, track_templates
-from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, TraceError, standard, trace
+from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, trace
 
 VERSION = "1.23"
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
@@ -119,7 +114,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         lo, hi = self.ref._freqmod(raw, 0)  # pylint: disable=protected-access
         return {"g": hi << 8 | lo}
 
-    def counter(self, kind: int, freq: int) -> int:
+    def _counter(self, kind: int, freq: int) -> int:
         """SETVIBR's first VIBRACNT for SLIDEVIB ``kind`` and frequency nibble ``freq``."""
         if not self.feats.vibratotypes or kind < 0x20:
             return freq >> 1
@@ -141,7 +136,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             "snd",
             c=kind,
             d=ins.vibrato_delay & 0xFF,
-            i=self.counter(kind, freq),
+            i=self._counter(kind, freq),
             q=2 * freq,
             h=high,
             t=index,
@@ -155,7 +150,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             "vfx",
             c=kind,
             w=int(clear),
-            i=self.counter(kind, freq),
+            i=self._counter(kind, freq),
             q=2 * freq,
             **self.amp((byte >> 4) << 3),
         )
@@ -191,7 +186,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             return True
         return bool(ins.control & (0x02 if tick == 0 else 0x01))
 
-    def hr_commands(self, ins) -> dict:
+    def _hr_commands(self, ins) -> dict:
         """HRGTOFF's commands: the hard-restart envelope, $18 for a staccato instrument."""
         if self.feats.hardrestypes:
             out = {
@@ -344,7 +339,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             carry = fx >= 0x3F if fx or not self.feats.hardrestypes else (rec.row.fx or 0) >= 3
             commands["hr.freq"] = self.call("hrc", c=int(carry))
         if rec.newnote and self.hr(rec.hr, tick):
-            commands |= self.hr_commands(rec.hr)
+            commands |= self._hr_commands(rec.hr)
             atom = "-" if rec.dummy else "off"
         if tick in rec.skips and not rec.dummy:
             wave, ins, pulse, filt = rec.skips[tick]

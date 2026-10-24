@@ -221,11 +221,12 @@ def test_tone_and_det_are_wrpitch(builds, build, seed):
 
 
 def test_every_template_reads_only_its_cell_and_round_trips(builds):
-    allowed = set(NAMES) | {"v", "phi", "nn", "ne", "F.lo", "F.hi"}
+    base = {"v", "phi", "nn", "ne", "F.lo", "F.hi"}
     for one in builds:
         for text in one.code.values():
             assert code.printed(code.read(text)) == text
-            assert set(code.symbols(code.read(text))) <= allowed
+            used = set(code.symbols(code.read(text))) - base
+            assert any(used <= set(names) for names in STATE.values()), used
 
 
 def cell_routine(one, call, cell: str):
