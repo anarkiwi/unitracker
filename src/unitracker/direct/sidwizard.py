@@ -55,6 +55,17 @@ def _col(image: bytes, pos: int, past=0):
     return image[pos] if pos < len(image) else past
 
 
+def _unnoted(row: Row) -> Row:
+    """WF ``row`` on a voice yet to play a note (DPITCH 0): its relative arp as the absolute
+    note it reaches, a relative arp down carrying nothing."""
+    keys = dict(row.keys)
+    if isinstance(keys.get("note"), Signed):
+        keys["note"] = note_name((keys["note"] & 0x7F) - 1)
+    if "dt.freq" in keys and keys["dt.freq"].args[2] == 2:
+        keys["dt.freq"] = Call("det", keys["dt.freq"].args[:2] + (0, 0))
+    return Row(keys)
+
+
 def _tracked(swm, table: str) -> bool:
     """Whether a row of an instrument's ``table`` sets a keyboard-track amount."""
     rows = (r for i in swm.instruments for r in _rows3(getattr(i, table)))
@@ -477,12 +488,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         rows, loop = self._swept(image, pos, "cut", rows_of, count, lead)
         return self._named("filter", "f", Program(rows, loop))
 
-    def resume(self, ins, wave: tuple, pulse=None, filt=None, skip: bool = True) -> str:
+    def resume(self, ins, wave: tuple, pulse=None, filt=None, skip=True, **at) -> str:
         """The ``ctrl`` name of a program that skips a tick of the tables (a legato's TICK_2, a
         staccato hard restart; not ``skip``: a chord FX) and resumes them where the player left
         them: ``wave`` the WF position, ARPSCNT, chord and its position, ``pulse`` and ``filt``
         positions and sweep counts."""
         # pylint: disable=too-many-locals
+        reload = at.get("reload")
         lead = []
         if pulse is not None:
             lead.append(Row({"hold": 0, "run": self.pulse(ins, *pulse, lead=skip)}))
@@ -492,7 +504,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         held = counter if self.feats.arpspeedsupp and counter < 0x80 else 0
         lead += ([Row({})] if skip else []) + self.skipped(ins, held)
         image = self.ref._image(ins)  # pylint: disable=protected-access
-        rows, loop = self.wave_rows(image, pos, ins, chord=(chord, cpos))
+        reload = self.reload(ins) if reload is None else reload
+        rows, loop = self.wave_rows(image, pos, ins, chord=(chord, cpos), reload=reload)
         program = Program(lead + rows, None if loop is None else loop + len(lead))
         return self._named("ctrl", "c", program)
 
@@ -564,11 +577,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         for k, keys in enumerate(ticks[:2]):
             if "ctrl" in keys:
                 keys["ctrl"] &= masks[k]
-            if isinstance(keys.get("note"), Signed):
-                keys["note"] = note_name((keys["note"] & 0x7F) - 1)
-            if "dt.freq" in keys and keys["dt.freq"].args[2] == 2:
-                keys["dt.freq"] = Call("det", keys["dt.freq"].args[:2] + (0, 0))
-            out.append(Row(keys))
+            out.append(_unnoted(Row(keys)))
         if not out:
             raise TranscribeError("an idle walk that ends at once")
         out[0] = Row(dict(out[0].keys) | {"wave.freq": self.call("tone")})
@@ -688,6 +697,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         out = [self.setup(rec, state, 0), self.setup(rec, state, 1)]
         if rec.applied:
             out.append(self.apply(rec, voice, state))
+            if rec.switch is not None:
+                out[2] = self.switch(rec, voice, state, out[2])
             rebound = any(key == "tick.freq" for key, _ in out[1].commands)
             if not rebound and any(key == "tick.freq" for key, _ in out[2].commands):
                 # A binding the slot already holds would keep its phi: rebind it first.
@@ -700,6 +711,20 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out = out[:length]
         out += [Event("-")] * (length - len(out))
         return out
+
+    def switch(self, rec, voice: int, state: dict, event: Event) -> Event:
+        """``event`` on a row that selects instrument ``rec.ins`` without a note: its tables
+        walk on from where they are, through the new instrument's bytes."""
+        commands = dict(event.commands)
+        if "run" in commands or event.ins is not None:
+            raise TranscribeError(
+                "an instrument selected without a note on a row that runs a table"
+            )
+        wave, pulse, filt, reload = rec.switch
+        commands["run"] = self.resume(rec.ins, wave, pulse, filt, skip=False, reload=reload)
+        name = self.instrument(rec.ins, rec.number, voice)
+        state["ins"] = name
+        return Event(event.note, name, commands, event.keep_pw, event.keep_filter, event.steps)
 
     def apply(self, rec, voice: int, state: dict) -> Event:
         """The TICK_2 event of an applied row."""

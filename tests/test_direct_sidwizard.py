@@ -147,6 +147,12 @@ BARE = {
         EMPTY,
     ],
     "rests before the first note": [EMPTY, EMPTY, Row(note=30, instrument=1)] + [EMPTY] * 5,
+    "instruments selected without a note": [
+        Row(note=37, instrument=1),
+        Row(instrument=3),
+        EMPTY,
+        Row(note=0x6A, instrument=13),
+    ],
 }
 
 
@@ -281,11 +287,10 @@ def test_a_lower_voice_takes_the_filter_claimed_in_the_same_tick(mega_run):
 
 REFUSED = {
     "FX \\$09": [Row(note=37, instrument=1, fx=9, fx_value=1), EMPTY],
-    "an instrument selected without a note": [Row(note=37, instrument=1), Row(instrument=2)],
     "a note before any instrument": [Row(note=37), EMPTY],
-    "instrument selected without a note, frame 2": [Row(note=0x7E, instrument=1), EMPTY],
     "note column \\$79": [Row(note=37, instrument=1), Row(note=0x79)],
     "small FX \\$41": [Row(note=37, instrument=1), Row(instrument=0x41)],
+    "an instrument selected before any note": [Row(note=0x7E, instrument=1), EMPTY],
     "two FX of one cell": [Row(note=37, instrument=1), Row(note=0x65, fx=0x01, fx_value=1)],
 }
 

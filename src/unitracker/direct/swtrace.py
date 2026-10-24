@@ -50,6 +50,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     kept: tuple = (None, None)
     handover: tuple = None
     gate: tuple = None
+    switch: tuple = None
     skips: dict = field(default_factory=dict)
 
 
@@ -118,7 +119,7 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
             filt = (ref.filt_pos, ref.filter_sweep_count) if held else None
             wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
             rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
-        before = v.instrument
+        before, octave = v.instrument, v.octave_shift
         if rec.newnote and v.instrument is not None and not 1 <= (row.instrument or 0) < LEGATO:
             control, feats = v.instrument.control, ref.features
             held = ref.filter_controller_voice is v
@@ -130,7 +131,20 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         apply_row(v, row)
         rec.applied, rec.ins, rec.number = True, v.instrument, v.instrument_idx
         if v.instrument is not before and not rec.newnote:
-            out.refused.append(f"an instrument selected without a note, frame {ref.frame_idx}")
+            frame = ref.frame_idx
+            if before is None:
+                out.refused.append(f"an instrument selected before any note, frame {frame}")
+            elif v.octave_shift != octave:
+                out.refused.append(
+                    f"an instrument of another octave selected without a note, frame {frame}"
+                )
+            held = ref.filter_controller_voice is v
+            rec.switch = (
+                (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos),
+                (v.pw_pos, v.pw_sweep_count),
+                (ref.filt_pos, ref.filter_sweep_count) if held else None,
+                v.arp_speed_reload & 0x3F if ref.features.arpspeedsupp else 0,
+            )
         rec.note = v.note + v.octave_shift + v.transpose - 1
         rec.adsr = (v.sid_ad, v.sid_sr)
         rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
