@@ -103,7 +103,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             and not feats.vibslidealways
             and self._held_rows()
         )
-        self.mirror = self.hrc and self.pwkb
+        held = feats.arpspeedsupp and feats.detunesupport and self._held_rows()
+        self.mirror = held and self.pwkb
         if self.pwkb or self.fkb:
             self.code |= track_templates(self.feats.finefiltsweep)
         if self.mirror:
@@ -390,7 +391,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 return rows, at[pos]
             byte = image[pos]
             if first and count is not None and not byte & 0x80:
-                rows += self._sweep(rows_of, pos, byte - count)
+                # PWSWEEP steps until its count equals the row's; FILTPRG until it reaches it.
+                left = (byte - count) & 0xFF if cell == "pw" else byte - count
+                rows += self._sweep(rows_of, pos, left)
                 first = False
                 pos += 3
                 continue
@@ -726,12 +729,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out.append(self.apply(rec, voice, state))
             if rec.switch is not None:
                 out[2] = self.switch(rec, voice, state, out[2])
-            rebound = any(key == "tick.freq" for key, _ in out[1].commands)
-            if not rebound and any(key == "tick.freq" for key, _ in out[2].commands):
-                # A binding the slot already holds would keep its phi: rebind it first.
-                out[1] = Event(
-                    out[1].note, commands=dict(out[1].commands) | {"tick.freq": self.call("stp")}
-                )
+            # A binding the slot already holds would keep its phi: rebind it the tick before.
+            before, applied = dict(out[1].commands), dict(out[2].commands)
+            for key, rebind in (("tick.freq", self.call("stp")), ("fx.cut", "none")):
+                if key in applied and key not in before:
+                    before[key] = rebind
+            if "late.cut" in applied:
+                before["late.cut"] = "none"
+            out[1] = Event(out[1].note, out[1].ins, before, out[1].keep_pw, out[1].keep_filter)
         if length < len(out):
             if rec.applied:
                 raise TranscribeError(f"a {length}-tick row")
