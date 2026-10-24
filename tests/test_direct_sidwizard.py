@@ -180,6 +180,10 @@ NORMAL = {
             "i5": {"arp_speed": 0, "wf_table": bytes.fromhex("210000")},
         },
     ),
+    "reset switches keep the pulse and filter walking": (
+        notes((37, 1), (40, None), (44, None), (40, 1)),
+        {"i1": {"control": 0xDA, "pw_table": bytes.fromhex("8400000c2000"), "arp_speed": 0}},
+    ),
     "typed vibratos": (
         notes((37, 1), (40, 3), (44, 5)),
         {

@@ -47,6 +47,8 @@ class Read:  # pylint: disable=too-many-instance-attributes
     resume: tuple = ()
     chord: tuple = None
     holder: bool = False
+    kept: tuple = (None, None)
+    handover: tuple = None
     skips: dict = field(default_factory=dict)
 
 
@@ -116,6 +118,14 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
             wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
             rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
         before = v.instrument
+        if rec.newnote and v.instrument is not None and not 1 <= (row.instrument or 0) < LEGATO:
+            control, feats = v.instrument.control, ref.features
+            held = ref.filter_controller_voice is v
+            pulse = (v.pw_pos, v.pw_sweep_count) if feats.pwresetsw and control & 0x40 else None
+            filt = None
+            if feats.filtresetsw and control & 0x80:
+                filt = (ref.filt_pos, ref.filter_sweep_count) if held else ()
+            rec.kept = (pulse, filt)
         apply_row(v, row)
         rec.applied, rec.ins, rec.number = True, v.instrument, v.instrument_idx
         if v.instrument is not before and not rec.newnote:
@@ -132,7 +142,22 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
             rec.adsr = (v.sid_ad, v.sid_sr)
             rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
 
+    def filter_state():
+        return (
+            ref.filter_cutoff_hi,
+            ref.filter_cutoff_lo,
+            ref.filter_resonance >> 4,
+            ref.filter_mode_vol & 0x70,
+            ref.filter_kbd_track,
+        )
+
     def claim(v):
+        holder = ref.filter_controller_voice
+        first = (v.instrument.filter_table or b"\xff")[0]
+        claiming = first not in (0x00, 0xFF)
+        if claiming and holder is not None and holder is not v and filter_state() != claims[0]:
+            rec = out.reads[voices[id(v)]][-1]
+            rec.handover = filter_state()
         setfltp(v)
         claims.append(v)
 
@@ -147,9 +172,9 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
     ref._advance_row, ref._apply_row, ref._run_deferred_fx = read, applied, run_deferred
     ref._setfltp, ref._is_staccato_hr_tick = claim, hard
     for frame in range(frames):
-        claims.clear()
+        claims[:] = [filter_state()]
         ref.play_frame()
-        _claims(ref, claims, out)
+        _claims(ref, claims[1:], out)
         for i, v in enumerate(ref.voices):
             if v.sequence_ended and out.ended[i] is None:
                 out.ended[i] = frame

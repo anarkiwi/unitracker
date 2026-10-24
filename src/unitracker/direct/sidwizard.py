@@ -46,8 +46,6 @@ LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
 DUMMY = 256
 # Build flags this transcription refuses whenever the tune uses what they change.
 USED = {
-    "pwresetsw": "the pulse reset switch",
-    "filtresetsw": "the filter reset switch",
     "gateoffptr": "gate-off table pointers",
     "portavibra": "vibrato portamento",
     "allghostregs": "all-ghost-register small FX",
@@ -106,8 +104,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out.append("no instruments, or fewer orderlists than voices")
         rows = [r for p in swm.patterns for r in p.rows]
         uses = {
-            "pwresetsw": any(i.control & 0x40 for i in swm.instruments),
-            "filtresetsw": any(i.control & 0x80 for i in swm.instruments),
             "gateoffptr": any(
                 i.gateoff_wf or i.gateoff_pw or i.gateoff_filt for i in swm.instruments
             ),
@@ -333,12 +329,21 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         detune = _col(image, pos + 2, 0xFF)
         return self._det(keys, None if detune == 0xFF else detune, carry, arp or 0), hold
 
-    def wave(self, ins, chord=None) -> str:
+    def wave(self, ins, chord=None, kept=(None, None)) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
-        waveform (control $09 without the first-frame switch), SETFLTP's routing."""
-        feats = self.feats
+        waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
+        reset switches, the pulse or filter walk ``kept`` resumed instead of restarted."""
+        # pylint: disable=too-many-locals
+        feats, (pulse, filt) = self.feats, kept
         table = ins.filter_table
         first = {"route": "+" if table and table[0] != 0xFF else "'-'"}
+        if filt is not None:
+            del first["route"]
+        runs = []
+        if pulse is not None:
+            runs.append(Row({"hold": 0, "run": self.pulse(ins, *pulse)}))
+        if filt:
+            runs.append(Row({"hold": 0, "run": self.filter(ins, filt[0], filt[1])}))
         lead = []
         if not feats.frame1switch or ins.control & 0x08 and self.swm.first_frame_fixed_waveform:
             first["ctrl"] = 9
@@ -357,8 +362,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 raise TranscribeError("a first frame that keeps a waveform before a hold row")
         else:
             (rows, loop), lead = self._rest([], ins, 0, 1), []
-        skip = 1 + len(lead)
-        program = Program([Row(first), *lead, *rows], None if loop is None else loop + skip)
+        skip = len(runs) + 1 + len(lead)
+        program = Program([*runs, Row(first), *lead, *rows], None if loop is None else loop + skip)
         return self._named("ctrl", "c", program)
 
     def _swept(self, image: bytes, pos: int, cell: str, rows_of: dict, count=None) -> tuple:
@@ -366,7 +371,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         keys of a ``set`` row and of a ``sweep``'s ticks, its ``advance`` tick, a ``jump`` to a
         sweep and the ``rest`` a tracked table keeps writing. Resumed with sweep ``count``, it
         leaves STRTSND's tick to the voice's bindings."""
-        rows, at = [Row({} if count is None else {cell: "none"})], {}
+        rows, at = [Row(rows_of["started"] if count is None else rows_of["resumed"])], {}
         first = True
         while True:
             if pos >= len(image) or image[pos] == 0xFF:
@@ -419,6 +424,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 "advance": lambda p, _: {"pw": self.call("pid", j=_col(image, p + 2))},
                 "jump": {"pw": self.call("pwr")},
                 "rest": [Row({"pw": self.call("pwr")})],
+                "resumed": {"pw": "none"},
+                "started": {},
             }
         else:
             rows_of = {
@@ -427,14 +434,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 "advance": lambda p, swept: {"pw": "none"} if swept else {},
                 "jump": {},
                 "rest": [],
+                "resumed": {"pw": "none"},
+                "started": {},
             }
         start = INST_WF_TABLE_POS + len(ins.wf_table) + 1 if pos is None else pos
         rows, loop = self._swept(image, start, "pw", rows_of, count)
         return self._named("pw", "pw", Program(rows, loop))
 
-    def filter(self, ins, pos=None, count=None) -> str:
+    def filter(self, ins, pos=None, count=None, handover=None) -> str:
         """The ``filter`` name of instrument ``ins``'s filter program, or resumed from ``pos``
-        at sweep ``count``."""
+        at sweep ``count``; taken on a tick the previous voice's walk stepped, from the state
+        that step ``handover`` left."""
+        # pylint: disable=too-many-locals
         image = self.ref._image(ins)  # pylint: disable=protected-access
         scale = 1 if self.feats.finefiltsweep else 8
 
@@ -449,6 +460,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 "advance": lambda p, _: {"cut": self.call("fid", j=_col(image, p + 2))},
                 "jump": {"cut": self.call("frs")},
                 "rest": [Row({"cut": self.call("frs")})],
+                "resumed": {"cut": self.call("frs")},
+                "started": {"cut": self.call("frs")},
             }
         else:
             rows_of = {
@@ -459,7 +472,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 "advance": lambda p, swept: {"cut": "none"} if swept else {},
                 "jump": {},
                 "rest": [],
+                "resumed": {"cut": "none"},
+                "started": {},
             }
+        if handover is not None:
+            high, low, res, mode, track = handover
+            cut = {"cut": self.call("fho", c=high, l=low & 7, j=track)} if self.fkb else {}
+            if not self.fkb:
+                cut = {"cut": high << 3 | low & 7}
+            rows_of["started"] = {"res": res, "mode": mode} | cut
         if pos is None:
             pos = INST_WF_TABLE_POS + len(ins.wf_table) + 1 + len(ins.pw_table) + 1
         rows, loop = self._swept(image, pos, "cut", rows_of, count)
@@ -645,8 +666,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             commands, atom = {}, "-"
             if rec.newnote and not tick and not rec.dummy:
                 commands = {"pw": "hold", "cut": "hold"}
-                if self.fkb:
-                    commands["cut"] = self.call("frs") if rec.holder else "hold"
+            if rec.newnote and tick and not rec.dummy and self.fkb and rec.holder:
+                # The cutoff is written every tick: its track follows the note STRTSND sets.
+                commands = {"cut": self.call("frs")}
             if rec.newnote and rec.dummy and not tick:
                 state["dummy"] = state["dummy"] or self.dummy(rec.hr)
                 commands["run"] = self.ins[state["dummy"]].get("ctrl")
@@ -676,6 +698,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
 
     def apply(self, rec, voice: int, state: dict) -> Event:
         """The TICK_2 event of an applied row."""
+        # pylint: disable=too-many-branches
         ins, note = rec.ins, rec.row.note
         commands = self.fx(rec)
         if rec.newnote and "dt.freq" in commands:
@@ -690,7 +713,19 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             state["ins"] = name
             if self.hrc:
                 commands["hr.freq"] = "none"
-            return Event(self.pitch(rec), given, commands, keep_filter=rec.keep_filter)
+            pulse, filt = rec.kept
+            if rec.handover is not None:
+                if "run" in commands or pulse is not None or filt is not None:
+                    raise TranscribeError("a filter handover on a note that runs another table")
+                commands["run"] = self.filter(ins, handover=rec.handover)
+            if pulse is not None or filt is not None:
+                if "run" in commands:
+                    raise TranscribeError("a chord FX on a note that keeps its tables")
+                commands["run"] = self.wave(ins, None, rec.kept)
+            keep = rec.keep_filter or filt is not None
+            return Event(
+                self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep
+            )
         if 0 < note < 0x60:
             return self.glide(rec, commands)
         if note in (GATE_OFF, GATE_ON):

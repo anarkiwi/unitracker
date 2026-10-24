@@ -105,6 +105,9 @@ def track_templates(finefiltsweep: bool) -> dict:
             else "clc\nlda ch\nadc #d\nsta ch\n"
         )
         + _CUTOFF,
+        # The cutoff and track the previous filter voice's walk left on a handover tick.
+        "fho": "lda phi\nora phi+1\nbne go\nlda #c\nsta ch\nlda #l\nsta cl\nlda #j\nsta ck\n"
+        + _CUTOFF,
         # FILTPRG past a sweep: the track amount.
         "fid": "lda phi\nora phi+1\nbne go\nlda #j\nsta ck\n" + _CUTOFF,
         # $D416/$D415 of the cutoff the table rests on.
