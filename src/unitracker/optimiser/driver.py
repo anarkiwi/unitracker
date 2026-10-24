@@ -9,6 +9,7 @@ from unitracker_grammar.document import Document, printed, read
 
 from unitracker.optimiser import passes, templates
 from unitracker.optimiser.guarantee import Guarantee
+from unitracker.optimiser.inline import inline as inline_definitions
 
 ENCODING = "cl100k_base"
 PASSES = (
@@ -88,15 +89,18 @@ class _Run:
             return self.prove(candidates, meter)
 
 
-def optimise(
+def optimise(  # pylint: disable=too-many-arguments
     text: str,
     ticks: int | None = None,
     order=PASSES,
     rounds: int = 8,
     progress: bool = False,
+    *,
+    inline: str = "named",
 ) -> Result:
     """``text`` rewritten by the passes of ``order``, repeated until a round keeps no edit
-    (at most ``rounds``), every kept edit playing the input's grid (:class:`Guarantee`)."""
+    (at most ``rounds``), every kept edit playing the input's grid (:class:`Guarantee`), then
+    the definitions of ``inline``'s mode written inline (:mod:`unitracker.optimiser.inline`)."""
     run = _Run(read(text), Guarantee(text, ticks), progress)
     before, kept = size(text), []
     for round_ in range(1, rounds + 1):
@@ -104,4 +108,8 @@ def optimise(
         kept += found
         if not found:
             break
+    if inline != "named":
+        holds = Guarantee(printed(run.doc), ticks).holds
+        run.doc, refused = inline_definitions(run.doc, inline, holds)
+        run.size, run.refused = size(run.doc), run.refused + refused
     return Result(run.doc, printed(run.doc), before, run.size, kept, run.refused)

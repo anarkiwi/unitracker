@@ -6,7 +6,7 @@ document only through unitracker-grammar's model (`unitracker_grammar.document`)
 text.
 
 ```sh
-python -m unitracker.optimiser IN.yaml [-o OUT.yaml] [--ticks N] [--rounds R]
+python -m unitracker.optimiser IN.yaml [-o OUT.yaml] [--ticks N] [--rounds R] [--inline MODE]
 ```
 
 prints the kept edits, the refused count and the size before and after (stderr), and writes the
@@ -14,7 +14,7 @@ document to `OUT.yaml` or stdout.
 
 ```python
 from unitracker.optimiser import optimise
-result = optimise(text, ticks=None)   # Result: doc, text, before, after, kept, refused
+result = optimise(text, ticks=None, inline="named")   # Result: doc, text, before, after, kept, refused
 ```
 
 ## Driver
@@ -58,10 +58,45 @@ Each pass's edits are what the semantics make equal in general; whether the song
 is the guarantee's to decide (a default binding is bound from tick 0, an instrument's from its
 note; merged templates keep the phi of one call where two names restarted it).
 
+## Inline
+
+`--inline MODE` (`optimise(..., inline=MODE)`, `unitracker-lift --optimise --inline MODE`) runs
+after the passes and writes named definitions at their uses, for documents a reader (or a
+language model) learns the format from without resolving names
+(`unitracker.optimiser.inline`):
+
+| mode | writes inline |
+|---|---|
+| `named` | nothing (the default) |
+| `single` | every definition referenced exactly once: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record; shared ones stay named |
+
+Templates (`mod:` records and program templates) are the format's shared vocabulary and stay
+named, a call is already an inline use and stays a call. The inline forms
+([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md),
+Definitions):
+
+| reference | inline |
+|---|---|
+| an event's instrument, `C4.i1` | `C4.{ad: 9, ...}` |
+| a play entry's phrase, `p1+2` | `[C4, -*3]+2` |
+| an instrument's `ctrl`, `restart`, `pw` or `filter` program | the program, `ctrl: [{ctrl: 65}, end]` |
+| a `run:` or `!run:` of a program | the program after its kind, `run: pw[{pw: 800}, end]` |
+| a `pw` or `filter` record that is a binding `b` | the program of its one row, `[{pw: b}, end]` |
+| a record that is a call of a program template | the call |
+
+A binding record becomes the program of its one row, never the instrument's own binding: the
+player starts an instrument's own binding's φ at 0 on each note, while a named binding, a
+program, keeps its φ where the same note binds it again. A definition that reaches itself (a
+program whose rows run it) has no inline form and stays named. The definitions are written
+inline together where the guarantee holds over the document the passes left (so after any
+lossy step), else in halves as the driver proves edits; a refused one stays named. A
+definition's records leave its section, and a section left empty is dropped.
+
 ## Tests
 
 `tests/test_optimiser.py`: each pass on the hand-written documents of `tests/optimiser_docs.py`,
-kept and refused; the guarantee's horizons; the CLI; and, for each `.tunecache/direct/*.yaml`
+kept and refused; the guarantee's horizons; `tests/test_inline.py` each inline mode on a
+hand-written document and on lifted documents of the four direct lifters; the CLI; and, for each `.tunecache/direct/*.yaml`
 (or `$UNITRACKER_DIRECT_DOCS`), a lifted document optimised over 3000 ticks. Those are written by
 the GoatTracker 2 transcriber (`python -m unitracker.direct.goattracker2 TUNE.sid > DOC.yaml`, on
 the `gt2-direct` branch).

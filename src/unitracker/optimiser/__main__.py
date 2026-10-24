@@ -1,10 +1,11 @@
-"""``python -m unitracker.optimiser IN.yaml [-o OUT.yaml] [--ticks N]``."""
+"""``python -m unitracker.optimiser IN.yaml [-o OUT.yaml] [--ticks N] [--inline MODE]``."""
 
 import argparse
 import sys
 from pathlib import Path
 
 from unitracker.optimiser.driver import optimise
+from unitracker.optimiser.inline import MODES
 
 
 def main(argv=None) -> int:
@@ -14,9 +15,16 @@ def main(argv=None) -> int:
     parser.add_argument("-o", "--out", type=Path, help="the optimised document (default stdout)")
     parser.add_argument("--ticks", type=int, help="the guarantee's horizon in ticks")
     parser.add_argument("--rounds", type=int, default=8)
+    parser.add_argument(
+        "--inline", choices=MODES, default="named", help="the definitions written inline"
+    )
     args = parser.parse_args(argv)
     result = optimise(
-        args.document.read_text(encoding="utf-8"), args.ticks, rounds=args.rounds, progress=True
+        args.document.read_text(encoding="utf-8"),
+        args.ticks,
+        rounds=args.rounds,
+        progress=True,
+        inline=args.inline,
     )
     if args.out:
         args.out.write_text(result.text, encoding="utf-8")
