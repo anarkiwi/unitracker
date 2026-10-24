@@ -1,5 +1,6 @@
 """``python -m unitracker.optimiser IN.yaml [-o OUT.yaml] [--ticks N] [--lossy [--freq-tol P95,MAX]
-[--pw-tol P95,MAX] [--cut-tol P95,MAX]]``."""
+[--pw-tol P95,MAX] [--cut-tol P95,MAX]]
+[--inline MODE]``."""
 
 import argparse
 import sys
@@ -7,6 +8,7 @@ from pathlib import Path
 
 from unitracker.optimiser import lossy
 from unitracker.optimiser.driver import optimise
+from unitracker.optimiser.inline import MODES
 
 
 def main(argv=None) -> int:
@@ -16,6 +18,9 @@ def main(argv=None) -> int:
     parser.add_argument("-o", "--out", type=Path, help="the optimised document (default stdout)")
     parser.add_argument("--ticks", type=int, help="the guarantee's horizon in ticks")
     parser.add_argument("--rounds", type=int, default=8)
+    parser.add_argument(
+        "--inline", choices=MODES, default="named", help="the definitions written inline"
+    )
     lossy.add_arguments(parser)
     args = parser.parse_args(argv)
     result = optimise(
@@ -23,6 +28,7 @@ def main(argv=None) -> int:
         args.ticks,
         rounds=args.rounds,
         progress=True,
+        inline=args.inline,
         lossy=lossy.tolerances_of(args),
     )
     if args.out:

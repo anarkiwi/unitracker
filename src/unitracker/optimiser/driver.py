@@ -9,6 +9,7 @@ from unitracker_grammar.document import Document, printed, read
 from unitracker.optimiser import lossy as _lossy
 from unitracker.optimiser import passes, templates
 from unitracker.optimiser.guarantee import Guarantee
+from unitracker.optimiser.inline import inline as inline_definitions
 from unitracker.optimiser.measure import Rewrite, size
 
 PASSES = (
@@ -79,11 +80,13 @@ def optimise(  # pylint: disable=too-many-arguments
     *,
     progress: bool = False,
     lossy: dict | None = None,
+    inline: str = "named",
 ) -> Result:
     """``text`` rewritten by the passes of ``order``, repeated until a round keeps no edit
     (at most ``rounds``), every kept edit playing the input's grid (:class:`Guarantee`).
     With ``lossy`` tolerances by cell, the lossy mode (:func:`lossy.simplify`) rewrites
-    ``text`` first, and the passes keep its result's grid."""
+    ``text`` first, and the passes keep its result's grid; then the definitions of ``inline``'s
+    mode are written inline (:mod:`unitracker.optimiser.inline`)."""
     before, kept, simplified = size(text), [], None
     if lossy is not None:
         simplified = _lossy.simplify(text, ticks, lossy, progress)
@@ -94,4 +97,7 @@ def optimise(  # pylint: disable=too-many-arguments
         kept += found
         if not found:
             break
+    if inline != "named":
+        run.doc, refused = inline_definitions(run.doc, inline, run.guarantee.holds)
+        run.size, run.refused = size(run.doc), run.refused + refused
     return Result(run.doc, printed(run.doc), before, run.size, kept, run.refused, simplified)

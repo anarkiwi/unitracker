@@ -14,6 +14,7 @@ edit proved to keep the register grid.
 | [docs/direct/defmon.md](docs/direct/defmon.md) | the defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
 | [docs/direct/musicassembler.md](docs/direct/musicassembler.md) | the Music Assembler transcription from pymusicassembler's playroutine (`python -m unitracker.direct.musicassembler`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
+| [docs/optimiser.md#inline](docs/optimiser.md#inline) | the optimiser's inline forms (`--inline single`, `--inline all`): definitions written at their uses |
 | [docs/optimiser.md#lossy-mode](docs/optimiser.md#lossy-mode) | the lossy mode: code modulators replaced by fitted expressions within a tolerance per cell (`--lossy`) |
 
 ## Install
@@ -25,7 +26,7 @@ pip install -e ".[dev]"
 ## Use
 
 ```sh
-unitracker-lift TUNE.sid [-o OUT.yaml] [--subtune N] [--optimise [--ticks T] [--lossy]]
+unitracker-lift TUNE.sid [-o OUT.yaml] [--subtune N] [--optimise [--ticks T] [--lossy] [--inline MODE]]
 ```
 
 It detects the tune's format (pysidtracker) and writes its direct lifter's document, optimised
