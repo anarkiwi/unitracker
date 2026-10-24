@@ -80,7 +80,7 @@ def test_tunes_play_exactly(name, request):
     cells, text = s.verify(raw, frames=3000)
     assert not cells.size, summary(cells, 3)
     assert "{loop: " in text or text.endswith("  - end\n")
-    assert "\ntables:" not in text and "F.lo,x" in text
+    assert "\ntables:" not in text and "F.lo-1,x" in text
 
 
 @pytest.mark.parametrize("name", ["mega_run", "lykia_boss"])
@@ -91,7 +91,7 @@ def test_the_native_table_is_the_standard_one_but_for_note_0(name, request):
     native, ref = SWMPlayer(one.swm), standard(one.swm)
     words = [[p.freq_hi[k] << 8 | p.freq_lo[k] for k in range(96)] for p in (native, ref)]
     assert [k for k, (u, w) in enumerate(zip(*words)) if u != w] == [0]
-    assert (words[0][0], words[1][0]) == (263, 0)
+    assert (words[0][0], words[1][0]) == (263, 262)
     cells = s.compare(one.swm, one.document(), 3000, native=True)
     assert not cells.size, summary(cells, 3)
 

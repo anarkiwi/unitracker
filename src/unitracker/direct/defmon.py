@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from pydefmon import DefmonPlayer
 from pysidtracker import SidImage, gridcmp
-from unitracker_grammar import code
+from unitracker_grammar import code, frequency
 from unitracker_grammar import document as d
 from unitracker_player.player import play
 
@@ -27,7 +27,7 @@ COUNTER, POINTER = 0x114A, 0x1186  # voice 1's; each voice's 0x88 on
 ARMED, ARR_Y, ARR_JR, ARR_JC = 0x10D9, 0x10EB, 0x14EC, 0x14ED
 SIDTAB_LO, SIDTAB_HI, SIDTAB_DL = 0x1800, 0x1900, 0x1E00
 GATE_A, GATE_B, GATE_N = 0x40, 0x20, 0x10
-NOTES, F_NOTES = (0x159C, 0x1638), range(24, 119)
+NOTES = (0x159C, 0x1638)
 TABLES = {"P": (0x1583, 0x161F, 257), "R": (0x1578, 0x1614, 128)}
 SLOTS = (
     ("freq", (d.Slot("n", reset=("note",)), d.Slot("p"))),
@@ -63,6 +63,30 @@ def note_name(k: int) -> str:
     class), the replay's note table being the standard ``F`` two octaves up."""
     k -= 24
     return f"{NAMES[k % 12]}{k // 12}"
+
+
+def clock_hz(header) -> int:
+    """The document's clock of a SID header: NTSC's where it names NTSC alone, else PAL's."""
+    return NTSC_HZ if (header.flags >> 2) & 3 == 2 else PAL_HZ
+
+
+def standard(raw: bytes, subtune: int = 0) -> DefmonPlayer:
+    """The replay of ``raw`` with every note-table read answered by the document's note table:
+    index ``k``'s word is ``F(k - 24)`` at the document's clock; its other reads are its own."""
+    ref = DefmonPlayer(raw, subtune=subtune)
+    # pylint: disable=protected-access
+    ram, cpu, bus = ref._mem, ref._mpu, ref._obs
+    hz, at = clock_hz(SidImage.from_bytes(raw).header), locate(ram)[0]
+    shifts = {at[NOTES[0]]: 0, at[NOTES[1]]: 8}
+
+    def read(addr):
+        shift = shifts.get(base := ram[cpu.pc + 1] | ram[cpu.pc + 2] << 8)
+        k = (addr - base) & 0xFFFF
+        return None if shift is None or k > 255 else frequency(k - 24, hz) >> shift & 0xFF
+
+    for base in shifts:
+        bus.subscribe_to_read([(base + k) & 0xFFFF for k in range(256)], read)
+    return ref
 
 
 def call(name: str, **params) -> d.Call:
@@ -411,10 +435,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     def head(self) -> d.Header:
         """The header: the SID's texts and clock, a step of one tick, the slots and state."""
-        ntsc = (self.header.flags >> 2) & 3 == 2
         return d.Header(
             meta=tuple((k, text(getattr(self.header, a))) for k, a in META),
-            clock=(int(self.player.cycles_per_frame), NTSC_HZ if ntsc else PAL_HZ),
+            clock=(int(self.player.cycles_per_frame), clock_hz(self.header)),
             tempo=1,
             slots=SLOTS,
             state=tuple((cell, tuple(names.items())) for cell, names in STATE.items()),
@@ -437,14 +460,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return d.printed(d.replace(doc, mods=mods(d.printed(doc), self.absolute)))
 
     def tables(self) -> tuple:
-        """The replay's note words standard ``F`` does not give (``L``: indexes under 24 and
-        over 118, to the build's note range), portamento and slide rates, trailing zeros dropped."""
-        top = 128 if self.absolute else 256
-        spans = {"L": (*NOTES, [k for k in range(top) if k not in F_NOTES])}
-        spans |= {name: (lo, hi, range(n)) for name, (lo, hi, n) in TABLES.items()}
+        """The replay's portamento table and slide rates, trailing zeros dropped."""
         out = []
-        for name, (lo, hi, ks) in spans.items():
-            words = [self.mem[self.at[lo] + k] | self.mem[self.at[hi] + k] << 8 for k in ks]
+        for name, (lo, hi, n) in TABLES.items():
+            words = [self.mem[self.at[lo] + k] | self.mem[self.at[hi] + k] << 8 for k in range(n)]
             while len(words) > 1 and not words[-1]:
                 words.pop()
             out.append((name, tuple(words)))
@@ -528,12 +547,14 @@ def transcribe(raw: bytes, subtune: int = 0) -> str:
     return Transcriber(raw, subtune).document()
 
 
-def compare(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
+def compare(raw: bytes, subtune: int = 0, frames: int = 20000, native: bool = False) -> tuple:
     """``(cells, document)``: the ``(tick, register, ours, theirs)`` cells where the document's
-    grid differs from the replay's over ``frames`` ticks."""
+    grid differs from the replay's at the standard note table (:func:`standard`), or ``native``
+    at its own, over ``frames`` ticks."""
     text_ = transcribe(raw, subtune)
     ours = play(text_, ticks=frames)
-    theirs = np.asarray(DefmonPlayer(raw, subtune=subtune).render_grid(len(ours)), dtype=np.uint8)
+    ref = DefmonPlayer(raw, subtune=subtune) if native else standard(raw, subtune)
+    theirs = np.asarray(ref.render_grid(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, theirs), text_
 
 

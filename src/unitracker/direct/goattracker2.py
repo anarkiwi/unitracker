@@ -92,17 +92,37 @@ class Occurrence:
 
 @dataclass
 class Run:
-    """The reference player's sequencer over ``frames`` frames."""
+    """The reference player's sequencer over ``frames`` frames: each channel's pattern starts."""
 
     frames: int
-    starts: list = field(default_factory=lambda: [[], [], []])
+    starts: list
+
+
+def layout(ref) -> tuple:
+    """The channels of ``ref``'s build in the order of the SID voices they play, one voice from
+    ``$D400`` each; a build whose played channels do not fill voices from the first one, or
+    that runs more than one player tick a frame, is refused."""
+    build, voices = ref.build, ref._voices  # pylint: disable=protected-access
+    if build.calls != 1:
+        raise TranscribeError(f"multispeed: {build.calls} player ticks a frame")
+    played = {c: off for c, off in enumerate(voices) if c not in build.idle}
+    if None in played.values():
+        raise TranscribeError(f"voices {voices}: a played channel writes no SID voice")
+    if len(played) > C.MAX_CHN or any(off >= 0x20 for off in played.values()):
+        raise TranscribeError(f"voices {voices}: more than one SID")
+    order = sorted(played, key=played.get)
+    if [played[c] for c in order] != [v * C.VOICE_REG_SIZE for v in range(len(order))]:
+        raise TranscribeError(f"voices {voices}: not the first voices")
+    return tuple(order)
 
 
 def sequence(model, frames: int, loops: int = 3) -> Run:
-    """Each voice's pattern starts until every voice has looped ``loops`` times, or over
-    ``frames`` frames of the reference player."""
-    ref, run = model.player(), Run(frames)
-    fetched, frame = [None] * C.MAX_CHN, [0]
+    """Each channel's pattern starts until every played channel has looped ``loops`` times, or
+    over ``frames`` frames of the reference player."""
+    ref = model.player()
+    order = layout(ref)
+    nchan = len(ref._channels)  # pylint: disable=protected-access
+    run, fetched, frame = Run(frames, [[] for _ in range(nchan)]), [None] * nchan, [0]
     get_new_notes, play_channel, play_call = (
         ref._get_new_notes,  # pylint: disable=protected-access
         ref._play_channel,  # pylint: disable=protected-access
@@ -135,7 +155,7 @@ def sequence(model, frames: int, loops: int = 3) -> Run:
     ref._get_new_notes = fetch  # pylint: disable=protected-access
     ref._play_channel = channel_tick  # pylint: disable=protected-access
     ref._play_call = call  # pylint: disable=protected-access
-    while frame[0] < frames and min(ref.loops) < loops:
+    while frame[0] < frames and min(ref.loops[c] for c in order) < loops:
         ref.play_frame()
     return run
 
@@ -147,6 +167,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.model = model
         self.ref = model.player()
         ref = self.ref
+        self.order = layout(ref)
         self.tables = {
             "PL": _trimmed([0] + ref._ltable[C.PTBL][:255]),  # pylint: disable=protected-access
             "PR": _trimmed([0] + ref._rtable[C.PTBL][:255]),  # pylint: disable=protected-access
@@ -370,7 +391,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if not ins.gatetimer & 0x40:
             first["gate"] = 0
             if not ins.gatetimer & 0x80:
-                adparam = self.ref.adparam
+                adparam = self.ref.build.adparam
                 first.update(ad=adparam >> 8, sr=adparam & 0xFF)
         init = {"ad": ins.ad, "sr": ins.sr, "run": self.silent()}
         if ins.firstwave >= 0xFE:
@@ -471,9 +492,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def slots(self) -> dict:
         """The frequency's wavetable and realtime slots and the pulse slot, with the
         playroutine's per-tick skips as their holds."""
-        ref = self.ref
-        tick = ("step-1" if ref.optimize_realtime else "note-1", "row")
-        pulse = ("read", "note-1", "last-1") if ref.optimize_pulse else ("note-1",)
+        build = self.ref.build
+        tick = ("step-1" if build.optimize_realtime else "note-1", "row")
+        pulse = ("read", "note-1", "last-1") if build.optimize_pulse else ("note-1",)
         return {
             "freq": (Slot("wave", reset=("row.note", "row.freq")), Slot("tick", hold=tick)),
             "pw": (Slot("pulse", hold=pulse),),
@@ -489,15 +510,17 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return {cell: names for cell, names in cells.items() if names} or None
 
     def timeline(self, run: Run) -> tuple:
-        """``(rows, loop row or None)`` of the reference player's pattern starts."""
-        self.entered = {o.pattern for occs in run.starts for o in occs if o.running}
-        plays = {}
-        for v, occs in enumerate(run.starts):
+        """``(rows, loop row or None)`` of the reference player's pattern starts, a voice
+        each played channel."""
+        starts = [run.starts[c] for c in self.order]
+        self.entered = {o.pattern for occs in starts for o in occs if o.running}
+        plays, voices = {}, len(starts)
+        for v, occs in enumerate(starts):
             for occ in occs:
                 entry = Play(self.phrase(occ), Signed(occ.trans) if occ.trans else None)
-                plays.setdefault(occ.tick, [CONT] * C.MAX_CHN)[v] = entry
+                plays.setdefault(occ.tick, [CONT] * voices)[v] = entry
         ticks = sorted(plays)
-        rows = [(Play("p0"),) * C.MAX_CHN] + [tuple(plays[t]) for t in ticks[:-1]]
+        rows = [(Play("p0"),) * voices] + [tuple(plays[t]) for t in ticks[:-1]]
         loop = repeat(rows[1:], [b - a for a, b in zip(ticks, ticks[1:])])
         if loop is None:
             return rows, None
@@ -509,7 +532,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         speed = self.ref._instr[1].speed_ptr  # pylint: disable=protected-access
         intro = {TICK: self.vibrato(speed, 1)} if speed else {}
         first = Event("-", ins, {"vol": 15, "tempo": LEAD} | intro)
-        return (first,) + (Event("-", ins, intro),) * (C.MAX_CHN - 1)
+        return (first,) + (Event("-", ins, intro),) * (len(self.order) - 1)
 
     def document(self, frames: int = 200000) -> str:
         """The document of the song to its loop, sequenced over at most ``frames`` frames."""
@@ -517,7 +540,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         rowlen = self.ref._default_tempo() + 1  # pylint: disable=protected-access
         if rowlen < 3:
             raise TranscribeError("funk default tempo")
-        first = {occ[0].tick for occ in run.starts if occ}
+        first = {run.starts[c][0].tick for c in self.order if run.starts[c]}
         if first != {LEAD + rowlen}:
             raise TranscribeError(f"first patterns start at {sorted(first)}")
         rows, loop = self.timeline(run)
@@ -540,6 +563,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             slots=self.slots(),
             order=PHASES,
             state=self.state(),
+            voices=len(self.order) if len(self.order) != C.MAX_CHN else None,
         )
         doc = Document(head, self.tables, (), defs, init, song, loop)
         return printed(replace_mods(doc, self.used))

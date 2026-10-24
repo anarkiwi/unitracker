@@ -1,9 +1,8 @@
 """defMON's per-tick units as 6502 code templates (docs/direct/defmon.md).
 
-defMON note index ``k`` is generic note ``k - 24``: its word is the standard note table's ``F``
-from index 24 to 118, else the replay's table ``L`` of the words under and over those. ``L``, the
-portamento table ``P`` and the slide rates ``R`` are the replay's; :data:`STATE` names each cell's
-variables.
+defMON note index ``k`` is generic note ``k - 24``: its word is the standard note table's
+``F(k - 24)``, read as ``F.lo-24,y``. The portamento table ``P`` and the slide rates ``R`` are the
+replay's; :data:`STATE` names each cell's variables.
 """
 
 STATE = {
@@ -13,12 +12,8 @@ STATE = {
 }
 
 _FIRST = "lda phi\nora phi+1\nbne {0}\n"
-# the note's word in {0} and its defMON index in y: F from index 24 to 118, L under and over it
-_WORD = (
-    "lda nn\nclc\nadc #24\nand #127\ntay\nsec\nsbc #24\nbcc low\ncmp #95\nbcs high\ntax\n"
-    "lda F.lo,x\nsta {0}\nlda F.hi,x\njmp put\nhigh:\nsbc #71\ntax\njmp tab\nlow:\ntya\ntax\n"
-    "tab:\nlda L.lo,x\nsta {0}\nlda L.hi,x\nput:\nsta {0}+1\n"
-)
+# the note's word in {0} and its defMON index in y
+_WORD = "lda nn\nclc\nadc #24\nand #127\ntay\nlda F.lo-24,y\nsta {0}\nlda F.hi-24,y\nsta {0}+1\n"
 _NOTE = _WORD.format("fq")
 _SUM = _NOTE + "clc\nlda s\nadc fq\nsta v\nlda fq+1\nadc s+1\nsta v+1\nrts\n"
 _W = "lda w\nsta v\nlda w+1\nsta v+1\nrts\n"

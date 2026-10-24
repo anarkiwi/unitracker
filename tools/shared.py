@@ -1,6 +1,7 @@
 """What the tools share: tunes by path, HVSC name or tune list."""
 
 import csv
+import hashlib
 import re
 from pathlib import Path
 
@@ -35,10 +36,16 @@ def name(row: dict) -> str:
 
 def rows(sources, player: str = "", subtunes: int | None = None) -> list:
     """Tune rows (``path`` and any other columns) of tune paths and of ``.csv`` tune lists (a
-    survey ``find`` list or an earlier result table), the lists' rows filtered by their SIDId
-    ``player`` (a regex) and their count of ``songs``."""
+    survey ``find`` list or an earlier result table) and of directories' ``.sid`` files (with
+    their md5), the lists' rows filtered by their SIDId ``player`` (a regex) and ``songs``."""
     out = []
     for source in sources:
+        if Path(source).is_dir():
+            out += [
+                {"path": str(p), "md5": hashlib.md5(p.read_bytes()).hexdigest()}
+                for p in sorted(Path(source).rglob("*.sid"))
+            ]
+            continue
         if not str(source).endswith(".csv"):
             out.append({"path": str(source)})
             continue

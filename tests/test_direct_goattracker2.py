@@ -202,6 +202,42 @@ def test_holds_follow_the_build():
     )
 
 
+V2 = [(31, 1, 0, 0)] + [REST] * 15
+
+
+@pytest.mark.parametrize(
+    "build, voices",
+    [
+        ({"voices": (0, 7)}, 2),
+        ({"voices": (7, 0, 14)}, None),
+        ({"idle": (2,)}, 2),
+        ({"voices": (0, None, 7), "idle": (1,)}, 2),
+        ({"voices": (0,)}, 1),
+    ],
+)
+def test_voice_layouts(build, voices):
+    """A build's played channels are the voices they write, in voice order."""
+    text = exact(gt_tune(WAVE, voice2=V2, **build))
+    assert ("\nvoices: " in text) == (voices is not None)
+    if voices:
+        assert f"\nvoices: {voices}\n" in text
+
+
+@pytest.mark.parametrize(
+    "build, match",
+    [
+        ({"calls": 2}, "multispeed: 2"),
+        ({"voices": (0, 7, 0x20)}, "more than one SID"),
+        ({"voices": (0, 7, None)}, "writes no SID voice"),
+        ({"voices": (0, 14)}, "not the first voices"),
+    ],
+)
+def test_unsupported_layouts_are_refused(build, match):
+    """Multispeed builds and channels on a second SID, on no voice or past a gap are refused."""
+    with pytest.raises(g.TranscribeError, match=match):
+        g.Transcriber(gt_tune(WAVE, voice2=V2, **build)[0]).document()
+
+
 def test_unsupported_wavetable_commands_are_refused():
     with pytest.raises(g.TranscribeError, match="wavetable command 4"):
         g.Transcriber(gt_tune([(0xF4, 0x01), (0xFF, 0x00)])[0]).document()

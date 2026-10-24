@@ -15,7 +15,9 @@ edit proved to keep the register grid.
 | [docs/direct/musicassembler.md](docs/direct/musicassembler.md) | the Music Assembler transcription from pymusicassembler's playroutine (`python -m unitracker.direct.musicassembler`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
 | [docs/optimiser-code.md](docs/optimiser-code.md) | the code modulator optimiser prototype: 6502 templates canonicalised and proved (`python -m unitracker.optimiser.code6502`) |
+| [docs/optimiser.md#inline](docs/optimiser.md#inline) | the optimiser's inline forms (`--inline single`, `--inline all`): definitions written at their uses |
 | [docs/optimiser.md#lossy-mode](docs/optimiser.md#lossy-mode) | the lossy mode: code modulators replaced by fitted expressions within a tolerance per cell (`--lossy`) |
+| [docs/tokenization.md](docs/tokenization.md) | how documents tokenize, by form, tokenizer and lexical category; printer changes and their savings; a document BPE (`python -m unitracker.optimiser.tokenizer`) |
 
 ## Install
 
@@ -26,7 +28,7 @@ pip install -e ".[dev]"
 ## Use
 
 ```sh
-unitracker-lift TUNE.sid [-o OUT.yaml] [--subtune N] [--optimise [--ticks T] [--lossy]]
+unitracker-lift TUNE.sid [-o OUT.yaml] [--subtune N] [--optimise [--ticks T] [--lossy] [--inline MODE]]
 ```
 
 It detects the tune's format (pysidtracker) and writes its direct lifter's document, optimised
@@ -59,6 +61,8 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
 | the native player's register grid | `pysidtracker.find_format(raw).play(raw, subtune)` |
 | what does the lossy mode replace, save and cost per tune; how does it sound? | `python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR]` |
+| each tune's lifted and optimised forms, cached, for a corpus study | `python tools/corpus.py forms TUNES_DIR\|LIST.csv [--out out/tokenize] [--forms ...] [--timeout S]` |
+| tokens per form, tokenizer and lexical category; what each printer transform saves | `python tools/tokens.py [out/tokenize] [--forms ...] [--encoders ...]` |
 | do the docs' links resolve; which lines did coverage lose? | `python tools/maint.py {links,coverage BEFORE.json AFTER.json}` |
 | which generator (semitone offset, `clock_hz`, rounding) reproduces each tracker's native note table, and which entries it misses | `python tools/notetables.py [--tune TRACKER=PATH ...] [--json OUT]` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `table`, `hvsc_tune` |

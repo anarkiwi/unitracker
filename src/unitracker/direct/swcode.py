@@ -65,12 +65,15 @@ _PORTAVIBRA = (
 # SETFMOD with CALCVIBRATO: FREQMOD at ceil(A / 2) + DPITCH, r that half + 1 (0: none).
 _CALC = (
     "lda #r\nbeq az\nlda ne\nclc\nadc #r\ncmp #204\nbcc ay\nlda #203\nay:\ncmp #107\n"
-    "bcs ar\nsec\nsbc #12\nbcc az\ntax\nlda F.hi,x\nsta fm\nlda #0\nsta fm+1\njmp ad\naz:\nlda #0\n"
-    "sta fm\nsta fm+1\njmp ad\nar:\nsec\nsbc #108\ntax\nlda F.lo,x\nsta fm\nlda F.hi,x\nsta fm+1\n"
-    "ad:\n"
+    "bcs ar\nsec\nsbc #11\nbcc az\ntax\nlda F.hi-1,x\nsta fm\nlda #0\nsta fm+1\njmp ad\naz:\n"
+    "lda #0\nsta fm\nsta fm+1\njmp ad\nar:\nsec\nsbc #107\ntax\nlda F.lo-1,x\nsta fm\n"
+    "lda F.hi-1,x\nsta fm+1\nad:\n"
 )
 _CONST = "lda #<g\nsta fm\nlda #>g\nsta fm+1\n"
-_TOWARD = "ldx ne\nsec\nlda z\nsbc F.lo,x\nsta o\nlda z+1\nsbc F.hi,x\nsta o+1\nlda #131\nsta k\n"
+_TOWARD = (
+    "ldx ne\ninx\nsec\nlda z\nsbc F.lo-1,x\nsta o\nlda z+1\nsbc F.hi-1,x\nsta o+1\nlda #131\n"
+    "sta k\n"
+)
 _WRPITCH = (
     "go:\nlda cm\nbeq c0\ncmp #1\nbeq c1\ncmp #3\nbeq c3\nlda ne\nclc\nadc #1\nclc\nadc ca\n"
     "jmp sum\nc3:\nlda cv\ncmp #255\nbne cvo\nlda ca\ncmp #2\nbne cvo\nlda cs\ncvo:\nlsr\njmp sum\n"
@@ -79,15 +82,15 @@ _WRPITCH = (
 )
 
 
-# EXPTABH[idx] (12 bytes of zeros, then FREQTBH) for idx = (DPITCH & $7F) + the track amount.
+# EXPTABH[idx] (11 bytes of zeros, then FREQTBH) for idx = (DPITCH & $7F) + the track amount.
 _TRACK = (
-    "lda ne\nclc\nadc #1\nand #127\nclc\nadc {k}\nphp\ntax\nsec\nsbc #12\ntay\nlda #0\n"
-    "cpx #12\nbcc e0\nlda F.hi,y\ne0:\n"
+    "lda ne\nclc\nadc #1\nand #127\nclc\nadc {k}\nphp\ntax\nlda #0\n"
+    "cpx #11\nbcc e0\nlda F.hi-12,x\ne0:\n"
 )
 _WRPULS = (
     "go:\nlda pk\nbeq plain\n"
     + _TRACK.format(k="pk")
-    + "sta v+1\nlda #0\ncpx #13\nbcc e1\ndey\nlda F.hi,y\ne1:\nsta v\nplp\nlda v+1\nsbc v\n"
+    + "sta v+1\nlda #0\ncpx #12\nbcc e1\nlda F.hi-13,x\ne1:\nsta v\nplp\nlda v+1\nsbc v\n"
     "adc pl+1\nsta v+1\nlda pl\nsta v\nrts\nplain:\nlda pl\nsta v\nlda pl+1\nsta v+1\nrts\n"
 )
 _CUTOFF = (
@@ -175,8 +178,8 @@ def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -
         # FREQLO/FREQHI of the note masked to 7 bits; a WF pitch row (phi 0) clears the offset.
         "tone": (
             "lda phi\nora phi+1\nbne go\nsta o\nsta o+1\nlda #1\nsta s\ngo:\nlda s\nbeq done\n"
-            "lda nn\nclc\nadc #1\nand #127\ntax\ndex\nclc\nlda F.lo,x\nadc o\nsta z\n"
-            "lda F.hi,x\nadc o+1\nsta z+1\ndone:\nlda z\nsta v\nlda z+1\nsta v+1\nrts\n"
+            "lda nn\nclc\nadc #1\nand #127\ntax\nclc\nlda F.lo-1,x\nadc o\nsta z\n"
+            "lda F.hi-1,x\nadc o+1\nsta z+1\ndone:\nlda z\nsta v\nlda z+1\nsta v+1\nrts\n"
         ),
         # WRPITCH: a WF row (phi 0) sets the detune (f 1) and the carry, mode c (3 skipped), b.
         "det": "lda phi\nora phi+1\nbne go\nlda #f\nbeq keep\nlda #d\nsta dd\nkeep:\nlda #c\n"
@@ -190,7 +193,8 @@ def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -
         "lda #d\nsta dc\nlda #i\nsta vc\nlda #q\nsta p\n"
         + keep
         + amp
-        + "lda #h\nbeq nh\nldx ne\ncmp #1\nbeq hw\nldx #t\nhw:\nlda F.hi,x\nsta v+1\nnh:\nrts\n",
+        + "lda #h\nbeq nh\nldx ne\ninx\ncmp #1\nbeq hw\nldx #t\ninx\nhw:\nlda F.hi-1,x\n"
+        "sta v+1\nnh:\nrts\n",
         # HARDRST's carry on a new note's skipped WF ticks.
         "hrc": "lda phi\nora phi+1\nbne kept\nlda #c\nsta cv\nkept:\nrts\n",
         # VIBSLIDE from the next tick: a tick the player's hard restart skips it.

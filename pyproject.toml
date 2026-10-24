@@ -16,19 +16,21 @@ dependencies = [
     "tqdm>=4",
     "pysidtracker>=0.36.0",
     "jennings[superopt] @ git+https://github.com/anarkiwi/jennings@superopt",
-    "pygoattracker>=0.7.3",
+    "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker@37c3e03cbf5c24a5e58721f308fe667ceddf09f5",
     "pydefmon>=0.10.1",
     "pysidwizard>=0.3.5",
     "pymusicassembler>=0.8.6",
-    "unitracker-grammar>=0.12.0",
-    "unitracker-player>=0.19.0",
+    "unitracker-grammar>=0.13.0",
+    "unitracker-player>=0.20.0",
     "tiktoken>=0.7",
+    "lark>=1.1",
     "egglog>=11",
 ]
 
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x>=13"]
-dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "zstandard>=0.21", "pytest-timeout>=2.2", "import-linter>=2.15"]
+tokenize = ["tokenizers>=0.20", "huggingface_hub>=0.24"]
+dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "zstandard>=0.21", "pytest-timeout>=2.2", "import-linter>=2.15", "tokenizers>=0.20", "huggingface_hub>=0.24"]
 
 [project.urls]
 Homepage = "https://github.com/anarkiwi/unitracker"

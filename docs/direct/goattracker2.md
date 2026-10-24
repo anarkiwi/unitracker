@@ -155,6 +155,11 @@ so command 0 after a frequency command resumes the instrument's vibrato after th
 
 Wavetable vibrato (`$F4`) and the commands that stop the song (`$F0`, `$F8`, `$FE`) are refused.
 
+The build's played channels (those not in `Build.idle`) become the document's voices, in the
+order of the SID voices `Build.voices` writes them to (`voices:` where fewer than three). Builds
+whose played channels do not fill the first SID's voices from voice 1, reach a second SID or
+no voice, and multispeed builds (`Build.calls` above 1) are refused.
+
 These play differently from GoatTracker because the document has no construct for them:
 
 | GoatTracker | why the document differs |
