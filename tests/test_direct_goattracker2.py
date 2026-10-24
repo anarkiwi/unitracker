@@ -3,6 +3,7 @@
 import pytest
 from pygoattracker import constants as GT
 from unitracker_grammar import code, parse
+from unitracker_grammar.document import Event
 
 from conftest import gt_tune
 from unitracker.direct import goattracker2 as g
@@ -29,12 +30,8 @@ def test_loop_and_runs():
         2,
     )
     assert g.repeat([1, 2, 3], [1, 2, 3]) is None
-    assert g.rests(["C2", "-", "-", "-", "off", "-"]) == [
-        "C2",
-        "-*3",
-        "off",
-        "-",
-    ]
+    events = [Event(n) for n in ("C2", "-", "-", "-", "off", "-")]
+    assert g.rests(events) == [Event("C2"), Event("-", steps=3), Event("off"), Event("-")]
 
 
 WAVE = [(0x41, 0x00), (0xFF, 0x00)]
