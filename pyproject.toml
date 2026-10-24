@@ -17,7 +17,7 @@ dependencies = [
     "pysidtracker>=0.36.0",
     "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker@3875ddd8e326086eb0066c7d7fca60ac1d48a39b",
     "pydefmon>=0.10.1",
-    "pysidwizard>=0.3.5",
+    "pysidwizard>=0.3.5,<0.4",
     "pymusicassembler>=0.8.6",
     "unitracker-grammar>=0.13.0",
     "unitracker-player>=0.20.0",
