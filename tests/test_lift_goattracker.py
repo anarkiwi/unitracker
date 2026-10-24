@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import yaml
 from conftest import gt_tune, table, tolerance, vm_mismatch
-from pygoattracker import Player
+from pygoattracker import Player, PlayerState
 from pygoattracker import constants as C
 from pygoattracker.model import (
     Instrument,
@@ -219,7 +219,7 @@ def test_track_errors(entries, restart, match):
 
 def test_unsupported_builds_are_named():
     info = SimpleNamespace(
-        simplepulse=True, state=object(), init_regs=((0, 1),), live_vibrato=False
+        simplepulse=True, state=SimpleNamespace(ghost=True), init_regs=((0, 1),), live_vibrato=False
     )
     with pytest.raises(gt.LiftError, match="SIMPLEPULSE.*full-ghosting.*init-routine"):
         gt.GoatTrackerLift(SimpleNamespace(info=info)).run()
@@ -685,10 +685,63 @@ def test_the_vm_plays_the_builds_pulse_and_realtime_optimisations(build):
 
     dec.player = player
     song = gt.GoatTrackerLift(dec, expressions=False).run()
-    assert song["tables"]["build"] == build
+    assert song["tables"]["build"] == [*build, 1]
     theirs = np.asarray(player().render_grid(400), np.uint8)
     assert vm_mismatch(song, theirs) is None
     assert (build == [1, 1]) == (np.asarray(make().render_grid(400), np.uint8) == theirs).all()
+
+
+def test_a_builds_pulse_step_scales_each_sweep():
+    ins = [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    pulse = [(0x88, 0), (0x20, 0x03), (0xFF, 2)]
+    text, song, player, theirs = lifted(
+        *gt_tune([(0x41, 0), (0xFF, 0)], ins, pulse=pulse, pulse_step=2)
+    )
+    assert song["tables"]["build"] == [1, 1, 2]
+    width = theirs[:, 2].astype(int) | (theirs[:, 3].astype(int) & 0x0F) << 8
+    begun = player.starts[0]
+    assert set(np.diff(width[begun : begun + 30])) == {0, 6}
+    assert verify.compare(text, theirs, tol=tolerance(song)).ok
+
+
+# A chip-writing build's first-tick SID: voice 1's pulse with stale high bits, voice 2's pulse and
+# envelope, and the filter cutoff, mode and volume init leaves as the image loaded.
+SEEDED = PlayerState(
+    registers=(0x11, 0x22, 0x34, 0xF8, 0, 0x5A, 0x6B)
+    + (0x33, 0x44, 0x80, 0x06, 0, 0x29, 0xA7)
+    + (0,) * 7
+    + (0, 0x40, 0, 0x1C),
+    cutoff=0x40,
+    filttype=0x10,
+    volume=0x0C,
+    funk=(8, 5),
+    ghost=False,
+    init=((4, 0), (11, 0), (18, 0), (21, 0)),
+    lastnote=(3, 4, 5),
+)
+
+
+def test_a_chip_writing_builds_init_seeds_the_pulse_envelope_filter_and_volume():
+    """Voice 1's note, of an instrument with no pulse table, sounds the pulse init left; voice 2,
+    which runs the wavetable without a note, the pulse and envelope; and both the cutoff, mode
+    and volume, which no command sets."""
+    rows = [(None, 0, 8, 1)] + [(None, 0, 0, 0)] * 15
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], voice2=rows, state=SEEDED)
+    text, song, player, theirs = lifted(dec, native)
+    assert song["records"]["vinit"] == {
+        0: {"pw": 0x834, "ad": 0x5A, "sr": 0x6B},
+        1: {"ins": 1, "pw": 0x680, "ad": 0x29, "sr": 0xA7},
+    }
+    assert song["records"]["ginit"] == {0: {"cut": 0x40, "mode": 0x10, "vol": 0x0C}}
+    init = yaml.safe_load(text)["init"]
+    seeds = [("pw:2100", "ad:90", "sr:107", "mode:16", "vol:12", "cut:512"), ("pw:1664", "ad:41")]
+    assert init[1].startswith("-.i1")
+    assert all(f"!{cmd}" in atom for atom, cmds in zip(init, seeds) for cmd in cmds)
+    first, second, _ = player.starts
+    assert {tuple(r) for r in theirs[min(first, second) :, 0x16:]} == {(0x40, 0, 0x1C)}
+    voice2 = theirs[second:, 7:14]
+    assert {tuple(r) for r in voice2[:, [2, 3, 5, 6]]} == {(0x80, 0x06, 0x29, 0xA7)}
+    assert verify.compare(text, theirs, tol=tolerance(song)).ok
 
 
 def test_a_voice_runs_a_table_before_it_names_an_instrument_on_the_init_instrument():

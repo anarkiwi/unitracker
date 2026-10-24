@@ -10,13 +10,13 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 | | |
 |---|---|
 | tune | a packed GoatTracker 2 `.sid`, decompiled by pygoattracker |
-| lifted from | the decompiled song, and the build's hard-restart preset `adparam` as the restart programs' `ad` and `sr` |
+| lifted from | the decompiled song, the build's hard-restart preset `adparam` as the restart programs' `ad` and `sr`, and a chip-writing build's state (pygoattracker's `PlayerState`, its first tick's SID) as `vinit` and `ginit`: the variables its init leaves as the image loaded |
 | tempo | the tempo cells the native player starts each voice on, read after its init: a tempo `t` from 2 is `t + 1` ticks, and 0 and 1 the swing on its funk pair from its first or second tempo. The playroutine's `tempo` starts 2-129 as `!tempo` does: 3-127 in the tempo cell, and 2, 128 and 129 on the funk pair, both that tempo |
 | clock | NTSC when the header's clock flags say so, else PAL |
 | step | one pattern row; the playroutine counts ticks per row itself, and `fetch` runs on the gate-timer lookahead, the hold of the restart's first row |
 | notes | `note_offset` 0 |
 | onset | the tick a wavetable row first sets the voice's frequency: on its first note's first tick the voice still sounds the frequency it had before the note |
-| build | the `build` table: the native player's PULSEOPTIMIZATION (no pulse step on a voice's fetch tick nor on tick 0 of a pattern's first row) and REALTIMEOPTIMIZATION (no continuous command on tick 0), each 1 when the build has it |
+| build | the `build` table: the native player's PULSEOPTIMIZATION (no pulse step on a voice's fetch tick nor on tick 0 of a pattern's first row) and REALTIMEOPTIMIZATION (no continuous command on tick 0), each 1 when the build has it, and its pulse step, the pulse change a +1 sweep speed makes (2 where the player shifts the speed left) |
 
 ## Records
 
@@ -27,7 +27,8 @@ is this player's buffered order (`BUFFEREDWRITES`: the filter step, then `mt_loa
 | `pw` | pulse table (`pulsetab`) | written as the program's `pw` expression |
 | `filter` | filter table (`filttab`) | see Filter |
 | `restart` | the instrument's gate timer and first wave | instruments with one gate timer and first wave share a restart program |
-| `vinit` | a voice's instrument after init (fixed) | `ins`, the instrument the init gives the voice (instrument 1), for a voice that plays a note or runs a table (commands $8-$A) before it names one: the init row names it, as unitracker-player runs a program only on a voice with an instrument |
+| `vinit` | a voice's state after init (fixed) | `ins`, the instrument the init gives the voice (instrument 1), for a voice that plays a note or runs a table (commands $8-$A) before it names one: the init row names it, as unitracker-player runs a program only on a voice with an instrument; `pw`, `ad` and `sr`, the pulse (its low 12 bits, as the player outputs it) and envelope a chip-writing build's init leaves, as the init row's `!pw`, `!ad` and `!sr`. The frequency and calculated-speed note (`mt_chnlastnote`) it leaves are not carried: the voice's onset is the wavetable row that sets both |
+| `ginit` | the filter and volume after init (fixed) | `cut`, `mode` and `vol`, the cutoff, filter mode and volume a chip-writing build's init leaves, as the init row's `!cut`, `!mode` and `!vol` |
 
 A jump row ($FF, target) chains the row before it to its target. The player follows one jump
 and reads the row it lands on as data, so a jump to a jump row runs that row's bytes: in the

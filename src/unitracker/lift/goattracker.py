@@ -230,8 +230,8 @@ def native_start(player) -> dict:
 
 def build_options(player) -> list[int]:
     """The ``build`` table of native ``player`` (a pygoattracker player): its
-    PULSEOPTIMIZATION and REALTIMEOPTIMIZATION."""
-    return [int(player.optimize_pulse), int(player.optimize_realtime)]
+    PULSEOPTIMIZATION and REALTIMEOPTIMIZATION, and the pulse change a +1 sweep speed makes."""
+    return [int(player.optimize_pulse), int(player.optimize_realtime), int(player.pulse_step)]
 
 
 TABLE_RUNS = (C.CMD_SETWAVEPTR, C.CMD_SETPULSEPTR, C.CMD_SETFILTERPTR)
@@ -250,17 +250,37 @@ def _needs_instrument(trk: dict, phrases: dict) -> bool:
     return False
 
 
-def voice_init(player, tracks: list, phrases: dict) -> dict:
+def voice_init(player, state, tracks: list, phrases: dict) -> dict:
     """``vinit`` records: the instrument native ``player`` (a pygoattracker player) gives a voice
-    in its init (``mt_initchn``), for each voice that needs one before it names one."""
+    in its init (``mt_initchn``), for each voice that needs one before it names one, and the
+    pulse and envelope chip-writing build ``state`` (a ``pygoattracker.packed.PlayerState``, or
+    None) seeds it with, as the image loaded them."""
     player.render_grid(1)
     # pylint: disable-next=protected-access
     chans = player._channels
-    return {
-        v: {"ins": chan.instr & 0x3F}
-        for v, (trk, chan) in enumerate(zip(tracks, chans))
-        if _needs_instrument(trk, phrases)
-    }
+    out = {}
+    for v, (trk, chan) in enumerate(zip(tracks, chans)):
+        rec = {"ins": chan.instr & 0x3F} if _needs_instrument(trk, phrases) else {}
+        if state is not None:
+            regs = state.registers[v * C.VOICE_REG_SIZE :]
+            rec.update(
+                pw=(regs[C.PULSE_HI_REG] << 8 | regs[C.PULSE_LO_REG]) & 0xFFF,
+                ad=regs[C.AD_REG],
+                sr=regs[C.SR_REG],
+            )
+        rec = {k: int(val) for k, val in rec.items() if val}
+        if rec:
+            out[v] = rec
+    return out
+
+
+def global_init(state) -> dict:
+    """The ``ginit`` record of chip-writing build ``state`` (a
+    ``pygoattracker.packed.PlayerState``, or None): the filter cutoff, mode and volume it seeds,
+    as the image loaded them."""
+    if state is None:
+        return {}
+    return {"cut": state.cutoff & 0xFF, "mode": state.filttype & 0xF0, "vol": state.volume & 0x0F}
 
 
 def _phrases(song, tracks) -> dict:
@@ -508,7 +528,7 @@ class GoatTrackerLift(Lift):
         info = self.tune.info
         unsupported = {
             "SIMPLEPULSE pulse tables": info.simplepulse,
-            "full-ghosting builds": info.state is not None,
+            "full-ghosting builds": info.state is not None and info.state.ghost,
             "init-routine SID writes": bool(info.init_regs),
             "instrument-vibrato-only builds": info.live_vibrato,
         }
@@ -531,7 +551,8 @@ class GoatTrackerLift(Lift):
         instruments, restarts = instrument_records(song.instruments, adparam)
         tracks = [track(ol) for ol in song.subtunes[dec.subtune].channels]
         phrases = _phrases(song, tracks)
-        vinit = voice_init(self.native(), tracks, phrases)
+        vinit = voice_init(self.native(), info.state, tracks, phrases)
+        ginit = global_init(info.state)
         header = dec.header
         return {
             "unitracker": "ir",
@@ -551,6 +572,7 @@ class GoatTrackerLift(Lift):
                 "filttab": filter_records(song.filtertable),
                 "speedtab": speed_records(song.speedtable),
                 **({"vinit": vinit} if vinit else {}),
+                **({"ginit": {0: ginit}} if ginit else {}),
             },
             "tracks": tracks,
             "phrases": phrases,

@@ -7,8 +7,9 @@ tempo:
   cells: {tempo: "a - 1 if a == b and 3 <= a <= 127 else 0", funk0: "a - 1", funk1: "b - 1"}
 tables:
   ftab: [279, 295, 313, 331, 351, 372, 394, 417, 442, 468, 496, 526, 557, 590, 625, 662, 702, 744, 788, 835, 884, 937, 993, 1052, 1114, 1180, 1250, 1325, 1404, 1487, 1576, 1669, 1768, 1874, 1985, 2103, 2228, 2361, 2501, 2650, 2807, 2974, 3151, 3338, 3537, 3747, 3970, 4206, 4456, 4721, 5002, 5299, 5614, 5948, 6302, 6677, 7074, 7494, 7940, 8412, 8912, 9442, 10004, 10599, 11229, 11897, 12604, 13353, 14148, 14989, 15880, 16824, 17825, 18885, 20008, 21197, 22458, 23793, 25208, 26707, 28295, 29978, 31760, 33649, 35650, 37769, 40015, 42395, 44916, 47586, 50416, 53414, 56590, 59955, 63520, 65535, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  # PULSEOPTIMIZATION and REALTIMEOPTIMIZATION of the build (1: on, greloc's default).
-  build: [1, 1]
+  # PULSEOPTIMIZATION and REALTIMEOPTIMIZATION of the build (1: on, greloc's default), and the
+  # pulse change a +1 sweep speed makes.
+  build: [1, 1, 1]
 commands:
   5: {name: ad}
   6: {name: sr}
@@ -44,12 +45,27 @@ record_types:
     unwritten: [speed, vd]
     refs: {ctrl: ctrltab, pw: pulsetab, filter: filttab, speed: speedtab, freq: x, restart: restart}
   # The instrument init gives a voice (mt_initchn, the voice's instr) that plays a note or runs a
-  # table before it names one.
+  # table before it names one; pw, ad and sr, the pulse and envelope a chip-writing build's init
+  # leaves as the image loaded.
   vinit:
     fixed: true
     form: map
-    fields: [ins]
+    fields: [ins, pw, ad, sr]
     refs: {ins: ins}
+  # The filter cutoff, mode and volume a chip-writing build's init leaves as the image loaded.
+  ginit:
+    fixed: true
+    form: map
+    fields: {cut: 0, mode: 0, vol: 0x0F}
+    codec:
+      - keys:
+          cut: {byte: cut, omit: "cut == 0"}
+          mode: {value: mode, omit: "mode == 0"}
+          vol: {value: vol, omit: "vol == 0x0F"}
+        raw:
+          cut: "cut if has_cut else 0"
+          mode: "mode if has_mode else 0"
+          vol: "vol if has_vol else 0x0F"
   # Hard restart: a lookahead row, read hold ticks before the note (the gate timer), that
   # may turn the gate off and then preset the envelope to the build's one preset; then the
   # note's first-tick row, which writes the first waveform with the gate on, or only the gate.
@@ -141,7 +157,7 @@ record_types:
         keys: {pw: "((l & 0x0F) << 8) | r"}
         raw: {l: "0x80 | (pw >> 8)", r: "pw & 0xFF"}
     do: [{set: {pulse: "((row.l & 0x0F) << 8) | row.r"}}]
-    each: [{accumulate: pulse, step: "s8(row.r)"}]
+    each: [{accumulate: pulse, step: "s8(row.r) * build[2]"}]
   # Filtertable row: l $80+ sets the mode and r, the $D417 byte (and cut, a cutoff the player
   # reads from the following row), l 0 sets the cutoff r, otherwise l ticks of an r cutoff sweep.
   filttab:
@@ -196,7 +212,7 @@ global:
   filtercutoff: {width: 8}
   filterctrl: {width: 8}
   filtertype: {width: 8}
-  masterfader: {width: 8, init: 0x0F}
+  masterfader: {width: 8}
   # $D416-$D418 as the filter step writes them, before the channels run.
   fcutreg: {width: 8}
   fctrlreg: {width: 8}
@@ -204,6 +220,7 @@ global:
   fptr: {width: 8}
   ftime: {width: 8}
   nt: {width: 8}
+  vi: {width: 8}
 voice:
   funk0: {width: 8, init: 8}
   funk1: {width: 8, init: 5}
@@ -441,7 +458,14 @@ procs:
     - {if: fetchtick, then: [{call: get_new_notes}]}
 
 init:
-  - set: {filterctrl: 0, fptr: 0, state: 0}
+  - set:
+      filterctrl: 0
+      fptr: 0
+      state: 0
+      vi: 0
+      filtercutoff: "ginit[0].cut"
+      filtertype: "ginit[0].mode & 0xF0"
+      masterfader: "ginit[0].vol & 0x0F"
   - for_voices:
       - set:
           command: 0
@@ -454,6 +478,10 @@ init:
           tick: 1
           instr: 1
           gatetimer: "restart[ins[1].restart].hold"
+          pulse: "vinit[vi].pw"
+          ad: "vinit[vi].ad"
+          sr: "vinit[vi].sr"
+      - set: {vi: "vi + 1"}
 
 tick:
   - {if: "state == 2", then: [{return: true}]}
