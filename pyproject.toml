@@ -15,8 +15,7 @@ dependencies = [
     "numpy>=1.23",
     "tqdm>=4",
     "pysidtracker>=0.36.0",
-    "jennings[superopt] @ git+https://github.com/anarkiwi/jennings@superopt",
-    "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker@37c3e03cbf5c24a5e58721f308fe667ceddf09f5",
+    "pygoattracker @ git+https://github.com/anarkiwi/pygoattracker@3875ddd8e326086eb0066c7d7fca60ac1d48a39b",
     "pydefmon>=0.10.1",
     "pysidwizard>=0.3.5",
     "pymusicassembler>=0.8.6",
@@ -25,6 +24,7 @@ dependencies = [
     "tiktoken>=0.7",
     "lark>=1.1",
     "egglog>=11",
+    "jennings[superopt] @ git+https://github.com/anarkiwi/jennings@superopt",
 ]
 
 [project.optional-dependencies]
