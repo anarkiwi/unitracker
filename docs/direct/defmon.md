@@ -12,7 +12,7 @@ python -m unitracker.direct.defmon --verify [--frames N] [--diff K] [--jobs J] T
 ```
 
 `--verify` plays each document with unitracker-player and compares its register grid with
-`DefmonPlayer(raw).render_grid` over `--frames` ticks; `--diff K` lists up to `K` differing runs
+`standard(raw).render_grid` (see Pitch) over `--frames` ticks; `--diff K` lists up to `K` differing runs
 per register.
 
 ## Builds
@@ -47,13 +47,18 @@ the first relative row or note replaces.
 
 ## Pitch
 
-The replay's note table is the standard `F` at PAL's `clock_hz`, rounded to the nearest, two
-octaves up: defMON note index `k` is generic note `k - 24` (index `$30` is `C2`), so notes carry
-standard pitch names. `F` gives indexes 24-118; the replay's words under them (two octaves below
-C0, named `C-2` to `B-1`) and over them (its top clamped word, then the memory a wrapped or
-relative note reaches, to index 127 in the absolute build and 255 in the relative one) are table
-`L`. The templates read the note's word from `F` or `L` by its index, and the portamento table `P`
-by the index itself.
+defMON note index `k` is generic note `k - 24` (index `$30` is `C2`, indexes 0-23 `C-2` to
+`B-1`), and its word is the standard `F(k - 24)` at the document's `clock_hz`: the templates read
+it as `F.lo-24,y` / `F.hi-24,y` with the index in Y, and the portamento table `P` by the index
+itself. The replay's note table is the standard `F` at PAL's clock two octaves up from index 24
+to 118; its own words under those (two octaves below C0) and over them (its top clamped word,
+then the memory a wrapped or relative note reaches, to index 127 in the absolute build and 255 in
+the relative one) are not carried: there the document plays `F`, 0 where the word overflows.
+
+Documents are verified against `standard()`, the replay with every note-table read answered by
+`F(k - 24)` at the document's clock (`compare(..., native=True)` against the replay's own table).
+Against the native replay, tunes that play notes under index 24, past 118, or at NTSC differ in
+those notes' frequencies only.
 
 ## Programs
 
@@ -88,7 +93,7 @@ state with the gate off on that call.
 ## Modulators
 
 Code templates (`unitracker.direct.dmcode`) over the standard note table `F` and the replay's
-tables `L` (note words `F` does not give), `P` (portamento) and `R` (slide rates):
+tables `P` (portamento) and `R` (slide rates):
 
 | cell | slots | template | replay |
 |---|---|---|---|
