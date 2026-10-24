@@ -13,6 +13,7 @@ convert native pitch, pulse and filter modulations to proved integer expressions
 | [docs/playroutines/](docs/playroutines/) | the playroutine [schema](docs/playroutines/schema.md), [lifting](docs/playroutines/lifting.md), and what each lifter decodes, covers and refuses: [goattracker2](docs/playroutines/goattracker2.md), [sidwizard](docs/playroutines/sidwizard.md), [defmon](docs/playroutines/defmon.md) |
 | [docs/modulation/modfit.md](docs/modulation/modfit.md) | modulation analysis and the proved conversion to expressions (`unitracker-modfit`) |
 | [docs/optimise.md](docs/optimise.md) | the optimiser's passes and guarantee |
+| [docs/optimiser.md](docs/optimiser.md) | the generic optimiser over any canonical document: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
 | [docs/porting.md](docs/porting.md) | bringing another playroutine to unitracker |
 | [docs/direct/goattracker2.md](docs/direct/goattracker2.md) | a standalone GoatTracker 2 transcription from pygoattracker's playroutine (`python -m unitracker.direct.goattracker2`) |
 

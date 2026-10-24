@@ -30,6 +30,32 @@ jobs:
           tunes: tests tools/shared.py
       - run: black --check src tests tools
       - run: lint-imports
-      - run: pylint src
+      - run: pylint src --ignore=optimiser
       - run: pylint --disable=missing-function-docstring tests tools
       - run: pytest -n auto --cov=unitracker --cov-fail-under=85
+
+  optimiser:
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      COVERAGE_CORE: sysmon
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # the document model and format 1.23's player, until they are released
+      - run: >-
+          pip install --no-deps
+          "unitracker-grammar @ git+https://github.com/anarkiwi/unitracker-grammar@document"
+          "unitracker-player @ git+https://github.com/anarkiwi/unitracker-player@code-mods"
+      - run: black --check src/unitracker/optimiser tests/test_optimiser.py tests/optimiser_docs.py
+      - run: pylint src/unitracker/optimiser
+      - run: pylint --disable=missing-function-docstring tests/test_optimiser.py tests/optimiser_docs.py
+      - run: >-
+          pytest -n auto tests/test_optimiser.py --cov=unitracker.optimiser --cov-config=/dev/null
+          --cov-fail-under=85

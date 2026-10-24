@@ -50,6 +50,10 @@ pythonpath = ["tools"]
 timeout = 1200
 addopts = ["-rx"]
 
+[tool.coverage.run]
+# the optimiser needs unitracker-grammar's document model: CI's optimiser job measures it
+omit = ["*/unitracker/optimiser/*"]
+
 [tool.pylint.main]
 init-hook = "import sys; sys.path.insert(0, 'tools')"
 
