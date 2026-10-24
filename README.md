@@ -57,6 +57,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
 | the native player's register grid | `pysidtracker.find_format(raw).play(raw, subtune)` |
 | do the docs' links resolve; which lines did coverage lose? | `python tools/maint.py {links,coverage BEFORE.json AFTER.json}` |
+| which generator (semitone offset, `clock_hz`, rounding) reproduces each tracker's native note table, and which entries it misses | `python tools/notetables.py [--tune TRACKER=PATH ...] [--json OUT]` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `table`, `hvsc_tune` |
 
 ## Layout
