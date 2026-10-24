@@ -57,11 +57,36 @@ held slot passes it on.
 
 | writer | slot | modulator |
 |---|---|---|
-| wavetable note row | `wave.freq` | `G[N]` once, then `v` |
-| wavetable `$F1`/`$F2`/`$F3` | `wave.freq` | one step of the portamento, then `v` |
-| a note's instrument | `wave.freq`, `tick.freq` | `v`; its vibrato after `delay - 1` firings |
-| pattern commands 1-4 | `!tick.freq:x` | `v ± s`, toward `G[n]` (`n` the event note), vibrato from the row's phase |
-| command 0 after a frequency command | `!tick.freq:x`, or `!tick.freq:none` without a vibrato | the instrument's vibrato from the row's phase and delay left |
+| wavetable note row | `wave.freq` | `note` |
+| wavetable `$F1`/`$F2`/`$F3` | `wave.freq` | `porta1`/`portan1`, `tporta1`/`tportan1`/`snap1` |
+| a note's instrument | `wave.freq`, `tick.freq` | `note`; `vib`/`vibn` after `delay - 1` firings |
+| pattern commands 1-4 | `!tick.freq:x` | `porta`/`portan`, `tporta`/`tportan`/`snap`, `vib`/`vibn` |
+| command 0 after a frequency command | `!tick.freq:x`, or `!tick.freq:none` without a vibrato | the instrument's `vib`/`vibn` after the delay left |
+
+### Code modulators
+
+The modulators are format 1.23 6502 code templates
+([`gt2code.py`](../../src/unitracker/direct/gt2code.py)), each a transcription of the
+playroutine function it replaces; `mod:` holds those the song uses and `state:` the variables
+they name. The freq cell's state is GoatTracker's channel state:
+
+| state | GoatTracker | written by |
+|---|---|---|
+| `t` | `vibtime`, the vibrato phase | `note` (0), `vib`/`vibn`, a toneporta reaching its note (0) |
+| `m` | `lastnote`, the note calculated speeds read | `note` (`N & 127`), a toneporta reaching its note (`n`) |
+
+| template | params | routine |
+|---|---|---|
+| `note` | | on `φ = 0`: `v = G[N & 127]`, `t = 0`, `m = N & 127`; then `v` |
+| `porta` | `g` (1 up, -1 down), `s` | `v ± s` |
+| `portan` | `k`, `g` | `v ± ((G[m + 1] - G[m]) >> k)` |
+| `tporta`, `tportan` | `s`; `k` | `_toneporta`: toward `G[n & 127]` by `s` (or the calculated step), snapping to it with `t = 0`, `m = n` where it crosses |
+| `snap` | | speed entry 0: `v = G[n & 127]`, `t = 0`, `m = n` |
+| `vib`, `vibn` | `l`, `c`, `s`; `l`, `k`, `c` | after `l` firings, `_vibrato`: the phase `t` turns at depth `c` and steps by 2, `v ± s` (or the calculated step) by its low bit |
+| `porta1`, `portan1`, `tporta1`, `tportan1`, `snap1` | as above | the same on `φ = 0` only (a wavetable command row) |
+
+A speed table entry `(l, r)` is `s = l << 8 | r`, or with `l & $80` calculated: `k = r` (and
+`c = l & $7F` for a vibrato).
 
 ## Instruments
 
@@ -88,26 +113,27 @@ player's overrun entries included).
 | wavetable `$F1/$F2/$F3` | `wave.freq`, one step |
 | wavetable `$F5/$F6/$F7/$F9/$FA/$FB/$FC/$FD` | `ad`, `sr`, `ctrl`, `run`/`pw: hold`, `run`/`cut: hold`, `res`+`route`, `cut`, `vol` |
 | wavetable `$FF xx` | `{loop: k}`, or `end` for `xx = 0` |
-| pulse table | one expression of `φ` (the firing count, by the holds): per firing a set width or an added step, from `_pulse_exec`, `P[i]` (and `K[i]` where both occur) over the orbit's prefix and cycle |
+| pulse table from row `b` | `ptab {b}` (`ptabs` with `SIMPLEPULSE`), `_pulse_exec` over the player's own table in `PL`/`PR` (`PL[k]`, `PR[k]` its row `k`); the pw cell's state `r` is the row and `q` the time left (on `φ = 0`, `r = b`, `q = 0`): a jump row moves `r`, a set row writes the width, a modulation row adds its signed step |
 | filter table `$80-$F0` (+ a following `$00`) | `{mode, res, route, cut}` in one row |
 | filter table `$01-$7F` | `{hold: t, cut: v + 8s}` |
 | filter table `$00` | `{cut: 8c}` |
 
-The filter table runs on every tick, so its rows are program rows; the pulse table does not, so
-its value is a function of its firings.
+The filter table runs on every tick, so its rows are program rows; the pulse table is held on
+the playroutine's skips, so it is a code modulator of the pw slot.
 
 ## Pattern commands
 
 | command | generic |
 |---|---|
-| `0` after a frequency command | `!tick.freq:x` (the instrument's vibrato) or `!tick.freq:none` |
-| `1`, `2` | `!tick.freq:x`: `v ± s`, `s` the speed entry or `(G[N+1] - G[N]) >> r` |
-| `3` with a note | `!tick.freq:x` toward `G[n]`, and `!legato` |
-| `4` | `!tick.freq:x`: `v ± s` by the sign bit of the vibrato phase, a table over its orbit |
+| `0` after a frequency command | `!tick.freq:x` (the instrument's `vib`/`vibn`) or `!tick.freq:none` |
+| `1`, `2` | `!tick.freq:x`, `porta` or `portan` with `g` 1 or -1 |
+| `3` with a note | `!tick.freq:x`, `tporta`, `tportan` or (`0`) `snap`, and `!legato` |
+| `4` | `!tick.freq:x`, `vib` or `vibn` with `l` 0 |
 | `5`, `6`, `7` | `!ad`, `!sr`, `!ctrl` |
-| `8`, `9`, `A` | `!run:c`/`!run:none`, `!run:pw`/`!pw:hold`, `!run:f`/`!cut:hold` |
+| `8`, `9`, `A` | `!run:c`/`!run:none`, `!pw:x` (`ptab`)/`!pw:hold`, `!run:f`/`!cut:hold` |
 | `B` | `!resfilt:r/m`, `!resfilt:0/0!cut:hold` for 0 |
 | `C`, `D` | `!cut:8c`, `!vol` |
+| `E` | `!tempo:a/b`, the speed entry's two lengths |
 | `F` | `!tempo` (`!vtempo` for `$80+`) |
 
 A phrase is a pattern occurrence's events; the same command running into it continues without
@@ -116,9 +142,9 @@ restarting `φ`.
 ## Context
 
 Each pattern occurrence is written from the reference player's channel state at each row's
-tick 0: the frequency command running into it, its instrument, and the vibrato phase and the
-delay left. Occurrences whose events come out the same share a phrase. A vibrato command starts
-from that phase; command 0 after a frequency command resumes the instrument's vibrato from it.
+tick 0: the frequency command running into it, its instrument, and the vibrato delay left.
+Occurrences whose events come out the same share a phrase. The vibrato phase is the state `t`,
+so command 0 after a frequency command resumes the instrument's vibrato after the delay left.
 
 ## Not transcribed
 
@@ -130,3 +156,6 @@ These play differently from GoatTracker because the document has no construct fo
 |---|---|
 | one filter program for the song | a document's filter slot is per voice: a second voice starting a filter program leaves the first voice's running |
 | a toneporta note's note change on tick 0 | a `!legato` note applies on the step's tick, GoatTracker's tick 1 |
+| command 9 (or a wavetable `$F9`) setting the pulse program already running | it restarts the table; a binding to the modulator a slot is bound to keeps its φ |
+| a ghosting build (the SID written from the previous call's registers) | its output lags the playroutine one tick and starts from the image's registers |
+| the SID registers a build's init leaves from its image before the first notes | the document's registers start at 0 |
