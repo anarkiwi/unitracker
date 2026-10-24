@@ -18,8 +18,8 @@ dependencies = [
     "pygoattracker>=0.7.3",
     "pydefmon>=0.10.1",
     "pysidwizard>=0.3.5",
-    "unitracker-grammar>=0.10.0",
-    "unitracker-player>=0.17.0",
+    "unitracker-grammar>=0.11.0",
+    "unitracker-player>=0.18.0",
     "tiktoken>=0.7",
 ]
 

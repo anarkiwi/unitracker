@@ -40,7 +40,7 @@ from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
 from unitracker.direct.swcode import CODE, STATE
 
-VERSION = "1.23"
+VERSION = "2.0"
 # The clock whose note table F is nearest FREQTBL/FREQTBH at note k + 1: no clock is exact.
 CLOCK = (PAL_CYCLES_PER_FRAME, 985256)
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}

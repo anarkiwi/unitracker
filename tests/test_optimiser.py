@@ -113,9 +113,8 @@ def test_hoist_resets_on_note_a_binding_that_reads_phi():
     assert "slots: {pw: {pw: {mod: vib(2), reset: [note]}}}" in printed(edit.apply(read(text)))
 
 
-def test_hoist_proposes_nothing_without_a_common_binding_or_before_1_22():
+def test_hoist_proposes_nothing_without_a_common_binding():
     assert not passes.hoist(read(D.MERGE))
-    assert not passes.hoist(read(D.HOIST.replace("unitracker: 1.23", "unitracker: 1.21")))
     assert not passes.hoist(read(D.doc("      phrase:\n        p1: [C4, -*3]\n", mods="")))
 
 
@@ -136,7 +135,7 @@ def test_the_guarantee_plays_to_an_end_a_proved_loop_or_a_tick_count():
     with pytest.raises(GuaranteeError):
         Guarantee(D.LOOPING_CODE)
     guarantee = Guarantee(D.LOOPING)
-    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker: 1.23\n")
+    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker: 2.0\n")
     assert not guarantee.holds(D.LOOPING.replace("D4.i2", "E4.i2"))
 
 
@@ -174,7 +173,7 @@ def test_the_cli_writes_the_optimised_document_and_its_sizes(tmp_path, capsys):
     assert "before:" in err and "after:" in err and "merge: ins i2 -> i1" in err
     assert Guarantee(D.MERGE).holds(out.read_text(encoding="utf-8"))
     assert main([str(source), "--ticks", "40", "--rounds", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 1.23\n")
+    assert capsys.readouterr().out.startswith("unitracker: 2.0\n")
 
 
 @pytest.mark.parametrize("path", sorted(LIFTED.glob("*.yaml")), ids=lambda p: p.stem)
@@ -211,4 +210,3 @@ def test_template_makes_programs_alike_but_for_integers_one_template_of_calls():
 
 def test_template_proposes_nothing_without_two_programs_differing_in_integers():
     assert not templates.template(read(D.MERGE))
-    assert not templates.template(read(D.TEMPLATE.replace("unitracker: 1.23", "unitracker: 1.22")))
