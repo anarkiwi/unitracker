@@ -18,8 +18,7 @@ from unitracker_player.player import play
 
 from unitracker.direct import cli
 from unitracker.direct.dmcode import CODE, STATE
-from unitracker.lift.base import LiftError
-from unitracker.lift.defmon import locate, row_fields
+from unitracker.direct.dmimage import LiftError, locate, row_fields
 
 VERSION = "1.23"
 PAL_HZ, NTSC_HZ = 985248, 1022727

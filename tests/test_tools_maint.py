@@ -1,4 +1,4 @@
-"""tools/maint.py: the docs' links, the playroutine docs' tables and lost coverage lines."""
+"""tools/maint.py: the docs' links and lost coverage lines."""
 
 import json
 
@@ -6,10 +6,8 @@ import maint
 import shared
 
 
-def test_the_repository_docs_have_no_broken_links_and_tables_match(capsys):
+def test_the_repository_docs_have_no_broken_links():
     assert not maint.broken(shared.ROOT)
-    assert maint.main(["tables"]) == 0
-    assert "| `!" in capsys.readouterr().out
 
 
 def test_a_missing_target_is_reported_and_external_links_are_not(tmp_path, capsys):

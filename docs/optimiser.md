@@ -4,8 +4,7 @@
 versions the grammar reads) into a smaller one that plays the same register grid on
 unitracker-player. It knows no tracker: it reads and writes the document only through
 unitracker-grammar's model (`unitracker_grammar.document`), whose `printed` is the one canonical
-text. It replaces `unitracker.optimise` ([optimise.md](optimise.md)), which works on the
-lifters' song model.
+text.
 
 ```sh
 python -m unitracker.optimiser IN.yaml [-o OUT.yaml] [--ticks N] [--rounds R]
