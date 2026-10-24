@@ -129,8 +129,8 @@ Slots, in the player's order:
 
 The pitch is the standard note table `F` at `clock_hz: 985240, rounding: floor`: generic note `k`
 is SID-Wizard note `k + 1`, and the reference player runs at that table (its EXPTABH built on it).
-FREQTBL/FREQTBH is that table at notes 1-95; it differs at note 0 (263, a word under C0, where `F`
-is 0) and past note 95, where the player's unmasked index reads the image after the table. Of the
+FREQTBL/FREQTBH is that table at notes 1-95; it differs at note 0 (263, a word under C0, where
+`F(-1)` is 262; the templates read it as `F.lo-1,x` with the SID-Wizard note in X) and past note 95, where the player's unmasked index reads the image after the table. Of the
 109 exact tunes, 28 also play the native player exactly; 37 more differ only by note 0 and the
 rest read past note 95.
 

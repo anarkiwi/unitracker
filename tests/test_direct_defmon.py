@@ -24,6 +24,32 @@ def test_the_document_plays_the_replay(request, name):
     assert not cells.size, cli.summary(cells, 3)
 
 
+def test_off_the_standard_table_only_note_frequencies_differ_from_the_native_replay(rent_a_cop):
+    """Rent-A-Cop's title plays notes the replay's own table tunes off the standard F."""
+    cells, _ = dm.compare(rent_a_cop.read_bytes(), frames=TICKS, native=True)
+    assert cells.size and set(cells[:, 1]) <= {0, 1, 7, 8, 14, 15}
+
+
+def test_the_standard_replay_answers_only_note_table_reads_by_f(crosseyed):
+    """A read of the note table's index k by the replay's note-table instructions is F(k - 24);
+    any other read of those bytes is the replay's own."""
+    raw = crosseyed.read_bytes()
+    ref = dm.standard(raw)
+    ram, at = ref._mem, dm.locate(ref._mem)[0]  # pylint: disable=protected-access
+    lo, hi = (at[a] for a in dm.NOTES)
+    ins = bytes(ram).index(bytes([0xB9, lo & 0xFF, lo >> 8]))
+    ref._mpu.pc = ins  # pylint: disable=protected-access
+    bus = ref._obs  # pylint: disable=protected-access
+    assert [bus[lo + k] for k in (0, 23, 48, 200)] == [
+        dm.frequency(k - 24) & 0xFF for k in (0, 23, 48, 200)
+    ]
+    assert bus[lo + 256] == ram[lo + 256] and bus[lo - 1] == ram[lo - 1]
+    ref._mpu.pc = bytes(ram).index(bytes([0xB9, hi & 0xFF, hi >> 8]))  # pylint: disable=W0212
+    assert bus[hi + 72] == dm.frequency(48) >> 8 and bus[lo + 2] == ram[lo + 2]
+    ref._mpu.pc = ins + 3  # pylint: disable=protected-access
+    assert bus[lo + 3] == ram[lo + 3]
+
+
 def test_helpers():
     assert [dm.note_name(k) for k in (0, 24, 48, 127)] == ["C-2", "C0", "C2", "G8"]
     assert dm.route(0) == [("route_off", 0)]
