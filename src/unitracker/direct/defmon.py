@@ -20,7 +20,6 @@ from unitracker.direct import cli
 from unitracker.direct.dmcode import CODE, STATE
 from unitracker.direct.dmimage import LiftError, locate, row_fields
 
-VERSION = "2.0"
 PAL_HZ, NTSC_HZ = 985248, 1022727
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 VOICES = (0x00, 0x31, 0x62)
@@ -238,8 +237,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         keys = [("hold", hold)] if hold != 1 else []
         wgh, wgl = cols.get("wgh"), cols.get("wgl")
         if wgh is not None or wgl is not None:
-            ctrl = "" if wgh is None else str(wgh | 1)
-            keys.append(("ctrl", ctrl + ("" if wgl is None else f"^{wgl & 0xFE}")))
+            keys += [] if wgh is None else [("ctrl", wgh | 1)]
+            keys += [] if wgl is None else [("mask", wgl & 0xFE)]
         if "_gate" in cols:
             keys.append(("gate", cols["_gate"]))
         if "_abs" in cols:
@@ -390,27 +389,27 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             out.append(d.Event(note_name(self(0x12ED, v)), "i1", commands))
         return tuple(out)
 
-    def timeline(self, steps: list) -> list:
-        """The lead-in row, then a row of each voice's phrase per song step."""
+    def timeline(self, steps: list) -> tuple:
+        """``(phrases, rows)``: the phrases by name, the lead-in row, then a row of each voice's
+        phrase per song step."""
         lead = (d.Event("-"),)
         if self.lead:  # a multispeed play routine's sub-tick calls before the first full one
             lead += (d.Event("-", commands=BINDS, steps=self.lead),)
-        phrases, rows = {}, [d.SongRow((d.Play("p0"),) * 3, (("phrase", {"p0": lead}),))]
+        phrases, rows = {}, [d.SongRow((d.Play("p0"),) * 3)]
         for k, (length, marks) in enumerate(steps):
-            names, new = [], {}
+            names = []
             for v in range(3):
                 events = self.phrase(length, marks[v], not (k or self.lead))
                 if events not in phrases:
-                    phrases[events] = new[events] = f"p{len(phrases) + 1}"
+                    phrases[events] = f"p{len(phrases) + 1}"
                 names.append(d.Play(phrases[events]))
-            rows.append(d.SongRow(tuple(names), (("phrase", {n: e for e, n in new.items()}),)))
-        return [d.replace(r, defs=()) if not r.defs[0].records else r for r in rows]
+            rows.append(d.SongRow(tuple(names)))
+        return {"p0": lead} | {n: e for e, n in phrases.items()}, rows
 
     def head(self) -> d.Header:
         """The header: the SID's texts and clock, a step of one tick, the slots and state."""
         ntsc = (self.header.flags >> 2) & 3 == 2
         return d.Header(
-            VERSION,
             meta=tuple((k, text(getattr(self.header, a))) for k, a in META),
             clock=(int(self.player.cycles_per_frame), NTSC_HZ if ntsc else PAL_HZ),
             tempo=1,
@@ -421,7 +420,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def document(self, calls: int = MAX_CALLS) -> str:
         """The document of the song to its loop."""
         steps, loop = self.song(calls)
-        rows = self.timeline(steps)
+        phrases, rows = self.timeline(steps)
         init = self.init()
         programs = {
             name: d.Program([self.row(h, c, v) for h, c in body], at)
@@ -430,6 +429,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         defs = [("ins", {"i1": d.Instrument({"p.freq": call("pitch")})})]
         defs += [("ctrl", programs)] if programs else []
         defs += [("pw", {n: p for p, n in self.pulses.items()})] if self.pulses else []
+        defs += [("phrase", phrases)]
         doc = d.Document(self.head(), self.tables(), (), defs, init, rows, loop + 1)
         return d.printed(d.replace(doc, mods=mods(d.printed(doc), self.absolute)))
 
@@ -495,8 +495,8 @@ def route(re_: int) -> list:
     """The keys of a row's ``$D417`` column: ``0`` removes the voice, bit 3 adds it and the low
     nibble under the high nibble's resonance, any other byte sets both."""
     if not re_:
-        return [("route", "'-'")]
-    return [("res", re_ >> 4), ("route", f"+ {re_ & 0x0F}" if re_ & 0x08 else re_ & 0x0F)]
+        return [("route_off", 0)]
+    return [("res", re_ >> 4), ("route_on" if re_ & 0x08 else "route", re_ & 0x0F)]
 
 
 def mods(body: str, absolute: bool = True) -> tuple:

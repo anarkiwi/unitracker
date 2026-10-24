@@ -40,7 +40,6 @@ from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat
 from unitracker.direct.macode import CODE, STATE
 
-VERSION = "2.0"
 # The clock whose F is nearest the player's note table: 53 of its notes 0-94 differ by one.
 CLOCK = (PAL_CYCLES_PER_FRAME, 985056)
 VOICES = MA.VOICES
@@ -313,7 +312,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         """The init events: the volume and filter init wrote, and the owner's cutoff sweep."""
         regs = self.ref.snapshot()
         res_filt, mode_vol = regs[MA.RES_FILT_REG], regs[MA.MODE_VOL_REG]
-        events = [{"resfilt": (res_filt >> 4, res_filt & 0x0F), "mode": mode_vol & 0xF0}]
+        events = [{"res": res_filt >> 4, "route": res_filt & 0x0F, "mode": mode_vol & 0xF0}]
         events[0]["vol"] = mode_vol & 0x0F
         events += [{} for _ in range(VOICES - 1)]
         rd, lay = self._rd, self.lay
@@ -339,7 +338,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         named = {s for t in used for s in code.symbols(ROUTINES[t])}
         state = {c: [(k, n) for k, n in names.items() if k in named] for c, names in STATE.items()}
         return Header(
-            VERSION,
             tuple((k, meta_text(v)) for k, v in self.meta()),
             clock=CLOCK,
             tempo=1,
@@ -360,7 +358,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         called = {b.name for b in bound if isinstance(b, Call)}
         used = [t for t in self.used if t in called]
         mods = [(signature(t, code.params(ROUTINES[t])), Code(ROUTINES[t])) for t in used]
-        song = [SongRow(rows[0], [Section("phrase", phrases)])] + [SongRow(r) for r in rows[1:]]
+        song, defs = [SongRow(r) for r in rows], defs + [Section("phrase", phrases)]
         doc = Document(self._header(used), mods=mods, defs=defs, init=init, rows=song, loop=loop)
         return printed(doc)
 

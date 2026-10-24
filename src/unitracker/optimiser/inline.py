@@ -13,13 +13,14 @@ from unitracker_grammar.document import (
     Row,
     Run,
     base,
+    first_use,
     printed,
 )
 
 from unitracker.optimiser.passes import program_templates
 from unitracker.optimiser.tree import transform, walk
 
-MODES = ("named", "single")
+MODES = ("named", "single", "all")
 _FIELDS = ("ctrl", "pw", "filter", "restart")  # the instrument fields that name a record
 _CELL = {"pw": "pw", "filter": "cut"}  # a binding record's cell, run as a program of one row
 _RUNS = {Row: "keys", Event: "commands"}
@@ -30,8 +31,7 @@ def definitions(doc: Document) -> dict:
     phrases and ``restart``, ``ctrl``, ``pw`` and ``filter`` records."""
     return {
         name: (section.kind, value)
-        for kind in ("ins", "phrase") + _FIELDS
-        for _, section in doc.sections(kind)
+        for section in doc.defs
         for name, value in section.records
         if "(" not in name
     }
@@ -78,11 +78,11 @@ def cyclic(defs: dict) -> set:
 
 
 def candidates(doc: Document, mode: str) -> set:
-    """The definitions ``mode`` writes inline: none for ``named``, those referenced exactly
-    once for ``single``; never one that reaches itself."""
+    """The definitions ``mode`` writes anonymously inline: those referenced exactly once for
+    ``single``, never one that reaches itself; none for ``named`` and ``all``."""
     if mode not in MODES:
         raise ValueError(f"{mode} is not one of {MODES}")
-    if mode == "named":
+    if mode != "single":
         return set()
     defs = definitions(doc)
     once = {name for name, count in _counts(doc, defs).items() if count == 1}
@@ -150,15 +150,28 @@ def inlined(doc: Document, targets: set) -> Document:
     if not targets:
         return doc
     doc = transform(doc, _Inliner(doc, targets).node)
-    rows = tuple(replace(r, defs=_kept(r.defs, targets)) for r in doc.rows)
-    return replace(doc, defs=_kept(doc.defs, targets), rows=rows)
+    return replace(doc, defs=_kept(doc.defs, targets))
+
+
+def _reached(doc: Document) -> Document:
+    """``doc`` without the definitions its song never reaches, which :func:`first_use` leaves in
+    their sections."""
+    rest = first_use(doc)
+    return replace(
+        doc,
+        mods=tuple(r for r in doc.mods if r not in rest.mods),
+        defs=_kept(doc.defs, {k for s in rest.defs for k, _ in s.records}),
+    )
 
 
 def inline(doc: Document, mode: str, holds=None) -> tuple:
     """``(document, refused)``: ``doc`` with the definitions of ``mode`` inline where
     ``holds`` of the text (the guarantee) keeps them, proved together and split in halves on
-    refusal; ``refused`` the names kept named."""
+    refusal, ``refused`` the names kept named; ``all`` every definition at its first use."""
     targets, kept, refused = sorted(candidates(doc, mode)), set(), []
+    if mode == "all":
+        out = first_use(_reached(doc))
+        return (out, []) if holds is None or holds(printed(out)) else (doc, ["first use"])
 
     def prove(group: list):
         if not group:

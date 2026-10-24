@@ -8,11 +8,11 @@ from unitracker.optimiser import Guarantee, optimise
 from unitracker.optimiser.__main__ import main
 from unitracker.optimiser.inline import candidates, cyclic, definitions, inline, inlined
 
-SHARED = """unitracker: 2.0
+SHARED = """unitracker: 2.1
 meta: {title: T, author: A}
 voices: 2
 mod:
-  vib(d): v + d*(φ % 4)
+  vib(d): v + d*(phi % 4)
   add(d): |
     clc
     lda v
@@ -34,25 +34,24 @@ ctrl:
   c4: [{ctrl: 33}, end]
   arp(a, b): [{ctrl: 65, note: +0}, {note: +a}, {note: +b}, {loop: 0}]
 pw:
-  pw1: v + 3*φ
+  pw1: v + 3*phi
   pw2: [{pw: 800}, {wait: 2, pw: v + 9}, {loop: 1}]
   pw3: v + 5
   pw4: vib(3)
   pw5: pt(900)
-  pt(b): [{pw: b}, end]
+  pt(b): [{pw: b}, {wait: 2, pw: v + 1}, end]
 filter:
   f1: [{cut: 300, res: 9, route: 1, mode: 16, vol: 15}, end]
+phrase:
+  p1: [C4.i1, D4.i2!run:f1, -*2, E4.i3!freq:vib(2), -*3]
+  p2: [G3.i2, -!run:c2, A3, -*5]
 song:
-  - def:
-      phrase:
-        p1: [C4.i1, D4.i2!run:f1, -*2, E4.i3!freq:vib(2), -*3]
-        p2: [G3.i2, -!run:c2, A3, -*5]
-    play: [p1, p2]
+  - play: [p1, p2]
   - play: [p2+2, p2-3]
   - end
 """
 SINGLE = ["c1", "c4", "f1", "i1", "i3", "p1", "pw1", "pw2", "pw3", "r1"]
-# i2's named binding keeps its φ across p2's notes, where an instrument's own binding restarts it
+# i2's named binding keeps its phi across p2's notes, where an instrument's own binding restarts it
 CONTINUOUS = SHARED.replace("p2: [G3.i2, -!run:c2, A3, -*5]", "p2: [G3.i2, -, A3.i2, -*5]")
 RUNS = SHARED.replace("i3: {ad: 3, ctrl: arp(7,4), pw: add(100)}", "i3: {ad: 3, pw: pw4}").replace(
     "-!run:c2", "-!run:pw5"
@@ -77,13 +76,26 @@ def test_single_inlines_each_definition_used_once_and_keeps_shared_ones_and_temp
     assert {k for k, _ in out.mods} == {"vib(d)", "add(d)"}
     assert "arp(a, b): [" in text and "ctrl: arp(7,4)" in text and "pw: add(100)" in text
     assert "run: ctrl[{ctrl: 33}, end]" in text and "run: pw[{pw: v + 5}, end]" in text
-    assert "D4.i2!run:filter[{cut: 300" in text and "pw: [{pw: v + 3*φ}, end]" in text
+    assert "D4.i2!run:filter[{cut: 300" in text and "pw: [{pw: v + 3*phi}, end]" in text
     assert "- play: [p2+2, p2-3]" in text and "restart: [{hold: 1, gate: 0}" in text
+
+
+def test_all_defines_each_definition_the_song_reaches_at_its_first_use():
+    doc, guarantee = read(SHARED), Guarantee(SHARED)
+    assert candidates(doc, "all") == set()
+    out, refused = inline(doc, "all", guarantee.holds)
+    text = printed(out)
+    assert not refused and read(text) == out and guarantee.holds(text)
+    assert not out.defs and not out.mods and "pw4" not in text and "pt(" not in text
+    for name in ("i1=", "i2=", "c2=", "p2=", "arp(a, b)=", "add(d)=", "vib(d)="):
+        assert text.count(name) == 1, name
+    assert "-!run:c2," in text and "[p2+2, p2-3]" in text
+    assert inline(doc, "all", lambda text: False) == (doc, ["first use"])
 
 
 def test_a_named_binding_inline_keeps_its_phase_as_a_program_of_one_row():
     out, refused = inline(read(CONTINUOUS), "single", Guarantee(CONTINUOUS).holds)
-    assert not refused and "pw: [{pw: v + 3*φ}, end]" in printed(out)
+    assert not refused and "pw: [{pw: v + 3*phi}, end]" in printed(out)
 
 
 def test_a_call_inline_stays_a_call_or_binds_as_a_program():
@@ -116,12 +128,14 @@ def test_the_driver_inlines_after_its_passes(tmp_path, capsys):
     assert "after:" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("mode", ["single", "all"])
 @pytest.mark.parametrize("tune", ["metal_warrior", "mega_run", "crosseyed", "space_invadarz"])
-def test_a_lifted_document_inline_plays_its_grid(tune, request, tmp_path):
+def test_a_lifted_document_inline_plays_its_grid(tune, mode, request, tmp_path):
     out = tmp_path / "out.yaml"
     path = request.getfixturevalue(tune)
-    argv = [str(path), "-o", str(out), "--optimise", "--ticks", "3000", "--inline", "single"]
+    argv = [str(path), "-o", str(out), "--optimise", "--ticks", "3000", "--inline", mode]
     assert cli.lift_main(argv) == 0
     text = out.read_text(encoding="utf-8")
-    assert printed(read(text)) == text
+    doc = read(text)
+    assert printed(doc) == text and (mode == "single" or not doc.defs and not doc.mods)
     assert Guarantee(cli.lift(path.read_bytes()), 3000).holds(text)

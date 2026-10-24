@@ -30,7 +30,7 @@ from unitracker.optimiser.tree import transform, update, walk
 
 TEMPO, VOICES = 6, 3
 NO_NOTE = frozenset({"-", "off", "on"})
-KINDS = ("ins", "ctrl", "pw", "filter", "restart", "x", "phrase")
+KINDS = ("ins", "ctrl", "pw", "filter", "restart", "phrase")
 _INS_CELL = {"freq": "freq", "pw": "pw", "filter": "cut"}
 _PROGRAM_NAME = re.compile(r"(?:c|pw|f|r)\d+")
 _STOPS = (NONE, HOLD)
@@ -128,7 +128,7 @@ def _header_defaults(doc: Document) -> list:
         edits.append(Edit("tempo: [a, a]", partial(_header, {"tempo": head.tempo[0]})))
     if head.voices == VOICES:
         edits.append(Edit(f"voices: {VOICES}", partial(_header, {"voices": None})))
-    if head.clock is not None and head.clock[1] == PAL_HZ:
+    if head.clock is not None and head.clock[1:] == (PAL_HZ,):
         edits.append(Edit("clock: PAL", partial(_header, {"clock": None})))
     return edits
 
@@ -250,18 +250,14 @@ def _dropped(doc: Document, kind: str, name: str) -> Document:
                 out.append(section)
         return tuple(out)
 
-    rows = tuple(replace(row, defs=kept(row.defs)) for row in doc.rows)
-    return replace(doc, defs=kept(getattr(doc, "defs", ())), rows=rows)
+    return replace(doc, defs=kept(doc.defs))
 
 
-_BINDS = ({"pw", "filter", "freq"}, set(CELLS))
 _REFS = {  # the instrument fields, and the row keys and commands, that name a record of a kind
     "ctrl": ({"ctrl"}, {"run"}),
     "pw": ({"pw"}, {"run"}),
     "filter": ({"filter"}, {"run"}),
     "restart": ({"restart"}, set()),
-    "x": _BINDS,
-    "mod": _BINDS,
 }
 
 
@@ -271,10 +267,8 @@ def _renamed(kind: str, old: str, new: str, node):
         return replace(node, ins=new) if isinstance(node, Event) and node.ins == old else node
     if kind == "phrase":
         return replace(node, phrase=new) if isinstance(node, Play) and node.phrase == old else node
-    if kind == "mod" and isinstance(node, Call) and node.name == old:
-        return Call(new, node.args)
-    if kind == "mod" and isinstance(node, Slot) and node.mod == old:
-        return replace(node, mod=new)
+    if kind == "mod":
+        return Call(new, node.args) if isinstance(node, Call) and node.name == old else node
     attr = {Instrument: "fields", Row: "keys", Event: "commands"}.get(type(node))
     if attr is None:
         return node
@@ -361,18 +355,18 @@ def _binds(doc: Document, pair: tuple, cell: str, slot: str, templates: set) -> 
 
 
 def _with_note(reset: tuple | None) -> tuple:
-    """A slot's reset events with ``note``, on which an instrument's binding restarts φ."""
+    """A slot's reset events with ``note``, on which an instrument's binding restarts phi."""
     return tuple(reset or ()) + (() if "note" in (reset or ()) else ("note",))
 
 
 def _reads_phi(doc: Document, value) -> bool:
-    """Whether a binding reads φ: its expression, its code or its template's."""
+    """Whether a binding reads phi: its expression, its code or its template's."""
     if isinstance(value, Call):
         templates = {code.signature(k)[0]: body for k, body in doc.mods}
         value = templates.get(value.name, value)
     if isinstance(value, Code):
         return "phi" in code.symbols(value.statements)
-    return not isinstance(value, (int, Expr)) or "φ" in str(value)
+    return not isinstance(value, (int, Expr)) or bool(re.search(r"\bphi\b", str(value)))
 
 
 def _hoist(cell: str, name: str, value, doc: Document) -> Document:
@@ -404,10 +398,10 @@ def _hoist(cell: str, name: str, value, doc: Document) -> Document:
 
 def hoist(doc: Document) -> list:
     """A binding every instrument carries identically for a slot without a default becomes
-    that slot's default in the slots line (format 1.22 on), reset on ``note`` where it reads
-    φ, which the instruments' binding restarted, and leaves the instruments."""
+    that slot's default in the slots line, reset on ``note`` where it reads phi, which the
+    instruments' binding restarted, and leaves the instruments."""
     instruments = [n for _, n in walk(doc) if isinstance(n, Instrument)]
-    if doc.header.version < "1.22" or not instruments:
+    if not instruments:
         return []
     edits, templates = [], program_templates(doc)
     for cell in CELLS:

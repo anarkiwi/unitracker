@@ -1,5 +1,5 @@
 """The ``template`` pass: programs of one kind identical up to integers become one program
-template (format 1.23) with a parameter per differing position, each original a call of it."""
+template with a parameter per differing position, each original a call of it."""
 
 from collections import defaultdict
 from dataclasses import replace
@@ -7,6 +7,7 @@ from functools import partial
 
 from unitracker_grammar.document import (
     CELLS,
+    KINDS,
     Call,
     Document,
     Expr,
@@ -23,18 +24,20 @@ from unitracker.optimiser.passes import Edit, _dropped, _named, _renamed
 from unitracker.optimiser.tree import transform, walk
 
 PROGRAM_KINDS = ("ctrl", "restart", "pw", "filter")
-TOP_KINDS = ("restart", "ins", "ctrl", "pw", "filter")
 # a row key that takes an integer a parameter may stand for, and the parameter's stem
 _STEMS = {
     "wait": "w",
     "hold": "h",
     "ctrl": "c",
+    "mask": "mk",
     "gate": "g",
     "note": "t",
     "ad": "ad",
     "sr": "sr",
     "res": "r",
     "route": "ro",
+    "route_on": "ron",
+    "route_off": "rof",
     "mode": "m",
     "vol": "vo",
     "pw": "p",
@@ -116,23 +119,12 @@ def _template(program: Program, names: dict) -> Program:
 
 
 def _section_added(doc: Document, kind: str, record: tuple) -> Document:
-    """``doc`` with ``record`` appended to its section of ``kind``: top-level from format 1.23
-    on (a new one in the grammar's order of kinds), else the first row's."""
-    if doc.header.version >= "1.23":
-        top = {s.kind: s for s in doc.defs}
-        current = top.get(kind, Section(kind))
-        top[kind] = replace(current, records=current.records + (record,))
-        return replace(doc, defs=tuple(top[k] for k in TOP_KINDS if k in top))
-    rows = list(doc.rows)
-    for r, row in enumerate(rows):
-        for i, s in enumerate(row.defs):
-            if s.kind == kind:
-                defs = list(row.defs)
-                defs[i] = replace(s, records=s.records + (record,))
-                rows[r] = replace(row, defs=tuple(defs))
-                return replace(doc, rows=tuple(rows))
-    rows[0] = replace(rows[0], defs=rows[0].defs + (Section(kind, (record,)),))
-    return replace(doc, rows=tuple(rows))
+    """``doc`` with ``record`` appended to its section of ``kind``, a new one in the grammar's
+    order of kinds."""
+    top = {s.kind: s for s in doc.defs}
+    current = top.get(kind, Section(kind))
+    top[kind] = replace(current, records=current.records + (record,))
+    return replace(doc, defs=tuple(top[k] for k in KINDS if k in top))
 
 
 def _inline(kind: str, calls: dict, node):
@@ -180,9 +172,7 @@ def _edit(kind: str, name: str, shape: tuple, group: list) -> Edit:
 def template(doc: Document) -> list:
     """Per kind, each group of two or more programs of one shape (every integer a hole) whose
     holes differ becomes a template ``{kind}_k`` of a parameter per differing hole, and each
-    member (a record, or an instrument's inline program) a call of it (format 1.23)."""
-    if doc.header.version < "1.23":
-        return []
+    member (a record, or an instrument's inline program) a call of it."""
     edits, taken = [], _taken(doc)
     for kind in PROGRAM_KINDS:
         groups = defaultdict(list)

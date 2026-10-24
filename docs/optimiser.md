@@ -1,6 +1,6 @@
 # The generic optimiser
 
-`unitracker.optimiser` rewrites any canonical document (format 2.0) into a smaller one that
+`unitracker.optimiser` rewrites any canonical document (format 2.1) into a smaller one that
 plays the same register grid on unitracker-player. It knows no tracker: it reads and writes the
 document only through unitracker-grammar's model (`unitracker_grammar.document`), whose `printed` is the one canonical
 text.
@@ -46,9 +46,9 @@ A candidate the grammar or the player refuses does not hold.
 | pass | proposes |
 |---|---|
 | `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo: 6`, `voices: 3`, a `clock` at PAL's `clock_hz`, `tempo: [a, a]` as `a`; a row's `wait: 0` and `hold: 1`; `!tempo:a/a` and `!vtempo:a/a` as `a`, `*1`, and a non-note's `!legato`, `!pw`, `!filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note: +0` of a control program no `run` starts (a note clears the rows' notes as it starts it) |
-| `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, `x` instances, phrases, and templates of modulators and programs, equal up to their parameters' names |
-| `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `gate`, `ad`, `sr`, `res`, `route`, `mode`, `vol`, a relative `note`, a constant cell value; `wait: 0` and `hold: 1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl: ctrl_1(7,4)`, `restart: restart_1(2,9,240)`, `!run:ctrl_1(7,3)` |
-| `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads φ, its fields dropped |
+| `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, phrases, and templates of modulators and programs, equal up to their parameters' names |
+| `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait: 0` and `hold: 1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl: ctrl_1(7,4)`, `restart: restart_1(2,9,240)`, `!run:ctrl_1(7,3)` |
+| `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
 
 A `tails` pass (a program ending in another's rows running that one) is not exact: a `run:` row
 starts the program at its own tick, so the shorter program's first row would apply a `hold` early,
@@ -56,7 +56,7 @@ and a row's `run` of its own slot's kind applies within the phase that runs it; 
 
 Each pass's edits are what the semantics make equal in general; whether the song plays the same
 is the guarantee's to decide (a default binding is bound from tick 0, an instrument's from its
-note; merged templates keep the φ of one call where two names restarted it).
+note; merged templates keep the phi of one call where two names restarted it).
 
 ## Inline
 
@@ -68,10 +68,12 @@ language model) learns the format from without resolving names
 | mode | writes inline |
 |---|---|
 | `named` | nothing (the default) |
-| `single` | every definition referenced exactly once: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record; shared ones stay named |
+| `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record; shared ones and templates stay named |
+| `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad: 9}`, `!freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`); a definition the song never reaches is dropped, so no section is left |
 
-Templates (`mod:` records and program templates) are the format's shared vocabulary and stay
-named, a call is already an inline use and stays a call. The inline forms
+In `single`, templates (`mod:` records and program templates) are the format's shared
+vocabulary and stay named, and a call is already an inline use and stays a call. Its anonymous
+forms
 ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md),
 Definitions):
 
@@ -85,18 +87,20 @@ Definitions):
 | a record that is a call of a program template | the call |
 
 A binding record becomes the program of its one row, never the instrument's own binding: the
-player starts an instrument's own binding's φ at 0 on each note, while a named binding, a
-program, keeps its φ where the same note binds it again. A definition that reaches itself (a
+player starts an instrument's own binding's phi at 0 on each note, while a named binding, a
+program, keeps its phi where the same note binds it again. A definition that reaches itself (a
 program whose rows run it) has no inline form and stays named. The definitions are written
 inline together where the guarantee holds over the document the passes left (so after any
 lossy step), else in halves as the driver proves edits; a refused one stays named. A
-definition's records leave its section, and a section left empty is dropped.
+definition's records leave its section, and a section left empty is dropped. `all` is proved
+as one edit: refused, the document stays as the passes left it.
 
 ## Tests
 
 `tests/test_optimiser.py`: each pass on the hand-written documents of `tests/optimiser_docs.py`,
 kept and refused; the guarantee's horizons; `tests/test_inline.py` each inline mode on a
-hand-written document and on lifted documents of the four direct lifters; the CLI; and, for each `.tunecache/direct/*.yaml`
+hand-written document and on lifted documents of the four direct lifters; the CLI; and, for
+each `.tunecache/direct/*.yaml`
 (or `$UNITRACKER_DIRECT_DOCS`), a lifted document optimised over 3000 ticks. Those are written by
 the GoatTracker 2 transcriber (`python -m unitracker.direct.goattracker2 TUNE.sid > DOC.yaml`, on
 the `gt2-direct` branch).
