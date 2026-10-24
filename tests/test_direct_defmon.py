@@ -35,7 +35,7 @@ def test_helpers():
     assert str(dm.acid({"cp": 4})) == "acid(1,4,0,0)"
     assert str(dm.acid({"acid": 0x4000})) == "acid(2,0,16384,0)"
     assert str(dm.acid({"acid": 0xC200})) == "acid(8,0,0,512)"
-    assert str(dm.acid({"acid": 0x8A00, "acc": 7})) == "acid(6,0,7,2560)"
+    assert str(dm.acid({"acid": 0x8A00, "cp": None})) == "acid(4,0,0,2560)"
     assert dm.text("Crosseyed") == "Crosseyed"
     assert dm.text("it's [x]") == "'it''s [x]'"
     assert dm.event_at(bytes([0x70, 3, 4, 48]), 0) == (3, 4, 48)
@@ -95,10 +95,11 @@ def test_notes_past_the_note_column_are_refused(cross):
 
 
 def test_both_layers_rows_of_one_call_apply_in_order():
-    a, b = {"re": 1, "acid": 0x100, "ad": 1}, {"re": 2, "acid": 0xC000, "ad": 2}
+    a, b = {"re": 1, "acid": 0x100, "ad": 1}, {"bre": 2, "bacid": 0xC000, "ad": 2}
     assert dm.merged([a]) == [a]
-    assert dm.merged([a, b]) == [{"re": 1}, {"re": 2, "acid": 0xC000, "ad": 2, "acc": 0x100}]
-    assert dm.merged([b, a]) == [{"re": 2}, {"re": 1, "acid": 0x100, "ad": 1}]
+    assert dm.merged([a, b]) == [{"re": 1, "acid": 0x100, "ad": 2, "bre": 2, "bacid": 0xC000}]
+    assert dm.filtered(None, 0x1F) == [("mode", 0x10)]
+    assert dm.filtered(0xF8, None) == [("res", 15), ("route", "+ 8")]
 
 
 def test_a_song_that_does_not_loop_in_time_is_refused(cross):

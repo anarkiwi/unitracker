@@ -39,8 +39,14 @@ SLOTS = (
             d.Slot("sw", reset=("row.pw",)),
         ),
     ),
-    ("cut", tuple(d.Slot(f"k{v}", reset=("row.cut",)) for v in (1, 2, 3)) + (d.Slot("st"),)),
+    (
+        "cut",
+        tuple(d.Slot(f"k{v}{x}", reset=("row.cut",)) for x in "ab" for v in (1, 2, 3))
+        + (d.Slot("st"),),
+    ),
 )
+LAYER_B = {"cp": "bcp", "acid": "bacid", "re": "bre", "fv": "bfv"}
+ACID = {"cp", "acid", "bcp", "bacid"}
 MAX_CALLS = 1 << 17
 PHASE = 64
 NOTE7 = "lda nn\nand #127\n"  # the absolute build's note wraps to 7 bits
@@ -60,6 +66,9 @@ def note_name(k: int) -> str:
 def call(name: str, **params) -> d.Call:
     """The call of template ``name`` with ``params``, in its signature's order."""
     return d.Call(name, tuple(int(params[k]) for k in code.params(ROUTINES[name])))
+
+
+BINDS = (("n.freq", call("nr")), ("p.freq", call("pitch")))  # the pitch step from call 0
 
 
 @dataclass
@@ -138,7 +147,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError(str(exc)) from exc
         self.absolute = "absolute" in variants
         self.check()
-        self.joints, self.names, self.runs = {}, {}, {}
+        self.joints, self.names, self.runs, self.lead, self.pulses = {}, {}, {}, 0, {}
 
     def __call__(self, addr: int, voice: int = 0) -> int:
         return self.mem[self.at[addr] + VOICES[voice]]
@@ -188,6 +197,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 eff = self.resolve(row)
                 state[k : k + 2] = (eff + 1) & 0xFF, self.sidtab(SIDTAB_DL, eff)
                 cols.append(self.columns(eff))
+                if k:  # layer B's ACID and filter columns apply after every voice's layer A
+                    cols[-1] = {LAYER_B.get(c, c): x for c, x in cols[-1].items()}
             elif cnt < 0x80:
                 state[k + 1] = cnt - 1
         return tuple(state), cols
@@ -229,6 +240,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             keys.append(("ctrl", ctrl + ("" if wgl is None else f"^{wgl & 0xFE}")))
         if "_gate" in cols:
             keys.append(("gate", cols["_gate"]))
+        if "_abs" in cols:
+            keys.append(("note", note_name(cols["_abs"])))
         if "tr" in cols:
             tr = cols["tr"]
             absolute = self.absolute and tr & 0x80
@@ -237,15 +250,25 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if {"pw", "ps", "af"} & cols.keys():  # any pw binding resets the sweep slot's phi
             flags = ("pw" in cols) | ("ps" in cols) << 1
             keys.append(("sw.pw", call("pul", g=flags, p=cols.get("pw", 0), h=cols.get("ps", 0))))
-        if "cp" in cols or "acid" in cols:
-            keys.append((f"k{voice + 1}.cut", acid(cols)))
-        if "re" in cols:
-            keys += route(cols["re"])
-        if "fv" in cols:
-            keys.append(("mode", cols["fv"] & 0xF0))
+        if ACID & cols.keys():
+            for x, (cp, col) in zip("ab", (("cp", "acid"), ("bcp", "bacid"))):
+                keys.append(
+                    (f"k{voice + 1}{x}.cut", acid({"cp": cols.get(cp), "acid": cols.get(col)}))
+                )
+        keys += filtered(cols.get("re"), cols.get("fv"))
+        if "bre" in cols or "bfv" in cols:
+            keys.append(("run", self.pulse(filtered(cols.get("bre"), cols.get("bfv")))))
         if "af" in cols:
             keys += [("p.freq", pitch(cols["af"])), ("pm.pw", call("pmode", m=cols["af"]))]
         return d.Row(keys)
+
+    def pulse(self, keys: list) -> str:
+        """The name of the one-row pulse-slot program of layer B's filter ``keys``: the pulse
+        phase runs after every voice's control program, as layer B runs after layer A."""
+        program = d.Program([d.Row(keys)])
+        if program not in self.pulses:
+            self.pulses[program] = f"pw{len(self.pulses) + 1}"
+        return self.pulses[program]
 
     def program(self, state: tuple, voice: int, bits: tuple, fix: bool) -> str:
         """The name of the control program both layers run from ``state`` and gate ``bits``
@@ -253,7 +276,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if (state, bits, fix) not in self.runs:
             self.runs[(state, bits, fix)] = self.joint(state, bits, fix)
         rows, loop = self.runs[(state, bits, fix)]
-        cut = any({"cp", "acid"} & c.keys() for _, c in rows)
+        cut = any(ACID & c.keys() for _, c in rows)
         key = (state, bits, fix, voice if cut else None)
         if key not in self.names:
             self.names[key] = f"c{len(self.names) + 1}"
@@ -275,6 +298,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             if key in seen:
                 return steps, seen[key]
             seen[key] = len(steps)
+            self.lead = self.lead if steps else step.call
             marks = [{}, {}, {}]
             for t in range(step.length):
                 for v, events in enumerate(step.events):
@@ -319,8 +343,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         for t in range(length):
             event = self.event(*marks[t]) if t in marks else d.Event("-")
             if first and not t:
-                binds = (("n.freq", call("nr")), ("p.freq", call("pitch")))
-                event = d.replace(event, commands=event.commands + binds)
+                event = d.replace(event, commands=event.commands + BINDS)
             if out and event == d.Event("-") and out[-1].note == "-" and not out[-1].commands:
                 out[-1] = d.replace(out[-1], steps=(out[-1].steps or 1) + 1)
             else:
@@ -329,10 +352,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     def init(self) -> tuple:
         """Each voice's init: the instrument binding the pitch, the gate, the carried frequency
-        and pulse cells; voice 1 also the volume and the ACID step's init."""
+        and pulse cells, the carried note base as a legato note under the cleared note 0 (an
+        absolute note relative rows replace); voice 1 also the volume and the ACID step's init."""
         out = []
+        self.names["init"] = "c0"
+        self.joints["c0"] = ([[1, {"_abs": 0}]], None, 0)
         for v in range(3):
             commands = [
+                ("run", "c0"),
                 (
                     "n.freq",
                     call(
@@ -357,16 +384,20 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                     ("vol", 15),
                     ("st.cut", call("cinit", u=self(0x10B8) == 0xE9, f=self(0x10CE), k=dbl)),
                 ]
-            out.append(d.Event("-", "i1", commands))
+            commands.append(("legato", True))
+            out.append(d.Event(note_name(self(0x12ED, v)), "i1", commands))
         return tuple(out)
 
     def timeline(self, steps: list) -> list:
         """The lead-in row, then a row of each voice's phrase per song step."""
-        phrases, rows = {}, [d.SongRow((d.Play("p0"),) * 3, (("phrase", {"p0": (d.Event("-"),)}),))]
+        lead = (d.Event("-"),)
+        if self.lead:  # a multispeed play routine's sub-tick calls before the first full one
+            lead += (d.Event("-", commands=BINDS, steps=self.lead),)
+        phrases, rows = {}, [d.SongRow((d.Play("p0"),) * 3, (("phrase", {"p0": lead}),))]
         for k, (length, marks) in enumerate(steps):
             names, new = [], {}
             for v in range(3):
-                events = self.phrase(length, marks[v], not k)
+                events = self.phrase(length, marks[v], not (k or self.lead))
                 if events not in phrases:
                     phrases[events] = new[events] = f"p{len(phrases) + 1}"
                 names.append(d.Play(phrases[events]))
@@ -389,13 +420,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         """The document of the song to its loop."""
         steps, loop = self.song(calls)
         rows = self.timeline(steps)
+        init = self.init()
         programs = {
             name: d.Program([self.row(h, c, v) for h, c in body], at)
             for name, (body, at, v) in self.joints.items()
         }
         defs = [("ins", {"i1": d.Instrument({"p.freq": call("pitch")})})]
         defs += [("ctrl", programs)] if programs else []
-        doc = d.Document(self.head(), self.tables(), (), defs, self.init(), rows, loop + 1)
+        defs += [("pw", {n: p for p, n in self.pulses.items()})] if self.pulses else []
+        doc = d.Document(self.head(), self.tables(), (), defs, init, rows, loop + 1)
         return d.printed(d.replace(doc, mods=mods(d.printed(doc), self.absolute)))
 
     def tables(self) -> tuple:
@@ -434,30 +467,26 @@ def gated(bits: tuple, cols: dict) -> tuple:
 
 
 def merged(cols: list) -> list:
-    """The columns both layers' rows of one call apply, as rows applied in order: one row
-    where layer B's columns replace layer A's, after a row of layer A's ``$D417`` column where
-    both write it; layer A's ACID accumulator stays under layer B's ACID step (``acc``)."""
-    if len(cols) == 1:
-        return cols
-    first, second = cols
-    out = first | second
-    if first.get("acid", 0x8000) < 0x8000 <= second.get("acid", 0):
-        out["acc"] = first["acid"]
-    return ([{"re": first["re"]}] if "re" in first and "re" in second else []) + [out]
+    """The columns both layers' rows of one call apply, layer B's replacing layer A's."""
+    return [{k: v for c in cols for k, v in c.items()}]
 
 
 def acid(cols: dict) -> d.Call:
-    """The ACID call of a row's offset and ACID columns: ``g`` bit 0 sets the offset ``c``,
-    bit 1 the accumulator ``j``, bit 2 an adding and bit 3 a subtracting step ``k``."""
-    flags, value, step = int("cp" in cols), cols.get("acc", 0), 0
-    if "acc" in cols:
-        flags |= 2
-    if "acid" in cols and cols["acid"] < 0x8000:
-        flags, value = flags | 2, cols["acid"]
-    elif "acid" in cols:
-        flags |= 8 if cols["acid"] & 0x4000 else 4
-        step = cols["acid"] & 0x3FFF
-    return call("acid", g=flags, c=cols.get("cp", 0), j=value, k=step)
+    """The ACID call of a row's offset and ACID columns (None absent): ``g`` bit 0 sets the
+    offset ``c``, bit 1 the accumulator ``j``, bit 2 an adding and bit 3 a subtracting step
+    ``k``; a call setting nothing keeps the slot bound."""
+    cp, col = cols.get("cp"), cols.get("acid")
+    flags, value, step = int(cp is not None), 0, 0
+    if col is not None and col < 0x8000:
+        flags, value = flags | 2, col
+    elif col is not None:
+        flags, step = flags | (8 if col & 0x4000 else 4), col & 0x3FFF
+    return call("acid", g=flags, c=cp or 0, j=value, k=step)
+
+
+def filtered(re_: int | None, fv: int | None) -> list:
+    """The keys of a row's ``$D417`` and ``$D418`` columns (None absent)."""
+    return ([] if re_ is None else route(re_)) + ([] if fv is None else [("mode", fv & 0xF0)])
 
 
 def route(re_: int) -> list:
