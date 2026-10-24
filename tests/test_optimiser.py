@@ -185,3 +185,15 @@ def test_a_lifted_goattracker_document_shrinks_and_plays_its_grid(path):
     assert result.after < result.before
     assert Guarantee(text, 3000).holds(result.text)
     assert read(result.text) == result.doc
+
+
+def test_merge_drops_a_top_level_definition_and_renames_its_references():
+    doc = read(D.MERGE)
+    top = document.replace(doc, defs=doc.rows[0].defs[:2])
+    top = document.replace(
+        top, rows=(document.replace(doc.rows[0], defs=doc.rows[0].defs[2:]), *doc.rows[1:])
+    )
+    edit = next(e for e in passes.merge(top) if e.label == "ctrl c2 -> c1")
+    out = edit.apply(top)
+    assert [n for n, _ in out.defs[1].records] == ["c1"]
+    assert out.defs[0].records[1][1].get("ctrl") == "c1"

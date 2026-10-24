@@ -240,17 +240,19 @@ def _dropped(doc: Document, kind: str, name: str) -> Document:
         mods = tuple((k, v) for k, v in doc.mods if code.signature(k)[0] != name)
         if mods != doc.mods:
             return replace(doc, mods=mods)
-    rows = []
-    for row in doc.rows:
-        defs = []
-        for section in row.defs:
+
+    def kept(sections) -> tuple:
+        out = []
+        for section in sections:
             if section.kind == kind:
                 records = tuple(r for r in section.records if _named(r[0]) != name)
                 section = replace(section, records=records)
             if section.records:
-                defs.append(section)
-        rows.append(replace(row, defs=tuple(defs)))
-    return replace(doc, rows=tuple(rows))
+                out.append(section)
+        return tuple(out)
+
+    rows = tuple(replace(row, defs=kept(row.defs)) for row in doc.rows)
+    return replace(doc, defs=kept(getattr(doc, "defs", ())), rows=rows)
 
 
 _BINDS = ({"pw", "filter", "freq"}, set(CELLS))
