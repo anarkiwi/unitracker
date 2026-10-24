@@ -66,12 +66,6 @@ def _unnoted(row: Row) -> Row:
     return Row(keys)
 
 
-def _tracked(swm, table: str) -> bool:
-    """Whether a row of an instrument's ``table`` sets a keyboard-track amount."""
-    rows = (r for i in swm.instruments for r in _rows3(getattr(i, table)))
-    return any(len(r) > 2 and r[2] and r[0] < 0xFE for r in rows)
-
-
 def _signed(byte: int) -> int:
     return byte - 0x100 if byte >= 0x80 else byte
 
@@ -91,8 +85,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             raise TranscribeError(f"{self.feats.name} build: {', '.join(refused)}")
         feats = self.feats
         self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
-        self.pwkb = self.feats.pwkeybtrack and _tracked(swm, "pw_table")
-        self.fkb = self.feats.filtkbtrack and _tracked(swm, "filter_table")
+        # A table walk can read any instrument byte as a track amount: write as the player.
+        self.pwkb, self.fkb = self.feats.pwkeybtrack, self.feats.filtkbtrack
         feats = self.feats
         self.hrc = (
             feats.arpspeedsupp
@@ -750,9 +744,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                     raise TranscribeError("a filter handover on a note that runs another table")
                 commands["run"] = self.filter(ins, handover=rec.handover)
             if pulse is not None or filt is not None:
-                if "run" in commands:
-                    raise TranscribeError("a chord FX on a note that keeps its tables")
-                commands["run"] = self.wave(ins, None, rec.kept)
+                # A chord FX (its own run) picks the chord the kept walk plays.
+                chord = rec.chord[2] if "run" in commands else None
+                commands["run"] = self.wave(ins, chord, rec.kept)
             keep = rec.keep_filter or filt is not None
             return Event(
                 self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep

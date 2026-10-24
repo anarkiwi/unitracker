@@ -236,6 +236,6 @@ def _claims(ref, claims: list, out: Trace) -> None:
         took = first not in (0x00, 0xFF)
         if took and holder is not v:
             rec.keep_filter = True
-        elif not took and holder is v and not (first == 0xFF and ref.swm.filter_stop_rewinds):
-            # The walk goes on from where it is, through the new instrument's bytes.
+        elif not took and holder is v:
+            # The walk goes on from where it is (or its rewound end), through the new bytes.
             rec.kept = (rec.kept[0], (ref.filt_pos, ref.filter_sweep_count), True)
