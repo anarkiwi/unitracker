@@ -45,7 +45,6 @@ from unitracker.direct.swtables import (
 from unitracker.direct.swcode import STATE, mirror_templates, templates, track_templates
 from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, trace
 
-VERSION = "2.0"
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
 DUMMY = 256
 
@@ -568,16 +567,16 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         """The document of the song to its loop or end."""
         rows, loop, dummies = self.traced()
         phrases = Section("phrase", [(name, list(events)) for events, name in self.phrases.items()])
-        song = [SongRow(rows[0], [phrases])] + [SongRow(r) for r in rows[1:]]
+        song = [SongRow(r) for r in rows]
         defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]
         defs += [Section(kind, store) for kind, store in self.programs.items() if store]
+        defs.append(phrases)
         named = {s for t in self.used for s in code.symbols(self.routines[t])}
         state = {
             cell: [(k, size) for k, size in names.items() if k in named]
             for cell, names in STATE.items()
         }
         header = Header(
-            VERSION,
             self.meta,
             clock=CLOCK,
             tempo=1,

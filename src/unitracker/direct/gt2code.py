@@ -1,4 +1,4 @@
-"""GoatTracker 2's per-tick modulators as format 1.23 6502 code templates.
+"""GoatTracker 2's per-tick modulators as 6502 code templates.
 
 State: the freq cell's ``t`` (vibrato phase) and ``m`` (the note a wavetable note row or a
 reached toneporta last set), the pw cell's ``r``, ``q`` (pulse row and time).

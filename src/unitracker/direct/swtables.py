@@ -198,9 +198,9 @@ class Tables:  # pylint: disable=too-few-public-methods
         # pylint: disable=too-many-locals
         feats, (pulse, filt, routed) = self.feats, kept
         table = ins.filter_table
-        first = {"route": "+" if table and table[0] != 0xFF else "'-'"}
+        first = {"route_on" if table and table[0] != 0xFF else "route_off": 0}
         if filt is not None and not routed:
-            del first["route"]
+            first = {}
         runs = []
         if pulse is not None:
             runs.append(Row({"hold": 0, "run": self.pulse(ins, *pulse)}))

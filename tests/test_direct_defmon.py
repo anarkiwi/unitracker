@@ -26,8 +26,8 @@ def test_the_document_plays_the_replay(request, name):
 
 def test_helpers():
     assert [dm.note_name(k) for k in (0, 48, 127)] == ["C0", "C4", "G10"]
-    assert dm.route(0) == [("route", "'-'")]
-    assert dm.route(0xF8) == [("res", 15), ("route", "+ 8")]
+    assert dm.route(0) == [("route_off", 0)]
+    assert dm.route(0xF8) == [("res", 15), ("route_on", 8)]
     assert dm.route(0xF7) == [("res", 15), ("route", 7)]
     assert str(dm.pitch(0)) == "pitch()"
     assert str(dm.pitch(0xD8)) == "slide(216)"
@@ -99,7 +99,7 @@ def test_both_layers_rows_of_one_call_apply_in_order():
     assert dm.merged([a]) == [a]
     assert dm.merged([a, b]) == [{"re": 1, "acid": 0x100, "ad": 2, "bre": 2, "bacid": 0xC000}]
     assert dm.filtered(None, 0x1F) == [("mode", 0x10)]
-    assert dm.filtered(0xF8, None) == [("res", 15), ("route", "+ 8")]
+    assert dm.filtered(0xF8, None) == [("res", 15), ("route_on", 8)]
 
 
 def test_a_step_without_end_is_refused(cross, monkeypatch):
@@ -124,7 +124,7 @@ def test_main_transcribes_and_verifies(crosseyed, tmp_path, capsys):
     bad = tmp_path / "bad.sid"
     bad.write_bytes(b"PSID")
     assert dm.main([str(crosseyed)]) == 0
-    assert capsys.readouterr().out.startswith("unitracker: 2.0\n")
+    assert capsys.readouterr().out.startswith("unitracker: 2.1\n")
     assert dm.main(["--verify", "--frames", "300", "--diff", "2", str(crosseyed), str(bad)]) == 0
     out = capsys.readouterr().out
     assert f"{crosseyed}: exact" in out and f"{bad}: SidFormatError" in out
