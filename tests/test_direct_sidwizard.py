@@ -14,11 +14,10 @@ from pysidwizard import (
     Transpose,
     parse_sid_song,
 )
-from pysidtracker import gridcmp
 from unitracker_grammar.document import VERSION, printed, read
-from unitracker_player.player import play
 
 from unitracker.direct import sidwizard as s
+from unitracker.direct.swtrace import standard
 from unitracker.direct.cli import summary
 
 TICKS = 800
@@ -85,12 +84,16 @@ def test_tunes_play_exactly(name, request):
 
 
 @pytest.mark.parametrize("name", ["mega_run", "lykia_boss"])
-def test_against_the_native_table_only_the_pitch_differs(name, request):
-    """FREQTBL is no clock's F: the native player differs in the frequency registers alone."""
+def test_the_native_table_is_the_standard_one_but_for_note_0(name, request):
+    """FREQTBL is F rounded down at CLOCK but for note 0, a word under C0, and past its 96
+    notes: a tune playing neither plays the native player exactly."""
     one = s.transcriber(request.getfixturevalue(name).read_bytes())
-    ours = play(one.document(), ticks=3000)
-    cells = gridcmp.cell_diff(ours, SWMPlayer(one.swm).render_grid(len(ours)))
-    assert cells.size and set(cells[:, 1].tolist()) <= {0, 1, 7, 8, 14, 15}
+    native, ref = SWMPlayer(one.swm), standard(one.swm)
+    words = [[p.freq_hi[k] << 8 | p.freq_lo[k] for k in range(96)] for p in (native, ref)]
+    assert [k for k, (u, w) in enumerate(zip(*words)) if u != w] == [0]
+    assert (words[0][0], words[1][0]) == (263, 0)
+    cells = s.compare(one.swm, one.document(), 3000, native=True)
+    assert not cells.size, summary(cells, 3)
 
 
 LIGHT = {
