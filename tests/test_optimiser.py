@@ -33,8 +33,9 @@ def test_defaults_drop_what_a_document_spells_at_its_default():
 
 
 def test_defaults_keep_a_none_of_a_slot_something_binds():
-    found = labels(passes.defaults(read(D.DEFAULTS_BOUND)))
-    assert not any("none" in label for label in found)
+    result = optimise(D.DEFAULTS_BOUND, order=(("defaults", passes.defaults),))
+    assert "tick.freq: none}" in result.text
+    assert any(label.endswith("tick.freq: none") for label in result.refused)
 
 
 def test_defaults_drop_header_lines_and_spellings_at_their_defaults():
@@ -204,7 +205,7 @@ def test_merge_drops_a_top_level_definition_and_renames_its_references():
 def test_template_makes_programs_alike_but_for_integers_one_template_of_calls():
     found = templates.template(read(D.TEMPLATE))
     assert labels(found) == ["ctrl ctrl_1(t, t2): 3", "restart restart_1(h, ad, sr): 3"]
-    result = optimise(D.TEMPLATE, order=(("template", templates.template),))
+    result = optimise(D.TEMPLATE, order=(("template", templates.template),), rename=False)
     assert len(result.kept) == 2 and result.after < result.before
     text = result.text
     assert (

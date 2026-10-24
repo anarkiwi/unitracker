@@ -14,6 +14,7 @@ edit proved to keep the register grid.
 | [docs/direct/defmon.md](docs/direct/defmon.md) | the defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
 | [docs/direct/musicassembler.md](docs/direct/musicassembler.md) | the Music Assembler transcription from pymusicassembler's playroutine (`python -m unitracker.direct.musicassembler`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
+| [docs/optimiser.md#passes](docs/optimiser.md#passes) | the passes: defaults, merge, transposition folding, the legato snap, templates and their structural names, hoist (`python tools/passes_eval.py`) |
 | [docs/optimiser.md#inline](docs/optimiser.md#inline) | the optimiser's inline forms (`--inline single`, `--inline all`): definitions written at their uses |
 | [docs/optimiser.md#lossy-mode](docs/optimiser.md#lossy-mode) | the lossy mode: code modulators replaced by fitted expressions within a tolerance per cell (`--lossy`) |
 | [docs/tokenization.md](docs/tokenization.md) | how documents tokenize, by form, tokenizer and lexical category; printer changes and their savings; a document BPE (`python -m unitracker.optimiser.tokenizer`) |
