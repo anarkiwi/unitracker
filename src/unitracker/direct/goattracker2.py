@@ -100,11 +100,13 @@ class Run:
 
 def layout(ref) -> tuple:
     """The channels of ``ref``'s build in the order of the SID voices they play, one voice from
-    ``$D400`` each; a build whose played channels do not fill voices from the first one, or
-    that runs more than one player tick a frame, is refused."""
+    ``$D400`` each; a build whose played channels do not fill voices from the first one, that
+    runs more than one player tick a frame, or that masks its control writes, is refused."""
     build, voices = ref.build, ref._voices  # pylint: disable=protected-access
     if build.calls != 1:
         raise TranscribeError(f"multispeed: {build.calls} player ticks a frame")
+    if any(mask not in (None, (0xFF, 0)) for mask in build.overlay or ()):
+        raise TranscribeError(f"control writes masked by an overlay {build.overlay}")
     played = {c: off for c, off in enumerate(voices) if c not in build.idle}
     if None in played.values():
         raise TranscribeError(f"voices {voices}: a played channel writes no SID voice")
