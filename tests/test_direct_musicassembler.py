@@ -43,7 +43,8 @@ def test_the_templates_bound(space_invadarz):
 
 @pytest.mark.parametrize("name", ["space_invadarz", "eastern_promise"])
 def test_against_the_native_table_only_the_pitch_differs(name, request):
-    cells, _ = m.verify(request.getfixturevalue(name).read_bytes(), frames=TICKS)
+    one = m.transcriber(request.getfixturevalue(name).read_bytes())
+    cells = m.compare(one.song, one.document(), TICKS, native=True)
     assert cells.size and set(cells[:, 1].tolist()) <= {0, 1, 7, 8, 14, 15}
 
 
