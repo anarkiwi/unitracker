@@ -1,6 +1,7 @@
 """The ``repeats`` pass: phrases' events and the song's rows written with groups and sections
 (docs/optimiser.md), each the same document once its sugar is expanded."""
 
+from bisect import bisect_right
 from collections import Counter
 from dataclasses import replace
 from functools import lru_cache, partial
@@ -39,7 +40,7 @@ def lcp(ids: np.ndarray) -> np.ndarray:
     return out
 
 
-class Encoder:
+class Encoder:  # pylint: disable=too-few-public-methods
     """The cheapest encoding of a sequence as items and groups by an exact interval DP: each
     item of ``costs[k]`` tokens, a tandem repeat ``[B]xk`` or a volta ``[B|E1|E2...]`` (endings
     of one length, the body maximal) of encoded parts, ``single(k, n)`` the cost of
@@ -48,17 +49,19 @@ class Encoder:
     def __init__(self, symbols: list, costs: list, single=None):
         dense = {}
         ids = np.array([dense.setdefault(s, len(dense)) for s in symbols], np.int64)
-        self.n, self.costs, self.single = len(ids), costs, single
+        self.costs, self.single = costs, single
         self.lcp = lcp(ids)
-        self.cands = [sorted(self._candidates(a)) for a in range(self.n)]
-        self.memo, self.gmemo = {}, {}
+        self.cands = [sorted(self._candidates(a)) for a in range(len(ids))]
+        self.ends = [[c[0] for c in cands] for cands in self.cands]
+        self.gcost = [[None] * len(cands) for cands in self.cands]
+        self.memo = {}
 
     def _primitive(self, a: int, p: int) -> bool:
         return all(p % q or self.lcp[a, a + q] < p - q for q in range(1, p))
 
     def _candidates(self, a: int):
         """``(end, kind, params)`` of each group starting at ``a``."""
-        rest, row = self.n - a, self.lcp[a]
+        rest, row = len(self.costs) - a, self.lcp[a]
         for p in range(1, rest // 2 + 1):
             if row[a + p] >= p and self._primitive(a, p):
                 for k in range(2, 2 + row[a + p] // p):
@@ -75,24 +78,40 @@ class Encoder:
                 if any(self.lcp[a + body, a + j * d + body] < tail for j in range(1, m + 1)):
                     yield a + (m + 1) * d, "volta", (d, body, m + 1)
 
-    def _group(self, a: int, idx: int) -> tuple:
-        """``(cost, item)`` of candidate ``idx`` at ``a``, its separator left out."""
-        key = (a, idx)
-        if key not in self.gmemo:
+    def _parts(self, a: int, idx: int) -> list:
+        """The spans ``(i, j)`` candidate ``idx`` at ``a`` encodes: its body, then its endings."""
+        _, kind, params = self.cands[a][idx]
+        if kind == "single":
+            return []
+        if kind == "rep":
+            return [(a, a + params[0])]
+        d, b, n = params
+        return [(a, a + b)] + [(a + m * d + b, a + (m + 1) * d) for m in range(n)]
+
+    def _cost(self, a: int, idx: int) -> int:
+        """The tokens of candidate ``idx`` at ``a``, its separator left out."""
+        cost = self.gcost[a][idx]
+        if cost is None:
             _, kind, params = self.cands[a][idx]
+            parts = sum(self.best(i, j)[0] for i, j in self._parts(a, idx))
             if kind == "single":
-                self.gmemo[key] = (self.single(a, params[0]), ("single", a, params[0]))
+                cost = self.single(a, params[0])
             elif kind == "rep":
-                p, k = params
-                cost, body = self.best(a, a + p)
-                self.gmemo[key] = (OPEN + cost - COMMA + size(f"]x{k}"), ("rep", body, k))
+                cost = OPEN + parts - COMMA + size(f"]x{params[1]}")
             else:
-                d, b, n = params
-                cost, body = self.best(a, a + b)
-                ends = [self.best(a + m * d + b, a + (m + 1) * d) for m in range(n)]
-                cost += sum(c for c, _ in ends) - (n + 1) * COMMA + n * BAR + CLOSE
-                self.gmemo[key] = (OPEN + cost, ("volta", body, tuple(e for _, e in ends)))
-        return self.gmemo[key]
+                cost = OPEN + parts - (params[2] + 1) * COMMA + params[2] * BAR + CLOSE
+            self.gcost[a][idx] = cost
+        return cost
+
+    def _item(self, a: int, idx: int) -> tuple:
+        """Candidate ``idx`` at ``a`` as an encoding item, its parts encoded."""
+        _, kind, params = self.cands[a][idx]
+        parts = [self.best(i, j)[1] for i, j in self._parts(a, idx)]
+        if kind == "single":
+            return ("single", a, params[0])
+        if kind == "rep":
+            return ("rep", parts[0], params[1])
+        return ("volta", parts[0], tuple(parts[1:]))
 
     def best(self, i: int, j: int, sep: int = COMMA) -> tuple:
         """``(cost, items)`` of ``[i, j)``, each item followed by ``sep`` tokens: an item a
@@ -104,16 +123,15 @@ class Encoder:
             here = cost[a - i]
             if here + self.costs[a] + sep < cost[a - i + 1]:
                 cost[a - i + 1], back[a - i + 1] = here + self.costs[a] + sep, (a, None)
-            for idx, (end, _, _) in enumerate(self.cands[a]):
-                if end > j:
-                    break
-                total = here + self._group(a, idx)[0] + sep
+            for idx in range(bisect_right(self.ends[a], j)):
+                end = self.ends[a][idx]
+                total = here + self._cost(a, idx) + sep
                 if total < cost[end - i]:
                     cost[end - i], back[end - i] = total, (a, idx)
         items, t = [], j
         while t > i:
             a, idx = back[t - i]
-            items.append(a if idx is None else self._group(a, idx)[1])
+            items.append(a if idx is None else self._item(a, idx))
             t = a
         out = (cost[j - i], tuple(reversed(items)))
         if sep == COMMA:
