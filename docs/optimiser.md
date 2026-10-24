@@ -48,10 +48,27 @@ A candidate the grammar or the player refuses does not hold.
 
 | pass | proposes |
 |---|---|
-| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo: 6`, `voices: 3`, a `clock` at PAL's `clock_hz`, `tempo: [a, a]` as `a`; a row's `wait: 0` and `hold: 1`; `!tempo:a/a` and `!vtempo:a/a` as `a`, `*1`, and a non-note's `!legato`, `!pw`, `!filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note: +0` of a control program no `run` starts (a note clears the rows' notes as it starts it) |
+| `defaults` | dropping what is spelled at the value it has anyway ([semantics](https://github.com/anarkiwi/unitracker-player/blob/main/docs/semantics.md)): `tempo: 6`, `voices: 3`, a `clock` at PAL's `clock_hz`, `tempo: [a, a]` as `a`; a row's `wait: 0` and `hold: 1`; `!tempo:a/a` and `!vtempo:a/a` as `a`, `*1`, and a non-note's `!legato`, `!pw`, `!filter`; a `none` (row key, instrument field or command) of a slot nothing binds, and for `freq` nothing holds; an instrument's binding equal to its slot's default; a first row's `note: +0` of a control program no `run` starts (a note clears the rows' notes as it starts it); an instrument's `none` field, one per instrument (it ends a binding only where one lasts to that instrument's note, so the guarantee decides); a program row of only `wait` and `hold` folded into the hold of the row before (`{hold: 2, ctrl: 65}, {}` is `{hold: 3, ctrl: 65}`), not where a loop starts at it |
 | `merge` | each definition equal to an earlier one of its kind becoming it, its record dropped and its references renamed: instruments, `ctrl`, `pw`, `filter` and `restart` programs, phrases, and templates of modulators and programs, equal up to their parameters' names |
+| `transpose` | each phrase whose events are an earlier phrase's but for one shift `k` of every note (a note atom's; a program row's notes are the instrument's and stay) becoming the first such phrase in document order, its record dropped and each play entry of it naming that phrase with `k` added to its transpose (`p2` = `p1` up 2: `p2-1` is `p1+1`) |
+| `snap` | each phrase event's frequency binding under which the voice's frequency was `F(N)` at every tick the binding lasted over the guarantee's horizon (see [Snap](#snap)) becoming the cell's own `F(N)`: the binding dropped where no frequency slot was bound as it applied, else a `none` of each slot that was |
 | `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait: 0` and `hold: 1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl: ctrl_1(7,4)`, `restart: restart_1(2,9,240)`, `!run:ctrl_1(7,3)` |
 | `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
+
+After the last round the `names` rename (`optimise(..., rename=True)`, the default) gives each
+program template the `template` pass named `{kind}_k` a name by its shape, in document order:
+
+| shape | name |
+|---|---|
+| a looping control program whose rows read a parameter as a relative note (`note: +t`) | `arp` |
+| a restart with a row gating off (`gate: 0`; its note gates on) | `hr` |
+| any other control, restart, pulse or filter program | `wave`, `rs`, `pwm`, `flt` |
+
+A name taken (by a template, `abs`, `min`, `max`, `none`, `hold`, `reset`, `end`, `loop`,
+`on`, `off`, or an earlier rename) is numbered from 2 (`arp2`); no stem is a record's
+(`c2`, `f2`). The modulator templates keep the lifters' names. The rename is cosmetic: it is
+applied whatever its size, as one edit the guarantee proves (refused, nothing is renamed), and
+`Result.saved["names"]` is negative where the names cost tokens.
 
 A `tails` pass (a program ending in another's rows running that one) is not exact: a `run:` row
 starts the program at its own tick, so the shorter program's first row would apply a `hold` early,
@@ -60,6 +77,21 @@ and a row's `run` of its own slot's kind applies within the phase that runs it; 
 Each pass's edits are what the semantics make equal in general; whether the song plays the same
 is the guarantee's to decide (a default binding is bound from tick 0, an instrument's from its
 note; merged templates keep the phi of one call where two names restarted it).
+
+## Snap
+
+A lifted "change pitch without retrigger" is a `!legato` note (which sets only the event note)
+bound to a modulator that writes `F(n)` (GoatTracker's `snap()`, a `tporta` at speed 0). Where
+no other binding moves the frequency while it lasts, the frequency is what an unbound cell
+plays anyway: `F(N)`. `snap.sites` plays the document over the guarantee's horizon (a traced
+pass: the driver passes it `len` of the reference grid) with a player that keeps, for each
+phrase event's frequency binding command (by phrase, event and slot), the slots bound as it
+applied and whether the voice's frequency equalled `F(N)` at every tick the binding was in its
+slot, its hold ticks included, and after it while another slot its `none` would end stays
+bound as it was (until something binds or stops that slot). Each such binding becomes `none` of the slots bound before it
+(the binding's own included, and it where the frequency held), so the cell is unbound and plays
+`F(N)`; with none bound it is dropped. State the modulator writes for a later binding to read
+(a vibrato's note) is not in the evidence; the guarantee refuses those.
 
 ## Lossy mode
 
@@ -212,6 +244,11 @@ picking a simpler form, noise refused at a tight tolerance and kept at a loose o
 sharing state fitted jointly with their state dropped, an unfit group and its templates' own
 replacements refused, another slot firing inside a group, a refused group's other plans and
 fallback, shape and parameter names, the parameter policy, each shape fitted, and the CLIs.
+`tests/test_optimiser_idioms.py`: the `transpose` and `snap` passes, the `names` rename and the
+`defaults` pass's instrument `none`s and empty rows on hand-written documents (folded and kept,
+refused by size or by the guarantee) and every pass on lifted documents of the four direct
+lifters; `python tools/passes_eval.py DOC.yaml ...` tabulates the tokens each pass saves over
+each song's length and lists the kept edits.
 `tests/test_optimiser.py`: each pass on the hand-written documents of `tests/optimiser_docs.py`,
 kept and refused; the guarantee's horizons; `tests/test_inline.py` each inline mode on a
 hand-written document and on lifted documents of the four direct lifters; the CLI; and, for
