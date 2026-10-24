@@ -100,13 +100,27 @@ def check(args) -> int:
 
 
 def forms() -> dict:
-    """``{form: optimise keywords}`` of the forms this optimiser writes, in dependency order:
-    the lifted document (None), the named form, each other inline mode, and lossy when the
-    optimiser has it."""
-    out = {"lifted": None, "named": {}} | {m: {"inline": m} for m in MODES if m != "named"}
+    """``{form: (base form, optimise keywords)}`` of the forms this optimiser writes, each after
+    its base: the lifted document, the named form, each other inline mode of it, and where the
+    optimiser has a lossy mode, the lossy form at its default tolerances and its inline modes."""
+    modes = [m for m in MODES if m != "named"]
+    out = {"lifted": (None, None), "named": ("lifted", {})}
+    out |= {m: ("named", {"inline": m}) for m in modes}
     if "lossy" in inspect.signature(optimise).parameters:
-        out["lossy"] = {"lossy": True}
+        from unitracker.optimiser.fit import TOLERANCES  # pylint: disable=C0415
+
+        out["lossy"] = ("lifted", {"lossy": dict(TOLERANCES)})
+        out |= {f"lossy-{m}": ("lossy", {"inline": m}) for m in modes}
     return out
+
+
+def with_bases(names) -> list:
+    """The forms ``names`` and the forms they derive from, in :func:`forms` order."""
+    table, need = forms(), set(names)
+    for name in reversed(list(table)):
+        if name in need and table[name][0]:
+            need.add(table[name][0])
+    return [n for n in table if n in need]
 
 
 def song_ticks(text: str, limit: int) -> int:
@@ -127,13 +141,13 @@ def song_ticks(text: str, limit: int) -> int:
     return player.tick
 
 
-def _form(spec, text: dict, opts: dict) -> str:
-    """A form's text: an inline mode of the named form, else the lifted text optimised."""
-    if set(spec) == {"inline"} and "named" in text:
-        named = text["named"]
-        holds = Guarantee(named, opts["ticks"]).holds
-        return printed(inline(read(named), spec["inline"], holds)[0])
-    return optimise(text["lifted"], opts["ticks"], **spec).text
+def _form(name: str, text: dict, opts: dict) -> str:
+    """Form ``name``'s text from its base's: an inline mode of it, else it optimised."""
+    base, spec = forms()[name]
+    if set(spec) == {"inline"}:
+        holds = Guarantee(text[base], opts["ticks"]).holds
+        return printed(inline(read(text[base]), spec["inline"], holds)[0])
+    return optimise(text[base], opts["ticks"], **spec).text
 
 
 def forms_one(row: dict, opts: dict) -> dict:
@@ -152,8 +166,9 @@ def forms_one(row: dict, opts: dict) -> dict:
         if err.exists() and not opts["retry"]:
             res[name] = err.read_text(encoding="utf-8").strip()
             continue
-        if "lifted" not in text and name != "lifted":
-            res[name] = "no lifted document"
+        base = forms()[name][0]
+        if base and base not in text:
+            res[name] = f"no {base} form"
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         err.write_text(f"TimeoutError: exceeded {opts['timeout']}s\n", encoding="utf-8")
@@ -167,7 +182,7 @@ def forms_one(row: dict, opts: dict) -> dict:
                     ticks = song_ticks(text[name], opts["limit"])
                     meta.write_text(json.dumps(json.loads(meta.read_text()) | {"ticks": ticks}))
                 else:
-                    text[name] = _form(forms()[name], text, opts)
+                    text[name] = _form(name, text, opts)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             res[name] = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
             err.write_text(res[name] + "\n", encoding="utf-8")
@@ -182,7 +197,7 @@ def write_forms(args) -> int:
     """The ``forms`` command: each tune's forms and ``forms.csv``, its forms' status."""
     opts = {"out": str(args.out), "hvsc": args.hvsc, "timeout": args.timeout}
     opts.update(subtune=args.subtune, ticks=args.ticks, limit=args.limit, retry=args.retry)
-    opts["forms"] = [f for f in forms() if f == "lifted" or not args.forms or f in args.forms]
+    opts["forms"] = with_bases(args.forms or forms())
     tunes = shared.rows(args.tunes, args.player, args.subtunes)
     rows = []
     for i, value, error in tqdm(

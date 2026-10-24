@@ -9,7 +9,7 @@ from pathlib import Path
 from pysidtracker import find_format
 from pysidtracker.errors import SidParseError
 
-from unitracker.optimiser import optimise
+from unitracker.optimiser import lossy, optimise
 from unitracker.optimiser.inline import MODES
 
 # format name: (direct lifter module, its verify function)
@@ -63,6 +63,7 @@ def lift_main(argv=None) -> int:
     parser.add_argument(
         "--inline", choices=MODES, default="named", help="--optimise: the definitions inline"
     )
+    lossy.add_arguments(parser)
     args = parser.parse_args(argv)
     try:
         text = lift(args.sid.read_bytes(), args.subtune)
@@ -70,7 +71,15 @@ def lift_main(argv=None) -> int:
         print(f"{args.sid}: {exc}", file=sys.stderr)
         return 1
     if args.optimise:
-        result = optimise(text, args.ticks, progress=True, inline=args.inline)
+        result = optimise(
+            text,
+            args.ticks,
+            progress=True,
+            lossy=lossy.tolerances_of(args),
+            inline=args.inline,
+        )
+        for line in result.lossy.report() if result.lossy else ():
+            print(line, file=sys.stderr)
         print(f"{result.before} -> {result.after} tokens", file=sys.stderr)
         text = result.text
     if args.output:
