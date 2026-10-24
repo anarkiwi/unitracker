@@ -170,7 +170,7 @@ Declare each native table as a record type ([Record types](playroutines/schema.m
 | instruments | `form: map`, `fields` with their defaults, `refs` to the programs they start, and `pin` for an index the replay reads directly (GoatTracker's instrument 1) |
 | a table of programs with a next pointer or jump | a `next` field (or `chain`, the next-row field), `stop` (a row after which the program ends, `defmon`'s frozen row), `end` (raw fields set on a program's last row) |
 | rows whose effect depends on their kind | templates (any other key, such as `do` and `each`), reading `row.<field>` |
-| module state carried through init | `fixed: true` (`defmon`'s `vinit`, `ginit`) |
+| module state carried through init | `fixed: true` (`defmon`'s and `goattracker2`'s `vinit`, `ginit`) |
 | a modulated program | `expr: x`, the field holding a row's expression (its `refs` entry is implied) |
 | raw fields with no written form | `unwritten: [field, ...]` |
 
@@ -374,7 +374,7 @@ imply, so the lifter resolves what the native data leaves implicit:
 | the build | constants (`defmon`'s `floor` and `dbl`) and the initial tempo; `check_build` refuses builds and features the playroutine does not cover |
 | carried modulator values | a slide's start frequency, a delay counter, an ACID direction: `convert` writes each as a constant of its start's expression |
 | instrument context | the voice's instrument at each note: SID-Wizard's octave shift into the notes, its envelope bytes, a first note that selects no instrument |
-| module state through init | `defmon`'s `vinit` and `ginit`; a cell the replay's init sets is refused, naming it |
+| module state through init | `defmon`'s and `goattracker2`'s `vinit` and `ginit`; a cell the replay's init sets is refused, naming it |
 | native rows with no shared form | rewritten to rows that have one when a replay proves it unheard (GoatTracker's `unpause` of `$F7` and `$FD`) |
 
 **What fails loudly.** Raise `LiftError` naming the row and what is not covered

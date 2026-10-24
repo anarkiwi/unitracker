@@ -658,7 +658,7 @@ class _Respell:  # pylint: disable=too-many-instance-attributes
             if isinstance(value, int) and not (freq and self.g is not None):
                 return {key: value}
             return {key: self.fresh("x", self.expr(value, freq, cell=key))}
-        if key in ("mode", "vol"):
+        if key in ("mode", "vol", "ad", "sr"):
             return {key: value}
         raise GenericError(f"{kind} {index}: {key} has no init command")
 

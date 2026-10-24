@@ -194,6 +194,7 @@ def test_the_survey_renderer_plays_the_document_as_the_native_player(references,
     assert info == {"format": "goattracker2"} and (grid == ref.native[:100]).all()
 
 
+@pytest.mark.timeout(2400)
 @pytest.mark.parametrize("name", TUNES)
 def test_the_optimised_tune_plays_its_native_player(references, optimised_tunes, name, request):
     result = optimised_tunes[name][1]

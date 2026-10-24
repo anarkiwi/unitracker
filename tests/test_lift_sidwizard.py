@@ -89,6 +89,7 @@ def test_tables_allocate_programs_that_end_or_loop():
             [0x41, 0, 0, 0x21, 0, 0],
             1,
         ),
+        ("wftab", {"wf_table": [0x41, 0, 0, 0xFE, 0xD0, 0]}, [0x41, 0, 0], None),
         (
             "flttab",
             {"filter_table": [0x90, 0x20, 0, 0x04, 0xF0, 0, 0xFE, 0x15, 0]},
@@ -103,6 +104,7 @@ def test_tables_allocate_programs_that_end_or_loop():
         "a forward jump skips its rows",
         "a jump into another table reads its rows",
         "a WF loop",
+        "a WF jump past $7F rests",
         "a filter loop to a sweep",
     ],
 )
@@ -116,7 +118,6 @@ def test_table_rows_follow_jumps(name, tables, rows, loop):
     "name,tables,match",
     [
         ("pwtab", {"pw_table": [0xFE, 0x11, 0]}, "starts with a jump"),
-        ("wftab", {"wf_table": [0x41, 0, 0, 0xFE, 0xD0, 0]}, "pitch carry"),
         ("pwtab", {"pw_table": [0x88, 0, 0, 0xFE, 0x17, 0, 0xFE, 0x11, 0]}, "lands on no row"),
         ("pwtab", {"pw_table": [0x88, 0, 0, 0xFE, 0x17, 0]}, "lands on no row"),
         ("pwtab", {"pw_table": [0x88, 0, 0, 0xFE, 0x7D, 0]}, "lands on no row"),
@@ -407,7 +408,14 @@ def test_phrases_fold_emptytable_rows():
 
 @pytest.mark.parametrize(
     "pair,tempo",
-    [((0x86, 0x83), 6), ((5, 7), [5, 7]), ((0, 6), 6), ((6, 0x86), 6), ((0x84, 9), [4, 9])],
+    [
+        ((0x86, 0x83), 6),
+        ((5, 7), [5, 7]),
+        ((0, 6), 6),
+        ((6, 0x86), 6),
+        ((0x84, 9), 4),
+        ((9, 0x84), [9, 4]),
+    ],
 )
 def test_the_subtune_tempo_is_the_initial_tempo(pair, tempo):
     assert sidwizard.tempo(SimpleNamespace(subtune_tempos=[pair], frame_speed=1)) == tempo
@@ -722,6 +730,7 @@ def header(row):
         ((0x02, 0x80, 0xF4, 0xFE, 0x7F, 0), [0x02, 0x80, 0xF4, 0xFF]),
         ((0xFF, 0x7F, 0, 0, 0, 0), [0xFF]),
         ((0x41, 0x0F, 0, 0xFF, 0x7F, 0), [0x41, 0x0F, 0, 0xFF]),
+        ((0xFE, 0x90, 0, 0, 0, 0), [0xFF]),
     ],
 )
 def test_idle_rows_are_the_header_rows_a_voice_reads_before_its_first_instrument(row, rows):
@@ -807,6 +816,7 @@ def as_built(raw: bytes, driver: int, speed: int):
     ``speed`` calls per frame."""
     swm = parse_sid_song(raw, 1)
     swm.driver_type, swm.frame_speed = driver, speed
+    swm.features = features_for_driver(driver)
     return swm
 
 
@@ -873,6 +883,9 @@ def test_multispeed_idle_rows_follow_the_walk_to_the_voices_first_note():
     assert sidwizard.idle_rows(ins, reads=8) == [*image[: 7 * 3], 0xFF]
     jumped = header((0xFE, 3, 0, 0x21, 0x80, 0))
     assert sidwizard.idle_rows(jumped) == [*jumped.memory_image()[3:9], 0xFF]
+    past = Instrument(control=0x41, wf_table=bytes([0x21, 0x80, 0]))
+    past.ram = past.memory_image() + bytes(range(0x30, 0x40))
+    assert sidwizard.idle_rows(past, reads=9) == [*past.ram[: 9 * 3], 0xFF]
     held = Instrument(control=0x02)
     assert len(sidwizard.idle_rows(held, reads=3)) == 3 + 1
     assert len(sidwizard.idle_rows(held, BARE, reads=3)) == 3 * 3 + 1
@@ -883,7 +896,8 @@ def test_the_tempo_counts_play_calls():
     assert sidwizard.tempo(swm) == [15, 21]
     pr = library("sidwizard")
     pr["constants"]["speed"] = 3
-    assert tempos.cells(pr, [15, 21]) == {"tl": 5, "tr": 7}
+    assert tempos.cells(pr, [15, 21]) == {"tl": 5, "tr": 7, "tle": 0}
+    assert tempos.cells(pr, 15) == {"tl": 5, "tr": 5, "tle": 1}
     cmds = CommandCodec(pr["commands"], sidwizard.rtypes(), pr["constants"])
     assert cmds.encode(0x12, 4) == ("tempo", 12)
     assert cmds.decode("tempo", 12) == (0x12, 4)

@@ -88,6 +88,21 @@ csillag = hvsc_tune(
     "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
     "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
 )
+coca_koala = hvsc_tune(
+    "coca_koala",
+    "MUSICIANS/S/Stinsen/Coca_Koala.sid",
+    "Path to Stinsen's Coca Koala, GoatTracker 2 wavetable notes before an instrument vibrato.",
+)
+dsr_8090 = hvsc_tune(
+    "dsr_8090",
+    "MUSICIANS/T/Triace/DSR_8090.sid",
+    "Path to Triace's DSR 8090, GoatTracker 2 notes of an instrument without a pulse table.",
+)
+slime_deluxe = hvsc_tune(
+    "slime_deluxe",
+    "MUSICIANS/B/Bayliss_Richard/Slime_Deluxe.sid",
+    "Path to Richard Bayliss's Slime Deluxe, GoatTracker 2 toneporta notes over a wavetable.",
+)
 addaraya = hvsc_tune(
     "addaraya",
     "MUSICIANS/H/Hermit/Stalker-Addaraya_Gurza_Dreaming.sid",
@@ -230,37 +245,47 @@ def assert_plays(request, song: dict, theirs, native) -> None:
     assert ver.ok, text
 
 
-def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
+def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voice2=None, **opts):
     """A one-pattern GoatTracker 2 tune on voice 1 as ``(decompiled tune, native player)``.
 
     ``wave``, ``speed``, ``pulse`` and ``filt`` are the tables' ``(left, right)`` rows;
     ``instruments`` keyword dicts of :class:`pygoattracker.Instrument` (default one instrument
     on the wavetable's first row); ``rows`` the pattern's ``(note, instrument, command, data)``
-    rows, a note as an offset from ``FIRSTNOTE`` or None for a rest.
+    rows, a note as an offset from ``FIRSTNOTE`` or None for a rest; ``voice2`` voice 2's, which
+    otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``)
+    and ``pulse_step``.
     """
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     instruments = instruments or [{"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
     rows = rows or [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 15
-    pattern = Pattern(
-        rows=[
-            Row(note=GT.REST if n is None else GT.FIRSTNOTE + n, instrument=i, command=c, data=d)
-            for n, i, c, d in rows
-        ]
-    )
+
+    def pattern(rows):
+        return Pattern(
+            rows=[
+                Row(
+                    note=GT.REST if n is None else GT.FIRSTNOTE + n, instrument=i, command=c, data=d
+                )
+                for n, i, c, d in rows
+            ]
+        )
+
+    patterns = [pattern(rows), Pattern(rows=[Row(note=GT.KEYOFF)] + [Row()] * 15)]
+    patterns += [pattern(voice2)] if voice2 else []
     song = Song(
         name="synthetic",
-        subtunes=[Subtune([Orderlist([PlayPattern(k)]) for k in (0, 1, 1)])],
+        subtunes=[Subtune([Orderlist([PlayPattern(k)]) for k in (0, 2 if voice2 else 1, 1)])],
         instruments=[Instrument(**ins) for ins in instruments],
-        patterns=[pattern, Pattern(rows=[Row(note=GT.KEYOFF)] + [Row()] * 15)],
+        patterns=patterns,
         wavetable=table(*wave),
         pulsetable=table(*pulse),
         filtertable=table(*filt),
         speedtable=table(*speed),
     )
     build = SimpleNamespace(adparam=None, srparam=None, deftempo=None)
+    state, step = opts.get("state"), opts.get("pulse_step", 1)
     info = SimpleNamespace(
         simplepulse=False,
-        state=None,
+        state=state,
         init_regs=(),
         live_vibrato=False,
         build=build,
@@ -272,9 +297,15 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=()):
         typed=TypedSong.from_song(song),
         subtune=0,
         header=header,
-        player=lambda: Player(song, freq_table=GT.FREQ_TABLE, default_tempo=build.deftempo),
+        player=lambda: Player(
+            song,
+            freq_table=GT.FREQ_TABLE,
+            default_tempo=build.deftempo,
+            state=state,
+            pulse_step=step,
+        ),
     )
-    return dec, Player(song, freq_table=GT.FREQ_TABLE)
+    return dec, Player(song, freq_table=GT.FREQ_TABLE, state=state, pulse_step=step)
 
 
 OPTIMISED = {

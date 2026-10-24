@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import yaml
 from conftest import gt_tune, table, tolerance, vm_mismatch
-from pygoattracker import Player
+from pygoattracker import Player, PlayerState
 from pygoattracker import constants as C
 from pygoattracker.model import (
     Instrument,
@@ -20,6 +20,7 @@ from pygoattracker.model import (
 )
 from pysidtracker import gridcmp
 
+from unitracker.lift import backends
 from unitracker.lift import goattracker as gt
 from unitracker.lift import verify
 from unitracker.playroutine.codec import CodecError, CommandCodec, RowCodec, row_codecs
@@ -218,7 +219,7 @@ def test_track_errors(entries, restart, match):
 
 def test_unsupported_builds_are_named():
     info = SimpleNamespace(
-        simplepulse=True, state=object(), init_regs=((0, 1),), live_vibrato=False
+        simplepulse=True, state=SimpleNamespace(ghost=True), init_regs=((0, 1),), live_vibrato=False
     )
     with pytest.raises(gt.LiftError, match="SIMPLEPULSE.*full-ghosting.*init-routine"):
         gt.GoatTrackerLift(SimpleNamespace(info=info)).run()
@@ -379,6 +380,20 @@ def test_filter_writes_sound_after_the_filter_step(tune, regs):
         assert value in theirs[begun:, reg]
 
 
+@pytest.mark.parametrize("command,data", [(0xA, 1), (0xB, 0x31), (0xC, 0x31), (0xD, 3)])
+@pytest.mark.parametrize("tempo", [0, 4])
+def test_a_rests_filter_and_volume_commands_sound_on_its_step(command, data, tempo):
+    """The player runs its filter step and writes $D416-$D418 before its voices' tick 0
+    commands, so a rest's A, B, C or D sounds on the step, a tick after its restart's first-tick
+    row."""
+    rows = [(24, 1, 0xF, tempo) if tempo else (24, 1, 0, 0), *[REST] * 3]
+    rows += [(None, 0, command, data), *[REST] * 11]
+    filt = [(0x90, 0xF1), (0x00, 0x40), (0x04, 0x02), (0xFF, 0)]
+    lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], rows=rows, filt=filt)[0])
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
 @pytest.mark.parametrize(
     "wave,rows,speed,error,match",
     [
@@ -521,7 +536,7 @@ def test_an_arpeggio_under_a_toneporta_of_speed_0_keeps_one_freq():
     text, _, _, _ = lifted(*gt_tune(arpeggio, rows=rows))
     first = song_def(text)
     assert first["phrase"]["p1"] == ["C2.i1*4", "G2!freq:x1!legato", "-!freq:hold*11"]
-    assert first["x"] == {"x1": 0}
+    assert first["x"] == {"x1": "(v - F(N)) % 65536 - ((v - F(N)) % 65536)*(φ >= 1) + F(N)"}
 
 
 def test_command_0_after_a_slide_holds_its_frequency():
@@ -588,6 +603,73 @@ def test_a_jump_to_a_jump_row_reads_that_row_as_data(tune):
     lifted(*gt_tune(instruments=[ins], **tune))
 
 
+def test_the_voice_that_starts_a_filter_program_last_runs_the_filter():
+    """The player keeps one filter table pointer: voice 2's note, a channel after voice 1's,
+    takes the filter, and voice 1's program never plays its second parameter row."""
+    ins = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}
+    instruments = [{**ins, "filter_ptr": 1}, {**ins, "filter_ptr": 6}]
+    filt = [(0x90, 0x11), (0x00, 0x40), (0x02, 0x00), (0xA0, 0x21), (0xFF, 0)]
+    filt += [(0x90, 0x52), (0x00, 0x80), (0xFF, 0)]
+    voice2 = [(31, 2, 0, 0)] + [REST] * 15
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], instruments, filt=filt, voice2=voice2)
+    played = set(np.asarray(native.render_grid(60))[:, 0x17])
+    assert 0x52 in played and 0x21 not in played
+    lift = gt.GoatTrackerLift(dec)
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
+def test_a_note_hard_restarts_at_the_gate_timer_of_the_instrument_before_it():
+    """The player fetches the next row at the voice's instrument's gate timer and hard-restarts
+    it with the new instrument's: four ticks ahead of instrument 2's note, not its own two."""
+    ins = {"wave_ptr": 1, "sustain_release": 0xF6}
+    instruments = [{**ins, "gateoff_timer": 4}, {**ins, "gateoff_timer": 2}]
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(26, 2, 0, 0)] + [REST] * 11
+    lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], instruments, rows)[0])
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
+def test_a_notes_set_waveform_sounds_on_its_first_tick():
+    """The player runs a note's tick 0 command after the instrument's first waveform, on the
+    restart's first-tick row: a note's 7 writes its waveform there."""
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(26, 1, 7, 0x21)] + [REST] * 11
+    lift = gt.GoatTrackerLift(gt_tune([(0x41, 0), (0xFF, 0)], rows=rows)[0])
+    lift.run()
+    assert lift.verdict.ok, lift.verdict
+
+
+def test_a_toneporta_note_sets_the_note_a_running_wavetable_reads(slime_deluxe):
+    """Voice 2's toneporta note at tick 12 does not restart its wavetable, whose relative row
+    reads the new note on the note's tick 0."""
+    lift = backends.lifter(slime_deluxe.read_bytes())
+    lift.run()
+    grid = oracle.play(lift.document, 24)[0]
+    native = np.asarray(lift.native().render_grid(24))
+    np.testing.assert_array_equal(grid[8:24, 7:9], native[8:24, 7:9])
+
+
+def test_a_note_of_an_instrument_without_a_pulse_table_keeps_the_pulse(dsr_8090):
+    """Voice 3's note at tick 431 is of an instrument with no pulse table: the pulse program its
+    earlier note started sweeps on through it."""
+    lift = backends.lifter(dsr_8090.read_bytes())
+    lift.run()
+    grid = oracle.play(lift.document, 450)[0]
+    native = np.asarray(lift.native().render_grid(450))
+    np.testing.assert_array_equal(grid[420:450, 16:18], native[420:450, 16:18])
+
+
+def test_a_pulse_sweep_of_time_zero_sweeps_256_ticks():
+    ins = [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    pulse = [(0x88, 0), (0x00, 5), (0x84, 0), (0xFF, 0)]
+    text, song, player, theirs = lifted(*gt_tune([(0x41, 0), (0xFF, 0)], ins, pulse=pulse))
+    width = theirs[:, 2].astype(int) | (theirs[:, 3].astype(int) & 0x0F) << 8
+    begun = player.starts[0]
+    steps = np.diff(width[begun : begun + 70])
+    assert set(steps) <= {0, 5} and (steps == 5).sum() > 50
+    assert verify.compare(text, theirs, tol=tolerance(song)).ok
+
+
 @pytest.mark.parametrize("build", [[0, 0], [0, 1], [1, 0], [1, 1]])
 def test_the_vm_plays_the_builds_pulse_and_realtime_optimisations(build):
     rows = [(24, 1, 1, 1)] + [(None, 0, 1, 1)] * 3 + [(26, 1, 1, 1)] + [(None, 0, 1, 1)] * 11
@@ -603,10 +685,63 @@ def test_the_vm_plays_the_builds_pulse_and_realtime_optimisations(build):
 
     dec.player = player
     song = gt.GoatTrackerLift(dec, expressions=False).run()
-    assert song["tables"]["build"] == build
+    assert song["tables"]["build"] == [*build, 1]
     theirs = np.asarray(player().render_grid(400), np.uint8)
     assert vm_mismatch(song, theirs) is None
     assert (build == [1, 1]) == (np.asarray(make().render_grid(400), np.uint8) == theirs).all()
+
+
+def test_a_builds_pulse_step_scales_each_sweep():
+    ins = [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    pulse = [(0x88, 0), (0x20, 0x03), (0xFF, 2)]
+    text, song, player, theirs = lifted(
+        *gt_tune([(0x41, 0), (0xFF, 0)], ins, pulse=pulse, pulse_step=2)
+    )
+    assert song["tables"]["build"] == [1, 1, 2]
+    width = theirs[:, 2].astype(int) | (theirs[:, 3].astype(int) & 0x0F) << 8
+    begun = player.starts[0]
+    assert set(np.diff(width[begun : begun + 30])) == {0, 6}
+    assert verify.compare(text, theirs, tol=tolerance(song)).ok
+
+
+# A chip-writing build's first-tick SID: voice 1's pulse with stale high bits, voice 2's pulse and
+# envelope, and the filter cutoff, mode and volume init leaves as the image loaded.
+SEEDED = PlayerState(
+    registers=(0x11, 0x22, 0x34, 0xF8, 0, 0x5A, 0x6B)
+    + (0x33, 0x44, 0x80, 0x06, 0, 0x29, 0xA7)
+    + (0,) * 7
+    + (0, 0x40, 0, 0x1C),
+    cutoff=0x40,
+    filttype=0x10,
+    volume=0x0C,
+    funk=(8, 5),
+    ghost=False,
+    init=((4, 0), (11, 0), (18, 0), (21, 0)),
+    lastnote=(3, 4, 5),
+)
+
+
+def test_a_chip_writing_builds_init_seeds_the_pulse_envelope_filter_and_volume():
+    """Voice 1's note, of an instrument with no pulse table, sounds the pulse init left; voice 2,
+    which runs the wavetable without a note, the pulse and envelope; and both the cutoff, mode
+    and volume, which no command sets."""
+    rows = [(None, 0, 8, 1)] + [(None, 0, 0, 0)] * 15
+    dec, native = gt_tune([(0x41, 0), (0xFF, 0)], voice2=rows, state=SEEDED)
+    text, song, player, theirs = lifted(dec, native)
+    assert song["records"]["vinit"] == {
+        0: {"pw": 0x834, "ad": 0x5A, "sr": 0x6B},
+        1: {"ins": 1, "pw": 0x680, "ad": 0x29, "sr": 0xA7},
+    }
+    assert song["records"]["ginit"] == {0: {"cut": 0x40, "mode": 0x10, "vol": 0x0C}}
+    init = yaml.safe_load(text)["init"]
+    seeds = [("pw:2100", "ad:90", "sr:107", "mode:16", "vol:12", "cut:512"), ("pw:1664", "ad:41")]
+    assert init[1].startswith("-.i1")
+    assert all(f"!{cmd}" in atom for atom, cmds in zip(init, seeds) for cmd in cmds)
+    first, second, _ = player.starts
+    assert {tuple(r) for r in theirs[min(first, second) :, 0x16:]} == {(0x40, 0, 0x1C)}
+    voice2 = theirs[second:, 7:14]
+    assert {tuple(r) for r in voice2[:, [2, 3, 5, 6]]} == {(0x80, 0x06, 0x29, 0xA7)}
+    assert verify.compare(text, theirs, tol=tolerance(song)).ok
 
 
 def test_a_voice_runs_a_table_before_it_names_an_instrument_on_the_init_instrument():
@@ -617,3 +752,16 @@ def test_a_voice_runs_a_table_before_it_names_an_instrument_on_the_init_instrume
     init = yaml.safe_load(text)["init"]
     assert [atom.split("!")[0] for atom in init] == ["-.i1", "-", "-"]
     assert "-!run:pw1" in text and oracle.play(text, 50)[1][0] is not None
+
+
+def test_a_lifts_expressions_are_timed_over_the_firings_of_its_song(coca_koala):
+    """Voice 1's first instrument plays three wavetable notes before its vibrato first fires; its
+    frequency follows them where the document is timed over the window its native firings are
+    logged over."""
+    raw = coca_koala.read_bytes()
+    lift = backends.lifter(raw)
+    lift.run()
+    grid = oracle.play(lift.document, 12)[0]
+    np.testing.assert_array_equal(
+        grid[8:12, :2], np.asarray(lift.native().render_grid(12))[8:12, :2]
+    )

@@ -2,7 +2,6 @@
 their canonical form, and the proof of its generic document against the native player."""
 
 import abc
-import dataclasses
 from collections import deque
 from collections.abc import Callable, Iterator
 
@@ -90,7 +89,7 @@ class Lift(abc.ABC):
             return None
         native = document.native_state(song, self.ticks, self.ticks)
         try:
-            self.document = document.write(song, dataclasses.replace(native, ticks=self.ticks))
+            self.document = document.write(song, native)
         except (document.GenericError, SongFormatError, PlayError) as exc:
             self.gap = str(exc)
             return None

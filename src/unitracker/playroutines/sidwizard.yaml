@@ -15,11 +15,15 @@ constants:
   vibslidealways: 0
   wfarp_nop_supp: 1
   chordsupport: 1
+  portavibra: 0
+  vibratotypes: 1
+  multispeedsupp: 1
   # Play calls per frame: the player runs on one, MULPLY on the others (see tick).
   speed: 1
-# A tempo is each voice's pair of row lengths tl, tr: 3-127 ticks (a byte 0 plays 6).
+# A tempo is each voice's pair of row lengths tl, tr: 3-127 ticks (a byte 0 plays 6); tle is
+# bit 7 of the first slot, set for a single tempo (see tick_voice).
 tempo:
-  cells: {tl: "a // speed", tr: "b // speed"}
+  cells: {tl: "a // speed", tr: "b // speed", tle: "1 if a == b else 0"}
 tables:
   freqlo: [7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
   freqhi: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255, 7, 22, 39, 56, 75, 94, 115, 137, 161, 186, 212, 240, 13, 44, 78, 113, 150, 189, 231, 19, 66, 116, 168, 224, 27, 89, 156, 226, 44, 123, 206, 39, 132, 232, 81, 192, 54, 179, 56, 196, 89, 246, 157, 78, 9, 208, 162, 129, 109, 103, 112, 136, 178, 237, 58, 156, 19, 160, 68, 2, 218, 206, 224, 17, 100, 218, 117, 56, 38, 64, 137, 4, 180, 156, 192, 34, 200, 180, 235, 113, 76, 128, 18, 8, 104, 56, 128, 69, 144, 104, 214, 227, 152, 0, 36, 16, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201]
@@ -27,10 +31,13 @@ tables:
   # (7 times the voice), not by the note.
   build: [0]
   # The WF rows a voice reads before its first instrument, ending in $FF: the cursor init
-  # zeroes reads instrument 1's header (the player's instrument 0 is linked to it).
+  # zeroes reads the header of the player's instrument 0 (linked to instrument 1 unless the
+  # image links another).
   idle: [255]
   # Each voice's pulse sweep count as its first note starts (see vinit's pw).
   pwcount: [0, 0, 0]
+  # EXPTABH, which the vibrato and slide amplitudes read: 11 zero bytes, then FREQTBH (the
+  # lifter writes the tune's).
   exptab: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29, 31, 32, 34, 36, 39, 41, 43, 46, 49, 52, 55, 58, 62, 65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 124, 131, 139, 147, 156, 165, 175, 185, 196, 208, 221, 234, 248, 249, 250, 251, 252, 253, 254, 255, 255]
 # !pw and !filter: the header's control bits 6 and 7, which keep the program running on
 # a note that selects no instrument.
@@ -213,6 +220,11 @@ functions:
   pwtrack:
     args: [k, d]
     expr: "0 if k == 0 else (ktd(k, d) & 0xFF) + (ktd(k, d) >= 0)"
+  # SETVIBR's VIBRACNT start for vibrato byte frequency f and type s: a quarter period, or with
+  # VIBRATOTYPES half for type $20 and none for $30.
+  vcnt:
+    args: [f, s]
+    expr: "(f >> 1) if not vibratotypes or s < 0x20 else (0 if s == 0x30 else f)"
 global:
   phase: {width: 8}
   fctl: {width: 8, init: 255}
@@ -230,6 +242,7 @@ global:
   nv: {width: 8}
   ntl: {width: 8}
   ntr: {width: 8}
+  ntle: {width: 1}
 voice:
   vi: {width: 8}
   seqend: {width: 1}
@@ -249,8 +262,10 @@ voice:
   tl: {width: 8}
   tr: {width: 8}
   tog: {width: 1}
+  tle: {width: 1}
   sc: {width: 8}
   cur: {width: 8}
+  sdif: {width: 8}
   pre: {width: 8}
   portrow: {width: 1}
   sel: {width: 1}
@@ -267,6 +282,7 @@ voice:
   arpre: {width: 8}
   wfarp: {}
   wfabs: {width: 1}
+  held: {width: 1}
   vdc: {}
   vfc: {width: 8}
   vper: {width: 8}
@@ -386,9 +402,9 @@ procs:
         fx: "ins[ci].freq"
         svib: "ins[ci].flags & 0x30"
         voff: 0
-        vdc: "ins[ci].vibdelay & 0x7F"
+        vdc: "s8(ins[ci].vibdelay)"
         vper: "(ins[ci].vibrato & 0x0F) * 2"
-        vfc: "(ins[ci].vibrato & 0x0F) >> 1"
+        vfc: "vcnt(ins[ci].vibrato & 0x0F, ins[ci].flags & 0x30)"
     - if: "(ins[ci].vibrato >> 4) == 0"
       then: [{set: {fml: 0, fmh: 0}}]
       else:
@@ -397,7 +413,7 @@ procs:
             fmh: "fmhi((ins[ci].vibrato >> 4) << 3, note + oct)"
   vib_byte:
     - set: {fx: 0, svib: "(ins[ci].flags & 0x30) if ci != 0 else 0", vper: "(vb & 0x0F) * 2"}
-    - set: {vfc: "0 if svib == 0x30 else ((vb & 0x0F) if svib >= 0x20 else ((vb & 0x0F) >> 1))"}
+    - set: {vfc: "vcnt(vb & 0x0F, svib)"}
     - if: "((vb >> 4) & 0x0F) == 0"
       then: [{set: {fml: 0, fmh: 0}}]
       else:
@@ -424,14 +440,15 @@ procs:
     - {if: xifx, then: [{call: small_fx, with: {sfc: xifx, sa: xia}}]}
     - {if: "xfc >= 0x20", then: [{call: small_fx, with: {sfc: xfc, sa: xfv}}, {return: true}]}
     - {if: "xfc == 16", then: [{set: {fx: xfv}}, {return: true}]}
-    # A tempo FX rewinds the swing to its first tempo, which the row it is on already counts.
+    # A tempo FX rewinds the swing to its first tempo, which the next tick counts against; a
+    # single tempo sets the first slot's bit 7, a swing pair clears it.
     - if: "xfc == 17 or xfc == 18"
       then:
-        - set: {ntl: "(xfv >> 4) if xfc == 17 else xfv & 0x7F", ntr: "(xfv & 0x0F) if xfc == 17 else xfv & 0x7F"}
-        - for_voices: [{set: {tl: ntl, tr: ntr, tog: 0}}]
+        - set: {ntl: "(xfv >> 4) if xfc == 17 else xfv & 0x7F", ntr: "(xfv & 0x0F) if xfc == 17 else xfv & 0x7F", ntle: "xfc == 18"}
+        - for_voices: [{set: {tl: ntl, tr: ntr, tle: ntle, tog: 0}}]
         - return: true
-    - {if: "xfc == 19", then: [{set: {tl: "xfv & 0x7F", tr: "xfv & 0x7F", tog: 0}}, {return: true}]}
-    - {if: "xfc == 20", then: [{set: {tl: "xfv >> 4", tr: "xfv & 0x0F", tog: 0}}, {return: true}]}
+    - {if: "xfc == 19", then: [{set: {tl: "xfv & 0x7F", tr: "xfv & 0x7F", tle: 1, tog: 0}}, {return: true}]}
+    - {if: "xfc == 20", then: [{set: {tl: "xfv >> 4", tr: "xfv & 0x0F", tle: 0, tog: 0}}, {return: true}]}
     - {if: "xfc == 1", then: [{set: {svib: 0x81, fx: 0}}, {call: slide_speed}]}
     - {if: "xfc == 2", then: [{set: {svib: 0x82, fx: 0}}, {call: slide_speed}]}
     - if: "xfc == 3"
@@ -446,12 +463,19 @@ procs:
     - {if: "ci == 0", then: [{return: true}]}
     - set: {started: 1, wpos: "ins[ci].ctrl"}
     - {if: "sel or not (ins[ci].flags & 0x40)", then: [{set: {ppos: "ins[ci].pw"}}]}
-    - {if: "sel or not (ins[ci].flags & 0x80)", then: [{set: {fpos: "ins[ci].filter"}}]}
-    - set: {wfarp: 0, wfabs: 0, arpcnt: 0xFF, det: 0, vif: "ins[ci].filter != 0"}
+    - {if: "sel or not (ins[ci].flags & 0x80)", then: [{call: set_filter}]}
+    # MULTISPEEDSUPP_ON's ARPSCNT $FF keeps MULCNTP off the voice until its next PLAYER tick;
+    # the frequency holds until a WF row writes a pitch.
+    - set: {wfarp: 0, wfabs: 0, arpcnt: "0xFF if multispeedsupp else arpcnt", det: 0, held: 1}
+    - call: setup_vibrato
+  # SETFLTP: the voice is routed through the filter when its instrument has a filter program,
+  # and one whose first row is not a sweep of none takes the filter and its cursor (the
+  # controlling voice's fpos).
+  set_filter:
+    - set: {vif: "ins[ci].filter != 0"}
     - call: set_routing
     - if: "ins[ci].filter != 0 and flttab[ins[ci].filter].a != 0"
-      then: [{set: {fctl: vi}}]
-    - call: setup_vibrato
+      then: [{set: {fctl: vi, fpos: "ins[ci].filter"}}]
   # TICK_2: apply the row read at TICK_0.
   apply_row:
     - {if: "pk or pins or pleg or pifx or pfx or pnfx", then: [{set: {trig: 1}}]}
@@ -478,28 +502,37 @@ procs:
       else:
         - set: {dfx: 0}
         - {call: fx_columns, with: {xifx: pifx, xia: pia, xfc: pfx, xfv: pfv}}
+  # PORTAME: the target less the frequency borrows the carry SLIDES leaves, which PORTAVIBRA_ON
+  # clears; the step inherits the test's carry.
   tick_porta:
     - set: {t4: "s16(voff)", t5: "(fmh << 8) | fml"}
-    - {if: "t4 == 0", then: [{return: true}]}
-    - if: "t4 > 0"
+    - if: "t4 > 0 - portavibra"
       then:
-        - {if: "t4 <= t5", then: [{set: {voff: 0}}, {return: true}]}
+        - {if: "t4 <= t5 - portavibra", then: [{call: portend}, {return: true}]}
         - set: {voff: "t4 - t5 - 1"}
       else:
-        - {if: "t4 + t5 > 0", then: [{set: {voff: 0}}, {return: true}]}
+        - {if: "t4 + t5 + portavibra > 0", then: [{call: portend}, {return: true}]}
         - set: {voff: "t4 + t5 + 1"}
+  # PORTEND: the slide reaches its note; PORTAVIBRA_ON returns to the instrument's vibrato.
+  portend:
+    - set: {voff: 0}
+    - {if: portavibra, then: [{call: vib_byte, with: {vb: "ins[ci].vibrato"}}]}
   tick_vibrato:
     - {if: "ci == 0", then: [{return: true}]}
-    # SLIDES: a pending note-FX portamento ($FF) runs PORTAME too (PORTAVIBRA_ON is off).
-    - {if: "svib == 0x83 or svib == 0xFF", then: [{call: tick_porta}, {return: true}]}
+    # SLIDES: a pending note-FX portamento ($FF) runs PORTAME too, unless PORTAVIBRA_ON sends it
+    # to TARGETN.
+    - {if: "svib == 0x83 or (svib == 0xFF and not portavibra)", then: [{call: tick_porta}, {return: true}]}
+    - {if: "svib == 0xFF", then: [{set: {voff: 0}}, {return: true}]}
     - {if: "svib == 0x81", then: [{set: {voff: "voff + ((fmh << 8) | fml)"}}, {return: true}]}
     - {if: "svib == 0x82", then: [{set: {voff: "voff - ((fmh << 8) | fml)"}}, {return: true}]}
-    - if: "svib == 0"
+    # INCVIBR (type $00 with VIBRATOTYPES) grows the amplitude by the delay byte; every other
+    # type below $80 is NORMVIB, which waits out the delay.
+    - if: "svib == 0 and vibratotypes"
       then:
-        - set: {t3: "((fmh << 8) | fml) + vdc"}
+        - set: {t3: "((fmh << 8) | fml) + (vdc & 0xFF)"}
         - set: {fml: t3, fmh: "t3 >> 8"}
       else:
-        - {if: "svib != 0x10", then: [{return: true}]}
+        - {if: "svib >= 0x80", then: [{return: true}]}
         - {if: "vdc >= 0", then: [{set: {vdc: "vdc - 1"}}, {return: true}]}
     - {if: "vfc == 0", then: [{set: {vfc: vper}}]}
     - set: {vfc: "vfc - 1"}
@@ -518,12 +551,12 @@ procs:
       else:
         - if: "rx >= 0xE0"
           then:
-            - set: {wfarp: "rx - 0x100", wfabs: 0, voff: 0}
+            - set: {wfarp: "rx - 0x100", wfabs: 0, voff: 0, held: 0}
             - {if: "rx + ((note + oct) & 0xFF) > 0xFF", then: [{set: {carry: 1}}]}
           else:
             - if: "rx >= 0x80"
-              then: [{set: {wfarp: "rx & 0x7F", wfabs: 1, voff: 0}}]
-              else: [{set: {wfarp: rx, wfabs: 0, voff: 0}}]
+              then: [{set: {wfarp: "rx & 0x7F", wfabs: 1, voff: 0, held: 0}}]
+              else: [{set: {wfarp: rx, wfabs: 0, voff: 0, held: 0}}]
     - {if: "rd != 0xFF", then: [{set: {det: "s8(rd)"}}]}
   wf_row:
     - {if: zpd, then: [{call: idle_row}, {return: true}]}
@@ -545,6 +578,7 @@ procs:
     - {if: wpos, then: [{set: {arpre: "wftab[wpos].h"}}]}
     - set: {arpcnt: arpre}
     - call: wf_row
+  # SETPWID: a sweep row ends when its count reaches the row's exactly.
   tick_pw:
     - {if: "ci == 0 or ppos == 0", then: [{return: true}]}
     - set: {t1: "pwtab[ppos].a", t2: "pwtab[ppos].b"}
@@ -552,7 +586,7 @@ procs:
       then:
         - set: {pwhi: "t1 & 0x7F", pwlo: t2, pwkt: "pwtab[ppos].k", ppos: "pwtab[ppos].next", pwcnt: 0}
         - return: true
-    - {if: "pwcnt >= t1", then: [{set: {pwkt: "pwtab[ppos].k", ppos: "pwtab[ppos].next", pwcnt: 0}}, {return: true}]}
+    - {if: "pwcnt == t1", then: [{set: {pwkt: "pwtab[ppos].k", ppos: "pwtab[ppos].next", pwcnt: 0}}, {return: true}]}
     - set: {pwcnt: "pwcnt + 1"}
     - {if: "t2 & 0x80", then: [{set: {pwhi: "pwhi - 1"}}]}
     - set: {t6: "pwlo + t2"}
@@ -597,7 +631,7 @@ procs:
         - if: "restart[rr].ctrl >= 0"
           then: [{set: {sctl: "restart[rr].ctrl & gate", sfh: "freqhi[vi * 7 if build[0] else (note + oct) & 0xFF] if frame1switch else sfh"}}]
         - return: true
-    - if: "ins[ci].ctrl != 0 or zpd"
+    - if: "(ins[ci].ctrl != 0 or zpd) and not held"
       then:
         - set: {t1: "dfreq((wfarp if wfabs else note + wfarp + oct) & 0x7F) + voff"}
         - set: {zpl: t1, zph: "t1 >> 8"}
@@ -620,12 +654,16 @@ procs:
   tick_voice:
     - set: {leg2: 0, adsrw: 0, zpd: 0}
     - {if: "seqend and not trig", then: [{return: true}]}
+    # SPDCNT against the slot's TEMPOTBL byte, bit 7 set but on a swing pair's first: a zero
+    # difference steps to the second slot, a signed overflow (a bit-7 byte reached) rewinds.
     - set: {cur: "tl if tog == 0 else tr"}
     - {if: "cur == 0", then: [{set: {cur: 6}}]}
+    - set: {cur: "cur | (0x80 if tog or tle else 0)"}
+    - set: {sdif: "(sc - cur) & 0xFF"}
+    - {if: "sdif == 0 or (sc ^ cur) & (sc ^ sdif) & 0x80", then: [{set: {sc: 0, tog: "0 if sdif else 1"}}]}
     - set: {pre: sc}
     - {if: "sc == 0 and not seqend", then: [{call: advance_row}]}
     - set: {sc: "sc + 1"}
-    - {if: "sc >= cur", then: [{set: {sc: 0, tog: "tog ^ 1"}}]}
     - set: {portrow: 0}
     - if: "pre == 2 and haspend"
       then:
@@ -638,7 +676,9 @@ procs:
     - call: note_setup
   write_regs:
     - {if: "not (trig or zpd)", then: [{return: true}]}
-    - {if: "(ci == 0 and not zpd) or leg2", then: [{set: {r4: sctl}}, {return: true}]}
+    # LEGATOO writes the waveform, and the envelope an envelope small FX set.
+    - if: "(ci == 0 and not zpd) or leg2"
+      then: [{if: adsrw, then: [{set: {r5: sad, r6: ssr}}]}, {set: {r4: sctl}}, {return: true}]
     - {if: inhr, then: [{set: {r1: sfh, r5: sad, r6: ssr, r4: sctl, onset: started}}, {return: true}]}
     - set: {r0: sfl, r1: sfh, r2: spl, r3: sph, onset: started}
     - {if: adsrw, then: [{set: {r5: sad, r6: ssr}}]}
@@ -653,12 +693,12 @@ procs:
     - for_voices: [{if: "vi == target", then: [{call: tick_voice}]}]
     - for_voices: [{if: "vi == fctl", then: [{set: {fdp: "note + oct"}}]}]
     - for_voices: [{call: write_regs}]
-  # MULCNTP: a multispeed call steps the WF program, and the pulse and filter programs of an
-  # instrument whose mul bits say so, of every voice past its note's first PLAYER tick (ARPSCNT
-  # positive); a voice without an instrument walks instrument 1's (the player's instrument 0).
+  # MULCNTP: a multispeed call steps the WF program, the pulse program of an instrument with
+  # either mul bit and its filter program with bit 7, of every voice past its note's first
+  # PLAYER tick (ARPSCNT positive); a voice without an instrument walks the idle rows.
   mulcntp:
     - call: tick_wf
-    - {if: "ins[ci].mul & 0x40", then: [{call: tick_pw}]}
+    - {if: "ins[ci].mul & 0xC0", then: [{call: tick_pw}]}
     - {if: "ins[ci].mul & 0x80", then: [{call: tick_filt}]}
     - call: compose
   tick_mul:

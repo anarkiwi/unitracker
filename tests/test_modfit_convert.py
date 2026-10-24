@@ -713,7 +713,7 @@ def test_a_resumed_vibrato_is_each_steps_freq_only_where_a_step_reselects(
     assert [k for k, e in enumerate(steps) if e.get("command") == [16, 1]] == written
 
 
-@pytest.mark.parametrize("flags,cleared,driven", [(0x50, 0x50, True), (0x60, 0x50, False)])
+@pytest.mark.parametrize("flags,cleared,driven", [(0x50, 0x50, True), (0x60, 0x50, True)])
 def test_sidwizard_vibrato_bytes_become_freq_expressions_and_are_cleared(flags, cleared, driven):
     ir = sw_ir(("C4", 8, 1), ("-", 4), ("-", 4))
     ir["records"]["ins"][1].update(vibrato=0x33, vibdelay=4, flags=flags)

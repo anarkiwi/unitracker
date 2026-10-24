@@ -85,8 +85,7 @@ def test_the_baseline_notes_each_read_when_the_full_play_first_reads_it():
     played = states(ir, len(base.rows))
     kinds = set()
     for item, tick in base.reads:
-        changed = perturbed(ir, item)
-        if changed is None or not tick:
+        if not tick or (changed := perturbed(ir, item)) is None:
             continue
         kinds.add(item[0])
         assert states(changed, tick) == played[:tick], item
