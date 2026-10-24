@@ -97,42 +97,82 @@ bound as it was (until something binds or stops that slot). Each such binding be
 
 `lossy.simplify(text, ticks, tolerances)`, off by default, trades a bounded loss of fidelity
 for simplicity: each call of a code template (`vib(0,4,32)`) becomes a call of an expression
-template fitted to what the call did, and nothing else in the document changes. The exact passes
-then run on its result, their guarantee taken against it.
+template fitted to what the call did, or, where code templates share state, to what they did
+together, and nothing else in the document changes. The exact passes then run on its result,
+their guarantee taken against it.
 
 1. **Record** (`trace.py`): the document plays over `ticks` (to its end where it ends; a looping
-   song needs `ticks`), and each firing of each call's routine is recorded by call and cell:
-   tick, voice, phi, input `v`, output, `N`, `n`.
+   song needs `ticks`), and every slot's firing is logged in firing order: tick, cell, the voice
+   whose cell it is and the one that bound it, the slot, its code call (if any), phi, input `v`,
+   output, `N`, `n`. Each code call's firings are those of its call and cell.
 2. **Fit** (`fit.py`): per call, residuals of the output against each base (`v`, `0`, `F(N)`,
    `F(n)`; the notes for the frequency only) are summarised per phi, and each shape's integer
-   parameters fitted:
+   parameters fitted. Each shape has a name by what it does on each base, and each parameter a
+   name by its role:
 
-   | shape | form (added to the base) | fit |
-   |---|---|---|
-   | `keep` | `0` | none |
-   | `off` | `q` | weighted median |
-   | `lin` | `q + s*phi` | weighted least squares, slope rounded |
-   | `up`, `down` | `min(q + s*phi,m)`, `max(...)` | the line short of the extreme, held at it |
-   | `sq` | `q + w*((phi + o) // h % 2)` | every half period `h` to 64 and offset `o` |
-   | `tri` | `q + s*abs((phi + o) % (2*h) - h)` | as `sq`, `q` and `s` by least squares |
-   | `tab` | `T[k + min(phi,l)] - z` | the residual per phi to its last change, held after |
-   | `loop` | `T[k + min(phi,l) + max(phi - l,0) % p] - z` | the shortest preperiod `l` and period `p` over two periods or more |
-   | `first` | `v + (phi < l)*(B + q - v)` | the base `B` until phi `l`, the input after |
+   | shape | form (added to the base) | fit | on `v` / `0` / `F(N)` | parameters |
+   |---|---|---|---|---|
+   | `keep` | `0` | none | `none` / - / `pitch` | |
+   | `off` | `q` | weighted median | `ramp` / `level` / `detune` | `step` / `value` / `offset` |
+   | `lin` | `q + s*phi` | weighted least squares, slope rounded | `accel` / `line` / `glide` | `q`, `s` |
+   | `up`, `down` | `min(q + s*phi,m)`, `max(...)` | the line short of the extreme, held at it | `accelup` / `rise` / `glideup`, ... | `q`, `s`, `limit` |
+   | `sq` | `q + w*((phi + o) // h % 2)` | every half period `h` to 64 and offset `o` | `stepsq` / `square` / `vibsq` | `q`, `depth`, `phase`, `half` |
+   | `tri` | `q + s*abs((phi + o) % (2*h) - h)` | as `sq`, `q` and `s` by least squares | `steptri` / `tri` / `vib` | `lo`, `step`, `phase`, `half` |
+   | `tab` | `T[k + min(phi,l)] - z` | the residual per phi to its last change, held after | `steps` / `seq` / `pitchseq` | `at`, `last` |
+   | `loop` | `T[k + min(phi,l) + max(phi - l,0) % p] - z` | the shortest preperiod `l` and period `p` over two periods or more | `stepcycle` / `cycle` / `pitchcycle` | `at`, `last`, `period` |
+   | `first` | `v + (phi < l)*(B + q - v)` | the base `B` until phi `l`, the input after | - / `start` / `note` | `offset`, `len` |
+   | `toward` | `v + max(-s,min(s,B - v))` | the input moved toward the note `B` by the median move | - / - / `glideto` | `step` |
 
-   A shape on a base whose residual is 0 before some phi `d` is also fitted from `d` on, as
-   `(phi >= d)*(...)`. A form is kept when its error over every firing keeps to the cell's
-   tolerance; along a chain (a firing whose input is what the voice's firing before left) the
-   form's own output feeds the next firing, so a form that drifts is refused.
-3. **Template**: per code template, the cheaper (in tokens) of one form key fitting all its
-   calls and each call's cheapest form, grouped by key. Each group is one expression template
-   named by its shape with a parameter per value its calls differ in, a parameter that is an
-   integer multiple of another written as that multiple, and the rest literal
-   (`vib(0,4,32)`, `vib(0,4,64)` → `sq(32)`, `sq(64)` of `sq(q):v - 2*(phi // 2 % 2)*q + q`). A table
-   form's tables are one new table, each call's offset `k`.
-4. **Prove**: each code template's replacement is screened alone for size, then the
-   replacements are proved together and, refused, in halves, as the driver's edits: kept where
-   the document (its replaced code templates no call names any more dropped, with the state
-   variables and tables nothing reads) shrinks and the check holds.
+   `q` is `step` on `v`, `lo` on `0` and `offset` on a note; `s` is `accel` on `v`, else
+   `step`. A form on `F(n)` is named as on `F(N)` after `ev`. A shape on a base whose residual
+   is 0 before some phi `d` is also fitted from `d` on, as `(phi >= d)*(...)` (named after
+   `late`); one whose output is its input before some phi `d` (a slot the player holds on a
+   note's first tick) as `v + (phi >= d)*(B + ... - v)` (after `held`), and that with a later
+   `late` start `d` after `e` (after `heldlate`). A form is kept when its error over every
+   firing keeps to the cell's tolerance; along a chain (a firing whose input is what the voice's
+   firing before left) the form's own output feeds the next firing, so a form that drifts is
+   refused.
+3. **Couple** (`coupled.py`): code templates of a cell that name the same declared `state:`
+   variables are joined into groups (connected components; `snd+stp+tone`, `note+porta+vib`). A
+   group's calls are replaced together by a plan, per slot `h` its calls fire in (the host):
+   - at each tick a group's calls fire on a voice's cell, the group's input is the value its first
+     firing took and its output the value its last left;
+   - each call bound in `h` is fitted (step 2) to the group's output at its own firings, with
+     its own phi, the group's input as `v` (or, where the group's calls in the slots before `h`
+     keep their own output, `h`'s own input, and those calls are fitted to their own output);
+   - every other call of the group, a call no firing reached among them, becomes `none`, and a
+     slot left bound by nothing loses its `none` bindings.
+   A plan is refused where a call fits no form (the report names the nearest form and its
+   error), where a call fires both before and after `h`, or where on the ticks `h` does not fire
+   the group moves the cell beyond the tolerance (the cell then takes the group's input, or the
+   note where nothing else fires). A group is unfit where every plan is refused, another
+   modulator fires between its slots or one of its templates fires on two cells. Templates in no
+   group are fitted per call as before.
+4. **Template**: per code template (or per host slot's calls), the cheaper (in tokens) of one
+   form key fitting all its calls and each call's cheapest form, grouped by key. Each group is
+   one expression template named by its shape and base (`ramp`, `vib`, `heldpitchseq`), the
+   least count after the second, clear of the document's records, tables and state variables.
+   Its parameters are its shape's natural ones (every one but a table's `z`, and those at
+   their neutral value, 0 for `q`, `o` and `k` and 1 for a `first`'s `l`, in every call),
+   whether or not its calls differ in them, plus any value its calls differ in, named by role
+   and, where a role's name is taken, by an alternate (`step`, `inc`, `delta`, then `step2`);
+   a parameter that is an integer multiple of another in every call is written as that
+   multiple, and the rest are literal (`vib(0,4,32)`, `vib(0,4,64)` → `stepsq(32,2)`,
+   `stepsq(64,2)` of `stepsq(step,half):v - 2*(phi // half % 2)*step + step`). A form that
+   keeps its input (`keep` on `v`) ends its call's binding (`none`). A table form's tables are
+   one new table, each call's offset `k`.
+5. **Prove**: each replacement (a code template's, or a group's best plan) is screened alone for
+   size, then the replacements are proved together and, refused, in halves, as the driver's
+   edits: kept where the document (its replaced code templates no call names any more dropped,
+   with the state variables and tables nothing reads) shrinks and the check holds. A refused
+   group tries its other plans, most tokens saved first, then its templates' own replacements;
+   an unfit group's templates offer theirs at once. The templates kept are then named in order
+   from their stems.
+
+Parameters stay parameters even where one call uses them (`ramp(32)`, not `ramp():v + 32`):
+the output is material for a reader, or a language model, learning the format's vocabulary,
+and a shape called with its arguments says what it does and is reused as it stands; the cost is
+a few tokens per template.
 
 The check plays the candidate over the same horizon: every register outside the targeted cells
 (the frequency, pulse width or cutoff of each voice a replaced call fired on) must equal the
@@ -145,14 +185,16 @@ it differs, must keep to its tolerance at its 95th percentile and maximum:
 | `pw` | register units (12 bits), or percent of the input's value with a `%` suffix | `32,128` |
 | `cut` | register units (11 bits), or percent as for `pw` | `16,64` |
 
-The report (stderr) gives, per replaced code template, its calls, the templates they became, the
-tokens it saves alone and its fitted error (p50, p95, max), each refused one, each targeted
+The report (stderr) gives, per replaced code template or group, its calls, the templates they
+became (`none` for an ended binding), the tokens it saves alone and its fitted error (p50, p95,
+max), each refused one, each unfit group with why each of its plans was refused, each targeted
 cell's error and the size before and after.
 
-A call fitted from its own firings cannot follow state another code template writes: a template
-that only feeds another's state fits `keep` and is refused by the check, and a call bound on two
-cells is left as it is. The guarantee covers the horizon only: a form fitted to the phi a song
-reaches may differ past it.
+A group whose output depends on more than its host's calls and phi (a vibrato whose phase a note
+resets while its command's binding runs on, a slot the player holds for ticks before each note
+under a vibrato) fits no plan within a tight maximum, and its templates keep their per-call
+replacements where those hold. The guarantee covers the horizon only: a form fitted to the phi
+a song reaches may differ past it.
 
 `python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR [--seconds S]]` tabulates the
 tokens of the exact passes against the lossy mode with them, what each code template became and
@@ -198,8 +240,10 @@ as one edit: refused, the document stays as the passes left it.
 ## Tests
 
 `tests/test_lossy.py`: code that is exactly an expression fitted exactly, a looser tolerance
-picking a simpler form, noise refused at a tight tolerance and kept at a loose one, a replacement
-that breaks code reading its state refused, each shape fitted, and the CLIs.
+picking a simpler form, noise refused at a tight tolerance and kept at a loose one, two routines
+sharing state fitted jointly with their state dropped, an unfit group and its templates' own
+replacements refused, another slot firing inside a group, a refused group's other plans and
+fallback, shape and parameter names, the parameter policy, each shape fitted, and the CLIs.
 `tests/test_optimiser_idioms.py`: the `transpose` and `snap` passes, the `names` rename and the
 `defaults` pass's instrument `none`s and empty rows on hand-written documents (folded and kept,
 refused by size or by the guarantee) and every pass on lifted documents of the four direct
