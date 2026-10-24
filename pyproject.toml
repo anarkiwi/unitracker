@@ -19,10 +19,11 @@ dependencies = [
     "pydefmon>=0.10.1",
     "pysidwizard>=0.4.0",
     "pymusicassembler>=0.8.6",
-    "unitracker-grammar>=0.14.0",
-    "unitracker-player>=0.21.0",
+    "unitracker-grammar>=0.15.0",
+    "unitracker-player>=0.22.0",
     "tiktoken>=0.7",
     "lark>=1.1",
+    "music21>=9",
 ]
 
 [project.optional-dependencies]

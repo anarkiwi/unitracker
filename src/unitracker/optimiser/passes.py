@@ -18,6 +18,7 @@ from unitracker_grammar.document import (
     Event,
     Expr,
     Instrument,
+    Once,
     Play,
     Program,
     Row,
@@ -190,6 +191,22 @@ def _event_defaults(path: tuple, event: Event) -> list:
     return edits
 
 
+def _bare(event) -> bool:
+    """Whether an event is a rest and nothing else, which a rest before it may take as steps."""
+    return isinstance(event, Event) and event == Event("-", steps=event.steps)
+
+
+def _rests(events: tuple) -> tuple:
+    """``events`` with each run of bare rests one rest of their steps."""
+    out = []
+    for event in events:
+        if out and _bare(out[-1]) and _bare(event):
+            out[-1] = replace(out[-1], steps=(out[-1].steps or 1) + (event.steps or 1))
+        else:
+            out.append(event)
+    return tuple(out)
+
+
 def defaults(doc: Document) -> list:
     """Drop what a document spells at the default it has anyway (semantics.md): header lines,
     ``wait:0``, ``hold:1``, ``a/a`` tempos, ``*1``, a non-note's ``legato``, ``pw`` and
@@ -206,6 +223,8 @@ def defaults(doc: Document) -> list:
             ]
         elif isinstance(node, Event):
             edits += _event_defaults(path, node)
+        elif isinstance(node, tuple) and node and _rests(node) != node:
+            edits.append(Edit(_label(path, "rests"), partial(update, path=path, fn=_rests)))
     return edits + _binding_defaults(doc) + _first_notes(doc) + _empty_rows(doc)
 
 
@@ -327,7 +346,7 @@ _PARAM = r"(?<![\w.]){}(?![\w(])"
 def _alpha(body, params: tuple):
     """A template's body with its parameters named by their positions."""
     names = {p: f"_{i}" for i, p in enumerate(params)}
-    if isinstance(body, Program):
+    if isinstance(body, (Program, Instrument, tuple)):
         return transform(body, partial(_alpha_row, names))
     if isinstance(body, Code):
         out = []
@@ -344,10 +363,13 @@ def _alpha(body, params: tuple):
 
 
 def _alpha_row(names: dict, node):
-    """A program template's row or call with its parameters named by their positions."""
+    """A program, instrument or phrase template's row, field, event or call with its
+    parameters named by their positions."""
     if isinstance(node, Call):
         return Call(node.name, tuple(names.get(a, a) for a in node.args))
-    if not isinstance(node, Row):
+    if isinstance(node, Event):
+        return replace(node, note=names.get(node.note, node.note))
+    if not isinstance(node, (Row, Instrument)):
         return node
 
     def named(value):
@@ -357,7 +379,8 @@ def _alpha_row(names: dict, node):
             return value[0] + names[value[1:]]
         return names.get(value, value) if isinstance(value, str) else value
 
-    return replace(node, keys=tuple((k, named(v)) for k, v in node.keys))
+    attr = "keys" if isinstance(node, Row) else "fields"
+    return replace(node, **{attr: tuple((k, named(v)) for k, v in getattr(node, attr))})
 
 
 def merge(doc: Document) -> list:
@@ -453,4 +476,68 @@ def hoist(doc: Document) -> list:
             if len(found) == 1 and found[0] not in _STOPS:
                 hoisted = partial(_hoist, cell, slot.name, found[0])
                 edits.append(Edit(f"{slot.name}.{cell}:{found[0]}", hoisted))
+    return edits
+
+
+# ---- once ---------------------------------------------------------------------------------
+
+
+def _slot_key(doc: Document, key: str) -> tuple | None:
+    """``(cell, slot)`` a command's key binds or stops, None for a key of no modulated cell."""
+    cell = base(key)
+    return (cell, _slot(doc, key, cell)) if cell in CELLS else None
+
+
+def _starts(events: tuple) -> list:
+    """Each event's first step in its phrase, which merging bare rests leaves as it is."""
+    out, at = [], 0
+    for event in events:
+        out.append(at)
+        at += event.steps or 1
+    return out
+
+
+def _onced(path: tuple, starts: tuple, key: str, doc: Document) -> Document:
+    """``doc`` with the event of the phrase at ``path`` starting at step ``starts[0]`` binding
+    ``key`` once and the one at ``starts[1]`` without its ``none``, then its bare rests merged."""
+
+    def edit(events):
+        i, j = (_starts(events).index(at) for at in starts)
+        first, last = events[i], events[j]
+        commands = tuple((k, Once(v) if k == key else v) for k, v in first.commands)
+        out = list(events)
+        out[i] = replace(first, commands=commands)
+        out[j] = replace(last, commands=_without(last.commands, (key, NONE)))
+        return _rests(tuple(out))
+
+    return update(doc, path, edit)
+
+
+def _stopped_at(events: tuple, i: int, key: str, cell: str) -> int | None:
+    """The event after ``i`` whose commands of ``cell`` are only ``key``'s ``none``, where it is
+    the first after ``i`` with a command of ``cell``."""
+    for j in range(i + 1, len(events)):
+        later = [(k, v) for k, v in events[j].commands if base(k) == cell]
+        if later:
+            return j if later == [(key, NONE)] else None
+    return None
+
+
+def once(doc: Document) -> list:
+    """A command binding a slot that a later event of its phrase stops with ``none``, no command
+    of the cell between, becomes a binding that fires once (``b!``), the ``none`` dropped."""
+    edits = []
+    for path, node in walk(doc):
+        if not isinstance(node, tuple) or not node or not all(isinstance(e, Event) for e in node):
+            continue
+        for i, event in enumerate(node):
+            for key, value in event.commands:
+                slot = _slot_key(doc, key)
+                if slot is None or value in (NONE, HOLD, "reset") or isinstance(value, Once):
+                    continue
+                j = _stopped_at(node, i, key, slot[0])
+                if j is not None:
+                    label = _label(path + (i,), f"{key}:{value}!")
+                    starts = _starts(node)
+                    edits.append(Edit(label, partial(_onced, path, (starts[i], starts[j]), key)))
     return edits

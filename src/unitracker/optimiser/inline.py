@@ -7,7 +7,9 @@ from unitracker_grammar.document import (
     Call,
     Document,
     Event,
+    Group,
     Instrument,
+    Part,
     Play,
     Program,
     Row,
@@ -48,6 +50,8 @@ def references(node, defs: dict):
         yield node.ins
     if isinstance(node, Play) and _named(defs, node.phrase):
         yield node.phrase
+    if isinstance(node, Part) and _named(defs, node.section):
+        yield node.section
     if isinstance(node, Instrument):
         yield from (v for k, v in node.fields if base(k) in _FIELDS and _named(defs, v))
     if type(node) in _RUNS:
@@ -103,22 +107,31 @@ class _Inliner:  # pylint: disable=too-few-public-methods
         return self.memo[name]
 
     def program(self, name: str):
-        """Definition ``name`` as a program or a program template's call: a binding (a
-        ``pw`` or ``filter`` record's) as the program of its one row, which, unlike an
-        instrument's own binding, keeps its φ where it binds again."""
-        kind, value = self.defs[name][0], self.body(name)
-        if isinstance(value, Program) or isinstance(value, Call) and value.name in self.forms:
-            return value
-        return Program((Row(((_CELL[kind], value),)),))
+        """Definition ``name`` where an instrument's field names it: itself, a binding (a
+        ``pw`` or ``filter`` record's) the field's own binding, as the name plays there."""
+        return self.body(name)
 
     def run(self, name: str):
-        """A ``run``'s inline form: the program after its kind, a call as itself."""
-        value = self.program(name)
-        return value if isinstance(value, Call) else Run(self.defs[name][0], value)
+        """A ``run``'s inline form: the program after its kind (a binding the program of its
+        one row), a call as itself."""
+        kind, value = self.defs[name][0], self.body(name)
+        if isinstance(value, Call) and value.name in self.forms or isinstance(value, Program):
+            return value if isinstance(value, Call) else Run(kind, value)
+        return Run(kind, Program((Row(((_CELL[kind], value),)),)))
+
+    def items(self, item) -> tuple:
+        """A song item's inline form: a section of the targets its items, or a group of
+        them where it plays more than once."""
+        if not isinstance(item, Part) or not _named(self.defs, item.section):
+            return (item,)
+        body = self.body(item.section)
+        return body if item.times is None else (Group(body, item.times),)
 
     def node(self, node):
         """``node`` with its references of the targets inline."""
         defs = self.defs
+        if isinstance(node, tuple) and any(isinstance(i, Part) for i in node):
+            node = tuple(x for i in node for x in self.items(i))
         if isinstance(node, Event) and _named(defs, node.ins):
             node = replace(node, ins=self.body(node.ins))
         if isinstance(node, Play) and _named(defs, node.phrase):
@@ -149,8 +162,10 @@ def inlined(doc: Document, targets: set) -> Document:
     with any section it leaves empty."""
     if not targets:
         return doc
-    doc = transform(doc, _Inliner(doc, targets).node)
-    return replace(doc, defs=_kept(doc.defs, targets))
+    inliner = _Inliner(doc, targets)
+    loop = doc.loop and sum(len(inliner.items(i)) for i in doc.rows[: doc.loop])
+    doc = transform(doc, inliner.node)
+    return replace(doc, defs=_kept(doc.defs, targets), loop=loop)
 
 
 def _reached(doc: Document) -> Document:

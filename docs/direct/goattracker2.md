@@ -67,7 +67,7 @@ held slot passes it on.
 
 ### Code modulators
 
-The modulators are format 2.2 6502 code templates
+The modulators are format 2.3 6502 code templates
 ([`gt2code.py`](../../src/unitracker/direct/gt2code.py)), each a transcription of the
 playroutine function it replaces. The top-level `mod:` section, after `tables:`, holds those
 the song uses by signature (`vib(l,c,s):|`) in first-use order, and `state:` the variables

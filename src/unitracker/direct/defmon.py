@@ -482,7 +482,7 @@ def pitch(mode: int) -> d.Call:
     """The pitch step's call in pitch mode ``mode``."""
     if not mode:
         return call("pitch")
-    return call("slide" if mode >= 0x80 else "por", m=mode)
+    return call("pslide" if mode >= 0x80 else "por", m=mode)
 
 
 def gated(bits: tuple, cols: dict) -> tuple:

@@ -27,6 +27,7 @@ from unitracker_grammar.document import (
     signature,
 )
 from unitracker_grammar.expr import canonical, tree
+from unitracker_grammar.prelude import NAMES as PRELUDE
 from unitracker_player.player import load
 
 from unitracker.optimiser import coupled, fit
@@ -151,6 +152,8 @@ def template(group: list, taken: set, reserved=frozenset()) -> tuple:
     natural value of its shape (:func:`fit.natural`) and per value that differs between them,
     the rest literal, each parameter named by its role but for ``reserved`` and ``taken``."""
     forms = [f for _, f in group]
+    if forms[0].shape == "prelude":
+        return None, None, None, {c: Call(f.base, f.params["args"]) for c, f in group}
     shape, base_, delay = forms[0].key
     params = {k: [f.params[k] for f in forms] for k in forms[0].params if k != "table"}
     table = _table(forms, params, taken) if shape in fit.TABLES else None
@@ -193,7 +196,9 @@ def _scaled(params: dict, varying: list) -> dict:
 
 def _cost(made: tuple, occurrences: Counter) -> int:
     sig, body, table, calls = made
-    text = f" {sig}:{body}\n" + (f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else "")
+    text = ("" if sig is None else f" {sig}:{body}\n") + (
+        f" {table[0]}:[{','.join(map(str, table[1]))}]\n" if table else ""
+    )
     return size(text) + sum(occurrences[c] * size(str(n)) for c, n in calls.items())
 
 
@@ -210,7 +215,7 @@ class Names:
     def of(cls, doc: Document) -> "Names":
         """The names of ``doc``."""
         taken = {_code.signature(k)[0] for k, _ in doc.mods} | {n for n, _ in doc.tables}
-        taken |= {k for section in doc.defs for k, _ in section.records}
+        taken |= {k for section in doc.defs for k, _ in section.records} | PRELUDE
         reserved = frozenset(n for _, names in doc.header.state or () for n, _ in names)
         return cls(_occurrences(doc), taken, reserved)
 
@@ -218,21 +223,29 @@ class Names:
 def _choose(options: dict, names: Names) -> list:
     """The ``(call, form)`` groups, one template each, for one code template's calls and
     their fitting forms: the cheapest of each form key fitting every call, and each call's
-    cheapest form grouped by key."""
+    cheapest form grouped by key, of every form and of the templates' own (no prelude call)."""
 
     def cost(plan):
         return sum(
-            _cost(template(g, set(names.taken), names.reserved), names.occurrences) for g in plan
+            (
+                sum(names.occurrences[c] for c, _ in g) * size(NONE)
+                if g[0][1].key == coupled.IDENTITY
+                else _cost(template(g, set(names.taken), names.reserved), names.occurrences)
+            )
+            for g in plan
         )
 
     keyed = {c: {f.key: f for f in forms} for c, forms in options.items()}
     common = set.intersection(*(set(k) for k in keyed.values()))
     plans = [[[(c, keyed[c][key]) for c in options]] for key in sorted(common)]
-    groups = defaultdict(list)
-    for call, forms in options.items():
-        best = min(forms, key=lambda f, c=call: cost([[(c, f)]]))
-        groups[best.key].append((call, best))
-    plans.append(list(groups.values()))
+    for own in (False, True):
+        groups = defaultdict(list)
+        for call, forms in options.items():
+            forms = [f for f in forms if f.shape != "prelude"] if own else forms
+            best = min(forms, key=lambda f, c=call: cost([[(c, f)]]), default=None)
+            groups[None if best is None else best.key].append((call, best))
+        if None not in groups:
+            plans.append(list(groups.values()))
     return min(plans, key=cost)
 
 
@@ -247,7 +260,7 @@ def _fitted(out: Replacement, options: dict, names: Names) -> list:
             continue
         sig, body, table, calls = template(group, names.taken, names.reserved)
         out.calls |= calls
-        out.mods.append((sig, body))
+        out.mods += [] if sig is None else [(sig, body)]
         out.tables += [table] if table else []
     return errs
 
@@ -272,12 +285,12 @@ def _grouped(group: coupled.Group, plan: coupled.Plan, names: Names) -> Replacem
     return out
 
 
-def _options(calls: dict, cells: Counter, tolerances: dict, clock: int) -> dict:
+def _options(calls: dict, cells: Counter, tolerances: dict, clock: int, prelude: bool) -> dict:
     """``{call: fitting forms}`` of the calls of ``calls`` (each its ``(cell, firings)``) that
-    fire on one cell and fit a form."""
+    fire on one cell and fit a form (a prelude call's where ``prelude``)."""
     out = {}
     for call, (cell, rec) in calls.items():
-        forms = fit.fits(fit.Firings(rec, cell, clock), tolerances[cell])
+        forms = fit.fits(fit.Firings(rec, cell, clock), tolerances[cell], prelude)
         if forms and cells[call] == 1:
             out[call] = forms
     return out
@@ -288,12 +301,14 @@ def _slots(doc: Document, cell: str) -> tuple:
 
 
 # pylint: disable-next=too-many-locals
-def propose(doc: Document, tr: Trace, tolerances: dict, progress: bool = False) -> tuple:
+def propose(
+    doc: Document, tr: Trace, tolerances: dict, progress: bool = False, prelude: bool = True
+) -> tuple:
     """``(replacements, unfit)``: a :class:`Replacement` per code template sharing no state
     some of whose calls fit a form within its cell's tolerance over every firing, those calls
-    to calls of expression templates, and per group of code templates sharing state whose
-    calls all fit a plan (:mod:`coupled`), its other plans its alternatives; ``unfit`` the
-    report line of each group no plan fits."""
+    to calls of expression templates (or the prelude's, where ``prelude``), and per group of
+    code templates sharing state whose calls all fit a plan (:mod:`coupled`), its other plans
+    its alternatives; ``unfit`` the report line of each group no plan fits."""
     clock = (doc.header.clock or (None, PAL_HZ))[1] or PAL_HZ
     codes = {_code.signature(k)[0] for k, v in doc.mods if isinstance(v, Code)}
     by_template, cells = defaultdict(dict), Counter(call for call, _ in tr.firings)
@@ -303,11 +318,11 @@ def propose(doc: Document, tr: Trace, tolerances: dict, progress: bool = False) 
     for name in tqdm(sorted(by_template), desc="lossy fit", unit="mod", disable=not progress):
         options = {}
         if name in codes:
-            options = _options(by_template[name], cells, tolerances, clock)
+            options = _options(by_template[name], cells, tolerances, clock, prelude)
         if options:
             own[name] = _replacement(name, options, by_template[name], names)
     groups = coupled.groups(doc)
-    found, unfit = _groups(doc, tr, groups, tolerances, names, progress)
+    found, unfit = _groups(doc, tr, groups, tolerances, names, (progress, prelude))
     for group in groups:
         fallback = [own.pop(t) for t in group.templates if t in own]
         if group.name in found:
@@ -317,14 +332,17 @@ def propose(doc: Document, tr: Trace, tolerances: dict, progress: bool = False) 
     return list(own.values()) + list(found.values()), unfit
 
 
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
-def _groups(doc: Document, tr: Trace, groups: list, tolerances: dict, names, progress) -> tuple:
+# pylint: disable-next=too-many-locals,too-many-arguments,too-many-positional-arguments
+def _groups(doc: Document, tr: Trace, groups: list, tolerances: dict, names, flags) -> tuple:
     """``(replacements, unfit)`` of the coupled ``groups``: each group's first plan by its name,
-    the rest its alternatives, and why each group no plan fits is unfit."""
+    the rest its alternatives, and why each group no plan fits is unfit; ``flags``
+    ``(progress, prelude)``."""
+    progress, prelude = flags
     clock = (doc.header.clock or (None, PAL_HZ))[1] or PAL_HZ
     out, unfit = {}, []
     for group in tqdm(groups, desc="lossy fit groups", unit="group", disable=not progress):
-        plans, why = coupled.plan(group, tr, _slots(doc, group.cell), tolerances[group.cell], clock)
+        tol = tolerances[group.cell]
+        plans, why = coupled.plan(group, tr, _slots(doc, group.cell), tol, clock, prelude)
         options = [_grouped(group, p, names) for p in plans]
         if options:
             options[0].alternatives = options[1:]
@@ -557,11 +575,14 @@ class Proof:  # pylint: disable=too-few-public-methods
                 del self.refused[refused:]
 
 
-def simplify(text: str, ticks: int | None, tolerances=None, progress: bool = False) -> Lossy:
+def simplify(  # pylint: disable=too-many-locals
+    text: str, ticks: int | None, tolerances=None, progress: bool = False, prelude: bool = True
+) -> Lossy:
     """``text`` with each code modulator call that fits an expression form within
-    ``tolerances`` (by cell, :data:`fit.TOLERANCES` by default) a call of that form's template,
-    kept where the document shrinks, every register outside the replaced calls' cells plays the
-    input's and their cells keep to their tolerance over ``ticks`` (the song's end where None)."""
+    ``tolerances`` (by cell, :data:`fit.TOLERANCES` by default) a call of that form's template
+    (or, where ``prelude``, a prelude call playing the form exactly), kept where the document
+    shrinks, every register outside the replaced calls' cells plays the input's and their cells
+    keep to their tolerance over ``ticks`` (the song's end where None)."""
     tolerances = fit.TOLERANCES | (tolerances or {})
     if ticks is None and load(text).loop is not None:
         raise GuaranteeError("the lossy mode needs ticks for a looping song")
@@ -571,7 +592,7 @@ def simplify(text: str, ticks: int | None, tolerances=None, progress: bool = Fal
     def verdict(candidate: str, replacements: list) -> Check:
         return check(tr.frames, candidate, ticks, targets(tr.firings, replacements), tolerances)
 
-    replacements, unfit = propose(doc, tr, tolerances, progress)
+    replacements, unfit = propose(doc, tr, tolerances, progress, prelude)
     proof = Proof(doc, verdict, tolerances)
     replacements = [x for r in replacements for x in _screened(proof, r)]
     total = sum(1 + len(r.alternatives) + len(r.fallback) for r in replacements)

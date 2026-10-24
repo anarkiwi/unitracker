@@ -27,7 +27,7 @@ CODE = {
     + "sbc #0\nsta v+1\njmp count\nup:\nclc\nlda v\nadc #s\nsta v\nlda v+1\nadc #0\nsta v+1\n"
     + "count:\ninc q\nlda q\ncmp #k\nbne done\nlda #0\nsta q\nlda d\neor #1\nsta d\ndone:\nrts\n",
     # The owner's trigger loads acc and ctr; while ctr lasts each tick steps acc into FC_HI.
-    "sweep": _FIRST
+    "csweep": _FIRST
     + "lda #u\nsta acc\nlda #c\nsta ctr\nrts\nstep:\nlda ctr\nbeq done\ndec ctr\nclc\nlda acc\n"
     + "adc #s\nsta acc\nlda #0\nsta v+1\nlda acc\nasl\nrol v+1\nasl\nrol v+1\nasl\nrol v+1\n"
     + "sta v\ndone:\nrts\n",

@@ -1,6 +1,6 @@
 """Small hand-written documents for the optimiser's tests."""
 
-HEAD = "unitracker:2.2\nmeta:{title:T,author:A}\n"
+HEAD = "unitracker:2.3\nmeta:{title:T,author:A}\n"
 MODS = "mod:\n note():F(N)\n vib(d):v + d*(phi % 4)\n wob(e):v + e*(phi % 4)\n"
 
 
@@ -119,7 +119,7 @@ TEMPLATE = doc(
 # square-wave vibrato (two calls) on a second slot and a pulse width sweep
 EXACT_CODE = (
     "mod:\n"
-    " slide(c):|\n\tclc\n\tlda v\n\tadc #<c\n\tsta v\n\tlda v+1\n\tadc #>c\n"
+    " ramp(c):|\n\tclc\n\tlda v\n\tadc #<c\n\tsta v\n\tlda v+1\n\tadc #>c\n"
     "\tsta v+1\n\trts\n"
     " start():|\n\tlda phi\n\tora phi+1\n\tbne done\n\tsta s\n\tldy nn\n"
     "\tlda F.lo,y\n\tsta v\n\tlda F.hi,y\n\tsta v+1\n\tdone:\n\trts\n"
@@ -129,8 +129,8 @@ EXACT_CODE = (
 )
 EXACT = doc(
     "      ins:\n"
-    "        i1:{ad:9,ctrl:c1,pw:slide(40),a.freq:start(),b.freq:wob(8)}\n"
-    "        i2:{ad:9,ctrl:c1,pw:slide(24),a.freq:start(),b.freq:wob(16)}\n"
+    "        i1:{ad:9,ctrl:c1,pw:ramp(40),a.freq:start(),b.freq:wob(8)}\n"
+    "        i2:{ad:9,ctrl:c1,pw:ramp(24),a.freq:start(),b.freq:wob(16)}\n"
     "      ctrl:\n"
     "        c1:[{ctrl:65},end]\n"
     "      phrase:\n"
@@ -151,14 +151,14 @@ NOISY = doc(
 )
 
 # put() keeps the frequency but stores the note that get() adds: put alone fits and is refused,
-# while slide() on the pulse width and the cutoff is kept
+# while ramp() on the pulse width and the cutoff is kept
 COUPLED = doc(
     "      ins:\n"
-    "        i1:{ad:9,ctrl:c1,pw:slide(8),filter:f1,a.freq:put(),b.freq:get()}\n"
+    "        i1:{ad:9,ctrl:c1,pw:ramp(8),filter:f1,a.freq:put(),b.freq:get()}\n"
     "      ctrl:\n"
     "        c1:[{ctrl:65},end]\n"
     "      filter:\n"
-    "        f1:[{cut:slide(3),res:12,route:1,mode:16},end]\n"
+    "        f1:[{cut:ramp(3),res:12,route:1,mode:16},end]\n"
     "      phrase:\n"
     "        p1:[C4.i1,-*5,E.i1,-*5]\n",
     head="voices:1\nslots:{freq:{a:{},b:{}}}\nstate:{freq:{s:1}}\n",
@@ -261,4 +261,90 @@ INTERLEAVED = doc(
     "        p1:[C4.i1,-*5]\n",
     head="voices:1\nslots:{freq:{a:{},m:{},b:{}}}\nstate:{freq:{s:1}}\n",
     mods=JOINT_CODE,
+)
+
+ONCE = doc(
+    "      ins:\n"
+    "        i1:{ad:9,sr:240}\n"
+    "      phrase:\n"
+    "        p1:[C4.i1 pw:800,-*3,- pw:none,D pw:'v + 8',-*2,- pw:none]\n"
+)
+
+# templates of the document's own that play as prelude calls (code and expressions), and one
+# (wob) that plays as none
+PRELUDE_MODS = (
+    "mod:\n gl(c):v + c\n tr(a,b):(-a + b)*(phi // 4 % 2) + a\n"
+    " vb(d):(-abs((phi + 1) % 12 - 6) + 3)*(phi >= 2)*d + F(N)\n"
+    " sw(a):min(2000,20*phi + a)\n wob(e):v + e*(phi % 4)\n"
+    " up(c):|\n\tclc\n\tlda v\n\tadc #<c\n\tsta v\n\tlda v+1\n\tadc #>c\n\tsta v+1\n\trts\n"
+)
+PRELUDE = doc(
+    "      ins:\n"
+    "        i1:{ad:9,ctrl:[{ctrl:65},end],pw:tr(800,1600),freq:vb(5)}\n"
+    "        i2:{ad:9,ctrl:[{ctrl:65},end],pw:sw(300),freq:up(40)}\n"
+    "        i3:{ad:9,ctrl:[{ctrl:65},end],pw:up(9),freq:gl(-7)}\n"
+    "        i4:{ad:9,ctrl:[{ctrl:65},end],freq:wob(3)}\n"
+    "      phrase:\n"
+    "        p1:[C4.i1,-*20,E.i2,-*20,G.i3,-*20,C5.i1,-*9,D.i4,-*9]\n",
+    mods=PRELUDE_MODS,
+)
+
+# instruments alike but for integers (i1-i3), and one of another shape (i4)
+INSTRUMENTS = doc(
+    "      restart:\n"
+    "        hr(ad,sr):[{gate:0,ad:15,sr:0},{ad:ad,sr:sr},end]\n"
+    "      ins:\n"
+    "        i1:{ad:9,sr:240,ctrl:c1,pw:800,restart:hr(9,240)}\n"
+    "        i2:{ad:8,sr:240,ctrl:c1,pw:900,restart:hr(8,240)}\n"
+    "        i3:{ad:7,sr:240,ctrl:c1,pw:1000,restart:hr(7,240)}\n"
+    "        i4:{ad:7,sr:240,ctrl:c2,pw:1000,restart:hr(7,240)}\n"
+    "      ctrl:\n"
+    "        c1:[{ctrl:65},end]\n"
+    "        c2:[{ctrl:17},end]\n"
+    "      phrase:\n"
+    "        p1:[C4.i1,-*3,D.i2,-*3,E.i3,-*3,F.i4,-*3]\n",
+    mods="",
+)
+
+# phrases alike but for their notes (p1, p2; p3 has another instrument), groups among them
+PHRASES = doc(
+    "      ins:\n"
+    "        i1:{ad:9,ctrl:[{ctrl:65},end]}\n"
+    "        i2:{ad:8,ctrl:[{ctrl:65},end]}\n"
+    "      phrase:\n"
+    "        p1:[C4.i1,-,E4,G4 pw:800,[C5,D5]x2,-*3,E4 pw:900,-,G4 pw:1000,-*2,off]\n"
+    "        p2:[D4.i1,-,E4,A4 pw:800,[D5,E5]x2,-*3,E4 pw:900,-,G4 pw:1000,-*2,off]\n"
+    "        p3:[F4.i2,-,E4,C5 pw:800,[F5,G5]x2,-*3,E4 pw:900,-,G4 pw:1000,-*2,off]\n",
+    play="[p1]\n - play:[p2]\n - play:[p3]",
+    mods="",
+)
+
+# an arpeggio called with its notes in one order not ascending, directly and through an
+# instrument template, and a template whose note parameter also times a row
+CHORDS = doc(
+    "      ins:\n"
+    "        ins_1(ad,t,t2,t3):{ad:ad,ctrl:arp(t,t2,t3)}\n"
+    "        i1:ins_1(9,10,3,7)\n"
+    "        i2:{ad:9,ctrl:arp(11,4,7)}\n"
+    "      ctrl:\n"
+    "        arp(t,t2,t3):[{ctrl:65},{note:+t2},{note:+t3},{note:+t},{loop:0}]\n"
+    "        sw(t,w):[{ctrl:65},{note:+t},{wait:t,note:+w},{loop:0}]\n"
+    "      phrase:\n"
+    "        p1:[C4.i1,-*3,E.i2,-*3,G.ins_1(9,11,4,7),-*3,C.i1 run:arp(9,3,7),-*3,"
+    "D.{ctrl:sw(4,7)},-*3]\n",
+    mods="",
+)
+
+# templates and records that are their calls, each referenced once (p2, i2) or more (p1, i1)
+CALLS = doc(
+    "      ins:\n"
+    "        ins_1(ad,p):{ad:ad,ctrl:[{ctrl:65},end],pw:p}\n"
+    "        i1:ins_1(9,800)\n"
+    "        i2:ins_1(8,1600)\n"
+    "      phrase:\n"
+    "        ph_1(x,y):[x.i1,-,y.i2,-*3]\n"
+    "        p1:ph_1(C4,E4)\n"
+    "        p2:ph_1(D4,F4)\n",
+    play="[p1]\n - play:[p2]\n - play:[p1]",
+    mods="",
 )

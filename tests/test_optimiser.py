@@ -142,7 +142,7 @@ def test_the_guarantee_plays_to_an_end_a_proved_loop_or_a_tick_count():
     with pytest.raises(GuaranteeError):
         Guarantee(D.LOOPING_CODE)
     guarantee = Guarantee(D.LOOPING)
-    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker:2.2\n")
+    assert guarantee.holds(D.LOOPING) and not guarantee.holds("unitracker:2.3\n")
     assert not guarantee.holds(D.LOOPING.replace("D.i2", "E.i2"))
 
 
@@ -178,7 +178,7 @@ def test_the_cli_writes_the_optimised_document_and_its_sizes(tmp_path, capsys):
     assert "before:" in err and "after:" in err and "merge: ins i2 -> i1" in err
     assert Guarantee(D.MERGE).holds(out.read_text(encoding="utf-8"))
     assert main([str(source), "--ticks", "40", "--rounds", "1"]) == 0
-    assert capsys.readouterr().out.startswith("unitracker:2.2\n")
+    assert capsys.readouterr().out.startswith("unitracker:2.3\n")
 
 
 @pytest.mark.parametrize("path", sorted(LIFTED.glob("*.yaml")), ids=lambda p: p.stem)
@@ -213,3 +213,18 @@ def test_template_makes_programs_alike_but_for_integers_one_template_of_calls():
 
 def test_template_proposes_nothing_without_two_programs_differing_in_integers():
     assert not templates.template(read(D.MERGE))
+
+
+def test_once_fires_a_binding_its_none_ends_once_where_it_plays_the_same():
+    found = labels(passes.once(read(D.ONCE)))
+    assert len(found) == 2 and any(label.endswith("pw:800!") for label in found)
+    result = optimise(D.ONCE, order=(("defaults", passes.defaults), ("once", passes.once)))
+    assert "C4.i1 pw:800!,-*4,D" in result.text and result.text.count("pw:none") == 1
+    assert "pw:'v + 8'!" not in result.text and Guarantee(D.ONCE).holds(result.text)
+
+
+def test_defaults_make_a_run_of_bare_rests_one_rest():
+    text = D.ONCE.replace("-*3,- pw:none", "-*3,-,-")
+    assert labels(passes.defaults(read(text))) == ["defs/1/records/0/1: rests"]
+    result = optimise(text, order=(("defaults", passes.defaults),))
+    assert "-*5" in result.text and Guarantee(text).holds(result.text)

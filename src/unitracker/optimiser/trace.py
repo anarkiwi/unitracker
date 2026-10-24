@@ -1,4 +1,5 @@
-"""Each modulator slot's firings over a document's play (the lossy mode's evidence)."""
+"""Each modulator slot's firings over a document's play (the evidence of the lossy mode and of
+the ``prelude`` pass)."""
 
 import numpy as np
 from unitracker_player import compiler
@@ -37,7 +38,8 @@ MASKS = {"freq": compiler.FREQ_MASK, "pw": compiler.PW_MASK, "cut": compiler.CUT
 
 
 class _Tracer(Player):
-    """A player that logs each slot's firing, its code call's ``(call, cell)`` by index."""
+    """A player that logs each slot's firing, its call's ``(call, cell)`` by index where
+    ``routines`` holds the call's modulator."""
 
     def __init__(self, song, routines: dict):
         self.routines, self.log, self.keys = routines, [], {}
@@ -58,10 +60,10 @@ class _Tracer(Player):
                 if type(fn) is Routine:  # pylint: disable=unidiomatic-typecheck
                     state = self.cut_state if cell == "cut" else self.voices[mod[2]].state[cell]
                     out = fn(value, mod[1], *notes, state) & mask
-                    key = self.routines.get(fn)
-                    key = -1 if key is None else self.keys.setdefault(key, len(self.keys))
                 else:
-                    out, key = fn(value, mod[1], *notes) & mask, -1
+                    out = fn(value, mod[1], *notes) & mask
+                key = self.routines.get(fn)
+                key = -1 if key is None else self.keys.setdefault(key, len(self.keys))
                 owner = 0 if cell == "cut" else mod[2]
                 self.log.append((t, c, owner, mod[2], slot, key, mod[1], value, out, *notes))
                 value = out
@@ -72,8 +74,8 @@ class _Tracer(Player):
 class Trace:  # pylint: disable=too-few-public-methods
     """A play's register grid ``frames``, every slot firing in order ``chain`` (:data:`CHAIN`:
     ``owner`` the voice of the cell, 0 for the cutoff, ``voice`` the one that bound the slot,
-    ``key`` the index in ``keys`` of its code call's ``(call, cell)``, -1 for an expression)
-    and each code call's firings ``firings`` by ``(call, cell)`` (:data:`FIRING`)."""
+    ``key`` the index in ``keys`` of its call's ``(call, cell)``, -1 for one not recorded)
+    and each recorded call's firings ``firings`` by ``(call, cell)`` (:data:`FIRING`)."""
 
     def __init__(self, frames: np.ndarray, chain: np.ndarray, keys: list):
         self.frames, self.chain, self.keys = frames, chain, keys
@@ -86,14 +88,15 @@ class Trace:  # pylint: disable=too-few-public-methods
             self.firings[key] = out
 
 
-def record(text: str, ticks: int | None) -> Trace:
-    """The :class:`Trace` of the document ``text`` over ``ticks`` (to its end where None)."""
+def record(text: str, ticks: int | None, every: bool = False) -> Trace:
+    """The :class:`Trace` of the document ``text`` over ``ticks`` (to its end where None), its
+    ``keys`` and ``firings`` those of code calls, of every template call where ``every``."""
     routines = {}
 
     class _Compiler(compiler._Compiler):  # pylint: disable=protected-access
         def call(self, value, cell):
             fn = super().call(value, cell)
-            if type(fn) is Routine:  # pylint: disable=unidiomatic-typecheck
+            if every or type(fn) is Routine:  # pylint: disable=unidiomatic-typecheck
                 routines[fn] = (value, cell)
             return fn
 
