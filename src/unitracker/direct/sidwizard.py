@@ -557,8 +557,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
     def dummy(self, ins) -> str:
         """The instrument whose WF program a voice's first HR ticks walk: the header of
         instrument 0 read as WF rows from DPITCH 0, gated as PTNGATE (0 after INITER) is."""
-        if self.feats.hardrestypes and ins.control & 0x04:
-            raise TranscribeError("a staccato first note")
+        # pylint: disable=too-many-locals
+        staccato = self.feats.hardrestypes and ins.control & 0x04
         dummy = self.ref._dummy  # pylint: disable=protected-access
         image = self.ref._image(dummy)  # pylint: disable=protected-access
         rows, _ = self.wave_rows(image, 0, dummy, 2, reload=0)
@@ -568,14 +568,19 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         for row in rows:
             keys = dict(row.keys)
             ticks += [keys] + [{}] * (keys.pop("hold", 1) - 1)
+        for k in (0, 1):
+            if staccato and self.hr(ins, k):
+                # HRGTOFF's staccato exit walks no table on its tick.
+                ticks.insert(k, {})
         out = []
         for k, keys in enumerate(ticks[:2]):
             if "ctrl" in keys:
                 keys["ctrl"] &= masks[k]
             out.append(_unnoted(Row(keys)))
-        if not out:
-            raise TranscribeError("an idle walk that ends at once")
-        out[0] = Row(dict(out[0].keys) | {"wave.freq": self.call("tone")})
+        first = next((k for k, r in enumerate(out) if r.keys), None)
+        if first is None:
+            raise TranscribeError("an idle walk that reads no row")
+        out[first] = Row(dict(out[first].keys) | {"wave.freq": self.call("tone")})
         if self.feats.vibslidealways:
             # The hard-restart ticks walk the pulse table too: the header's, from PWTPOS 0.
             out.insert(0, Row({"hold": 0, "run": self.pulse(dummy, 0, 0, lead=False)}))
@@ -677,7 +682,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         if rec.newnote and self.hr(rec.hr, tick):
             commands |= self.hr_commands(rec.hr)
             atom = "-" if rec.dummy else "off"
-        if tick in rec.skips:
+        if tick in rec.skips and not rec.dummy:
             wave, ins, pulse, filt = rec.skips[tick]
             if self.feats.vibslidealways:
                 # The staccato tick walks no table and no vibrato, which this build would.
@@ -721,6 +726,27 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         state["ins"] = name
         return Event(event.note, name, commands, event.keep_pw, event.keep_filter, event.steps)
 
+    def strtsnd_event(self, rec, voice: int, state: dict, commands: dict) -> Event:
+        """The event of a note STRTSND starts: its instrument, the tables it keeps walking
+        (reset switches, a filter it does not take) or the filter it takes over."""
+        ins = rec.ins
+        name = self.instrument(ins, rec.number, voice)
+        given = name if state["ins"] != name else None
+        state["ins"] = name
+        if self.hrc:
+            commands["hr.freq"] = "none"
+        pulse, filt, _ = rec.kept
+        if rec.handover is not None:
+            if "run" in commands or pulse is not None or filt is not None:
+                raise TranscribeError("a filter handover on a note that runs another table")
+            commands["run"] = self.filter(ins, handover=rec.handover)
+        if pulse is not None or filt is not None:
+            # A chord FX (its own run) picks the chord the kept walk plays.
+            chord = rec.chord[2] if "run" in commands else None
+            commands["run"] = self.wave(ins, chord, rec.kept)
+        keep = rec.keep_filter or filt is not None
+        return Event(self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep)
+
     def apply(self, rec, voice: int, state: dict) -> Event:
         """The TICK_2 event of an applied row."""
         # pylint: disable=too-many-branches,too-many-return-statements
@@ -733,24 +759,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         if note is None or ins is None:
             return Event("-", commands=commands)
         if rec.newnote:
-            name = self.instrument(ins, rec.number, voice)
-            given = name if state["ins"] != name else None
-            state["ins"] = name
-            if self.hrc:
-                commands["hr.freq"] = "none"
-            pulse, filt, _ = rec.kept
-            if rec.handover is not None:
-                if "run" in commands or pulse is not None or filt is not None:
-                    raise TranscribeError("a filter handover on a note that runs another table")
-                commands["run"] = self.filter(ins, handover=rec.handover)
-            if pulse is not None or filt is not None:
-                # A chord FX (its own run) picks the chord the kept walk plays.
-                chord = rec.chord[2] if "run" in commands else None
-                commands["run"] = self.wave(ins, chord, rec.kept)
-            keep = rec.keep_filter or filt is not None
-            return Event(
-                self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep
-            )
+            return self.strtsnd_event(rec, voice, state, commands)
         if 0 < note < 0x60:
             return self.glide(rec, commands)
         if note == GATE_OFF and rec.gate is not None:

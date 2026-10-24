@@ -170,6 +170,10 @@ NORMAL = {
         notes((37, 5), (40, 1), (None, None), (45, 1)),
         {"i1": {"control": 0x1E}},
     ),
+    "a staccato first note": (
+        notes((37, 1), (40, 1)),
+        {"i1": {"control": 0x1E, "wf_table": bytes.fromhex("410000400000")}},
+    ),
     "a first frame without the test bit": (
         notes((37, 1), (40, 1), (44, 1)),
         {"i1": {"control": 0x12, "wf_table": bytes.fromhex("41000040fe00")}},
