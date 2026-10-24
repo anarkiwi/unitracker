@@ -41,6 +41,7 @@ WAVE = [(0x41, 0x00), (0xFF, 0x00)]
 CASES = {
     "a plain note": {"wave": WAVE},
     "a looping arpeggio with a delay": {"wave": [(65, 0), (2, 12), (0, 7), (255, 2)]},
+    "an arpeggio down": {"wave": [(65, 0), (0, 126), (0, 0x40), (255, 1)]},
     "an absolute wave note and silent wave": {"wave": [(65, 0), (233, 164), (33, 128), (255, 0)]},
     "porta up": {"wave": WAVE, "rows": [(24, 1, 1, 1)] * 4 + [REST] * 12, "speed": [(0, 32)]},
     "porta down, then command 0 holds": {
@@ -177,6 +178,23 @@ def test_state_and_code_of_the_templates_used(case, state):
     assert f"\norder: {g.ORDER}\nstate: {state}\ntables:" in text
     templates = code.templates(parse(text))
     assert templates and all(code.printed(t) == g.CODE[name] for name, t in templates.items())
+    assert f"\nclock: {{cycles_per_tick: 19656, clock_hz: {g.CLOCK['clock_hz']}}}\n" in text
+    tables = text[text.index("\ntables:\n") : text.index("\nmod:\n  ")]
+    assert "  G:" not in tables and "wave.freq: note()" in text
+
+
+@pytest.mark.parametrize(
+    "case, value",
+    [
+        ("an arpeggio down", "{note: -2}, {note: -64}"),
+        ("a filter table", "{hold: 4, cut: v - 32}"),
+        ("vibrato", "!tick.freq:vib(0,3,48)"),
+        ("porta down, then command 0 holds", "!tick.freq:porta(-1,48)"),
+    ],
+)
+def test_values_as_played(case, value):
+    """Relative notes and steps are signed, and bindings are calls."""
+    assert value in exact(gt_tune(**CASES[case]))
 
 
 def test_holds_follow_the_build():

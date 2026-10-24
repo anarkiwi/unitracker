@@ -60,15 +60,17 @@ held slot passes it on.
 | wavetable note row | `wave.freq` | `note` |
 | wavetable `$F1`/`$F2`/`$F3` | `wave.freq` | `porta1`/`portan1`, `tporta1`/`tportan1`/`snap1` |
 | a note's instrument | `wave.freq`, `tick.freq` | `note`; `vib`/`vibn` after `delay - 1` firings |
-| pattern commands 1-4 | `!tick.freq:x` | `porta`/`portan`, `tporta`/`tportan`/`snap`, `vib`/`vibn` |
-| command 0 after a frequency command | `!tick.freq:x`, or `!tick.freq:none` without a vibrato | the instrument's `vib`/`vibn` after the delay left |
+| pattern commands 1-4 | `!tick.freq:call` | `porta`/`portan`, `tporta`/`tportan`/`snap`, `vib`/`vibn` |
+| command 0 after a frequency command | `!tick.freq:call`, or `!tick.freq:none` without a vibrato | the instrument's `vib`/`vibn` after the delay left |
 
 ### Code modulators
 
 The modulators are format 1.23 6502 code templates
 ([`gt2code.py`](../../src/unitracker/direct/gt2code.py)), each a transcription of the
-playroutine function it replaces; `mod:` holds those the song uses and `state:` the variables
-they name. The freq cell's state is GoatTracker's channel state:
+playroutine function it replaces. The top-level `mod:` section, after `tables:`, holds those
+the song uses by signature (`vib(l, c, s): |`) in first-use order, and `state:` the variables
+they name; a binding is a call, its arguments in signature order (`!tick.freq:vib(0,3,48)`,
+`tick.freq: vib(7,1,16)`, `pw: ptab(1)`, `wave.freq: note()`). The freq cell's state is GoatTracker's channel state:
 
 | state | GoatTracker | written by |
 |---|---|---|
@@ -77,11 +79,11 @@ they name. The freq cell's state is GoatTracker's channel state:
 
 | template | params | routine |
 |---|---|---|
-| `note` | | on `φ = 0`: `v = G[N & 127]`, `t = 0`, `m = N & 127`; then `v` |
+| `note` | | on `φ = 0`: `v = F[N & 127]`, `t = 0`, `m = N & 127`; then `v` |
 | `porta` | `g` (1 up, -1 down), `s` | `v ± s` |
-| `portan` | `k`, `g` | `v ± ((G[m + 1] - G[m]) >> k)` |
-| `tporta`, `tportan` | `s`; `k` | `_toneporta`: toward `G[n & 127]` by `s` (or the calculated step), snapping to it with `t = 0`, `m = n` where it crosses |
-| `snap` | | speed entry 0: `v = G[n & 127]`, `t = 0`, `m = n` |
+| `portan` | `k`, `g` | `v ± ((F[m + 1] - F[m]) >> k)` |
+| `tporta`, `tportan` | `s`; `k` | `_toneporta`: toward `F[n & 127]` by `s` (or the calculated step), snapping to it with `t = 0`, `m = n` where it crosses |
+| `snap` | | speed entry 0: `v = F[n & 127]`, `t = 0`, `m = n` |
 | `vib`, `vibn` | `l`, `c`, `s`; `l`, `k`, `c` | after `l` firings, `_vibrato`: the phase `t` turns at depth `c` and steps by 2, `v ± s` (or the calculated step) by its low bit |
 | `porta1`, `portan1`, `tporta1`, `tportan1`, `snap1` | as above | the same on `φ = 0` only (a wavetable command row) |
 
@@ -100,8 +102,9 @@ A speed table entry `(l, r)` is `s = l << 8 | r`, or with `l & $80` calculated: 
 | gate timer, hard restart flags `$40`/`$80`, `adparam` | `restart`: `{hold: timer, gate: 0, ad, sr}` |
 | first wave | `restart`'s tick-0 row: `ctrl`, `gate: 1`, `ad`, `sr`, and `run` of the empty `c`, as tick 0 does not run the old wavetable |
 
-The note's frequency is `G[N]` over `tables: G`, the player's own frequency table (the packed
-player's overrun entries included).
+The note's frequency is `F[N]`, the player's built-in note table read as `F.lo`/`F.hi`, at
+`clock: {cycles_per_tick: 19656, clock_hz: 985000}`: GoatTracker's editor table is exactly
+`F(k)` at 985000 Hz for notes 0-94.
 
 ## Tables
 
@@ -109,13 +112,13 @@ player's overrun entries included).
 |---|---|
 | wavetable `$01-$0F` delay | `wait` |
 | wavetable `$10-$DF`, `$E0-$EF` | `ctrl` (`& $0F` for `$Ex`) |
-| wavetable note `$00-$7F`, `$81-$DF`, `$80` | `note: +n` (`$40-$7F` down), absolute `note`, none |
+| wavetable note `$00-$7F`, `$81-$DF`, `$80` | `note: +n` (`$40-$7F` as `n - 128`, down), absolute `note`, none |
 | wavetable `$F1/$F2/$F3` | `wave.freq`, one step |
 | wavetable `$F5/$F6/$F7/$F9/$FA/$FB/$FC/$FD` | `ad`, `sr`, `ctrl`, `run`/`pw: hold`, `run`/`cut: hold`, `res`+`route`, `cut`, `vol` |
 | wavetable `$FF xx` | `{loop: k}`, or `end` for `xx = 0` |
 | pulse table from row `b` | `ptab {b}` (`ptabs` with `SIMPLEPULSE`), `_pulse_exec` over the player's own table in `PL`/`PR` (`PL[k]`, `PR[k]` its row `k`); the pw cell's state `r` is the row and `q` the time left (on `φ = 0`, `r = b`, `q = 0`): a jump row moves `r`, a set row writes the width, a modulation row adds its signed step |
 | filter table `$80-$F0` (+ a following `$00`) | `{mode, res, route, cut}` in one row |
-| filter table `$01-$7F` | `{hold: t, cut: v + 8s}` |
+| filter table `$01-$7F` | `{hold: t, cut: v + 8s}`, `s` the signed step (`v - 8` for `$FF`) |
 | filter table `$00` | `{cut: 8c}` |
 
 The filter table runs on every tick, so its rows are program rows; the pulse table is held on
@@ -125,12 +128,12 @@ the playroutine's skips, so it is a code modulator of the pw slot.
 
 | command | generic |
 |---|---|
-| `0` after a frequency command | `!tick.freq:x` (the instrument's `vib`/`vibn`) or `!tick.freq:none` |
-| `1`, `2` | `!tick.freq:x`, `porta` or `portan` with `g` 1 or -1 |
-| `3` with a note | `!tick.freq:x`, `tporta`, `tportan` or (`0`) `snap`, and `!legato` |
-| `4` | `!tick.freq:x`, `vib` or `vibn` with `l` 0 |
+| `0` after a frequency command | `!tick.freq:call` (the instrument's `vib`/`vibn`) or `!tick.freq:none` |
+| `1`, `2` | `!tick.freq:call`, `porta` or `portan` with `g` 1 or -1 |
+| `3` with a note | `!tick.freq:call`, `tporta`, `tportan` or (`0`) `snap`, and `!legato` |
+| `4` | `!tick.freq:call`, `vib` or `vibn` with `l` 0 |
 | `5`, `6`, `7` | `!ad`, `!sr`, `!ctrl` |
-| `8`, `9`, `A` | `!run:c`/`!run:none`, `!pw:x` (`ptab`)/`!pw:hold`, `!run:f`/`!cut:hold` |
+| `8`, `9`, `A` | `!run:c`/`!run:none`, `!pw:ptab(b)`/`!pw:hold`, `!run:f`/`!cut:hold` |
 | `B` | `!resfilt:r/m`, `!resfilt:0/0!cut:hold` for 0 |
 | `C`, `D` | `!cut:8c`, `!vol` |
 | `E` | `!tempo:a/b`, the speed entry's two lengths |
@@ -159,3 +162,4 @@ These play differently from GoatTracker because the document has no construct fo
 | command 9 (or a wavetable `$F9`) setting the pulse program already running | it restarts the table; a binding to the modulator a slot is bound to keeps its φ |
 | a ghosting build (the SID written from the previous call's registers) | its output lags the playroutine one tick and starts from the image's registers |
 | the SID registers a build's init leaves from its image before the first notes | the document's registers start at 0 |
+| the packed frequency table's overrun entries (notes 95-127: B7's `$FFFF` and the bytes past the table) | `F(k)` is 0 there |

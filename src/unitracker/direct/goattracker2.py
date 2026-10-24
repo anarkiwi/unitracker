@@ -6,6 +6,7 @@ modulators (:mod:`unitracker.direct.gt2code`, docs/direct/goattracker2.md).
 """
 
 import argparse
+import re
 import signal
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -26,6 +27,7 @@ from unitracker.direct.gt2code import CODE, STATE
 from unitracker.document.yamlstyle import Atom, Block, Dumper, Flow, FlowMap
 
 VERSION = "1.23"
+CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985000}
 EVENT = "n"
 TICK = "tick.freq"
 WIDTH = 100
@@ -128,11 +130,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.ref = model.player()
         ref = self.ref
         self.tables = {
-            "G": list(ref._freq_table[:128]),  # pylint: disable=protected-access
             "PL": _trimmed([0] + ref._ltable[C.PTBL][:255]),  # pylint: disable=protected-access
             "PR": _trimmed([0] + ref._rtable[C.PTBL][:255]),  # pylint: disable=protected-access
         }
-        self.ctrl, self.filter, self.x, self.ins, self.used = {}, {}, {}, {}, set()
+        self.ctrl, self.filter, self.ins, self.used = {}, {}, {}, set()
         self.phrases, self.entered = {}, set()
         self.funk = [t + 1 for t in self.ref._funktable]  # pylint: disable=protected-access
 
@@ -144,11 +145,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     # ---- modulators ---------------------------------------------------------------------
 
-    def instance(self, template: str, **params) -> str:
-        """The ``x`` name of ``template`` with ``params``, defined once."""
+    def call(self, template: str, **params) -> str:
+        """The call of ``template`` with ``params``, its arguments in its signature's order."""
         self.used.add(template)
-        bag = ", ".join(f"{k}: {params[k]}" for k in code.params(ROUTINES[template]))
-        return self._named(self.x, "x", Atom(f"{template} {{{bag}}}" if bag else template))
+        return f"{template}({','.join(str(params[k]) for k in code.params(ROUTINES[template]))})"
 
     def _speed(self, idx: int) -> tuple:
         """``(note-relative, params)`` of speed table entry ``idx``: a 16-bit step ``s``, or
@@ -161,7 +161,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return False, {"s": left << 8 | right}
 
     def portamento(self, cmd: int, data: int, once: bool = False) -> str:
-        """The ``x`` name of portamento ``cmd`` with speed entry ``data``; ``once``, one step."""
+        """The call of portamento ``cmd`` with speed entry ``data``; ``once``, one step."""
         calc, params = self._speed(data)
         if cmd == C.CMD_TONEPORTA:
             template = "snap" if not data else "tportan" if calc else "tporta"
@@ -169,26 +169,26 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         else:
             template = "portan" if calc else "porta"
             params = {"g": 1 if cmd == C.CMD_PORTAUP else -1} | params
-        return self.instance(template + ("1" if once else ""), **params)
+        return self.call(template + ("1" if once else ""), **params)
 
     def vibrato(self, idx: int, lag: int = 0) -> str:
-        """The ``x`` name of the vibrato of speed entry ``idx`` after ``lag`` firings that
+        """The call of the vibrato of speed entry ``idx`` after ``lag`` firings that
         change nothing; its phase is the voice's state ``t``."""
         cmp, right = (self._lt(C.STBL, idx), self._rt(C.STBL, idx)) if idx else (0, 0)
         if cmp >= 0x80:
-            return self.instance("vibn", k=right, c=cmp & 0x7F, l=lag)
-        return self.instance("vib", s=right, c=cmp, l=lag)
+            return self.call("vibn", k=right, c=cmp & 0x7F, l=lag)
+        return self.call("vib", s=right, c=cmp, l=lag)
 
     def command(self, cmd: int, data: int) -> str:
-        """The ``x`` name of realtime command ``cmd`` with ``data``."""
+        """The call of realtime command ``cmd`` with ``data``."""
         if cmd == C.CMD_VIBRATO:
             return self.vibrato(data)
         return self.portamento(cmd, data)
 
     def pulse(self, pos: int) -> str:
-        """The ``x`` name of the pulse table from row ``pos``, read from ``PL``/``PR``, the
+        """The call of the pulse table from row ``pos``, read from ``PL``/``PR``, the
         player's own pulse table."""
-        return self.instance("ptabs" if self.ref.simplepulse else "ptab", b=pos)
+        return self.call("ptabs" if self.ref.simplepulse else "ptab", b=pos)
 
     # ---- programs -----------------------------------------------------------------------
 
@@ -221,7 +221,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if any(isinstance(r, dict) and "wave.freq" in r for r in rows):
             rows = [
                 (
-                    _ordered(r | {"wave.freq": Atom("note")})
+                    _ordered(r | {"wave.freq": Atom(self.call("note"))})
                     if isinstance(r, dict) and "note" in r
                     else r
                 )
@@ -251,7 +251,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         else:
             return self._wave_command(wave & 0x0F, note)
         if note != 0x80:
-            keys["note"] = Atom(f"+{note}" if note < 0x80 else note_name(note & 0x7F))
+            keys["note"] = Atom(
+                f"{note - 0x80 if note >= 0x40 else note:+d}"
+                if note < 0x80
+                else note_name(note & 0x7F)
+            )
         return keys
 
     def _wave_command(self, cmd: int, arg: int) -> dict:
@@ -295,7 +299,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                     keys["cut"] = self._rt(C.FTBL, pos) << 3
                     pos = (pos + 1) & 0xFF
             elif left:
-                keys = {"hold": left, "cut": canonical(f"v + {right << 3}")}
+                keys = {
+                    "hold": left,
+                    "cut": canonical(f"v + {(right - 0x100 if right >= 0x80 else right) << 3}"),
+                }
             else:
                 keys = {"cut": right << 3}
             rows.append(_ordered(keys))
@@ -319,7 +326,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             keys["pw"] = Atom(self.pulse(ins.pulse_ptr))
         if ins.filter_ptr:
             keys["filter"] = Atom(self.filt(ins.filter_ptr))
-        keys["wave.freq"], keys[TICK] = Atom("note"), Atom(self.tick(n))
+        keys["wave.freq"], keys[TICK] = Atom(self.call("note")), Atom(self.tick(n))
         keys["restart"] = Flow(self._restart(ins))
         self.ins[name] = FlowMap(keys)
         return name
@@ -489,17 +496,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         )
 
     def _defs(self, rowlen: int) -> dict:
-        """The definitions: the lead-in and the patterns' phrases, the instruments, the
-        programs, the templates used and their instances."""
+        """The definitions: the lead-in and the patterns' phrases, the instruments and the
+        programs."""
         phrases = {"p0": Flow([Atom("-"), Atom(f"-!tempo:{rowlen}")])}
         phrases.update((name, Flow(events)) for events, name in self.phrases.items())
-        self.used.add("note")
         defs = {"phrase": phrases, "ins": self.ins, "ctrl": self.ctrl}
         if self.filter:
             defs["filter"] = self.filter
-        defs["mod"] = {k: Block(code.printed(r)) for k, r in ROUTINES.items() if k in self.used}
-        if self.x:
-            defs["x"] = self.x
         return defs
 
     def document(self, frames: int = 200000) -> str:
@@ -519,6 +522,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         doc = {
             "unitracker": Atom(VERSION),
             "meta": FlowMap(title=header.name, author=header.author, released=header.released),
+            "clock": FlowMap(CLOCK),
             "tempo": rowlen,
             "tables": {k: Flow(v) for k, v in self.tables.items()},
             "init": init,
@@ -526,7 +530,23 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         }
         text = yaml.dump(doc, Dumper=Dumper, sort_keys=False, allow_unicode=True, width=WIDTH)
         head, rest = text.split("tables:", 1)
-        return f"{head}slots: {self.slots()}\norder: {ORDER}\n{self.state()}tables:{rest}"
+        tables, rest = rest.split("init:", 1)
+        return (
+            f"{head}slots: {self.slots()}\norder: {ORDER}\n{self.state()}tables:{tables}"
+            f"{self.mods(rest)}init:{rest}"
+        )
+
+    def mods(self, body: str) -> str:
+        """The mod section: each template used, by its signature, in the order ``body`` first
+        calls it."""
+        first = {name: re.search(rf"(?<![a-z0-9_]){name}\(", body).start() for name in self.used}
+        mods = {
+            Atom(f"{name}({', '.join(code.params(ROUTINES[name]))})"): Block(
+                code.printed(ROUTINES[name])
+            )
+            for name in sorted(first, key=first.get)
+        }
+        return yaml.dump({"mod": mods}, Dumper=Dumper, sort_keys=False, width=WIDTH)
 
 
 def _trimmed(values: list) -> list:

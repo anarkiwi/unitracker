@@ -2,7 +2,7 @@
 
 State: the freq cell's ``t`` (vibrato phase) and ``m`` (the note a wavetable note row or a
 reached toneporta last set), the pw cell's ``r``, ``q`` (pulse row and time).
-Params: ``s`` step, ``k`` shift of ``G[m + 1] - G[m]`` (computed into ``phi``), ``g`` sign,
+Params: ``s`` step, ``k`` shift of ``F[m + 1] - F[m]`` (computed into ``phi``), ``g`` sign,
 ``c`` depth, ``l`` delay, ``b`` first pulse row; a ``1`` variant fires on ``phi`` 0 only.
 """
 
@@ -12,7 +12,7 @@ _ONCE = "lda phi\nora phi+1\nbeq first\nrts\nfirst:\n"
 _DELAY = "lda phi+1\nbne go\nlda phi\ncmp #l\nbcs go\nrts\ngo:\n"
 _CALC = (
     "lda m\nand #127\ntax\nclc\nadc #1\nand #127\ntay\nsec\n"
-    "lda G.lo,y\nsbc G.lo,x\nsta phi\nlda G.hi,y\nsbc G.hi,x\nsta phi+1\n"
+    "lda F.lo,y\nsbc F.lo,x\nsta phi\nlda F.hi,y\nsbc F.hi,x\nsta phi+1\n"
     "ldx #k\nbeq sped\nshift:\nlsr phi+1\nror phi\ndex\nbne shift\nsped:\n"
 )
 _ADD = "lda v\nadc {0}\nsta v\nlda v+1\nadc {1}\nsta v+1\n"
@@ -26,16 +26,16 @@ _VIB = (
     + "rts"
 )
 _TOWARD = (
-    "lda ne\nand #127\ntay\nsec\nlda v\nsbc G.lo,y\ntax\nlda v+1\nsbc G.hi,y\nbcc up\n"
-    "bne dn\ntxa\nbeq done\ndn:\n" + _SUB + "lda v\ncmp G.lo,y\nlda v+1\nsbc G.hi,y\nbcs done\n"
-    "snap:\nlda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\nlda ne\nsta m\nlda #0\nsta t\ndone:\nrts\nup:\n"
+    "lda ne\nand #127\ntay\nsec\nlda v\nsbc F.lo,y\ntax\nlda v+1\nsbc F.hi,y\nbcc up\n"
+    "bne dn\ntxa\nbeq done\ndn:\n" + _SUB + "lda v\ncmp F.lo,y\nlda v+1\nsbc F.hi,y\nbcs done\n"
+    "snap:\nlda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nlda ne\nsta m\nlda #0\nsta t\ndone:\nrts\nup:\n"
     + _ADD
-    + "lda G.lo,y\ncmp v\nlda G.hi,y\nsbc v+1\nbcc snap\nrts"
+    + "lda F.lo,y\ncmp v\nlda F.hi,y\nsbc v+1\nbcc snap\nrts"
 )
-_SNAP = "sta t\nlda ne\nsta m\nand #127\ntay\nlda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\nrts"
+_SNAP = "sta t\nlda ne\nsta m\nand #127\ntay\nlda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nrts"
 _NOTE = (
     "lda phi\nora phi+1\nbne done\nsta t\nlda nn\nand #127\nsta m\ntay\n"
-    "lda G.lo,y\nsta v\nlda G.hi,y\nsta v+1\ndone:\nrts"
+    "lda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\ndone:\nrts"
 )
 _PTAB_ROW = (
     "lda phi\nora phi+1\nbne go\nsta q\nlda #b\nsta r\ngo:\nldx r\n{0}lda PL.lo,x\ncmp #255\n"

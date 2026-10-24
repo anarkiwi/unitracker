@@ -6,32 +6,30 @@ import random
 import pytest
 from pygoattracker import constants as GT
 from pygoattracker.player import Player, _Channel
-from unitracker_grammar import code
+from unitracker_grammar import code, frequency
 from unitracker_player.code import Machine
 
+from unitracker.direct.goattracker2 import CLOCK
 from unitracker.direct.gt2code import CODE, STATE
 
 # pylint: disable=protected-access
 
-RNG_G = random.Random(23)
-TABLES = {
-    "gt": list(GT.FREQ_TABLE),
-    "random": [RNG_G.randrange(65536) for _ in range(128)],
-}
+CLOCK_HZ = CLOCK["clock_hz"]
+FREQ = tuple(frequency(k, CLOCK_HZ) for k in range(128))
 
 
 def routine(name: str, values: dict, tables: dict, cell: str):
     """Template ``name`` bound to ``values`` on a machine of its own over ``tables``, as the
     player compiles it for ``cell``."""
-    machine = Machine(tables, {cell: tuple(STATE[cell].items())})
+    machine = Machine(tables, {cell: tuple(STATE[cell].items())}, CLOCK_HZ)
     return machine.compile(name, code.read(CODE[name]), values, cell)
 
 
-def reference(freq=(), speed=(0, 0), pulse=((), ()), simplepulse=False) -> Player:
-    """A playroutine over speed table entry 1 ``speed``, pulse table rows ``pulse`` from row 1
-    and frequency table ``freq``."""
+def reference(speed=(0, 0), pulse=((), ()), simplepulse=False) -> Player:
+    """A playroutine over speed table entry 1 ``speed`` and pulse table rows ``pulse`` from row
+    1, its frequency table the code's ``F``."""
     ref = Player.__new__(Player)
-    ref._freq_table = tuple(freq) or GT.FREQ_TABLE
+    ref._freq_table = FREQ
     ref._ltable, ref._rtable = ([[0] * 256 for _ in range(4)] for _ in range(2))
     ref._ltable[GT.STBL][0], ref._rtable[GT.STBL][0] = speed
     ref._ltable[GT.PTBL][: len(pulse[0])] = pulse[0]
@@ -40,12 +38,12 @@ def reference(freq=(), speed=(0, 0), pulse=((), ()), simplepulse=False) -> Playe
     return ref
 
 
-def run_freq(name: str, values: dict, ref: Player, chan: _Channel, act, rng, firings=48):
+def run_freq(name: str, values: dict, chan: _Channel, act, rng, firings=48):
     """Fire ``name`` beside ``act(phi)`` on the reference ``chan``, comparing the frequency and
     the state (the vibrato phase and the latched note) after each firing; between firings, other
     slots sometimes write them."""
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    fire = routine(name, values, {"G": ref._freq_table}, "freq")
+    fire = routine(name, values, {}, "freq")
     for phi in range(300 if rng.random() < 0.04 else firings):
         if phi and rng.random() < 0.1:
             chan.freq, chan.vibtime = rng.randrange(65536), rng.randrange(256)
@@ -88,22 +86,20 @@ def test_vibrato_every_phase(calc, depth):
     for t in range(256):
         lag = rng.choice((0, 0, 1, 2, rng.randrange(255)))
         step = shift(rng) if calc else rng.randrange(256)
-        ref = reference(rng.choice(list(TABLES.values())), ((0x80 if calc else 0) | depth, step))
+        ref = reference(((0x80 if calc else 0) | depth, step))
         command = GT.CMD_VIBRATO if not lag and rng.random() < 0.5 else GT.CMD_DONOTHING
         chan = channel(rng, vibtime=t, command=command, cmddata=1, vibdelay=lag + 1)
         values = {"c": depth, "l": lag, "k" if calc else "s": step}
         name = "vibn" if calc else "vib"
-        run_freq(
-            name, values, ref, chan, lambda _, c=chan, r=ref: r._tickn_command(c), rng, lag + 48
-        )
+        run_freq(name, values, chan, lambda _, c=chan, r=ref: r._tickn_command(c), rng, lag + 48)
 
 
 def test_vibrato_delay_past_a_byte():
     """``phi`` past 255 keeps a long delay's vibrato running."""
-    ref = reference(speed=(3, 40))
+    ref = reference((3, 40))
     chan = _Channel(freq=4000, command=GT.CMD_DONOTHING, cmddata=1, vibdelay=255)
     values = {"c": 3, "s": 40, "l": 254}
-    fire = routine("vib", values, {"G": ref._freq_table}, "freq")
+    fire = routine("vib", values, {}, "freq")
     v, state = chan.freq, bytearray(2)
     for phi in range(600):
         v = fire(v, phi, 0, 0, state)
@@ -129,7 +125,7 @@ def test_portamento(once, calc, up):
     rng = random.Random(f"{once}{calc}{up}")
     for _ in range(300):
         speed, values = portamento_case(rng, calc)
-        ref = reference(rng.choice(list(TABLES.values())), speed)
+        ref = reference(speed)
         command = GT.CMD_PORTAUP if up else GT.CMD_PORTADOWN
         chan = channel(rng, command=command, cmddata=1)
         name = ("portan" if calc else "porta") + once
@@ -140,7 +136,7 @@ def test_portamento(once, calc, up):
             if not once or not phi:
                 ref._tickn_command(chan)
 
-        run_freq(name, values | {"g": 1 if up else -1}, ref, chan, act, rng)
+        run_freq(name, values | {"g": 1 if up else -1}, chan, act, rng)
 
 
 @pytest.mark.parametrize("once", ["", "1"])
@@ -150,7 +146,7 @@ def test_toneporta(once, form):
     rng = random.Random(f"{once}{form}")
     for _ in range(600):
         speed, values = portamento_case(rng, form == "tportan")
-        ref = reference(rng.choice(list(TABLES.values())), speed)
+        ref = reference(speed)
         chan = channel(rng, command=GT.CMD_TONEPORTA, cmddata=0 if form == "snap" else 1)
         near = rng.choice(
             (0, rng.randrange(-300, 300), rng.randrange(-20, 20) * values.get("s", 1))
@@ -163,7 +159,7 @@ def test_toneporta(once, form):
             if not once or not phi:
                 ref._tickn_command(chan)
 
-        run_freq(form + once, values, ref, chan, act, rng)
+        run_freq(form + once, values, chan, act, rng)
 
 
 def test_note():
@@ -171,7 +167,7 @@ def test_note():
     note latched for calculated speeds."""
     rng = random.Random(5)
     for _ in range(400):
-        ref = reference(rng.choice(list(TABLES.values())))
+        ref = reference()
         note = rng.randrange(256)
         chan = channel(rng, note=note, wave_table_ptr=1)
 
@@ -179,7 +175,7 @@ def test_note():
             if not phi:
                 ref._wave_exec(0, chan)
 
-        run_freq("note", {}, ref, chan, act, rng)
+        run_freq("note", {}, chan, act, rng)
 
 
 def pulse_table(rng) -> tuple:
