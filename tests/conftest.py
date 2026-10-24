@@ -255,7 +255,7 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
     otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``)
     and ``pulse_step``.
     """
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     instruments = instruments or [{"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
     rows = rows or [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 15
 
