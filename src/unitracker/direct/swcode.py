@@ -3,9 +3,12 @@
 The freq cell's state is the player's: ``o`` vibrato_offset, ``s`` set once a WF row's pitch
 drives the frequency, ``z`` FREQLO/FREQHI, ``dc`` VIDELCNT, ``vc`` VIBRACNT, ``p`` VIBFREQU,
 ``fm`` FREQMOD, ``k`` SLIDEVIB, ``dd`` DETUNER, ``cm``/``ca``/``cv`` WRPITCH's carry; the pw
-cell's ``pl`` PWLOGHO/PWHIGHO, ``pk`` PKBDTRK; the cut cell's ``ch``, ``cl``, ``ck`` CTFH, CTFL and
-its keyboard track.
+cell's ``pl`` PWLOGHO/PWHIGHO, ``pk`` PKBDTRK, mirrored in the freq cell's ``ml``/``mk`` for
+WRPULS's carry ``cs`` (``mt`` its scratch); the cut cell's ``ch``, ``cl``, ``ck`` CTFH, CTFL and its
+keyboard track.
 """
+
+import re
 
 STATE = {
     "freq": {
@@ -21,6 +24,10 @@ STATE = {
         "cm": 1,
         "ca": 1,
         "cv": 1,
+        "ml": 2,
+        "mk": 1,
+        "mt": 2,
+        "cs": 1,
     },
     "pw": {"pl": 2, "pk": 1},
     "cut": {"ch": 1, "cl": 1, "ck": 1},
@@ -53,7 +60,8 @@ _CONST = "lda #<g\nsta fm\nlda #>g\nsta fm+1\n"
 _TOWARD = "ldx ne\nsec\nlda z\nsbc F.lo,x\nsta o\nlda z+1\nsbc F.hi,x\nsta o+1\nlda #131\nsta k\n"
 _WRPITCH = (
     "go:\nlda cm\nbeq c0\ncmp #1\nbeq c1\ncmp #3\nbeq c3\nlda ne\nclc\nadc #1\nclc\nadc ca\n"
-    "jmp sum\nc3:\nlda cv\ncmp #255\nbne cvo\nlda ca\ncvo:\nlsr\njmp sum\nc1:\nsec\njmp sum\n"
+    "jmp sum\nc3:\nlda cv\ncmp #255\nbne cvo\nlda ca\ncmp #2\nbne cvo\nlda cs\ncvo:\nlsr\njmp sum\n"
+    "c1:\nsec\njmp sum\n"
     "c0:\nclc\nsum:\nlda z\nadc dd\nsta v\nlda z+1\nadc #0\nsta v+1\nrts\n"
 )
 
@@ -75,6 +83,25 @@ _CUTOFF = (
     + "plp\nadc ch\nadc #0\njmp fo\nfp:\nlda ch\nfo:\nsta v\nlda #0\nsta v+1\nasl v\nrol v+1\n"
     "asl v\nrol v+1\nasl v\nrol v+1\nlda cl\nand #7\nora v\nsta v\nrts\n"
 )
+
+
+def _mirrored(text: str) -> str:
+    """A pulse template on the freq cell's copy: its WRPULS keeps only the carry, in ``cs``."""
+    text = re.sub(r"\bpk\b", "mk", re.sub(r"\bpl\b", "ml", text)).replace("sta v\n", "sta mt\n")
+    text = text.replace("sta v+1\n", "sta mt+1\n").replace("sbc v\n", "sbc mt\n")
+    text = text.replace("lda v+1\n", "lda mt+1\n")
+    text = text.replace(
+        "adc ml+1\nsta mt+1\nlda ml\nsta mt\nrts\n", "adc ml+1\nlda #0\nrol\nsta cs\nrts\n"
+    )
+    return text.replace(
+        "plain:\nlda ml\nsta mt\nlda ml+1\nsta mt+1\nrts\n", "plain:\nlda #0\nsta cs\nrts\n"
+    )
+
+
+def mirror_templates() -> dict:
+    """The pulse templates mirrored on the freq cell, for WRPITCH's carry on skipped WF ticks."""
+    pulse = track_templates(False)
+    return {"m" + name[1:]: _mirrored(pulse[name]) for name in ("pst", "psw", "pid", "pwr")}
 
 
 def track_templates(finefiltsweep: bool) -> dict:

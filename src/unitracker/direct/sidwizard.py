@@ -38,7 +38,7 @@ from unitracker_player.player import play
 
 from unitracker.direct import cli
 from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
-from unitracker.direct.swcode import STATE, templates, track_templates
+from unitracker.direct.swcode import STATE, mirror_templates, templates, track_templates
 from unitracker.direct.swtrace import CLOCK, VOICES, Trace, TraceError, standard, trace
 
 VERSION = "1.23"
@@ -87,13 +87,16 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         self.code = templates(self.feats.calcvibrato, self.feats.vibratotypes)
         self.pwkb = self.feats.pwkeybtrack and _tracked(swm, "pw_table")
         self.fkb = self.feats.filtkbtrack and _tracked(swm, "filter_table")
+        feats = self.feats
+        self.hrc = feats.arpspeedsupp and feats.detunesupport and self._held_rows()
+        self.mirror = self.hrc and self.pwkb
         if self.pwkb or self.fkb:
             self.code |= track_templates(self.feats.finefiltsweep)
+        if self.mirror:
+            self.code |= mirror_templates()
         self.routines = {name: code.read(text) for name, text in self.code.items()}
         self.programs = {"ctrl": {}, "pw": {}, "filter": {}}
         self.ins, self.used, self.phrases, self.dummies = {}, [], {}, []
-        feats = self.feats
-        self.hrc = feats.arpspeedsupp and feats.detunesupport and self._held_rows()
 
     def _unsupported(self) -> list:
         """What the tune uses that this transcription refuses."""
@@ -119,8 +122,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             ),
         }
         out += [USED[k] for k, used in uses.items() if used and getattr(feats, k)]
-        if feats.pwkeybtrack and _tracked(swm, "pw_table") and self._held_rows():
-            out.append("WF rows held over ticks with pulse keyboard tracking, their carry")
         if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
             out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
         if feats.fastspeedbind or feats.vibslidealways:
@@ -223,7 +224,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         if not self.feats.detunesupport:
             return [Row({"hold": ticks})]
         if self.feats.pwkeybtrack:
-            carry = 0
+            carry = 2 if self.mirror else 0
         elif not ins.pw_table:
             carry = 1
         else:
@@ -415,16 +416,16 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         image = self.ref._image(ins)  # pylint: disable=protected-access
 
         def width(p):
-            return ((image[p] & 0x7F) << 8 | _col(image, p + 1)) & 0xFFF
+            return ((image[p] & 0x7F) << 8 | _col(image, p + 1)) & (0x7FFF if self.pwkb else 0xFFF)
 
         if self.pwkb:
             rows_of = {
-                "set": lambda p: {"pw": self.call("pst", w=width(p), j=_col(image, p + 2))},
-                "sweep": lambda p: {"pw": self.call("psw", d=_signed(_col(image, p + 1)))},
-                "advance": lambda p, _: {"pw": self.call("pid", j=_col(image, p + 2))},
-                "jump": {"pw": self.call("pwr")},
-                "rest": [Row({"pw": self.call("pwr")})],
-                "resumed": {"pw": "none"},
+                "set": lambda p: self._pulsed("st", w=width(p), j=_col(image, p + 2)),
+                "sweep": lambda p: self._pulsed("sw", d=_signed(_col(image, p + 1))),
+                "advance": lambda p, _: self._pulsed("id", j=_col(image, p + 2)),
+                "jump": self._pulsed("wr"),
+                "rest": [Row(self._pulsed("wr"))],
+                "resumed": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
                 "started": {},
             }
         else:
@@ -440,6 +441,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         start = INST_WF_TABLE_POS + len(ins.wf_table) + 1 if pos is None else pos
         rows, loop = self._swept(image, start, "pw", rows_of, count)
         return self._named("pw", "pw", Program(rows, loop))
+
+    def _pulsed(self, kind: str, **params) -> dict:
+        """A tracked pulse row's binding of template ``p`` + ``kind``, and its mirror's."""
+        out = {"pw": self.call("p" + kind, **params)}
+        return out | ({"pm.freq": self.call("m" + kind, **params)} if self.mirror else {})
 
     def filter(self, ins, pos=None, count=None, handover=None) -> str:
         """The ``filter`` name of instrument ``ins``'s filter program, or resumed from ``pos``
@@ -666,6 +672,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             commands, atom = {}, "-"
             if rec.newnote and not tick and not rec.dummy:
                 commands = {"pw": "hold", "cut": "hold"}
+                if self.mirror:
+                    commands["pm.freq"] = "none"
             if rec.newnote and tick and not rec.dummy and self.fkb and rec.holder:
                 # The cutoff is written every tick: its track follows the note STRTSND sets.
                 commands = {"cut": self.call("frs")}
@@ -823,6 +831,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         ]
         if self.hrc:
             out.append(Slot("hr"))
+        if self.mirror:
+            out.append(Slot("pm"))
         if self.feats.detunesupport:
             out.append(Slot("dt", hold=held, reset=("row.freq",)))
         return {"freq": out}

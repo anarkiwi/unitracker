@@ -180,6 +180,16 @@ NORMAL = {
             "i5": {"arp_speed": 0, "wf_table": bytes.fromhex("210000")},
         },
     ),
+    "held WF rows over a tracked pulse: WRPULS's carry": (
+        notes((37, 5), (13, 5), (None, None), (60, 5)),
+        {
+            "i5": {
+                "wf_table": bytes.fromhex("2100000341f4ff4003fe40fc0041000a"),
+                "arp_speed": 1,
+                "pw_table": bytes.fromhex("8f0001108003fe2600"),
+            }
+        },
+    ),
     "reset switches keep the pulse and filter walking": (
         notes((37, 1), (40, None), (44, None), (40, 1)),
         {"i1": {"control": 0xDA, "pw_table": bytes.fromhex("8400000c2000"), "arp_speed": 0}},
