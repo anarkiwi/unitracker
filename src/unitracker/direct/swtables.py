@@ -150,14 +150,13 @@ class Tables:  # pylint: disable=too-few-public-methods
         if not 1 <= number <= len(starts) or _col(table, starts[number - 1], 0x7F) == 0x7F:
             raise TranscribeError(f"chord {number}, past the chord table or empty")
         start = starts[number - 1]
-        keys, detune = row
-        base = {k: v for k, v in keys.items() if k == "ctrl"}
+        base = {k: v for k, v in row[0].items() if k == "ctrl"}
 
         def played(at: int) -> tuple:
             rows = []
             while at < len(table) and table[at] not in (0x7E, 0x7F):
                 pitch = base | {"note": Signed(table[at]), "wave.freq": self.call("tone")}
-                rows += [Row(self._det(pitch, detune, 2, table[at]))] + self.skipped(ins, hold - 1)
+                rows += [Row(self._det(pitch, row[1], 2, table[at]))] + self.skipped(ins, hold - 1)
                 at += 1
             return rows, at < len(table) and table[at] == 0x7F
 
