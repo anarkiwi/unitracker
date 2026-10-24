@@ -41,7 +41,7 @@ def evaluate(path: Path, ticks: int, tolerances: dict, wavs: Path | None, second
     both = optimise(text, ticks, lossy=tolerances)
     simplified = both.lossy
     replaced = "; ".join(
-        f"{r.name}->{'/'.join(sorted({getattr(c, "name", str(c)) for c in r.calls.values()}))}"
+        r.name + "->" + "/".join(sorted({getattr(c, "name", str(c)) for c in r.calls.values()}))
         for r in simplified.kept
     )
     errors = " ".join(
