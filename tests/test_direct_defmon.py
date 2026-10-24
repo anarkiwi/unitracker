@@ -17,7 +17,7 @@ def fixture_cross(crosseyed):
     return tune
 
 
-@pytest.mark.parametrize("name", ["crosseyed", "tractorbeam"])
+@pytest.mark.parametrize("name", ["crosseyed", "tractorbeam", "rent_a_cop", "persei", "ngc1277"])
 def test_the_document_plays_the_replay(request, name):
     cells, text = dm.compare(request.getfixturevalue(name).read_bytes(), frames=TICKS)
     parse(text)
@@ -100,6 +100,12 @@ def test_both_layers_rows_of_one_call_apply_in_order():
     assert dm.merged([a, b]) == [{"re": 1, "acid": 0x100, "ad": 2, "bre": 2, "bacid": 0xC000}]
     assert dm.filtered(None, 0x1F) == [("mode", 0x10)]
     assert dm.filtered(0xF8, None) == [("res", 15), ("route", "+ 8")]
+
+
+def test_a_step_without_end_is_refused(cross, monkeypatch):
+    monkeypatch.setattr(dm, "MAX_STEP", 3)
+    with pytest.raises(dm.TranscribeError, match="reaches no ALT event"):
+        dm.Transcriber(cross.raw).song()
 
 
 def test_a_song_that_does_not_loop_in_time_is_refused(cross):

@@ -47,7 +47,7 @@ SLOTS = (
 )
 LAYER_B = {"cp": "bcp", "acid": "bacid", "re": "bre", "fv": "bfv"}
 ACID = {"cp", "acid", "bcp", "bacid"}
-MAX_CALLS = 1 << 17
+MAX_CALLS, MAX_STEP = 1 << 20, 1 << 14
 PHASE = 64
 NOTE7 = "lda nn\nand #127\n"  # the absolute build's note wraps to 7 bits
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
@@ -98,6 +98,8 @@ def sequence(player, at: dict, calls: int = MAX_CALLS):
         player.play_frame()
         ran = bytes(mem[a] for a in marks) != before
         full = full[1:] + (int(ran),)
+        if step is not None and c - step.call >= MAX_STEP:
+            raise TranscribeError(f"the song step from call {step.call} reaches no ALT event")
         if not ran:
             continue
         if armed & 0x80:
