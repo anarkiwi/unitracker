@@ -3,7 +3,9 @@
 `unitracker.direct.goattracker2` transcribes a GoatTracker 2 SID to the generic document from
 pygoattracker's playroutine (`pygoattracker.player.Player`, a tick-for-tick transcription of
 `gplay.c`/`player.s`), without the playroutine library or modfit. It is a standalone prototype:
-nothing else in unitracker calls it.
+nothing else in unitracker calls it. It builds the document with `unitracker_grammar.document`'s
+classes and writes it with its `printed`: the templates, instruments, control and filter programs
+as top-level sections, the phrases in the first row's `def`.
 
 ```sh
 python -m unitracker.direct.goattracker2 TUNE.sid > tune.yaml
