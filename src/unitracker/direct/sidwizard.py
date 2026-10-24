@@ -569,9 +569,10 @@ def standard(swm) -> SWMPlayer:
 
 def compare(swm, text: str, frames: int = 20000):
     """The ``(tick, register, ours, theirs)`` cells where document ``text``'s grid differs
-    from the reference player's over ``frames`` ticks."""
+    from the reference player's at the standard note table (:func:`standard`) over ``frames``
+    ticks."""
     ours = play(text, ticks=frames)
-    theirs = np.asarray(SWMPlayer(swm).render_grid(len(ours)), dtype=np.uint8)
+    theirs = np.asarray(standard(swm).render_grid(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, theirs)
 
 

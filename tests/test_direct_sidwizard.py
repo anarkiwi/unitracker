@@ -1,7 +1,7 @@
 """The direct SID-Wizard transcription plays the reference player's registers."""
 
 import pytest
-from pysidwizard import Loop, Pattern, PlayPattern, Row, TempoOverride, parse_sid_song
+from pysidwizard import SWMPlayer, Loop, Pattern, PlayPattern, Row, TempoOverride, parse_sid_song
 from pysidtracker import gridcmp
 from unitracker_grammar.document import printed, read
 from unitracker_player.player import play
@@ -27,19 +27,12 @@ def song(raw: bytes, rows: list, others=(), **instruments):
     return swm
 
 
-def standard_cells(swm, text: str, ticks: int):
-    """The cells where ``text``'s grid differs from the reference player's at the standard
-    note table."""
-    ours = play(text, ticks=ticks)
-    return gridcmp.cell_diff(ours, s.standard(swm).render_grid(len(ours)))
-
-
 def exact(swm, ticks: int = TICKS) -> str:
     """The tune's document, asserting it reads back to itself and its grid is the reference
     player's at the standard note table."""
     text = s.Transcriber(swm, META).document()
     assert printed(read(text)) == text
-    cells = standard_cells(swm, text, ticks)
+    cells = s.compare(swm, text, ticks)
     assert not cells.size, summary(cells, 3) + "\n" + text
     return text
 
@@ -59,7 +52,7 @@ def test_tunes_play_exactly(name, request):
     raw = request.getfixturevalue(name).read_bytes()
     one = s.transcriber(raw, frames=4000)
     text = one.document()
-    cells = standard_cells(one.swm, text, 4000)
+    cells = s.compare(one.swm, text, 4000)
     assert not cells.size, summary(cells, 3)
     assert "{loop: " in text and "\ntables:" not in text and "F.lo,x" in text
 
@@ -67,7 +60,9 @@ def test_tunes_play_exactly(name, request):
 @pytest.mark.parametrize("name", ["mega_run", "lykia_boss"])
 def test_against_the_native_table_only_the_pitch_differs(name, request):
     """FREQTBL is no clock's F: the native player differs in the frequency registers alone."""
-    cells, _ = s.verify(request.getfixturevalue(name).read_bytes(), frames=4000)
+    one = s.transcriber(request.getfixturevalue(name).read_bytes())
+    ours = play(one.document(), ticks=4000)
+    cells = gridcmp.cell_diff(ours, SWMPlayer(one.swm).render_grid(len(ours)))
     assert cells.size and set(cells[:, 1].tolist()) <= {0, 1, 7, 8, 14, 15}
 
 
@@ -196,4 +191,4 @@ def test_cli(mega_run, capsys):
     assert s.main([str(mega_run)]) == 0
     assert capsys.readouterr().out.startswith(f"unitracker: {s.VERSION}\nmeta: {{title: Mega-Run")
     assert s.main(["--verify", "--frames", "400", str(mega_run)]) == 0
-    assert f"{mega_run}: first (" in capsys.readouterr().out
+    assert f"{mega_run}: exact" in capsys.readouterr().out
