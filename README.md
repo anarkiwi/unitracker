@@ -57,6 +57,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | question | tool |
 |---|---|
 | does each tune lift to a document that plays its native player's grid, and why not (by cause) | `python tools/corpus.py check [TUNE.sid\|LIST.csv ...] [--out DIR] [--frames N] [--player RE] [--timeout S] [--multi-sid]` (default: the reference tunes; multi-SID tunes, by header or a GoatTracker build past three voices, excluded) |
+| why do a `check` table's differing tunes diverge (standard pitch, one-tick lag, start registers, register groups), with each GoatTracker 2 build's flags | `python tools/divergence.py out/check/results.csv [--frames N] [--jobs J]` (writes `classes.csv` beside it) |
 | where does one lifter's document differ from its native player? | `python -m unitracker.direct.{goattracker2,sidwizard,defmon,musicassembler} --verify TUNE.sid ... [--frames N] [--diff RUNS] [--jobs J]` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
 | the native player's register grid | `pysidtracker.find_format(raw).play(raw, subtune)` |

@@ -2,16 +2,18 @@
 
 import numpy as np
 import pytest
-from unitracker_grammar.document import Code, read
+from tqdm import tqdm
+from unitracker_grammar import frequency
+from unitracker_grammar.document import NONE, Call, Code, printed, read
 from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
 import optimiser_docs as D
 
 from unitracker import cli
-from unitracker.optimiser import GuaranteeError, fit, lossy, optimise
+from unitracker.optimiser import GuaranteeError, coupled, fit, lossy, optimise
 from unitracker.optimiser.__main__ import main
-from unitracker.optimiser.trace import FIRING, trace
+from unitracker.optimiser.trace import FIRING, record, trace
 
 EXACT = {cell: fit.Tolerance(0, 0) for cell in fit.BITS}
 OTHER = [r for r in range(25) if r not in (0, 1, 2, 3)]
@@ -45,17 +47,19 @@ def test_code_that_is_exactly_an_expression_is_fitted_exactly():
     assert not any(isinstance(body, Code) for _, body in doc.mods)
     assert doc.header.state is None and not result.refused
     assert {r.name for r in result.kept} == {"slide", "start", "wob"}
-    assert dict((k, str(v)) for k, v in doc.mods)["sq(q)"] == canonical(
-        "v + q - 2*q*(phi // 2 % 2)"
+    assert dict((k, str(v)) for k, v in doc.mods)["stepsq(step, half)"] == canonical(
+        "v + step - 2*step*(phi // half % 2)"
     )
-    assert "b.freq: sq(8)" in result.text and "b.freq: sq(16)" in result.text
+    assert "b.freq: stepsq(8,2)" in result.text and "b.freq: stepsq(16,2)" in result.text
+    assert "pw: ramp(40)" in result.text and "a.freq: note()" in result.text
     assert np.array_equal(play(result.text), play(D.EXACT))
     assert result.after < result.before and all(s == (0, 0, 0) for s in result.stats.values())
 
 
 def test_a_looser_tolerance_trades_fidelity_for_a_simpler_form():
     result = lossy.simplify(D.EXACT, None)
-    assert "b.freq: keep()" in result.text and "sq(" not in result.text
+    assert "a.freq: pitch()" in result.text and "b.freq" not in result.text
+    assert "stepsq(" not in result.text
     p50, p95, top = result.stats["freq"]
     assert 0 < p95 <= fit.TOLERANCES["freq"].p95 and top <= fit.TOLERANCES["freq"].max
     assert p50 <= p95
@@ -74,11 +78,14 @@ def test_noise_is_refused_at_a_tight_tolerance_and_kept_at_a_loose_one():
     assert np.array_equal(play(D.NOISY)[:, keep], play(loose.text)[:, keep])
 
 
-def test_a_replacement_that_breaks_code_reading_its_state_is_refused():
+def test_a_group_no_plan_fits_is_unfit_and_its_own_replacements_are_refused():
     result = lossy.simplify(D.COUPLED, None)
     assert [r.name for r in result.refused] == ["put"]
     assert [r.name for r in result.kept] == ["slide"] and set(result.stats) == {"pw", "cut"}
     assert "lossy refused: put" in result.report() and "put()" in result.text
+    assert len(result.unfit) == 1 and result.unfit[0].startswith("get+put (freq): host a: ")
+    assert "get() fits no form (nearest ramp p95" in result.unfit[0]
+    assert any(line.startswith("lossy unfit: get+put") for line in result.report())
     keep = [r for r in range(25) if r not in (2, 3, 21, 22)]
     assert np.array_equal(play(D.COUPLED)[:, keep], play(result.text)[:, keep])
 
@@ -159,7 +166,7 @@ def test_the_cli_reports_the_lossy_mode(tmp_path, capsys):
         main([str(source), "-o", str(out), "--lossy", "--freq-tol", "0,0", "--pw-tol", "0,0"]) == 0
     )
     err = capsys.readouterr().err
-    assert "lossy: wob (2 calls, freq) -> sq" in err and "lossy: " in err and "before:" in err
+    assert "lossy: wob (2 calls, freq) -> stepsq" in err and "lossy: " in err and "before:" in err
     assert np.array_equal(play(out.read_text(encoding="utf-8")), play(D.EXACT))
 
 
@@ -169,3 +176,159 @@ def test_unitracker_lift_runs_the_lossy_mode(metal_warrior, tmp_path, capsys):
     assert cli.lift_main(argv) == 0
     err = capsys.readouterr().err
     assert "lossy: " in err and " tokens" in err
+
+
+def test_a_group_sharing_state_is_fitted_jointly_and_its_state_dropped():
+    result = lossy.simplify(D.JOINT, None, EXACT)
+    assert [(r.name, r.templates) for r in result.kept] == [("add+set", ("add", "set"))]
+    doc = read(result.text)
+    assert dict((k, str(v)) for k, v in doc.mods) == {"ramp(step)": "v + step"}
+    assert doc.header.state is None and "b.freq" not in result.text
+    assert "a.freq: ramp(8)" in result.text and "a.freq: ramp(16)" in result.text
+    assert np.array_equal(play(result.text), play(D.JOINT)) and not result.unfit
+
+
+def test_groups_join_code_templates_by_the_state_they_share():
+    assert coupled.groups(read(D.JOINT)) == [coupled.Group("freq", ("add", "set"), ("s",))]
+    assert not coupled.groups(read(D.EXACT))
+    assert coupled.Group("freq", ("add", "set"), ("s",)).name == "add+set"
+
+
+def test_a_group_another_slot_fires_inside_is_unfit_and_falls_back():
+    result = lossy.simplify(D.INTERLEAVED, None, EXACT)
+    assert result.unfit == ["add+set (freq): slot m fires between the group's slots"]
+    assert sorted(r.name for r in result.kept) == ["add", "set"]
+    assert "a.freq" not in result.text and "b.freq: ramp(8)" in result.text
+    assert np.array_equal(play(result.text), play(D.INTERLEAVED))
+
+
+def test_a_group_refused_tries_its_other_plans_then_its_templates_own():
+    doc = read(D.JOINT)
+
+    def ended(name, *calls, templates=("add", "set")):
+        out = lossy.Replacement(name, "freq", {}, [], [], np.zeros(1), templates=templates)
+        out.calls = dict.fromkeys(calls, NONE)
+        return out
+
+    first = ended("first", Call("set", (8,)), Call("set", (16,)), Call("add"))
+    other = ended("other", Call("add"), Call("set", (8,)), Call("set", (16,)))
+    own = ended("own", Call("add"), templates=("add",))
+
+    def run(good):
+        first.alternatives, first.fallback = [other], [own]
+        proof = lossy.Proof(doc, lambda _, rs: lossy.Check(rs[-1] is good, {}), fit.TOLERANCES)
+        with tqdm(disable=True) as meter:
+            proof.prove([first], meter)
+            proof.alternatives(meter)
+        return proof
+
+    proof = run(other)
+    assert proof.kept == [other] and not proof.refused
+    proof = run(own)
+    assert proof.kept == [own] and proof.refused == [first]
+    proof = run(None)
+    assert not proof.kept and proof.refused == [first]
+
+
+def test_added_templates_are_merged_and_renumbered_from_their_stem():
+    before = lossy.Names.of(read(D.JOINT))
+    text = (
+        D.JOINT.replace("mod:\n", "mod:\n  ramp3(step): v + step\n  ramp4(step): v + step\n")
+        .replace("a.freq: set(8)", "a.freq: ramp3(8)")
+        .replace("a.freq: set(16)", "a.freq: ramp4(16)")
+    )
+    doc, names = lossy.renumbered(read(text), before)
+    assert names == {"ramp3": "ramp", "ramp4": "ramp"}
+    assert [k for k, _ in doc.mods] == ["ramp(step)", "set(d)", "add()"]
+    assert "a.freq: ramp(8)" in printed(doc) and "a.freq: ramp(16)" in printed(doc)
+    assert lossy.renumbered(read(D.JOINT), before) == (read(D.JOINT), {})
+
+
+def test_a_replaced_template_s_name_is_free_again():
+    before = lossy.Names.of(read(D.JOINT))
+    text = D.JOINT.replace(D.JOINT_CODE, "mod:\n  set2(step): v + step\n").replace(
+        "b.freq: add()", "b.freq: none"
+    )
+    doc, names = lossy.renumbered(read(text.replace("set(", "set2(")), before)
+    assert names == {"set2": "set"} and "a.freq: set(16)" in printed(doc)
+
+
+@pytest.mark.parametrize(
+    "key,name",
+    [
+        (("off", "v", 0), "ramp"),
+        (("off", "0", 0), "level"),
+        (("off", "F(N)", 0), "detune"),
+        (("tri", "0", 0), "tri"),
+        (("tri", "F(N)", 0), "vib"),
+        (("sq", "F(N)", 0), "vibsq"),
+        (("first", "F(N)", 0), "note"),
+        (("keep", "F(N)", fit.HELD), "heldpitch"),
+        (("tri", "F(n)", fit.LATE), "lateevvib"),
+        (("tab", "F(N)", fit.HELD | fit.LATE), "heldlatepitchseq"),
+        (("toward", "F(N)", 0), "glideto"),
+    ],
+)
+def test_shapes_are_named_by_what_they_do(key, name):
+    assert fit.stem(*key) == name
+
+
+def test_parameters_are_named_by_role_clear_of_reserved_names():
+    assert [fit.role("tri", "0", k) for k in "qsoh"] == ["lo", "step", "phase", "half"]
+    assert fit.role("off", "0", "q") == "value" and fit.role("off", "v", "q") == "step"
+    assert fit.role("first", "F(N)", "l") == "len" and fit.role("sq", "F(n)", "w") == "depth"
+    assert fit.vacant("step", set()) == "step" and fit.vacant("step", {"step"}) == "inc"
+    assert fit.vacant("step", {"step", "inc", "delta"}) == "step2"
+    form = fit.Form("off", "v", 0, {"q": 32}, np.zeros(1))
+    sig, body, _, calls = lossy.template([(Call("x"), form)], {"ramp"}, frozenset({"step"}))
+    assert (sig, str(body), calls) == ("ramp2(inc)", "v + inc", {Call("x"): Call("ramp2", (32,))})
+
+
+def test_a_shape_keeps_its_natural_parameters_but_neutral_ones():
+    form = fit.Form("sq", "F(N)", 0, {"q": 0, "w": 6, "o": 0, "h": 4}, np.zeros(1))
+    sig, body, _, calls = lossy.template([(Call("x"), form)], set())
+    assert sig == "vibsq(depth, half)" and calls == {Call("x"): Call("vibsq", (6, 4))}
+    assert str(body) == canonical("F(N) + depth*(phi // half % 2)")
+    note = fit.Form("first", "F(N)", 0, {"q": 0, "l": 1}, np.zeros(1))
+    assert lossy.template([(Call("x"), note)], set())[0] == "note()"
+    assert fit.natural("loop", "l", [0]) and not fit.natural("tab", "z", [5])
+
+
+def test_a_held_form_passes_its_input_until_it_acts():
+    phi = np.tile(np.arange(10), 3)
+    n = np.repeat([60, 64, 67], 10)
+    notes = np.array([frequency(k, 985248) for k in n])
+    out = np.where(phi < 1, np.concatenate([[1000], notes[:-1]]), notes)
+    v = np.concatenate([[1000], out[:-1]])
+    rec = np.zeros(len(phi), dtype=FIRING)
+    rec["t"], rec["phi"], rec["out"], rec["N"], rec["n"], rec["v"] = (
+        np.arange(30),
+        phi,
+        out,
+        n,
+        n,
+        v,
+    )
+    fir = fit.Firings(rec, "freq", 985248)
+    held = [f for f in fit.fits(fir, EXACT["freq"]) if f.key == ("keep", "F(N)", fit.HELD)]
+    assert held and held[0].params == {"d": 1}
+    assert held[0].text() == f"v + ({fit.PHI} >= d)*(F(N) + 0 - v)"
+    assert np.array_equal(fir.predict(held[0]), fir.out)
+
+
+def test_a_glide_moves_toward_the_note_by_its_step():
+    out = np.minimum(8000 + 300 * np.arange(1, 13), frequency(64, 985248))
+    v = np.concatenate([[8000], out[:-1]])
+    fir = firings(np.arange(12), out, v, n=64)
+    glide = [f for f in fit.fits(fir, EXACT["freq"]) if f.key == ("toward", "F(N)", 0)]
+    assert glide and glide[0].params == {"s": 300}
+    assert np.array_equal(fir.predict(glide[0]), fir.out)
+    assert "nearest" not in fit.nearest(fir, EXACT["freq"])
+
+
+def test_record_logs_every_slot_s_firing_in_order():
+    tr = record(D.INTERLEAVED, 6)
+    assert len(tr.frames) == 6 and set(tr.chain["slot"]) == {0, 1, 2}
+    expr = tr.chain[tr.chain["slot"] == 1]
+    assert (expr["key"] == -1).all() and np.array_equal(expr["out"] - expr["v"], np.ones(6))
+    assert [str(c) for c, _ in tr.keys] == ["set(8)", "add()"]

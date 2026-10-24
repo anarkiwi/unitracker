@@ -229,3 +229,36 @@ RESTART_EMPTY = doc(
     "        p1: [C4.i1, -*3, D4, -*3]\n",
     mods="",
 )
+
+JOINT_CODE = (
+    "mod:\n"
+    "  set(d): |\n    lda phi\n    ora phi+1\n    bne done\n    lda #d\n    sta s\n    done:\n"
+    "    rts\n"
+    "  add(): |\n    clc\n    lda v\n    adc s\n    sta v\n    lda v+1\n    adc #0\n    sta v+1\n"
+    "    rts\n"
+)
+
+# set() stores the step add() adds each tick: neither fits alone, together a ramp per instrument
+JOINT = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: c1, a.freq: set(8), b.freq: add()}\n"
+    "        i2: {ad: 9, ctrl: c1, a.freq: set(16), b.freq: add()}\n"
+    "      ctrl:\n"
+    "        c1: [{ctrl: 65}, end]\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -*5, E4.i2, -*5, G4.i1, -*5]\n",
+    head="voices: 1\nslots: {freq: {a: {}, b: {}}}\nstate: {freq: {s: 1}}\n",
+    mods=JOINT_CODE,
+)
+
+# JOINT with an expression slot firing between the two code slots
+INTERLEAVED = doc(
+    "      ins:\n"
+    "        i1: {ad: 9, ctrl: c1, a.freq: set(8), m.freq: v + 1, b.freq: add()}\n"
+    "      ctrl:\n"
+    "        c1: [{ctrl: 65}, end]\n"
+    "      phrase:\n"
+    "        p1: [C4.i1, -*5]\n",
+    head="voices: 1\nslots: {freq: {a: {}, m: {}, b: {}}}\nstate: {freq: {s: 1}}\n",
+    mods=JOINT_CODE,
+)
