@@ -114,7 +114,8 @@ def test_snd_is_strtsnd(builds, build, seed):
     value = rng.randrange(65536)
     out = routine(one, call)(value, 0, 0, v.note - 1, state)
     one.ref._setup_vibrato(v)
-    compare(state, v, "o s dc vc p fm k", 0)
+    v.detune = 0
+    compare(state, v, "o s dc vc p fm k dd", 0)
     high = dict(zip(code.params(one.routines["snd"]), call.args))["h"]
     expect = value if not high else one.ref.freq_hi[v.note] << 8 | value & 0xFF
     assert out == expect

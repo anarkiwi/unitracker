@@ -70,8 +70,9 @@ def templates(calcvibrato: bool, vibratotypes: bool) -> dict:
         "sta cm\nlda #b\nsta ca\n" + _WRPITCH,
         # SETDETU: a FX's detune, the carry left as the WF walk made it.
         "dfx": "lda phi\nora phi+1\nbne go\nlda #d\nsta dd\n" + _WRPITCH,
-        # STRTSND: SLIDEVIB, SETVIB0, SETVIBR, the pitch held; h 1 or 2 writes FREQHI of ne or t.
-        "snd": "lda phi\nora phi+1\nbeq init\nrts\ninit:\nsta o\nsta o+1\nsta s\nlda #c\nsta k\n"
+        # STRTSND: SLIDEVIB, SETVIB0, SETVIBR, no detune, the pitch held; h 1 or 2 writes FREQHI.
+        "snd": "lda phi\nora phi+1\nbeq init\nrts\ninit:\nsta o\nsta o+1\nsta s\nsta dd\nlda #c\n"
+        "sta k\n"
         "lda #255\nsta cv\n"
         "lda #d\nsta dc\nlda #i\nsta vc\nlda #q\nsta p\n"
         + amp

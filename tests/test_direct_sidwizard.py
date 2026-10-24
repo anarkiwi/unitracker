@@ -26,14 +26,18 @@ META = (("title", "t"),)
 
 def song(raw: bytes, rows: list, others=(), **instruments):
     """Tune ``raw`` reduced to a loop of ``rows`` on voice 1 (``others`` on voices 2 and 3,
-    else rests), its instrument ``iN`` fields set from ``instruments``."""
+    else rests), its instrument ``iN`` fields (and the module's, ``swm``) set from
+    ``instruments``."""
     swm = parse_sid_song(raw, 1)
     lines = [rows, *others] + [[EMPTY] * len(rows)] * (2 - len(others))
     swm.patterns = [Pattern(rows=list(r)) for r in lines]
     swm.sequences = [[PlayPattern(k + 1), Loop(0)] for k in range(3)]
     for name, fields in instruments.items():
         for key, value in fields.items():
-            setattr(swm.instruments[int(name[1:]) - 1], key, value)
+            if name == "swm":
+                setattr(swm, key, value)
+            else:
+                setattr(swm.instruments[int(name[1:]) - 1], key, value)
     return swm
 
 
@@ -55,10 +59,10 @@ def notes(*rows) -> list:
     return out
 
 
-@pytest.mark.parametrize("name", ["mega_run", "lykia_boss", "border_odyssey", "whammer"])
+@pytest.mark.parametrize("name", ["mega_run", "lykia_boss", "border_odyssey", "whammer", "csillag"])
 def test_tunes_play_exactly(name, request):
     """Light and bare builds, a normal build with octave shifts, a medium build with
-    portamentos and slides."""
+    portamentos and slides, a normal build with chords and chord FX."""
     raw = request.getfixturevalue(name).read_bytes()
     cells, text = s.verify(raw, frames=3000)
     assert not cells.size, summary(cells, 3)
@@ -157,6 +161,14 @@ NORMAL = {
         notes((37, 5), (40, 5), (None, None), (44, 5)),
         {"i5": {"wf_table": bytes.fromhex("2100030341f4ff4003fe40fc0041000a"), "arp_speed": 1}},
     ),
+    "chords that return and loop, and a chord FX": (
+        notes((37, 3), (40, 5), (44, 3)) + [Row(fx=0x72), EMPTY, Row(note=37, instrument=3)],
+        {
+            "i3": {"wf_table": bytes.fromhex("417f00217f00410c00"), "default_chord": 1},
+            "i5": {"wf_table": bytes.fromhex("117f00"), "default_chord": 2, "arp_speed": 1},
+            "swm": {"chord_table": bytes.fromhex("0003077e0004070c7f")},
+        },
+    ),
     "typed vibratos": (
         notes((37, 1), (40, 3), (44, 5)),
         {
@@ -246,8 +258,10 @@ def test_a_filter_voice_note_that_leaves_the_filter_walking_is_refused(mega_run)
 
 
 def test_song_refusals(lykia_boss, csillag):
-    with pytest.raises(s.TranscribeError, match="normal build: a chord"):
-        s.transcriber(csillag.read_bytes())
+    swm = song(csillag.read_bytes(), notes((37, 1)))
+    swm.instruments[0].pw_table = bytes.fromhex("880001")
+    with pytest.raises(s.TranscribeError, match="normal build: pulse keyboard tracking"):
+        s.Transcriber(swm, META)
     swm = song(lykia_boss.read_bytes(), notes((37, 1)))
     swm.instruments[0].pw_table = bytes.fromhex("100100")
     with pytest.raises(s.TranscribeError, match="pw table that starts with a sweep"):

@@ -52,7 +52,6 @@ DUMMY = 256
 LOOPS = 4
 # Build flags this transcription refuses whenever the tune uses what they change.
 USED = {
-    "chordsupport": "a chord ($7F WF arp)",
     "pwkeybtrack": "pulse keyboard tracking",
     "filtkbtrack": "filter keyboard tracking",
     "pwresetsw": "the pulse reset switch",
@@ -99,6 +98,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     adsr: tuple = ()
     keep_filter: bool = False
     resume: tuple = ()
+    chord: tuple = None
     skips: dict = field(default_factory=dict)
 
 
@@ -164,7 +164,8 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         if rec.tick2:
             held = ref.filter_controller_voice is v
             filt = (ref.filt_pos, ref.filter_sweep_count) if held else None
-            rec.resume = ((v.wf_pos, v.arp_speed_counter), (v.pw_pos, v.pw_sweep_count), filt)
+            wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
+            rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
         before = v.instrument
         apply_row(v, row)
         rec.applied, rec.ins, rec.number = True, v.instrument, v.instrument_idx
@@ -172,12 +173,15 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
             out.refused.append(f"an instrument selected without a note, frame {ref.frame_idx}")
         rec.note = v.note + v.octave_shift + v.transpose - 1
         rec.adsr = (v.sid_ad, v.sid_sr)
+        rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
 
     def run_deferred(v):
         pending = v.deferred_fx is not None
         deferred(v)
         if pending:
-            out.reads[voices[id(v)]][-1].adsr = (v.sid_ad, v.sid_sr)
+            rec = out.reads[voices[id(v)]][-1]
+            rec.adsr = (v.sid_ad, v.sid_sr)
+            rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
 
     def claim(v):
         setfltp(v)
@@ -187,7 +191,8 @@ def trace(swm, frames: int = MAX_FRAMES) -> Trace:
         fires = staccato(v, pre, apply_sc)
         if fires:
             rec = out.reads[voices[id(v)]][-1]
-            rec.skips[ref.frame_idx - rec.frame] = ((v.wf_pos, v.arp_speed_counter), v.instrument)
+            wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
+            rec.skips[ref.frame_idx - rec.frame] = (wave, v.instrument)
         return fires
 
     ref._advance_row, ref._apply_row, ref._run_deferred_fx = read, applied, run_deferred
@@ -262,11 +267,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             out.append("no instruments, or fewer orderlists than voices")
         rows = [r for p in swm.patterns for r in p.rows]
         uses = {
-            "chordsupport": any(
-                len(r) > 1 and r[1] == 0x7F and r[0] < 0xFE
-                for i in swm.instruments
-                for r in _rows3(i.wf_table)
-            ),
             "pwkeybtrack": any(
                 len(r) > 2 and r[2] and r[0] < 0xFE
                 for i in swm.instruments
@@ -411,10 +411,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         rest = [Row(self._det({}, None, carry))] + self.skipped(ins, reload)
         return rows + rest, len(rows) if reload else None
 
-    def wave_rows(self, image: bytes, pos: int, ins, limit: int = 1 << 12, reload=None) -> tuple:
+    def wave_rows(self, image: bytes, pos: int, ins, limit: int = 1 << 12, **at_start) -> tuple:
         """``(rows, loop)`` of instrument ``ins``'s WFARPTB from ``pos``, row by row as the
-        player reads them: each lasts its arp speed (``reload``) or hold, jumps on the tick."""
-        reload = self.reload(ins) if reload is None else reload
+        player reads them: each lasts its arp speed or hold, jumps taken on the tick; a chord
+        row plays its chord from its start (or ``chord`` at first)."""
+        # pylint: disable=too-many-locals
+        reload = at_start.get("reload", self.reload(ins))
+        number, cpos = at_start.get("chord", (ins.default_chord, None))
         rows, at, ticks = [], {}, 0
         while ticks < limit:
             for _ in range(4):
@@ -435,10 +438,46 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 return rows, at[pos]
             at[pos] = len(rows)
             keys, hold = self._wave_row(image, pos, reload)
+            first, cpos = cpos, None
+            if self.feats.chordsupport and _col(image, pos + 1) == 0x7F:
+                played, looped = self._chord(ins, keys, hold, number, first)
+                if looped is not None:
+                    return rows + played, len(rows) + looped
+                rows += played
+                ticks += hold * len(played)
+                pos += 3
+                continue
             rows += [Row(keys)] + self.skipped(ins, hold - 1)
             ticks += hold
             pos += 3
         return rows, None
+
+    def _chord(self, ins, keys: dict, hold: int, number: int, pos=None) -> tuple:
+        """``(rows, loop)`` of a chord row playing chord ``number``: a WF read per pitch with
+        the row's waveform, from ``pos`` (else the chord's start) to its $7E (on to the next
+        row in the tick) or its $7F (its first pitch again: ``loop`` the row it loops to)."""
+        # pylint: disable=protected-access
+        starts, table = self.ref._chord_starts, self.ref._chord_table
+        if not 1 <= number <= len(starts) or _col(table, starts[number - 1], 0x7F) == 0x7F:
+            raise TranscribeError(f"chord {number}, past the chord table or empty")
+        start = starts[number - 1]
+        base = {k: v for k, v in keys.items() if k == "ctrl"}
+
+        def played(at: int) -> tuple:
+            rows = []
+            while at < len(table) and table[at] not in (0x7E, 0x7F):
+                pitch = base | {"note": Signed(table[at]), "wave.freq": self.call("tone")}
+                rows += [Row(self._det(pitch, None, 0))] + self.skipped(ins, hold - 1)
+                at += 1
+            return rows, at < len(table) and table[at] == 0x7F
+
+        rows, looped = played(start if pos is None or pos >= len(table) else pos)
+        if not looped:
+            return rows, None
+        if pos is None or pos == start:
+            return rows, 0
+        cycle, _ = played(start)
+        return rows + cycle, len(rows)
 
     def _wave_row(self, image: bytes, pos: int, reload: int) -> tuple:
         """``(keys, ticks)`` of the WF row at ``pos``: its waveform (or hold), its arp as the
@@ -463,7 +502,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         detune = _col(image, pos + 2, 0xFF)
         return self._det(keys, None if detune == 0xFF else detune, carry, arp or 0), hold
 
-    def wave(self, ins) -> str:
+    def wave(self, ins, chord=None) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
         waveform (control $09 without the first-frame switch), SETFLTP's routing."""
         feats = self.feats
@@ -481,7 +520,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             lead = [Row({"hold": 0, "gate": 1})]
         if ins.wf_table:
             image = self.ref._image(ins)  # pylint: disable=protected-access
-            rows, loop = self.wave_rows(image, INST_WF_TABLE_POS, ins)
+            number = ins.default_chord if chord is None else chord
+            rows, loop = self.wave_rows(image, INST_WF_TABLE_POS, ins, chord=(number, None))
             if lead and rows[0].get("ctrl") is None:
                 raise TranscribeError("a first frame that keeps a waveform before a hold row")
         else:
@@ -563,22 +603,34 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
         )
         return self._named("filter", "f", Program(rows, loop))
 
-    def resume(self, ins, wave: tuple, pulse=None, filt=None) -> str:
+    def resume(self, ins, wave: tuple, pulse=None, filt=None, skip: bool = True) -> str:
         """The ``ctrl`` name of a program that skips a tick of the tables (a legato's TICK_2, a
-        staccato hard restart) and resumes them where the player left them: ``wave`` the WF
-        position and ARPSCNT, ``pulse`` and ``filt`` positions and sweep counts."""
+        staccato hard restart; not ``skip``: a chord FX) and resumes them where the player left
+        them: ``wave`` the WF position, ARPSCNT, chord and its position, ``pulse`` and ``filt``
+        positions and sweep counts."""
+        # pylint: disable=too-many-locals
         lead = []
         if pulse is not None:
             lead.append(Row({"hold": 0, "run": self.pulse(ins, *pulse)}))
         if filt is not None:
             lead.append(Row({"hold": 0, "run": self.filter(ins, *filt)}))
-        pos, counter = wave
+        pos, counter, chord, cpos = wave
         held = counter if self.feats.arpspeedsupp and counter < 0x80 else 0
-        lead += [Row({})] + self.skipped(ins, held)
+        lead += ([Row({})] if skip else []) + self.skipped(ins, held)
         image = self.ref._image(ins)  # pylint: disable=protected-access
-        rows, loop = self.wave_rows(image, pos, ins)
+        rows, loop = self.wave_rows(image, pos, ins, chord=(chord, cpos))
         program = Program(lead + rows, None if loop is None else loop + len(lead))
         return self._named("ctrl", "c", program)
+
+    def rechord(self, rec) -> str:
+        """The ``ctrl`` name of the WF walk a chord FX leaves: from STRTSND on a note (the FX
+        deferred past it), else from where it is, the chord its own."""
+        if rec.chord is None:
+            raise TranscribeError("a chord FX before any instrument")
+        pos, counter, chord, ins = rec.chord
+        if rec.newnote:
+            return self.wave(ins, chord)
+        return self.resume(ins, (pos, counter, chord, None), skip=False)
 
     # ---- instruments ---------------------------------------------------------------------
 
@@ -627,7 +679,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             raise TranscribeError("a staccato first note")
         dummy = self.ref._dummy  # pylint: disable=protected-access
         image = self.ref._image(dummy)  # pylint: disable=protected-access
-        rows, _ = self.wave_rows(image, 0, dummy, 2, 0)
+        rows, _ = self.wave_rows(image, 0, dummy, 2, reload=0)
         masks = [0xFE if self.hr(ins, 0) else 0]
         masks.append(0xFE if self.hr(ins, 1) or masks[0] else 0)
         ticks = []
@@ -670,7 +722,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             high, low = value & 0xF0, value & 0x0F
             if high in (0x20, 0x30, 0x50, 0x60):
                 out["ad"], out["sr"] = rec.adsr
-            elif high == 0x70 and not self.feats.chordsupport or high == 0xE0:
+            elif high == 0x70 and self.feats.chordsupport:
+                out["run"] = self.rechord(rec)
+            elif high in (0x70, 0xE0):
                 pass
             elif high == 0x80 and ins is not None:
                 out["tick.freq"] = self.vibrato_byte(ins, low << 4 | ins.vibrato & 0x0F, False)
@@ -706,12 +760,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             or 0x17 <= fx <= 0x1C
             or fx == 0x1F
         ):
-            if fx != 0x07 or self.feats.chordsupport:
+            if fx != 0x07:
                 raise TranscribeError(f"FX ${fx:02X}")
+        if fx == 0x07 and self.feats.chordsupport:
+            made[fx] = lambda: {"run": self.rechord(rec)}
         commands = made[fx]() if fx in made else {}
         if commands is None:
             raise TranscribeError(f"FX ${fx:02X} before any instrument")
-        if set(commands) & set(out) - {"ad", "sr"}:
+        if set(commands) & set(out) - {"ad", "sr", "run"}:
             raise TranscribeError("two FX of one cell on a row")
         return out | commands
 
@@ -768,6 +824,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes,too-many-publ
             name = self.instrument(ins, rec.number, voice)
             given = name if state["ins"] != name else None
             state["ins"] = name
+            if self.hrc:
+                commands["hr.freq"] = "none"
             return Event(self.pitch(rec), given, commands, keep_filter=rec.keep_filter)
         if 0 < note < 0x60:
             return self.glide(rec, commands)
