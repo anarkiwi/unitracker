@@ -18,6 +18,7 @@ from unitracker_grammar.document import (
     Event,
     Expr,
     Instrument,
+    Once,
     Play,
     Program,
     Row,
@@ -418,4 +419,57 @@ def hoist(doc: Document) -> list:
             if len(found) == 1 and found[0] not in _STOPS:
                 hoisted = partial(_hoist, cell, slot.name, found[0])
                 edits.append(Edit(f"{slot.name}.{cell}:{found[0]}", hoisted))
+    return edits
+
+
+# ---- once ---------------------------------------------------------------------------------
+
+
+def _slot_key(doc: Document, key: str) -> tuple | None:
+    """``(cell, slot)`` a command's key binds or stops, None for a key of no modulated cell."""
+    cell = base(key)
+    return (cell, _slot(doc, key, cell)) if cell in CELLS else None
+
+
+def _onced(path: tuple, i: int, j: int, key: str, doc: Document) -> Document:
+    """``doc`` with event ``i`` of the events at ``path`` binding ``key`` once and event
+    ``j``'s ``none`` of it dropped."""
+
+    def edit(events):
+        first, last = events[i], events[j]
+        commands = tuple((k, Once(v) if k == key else v) for k, v in first.commands)
+        dropped = _without(last.commands, (key, NONE))
+        out = list(events)
+        out[i], out[j] = replace(first, commands=commands), replace(last, commands=dropped)
+        return tuple(out)
+
+    return update(doc, path, edit)
+
+
+def _stopped_at(events: tuple, i: int, key: str, cell: str) -> int | None:
+    """The event after ``i`` whose commands of ``cell`` are only ``key``'s ``none``, where it is
+    the first after ``i`` with a command of ``cell``."""
+    for j in range(i + 1, len(events)):
+        later = [(k, v) for k, v in events[j].commands if base(k) == cell]
+        if later:
+            return j if later == [(key, NONE)] else None
+    return None
+
+
+def once(doc: Document) -> list:
+    """A command binding a slot that a later event of its phrase stops with ``none``, no command
+    of the cell between, becomes a binding that fires once (``b!``), the ``none`` dropped."""
+    edits = []
+    for path, node in walk(doc):
+        if not isinstance(node, tuple) or not node or not all(isinstance(e, Event) for e in node):
+            continue
+        for i, event in enumerate(node):
+            for key, value in event.commands:
+                slot = _slot_key(doc, key)
+                if slot is None or value in (NONE, HOLD, "reset") or isinstance(value, Once):
+                    continue
+                j = _stopped_at(node, i, key, slot[0])
+                if j is not None:
+                    label = _label(path + (i,), f"{key}:{value}!")
+                    edits.append(Edit(label, partial(_onced, path, i, j, key)))
     return edits

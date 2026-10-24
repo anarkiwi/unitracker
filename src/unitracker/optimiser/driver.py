@@ -17,6 +17,7 @@ PASSES = (
     ("merge", passes.merge),
     ("template", templates.template),
     ("hoist", passes.hoist),
+    ("once", passes.once),
 )
 
 
