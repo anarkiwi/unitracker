@@ -10,24 +10,23 @@ from pysidwizard.player import VoiceState
 from unitracker_grammar import code
 from unitracker_player.code import Machine
 
-from unitracker.direct.sidwizard import CLOCK, Transcriber
+from unitracker.direct.sidwizard import CLOCK, Transcriber, standard
 from unitracker.direct.swcode import CODE, STATE
 
 # pylint: disable=protected-access
 
 
-def routine(name: str, values: dict, words: list):
-    """Template ``name`` bound to ``values`` over the frequency table ``words``."""
-    machine = Machine({"W": words}, {"freq": tuple(STATE["freq"].items())}, CLOCK[1])
+def routine(name: str, values: dict):
+    """Template ``name`` bound to ``values``, as the player compiles it for the freq cell."""
+    machine = Machine({}, {"freq": tuple(STATE["freq"].items())}, CLOCK[1])
     return machine.compile(name, code.read(CODE[name]), values, "freq")
 
 
 @pytest.fixture(name="ref", scope="module")
 def fixture_ref(mega_run):
-    """A light-build player, its frequency table and its first instrument."""
+    """A light-build player at the standard note table, and its transcriber."""
     swm = parse_sid_song(mega_run.read_bytes(), 1)
-    one = Transcriber(swm)
-    return one.ref, one._words(), one
+    return standard(swm), Transcriber(swm)
 
 
 def state_of(v: VoiceState, held: bool) -> tuple:
@@ -58,7 +57,7 @@ def test_every_template_is_canonical_code():
 
 @pytest.mark.parametrize("seed", range(40))
 def test_vib_is_strtsnd_then_normvib(ref, seed):
-    player, words, one = ref
+    player, one = ref
     rng = random.Random(seed)
     v = voice(rng, player)
     ins = v.instrument
@@ -67,7 +66,7 @@ def test_vib_is_strtsnd_then_normvib(ref, seed):
         call = one.vibrato(1)
     finally:
         one.swm.instruments[0] = saved
-    fire = routine("vib", dict(zip(code.params(code.read(CODE["vib"])), call.args)), words)
+    fire = routine("vib", dict(zip(code.params(code.read(CODE["vib"])), call.args)))
     state = bytearray(rng.randrange(256) for _ in range(7))
     fire(0, 0, 0, 0, state)
     player._setup_vibrato(v)
@@ -81,7 +80,7 @@ def test_vib_is_strtsnd_then_normvib(ref, seed):
 
 @pytest.mark.parametrize("seed", range(20))
 def test_vibfx_is_setvibr_then_normvib(ref, seed):
-    player, words, one = ref
+    player, one = ref
     rng = random.Random(seed)
     v = voice(rng, player)
     note = rng.randrange(0x60, 0x78)
@@ -91,7 +90,7 @@ def test_vibfx_is_setvibr_then_normvib(ref, seed):
         call = one.vibfx(1, note)
     finally:
         one.swm.instruments[0] = saved
-    fire = routine("vibfx", dict(zip(code.params(code.read(CODE["vibfx"])), call.args)), words)
+    fire = routine("vibfx", dict(zip(code.params(code.read(CODE["vibfx"])), call.args)))
     state = bytearray(state_of(v, True))
     for phi in range(200):
         if not phi:
@@ -104,12 +103,12 @@ def test_vibfx_is_setvibr_then_normvib(ref, seed):
 
 @pytest.mark.parametrize("seed", range(40))
 def test_leg_is_the_legato_seed_then_portame(ref, seed):
-    player, words, _ = ref
+    player, _ = ref
     rng = random.Random(seed)
     v = voice(rng, player)
     prev = rng.choice((rng.randrange(65536), rng.randrange(256), 65535 - rng.randrange(256)))
     v.zp_freq_lo, v.zp_freq_hi = prev & 0xFF, prev >> 8
-    fire = routine("leg", {}, words)
+    fire = routine("leg", {})
     state = bytearray(state_of(v, True))
     note = rng.randrange(1, 0x60)
     fire(prev, 0, 0, note - 1, state)
@@ -124,15 +123,16 @@ def test_leg_is_the_legato_seed_then_portame(ref, seed):
 
 @pytest.mark.parametrize("seed", range(40))
 def test_tone_is_the_compose(ref, seed):
-    player, words, _ = ref
+    player, _ = ref
     rng = random.Random(seed)
-    fire = routine("tone", {}, words)
+    fire = routine("tone", {})
     v = voice(rng, player)
     held = rng.random() < 0.5
     for phi in range(30):
         prev = rng.randrange(65536)
         v.zp_freq_lo, v.zp_freq_hi = prev & 0xFF, prev >> 8
-        v.note, v.wf_arp_pitch = rng.randrange(1, 0x60), rng.randrange(-20, 20)
+        v.note = rng.randrange(1, 0x60)
+        v.wf_arp_pitch = rng.randrange(-v.note, 0x80 - v.note)
         written = not phi or rng.random() < 0.2
         if written:
             v.vibrato_offset = 0

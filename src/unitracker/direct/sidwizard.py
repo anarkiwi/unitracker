@@ -14,7 +14,7 @@ from pysidtracker import SidImage, gridcmp
 from pysidwizard import Loop, PlayPattern, SWMPlayer, parse_sid_song
 from pysidwizard.constants import INST_WF_TABLE_POS
 from pysidwizard.player import DEFAULT_HR_ADSR, PAL_CYCLES_PER_FRAME
-from unitracker_grammar import code
+from unitracker_grammar import code, frequency
 from unitracker_grammar.document import (
     Call,
     Code,
@@ -41,7 +41,8 @@ from unitracker.direct.goattracker2 import meta_text, note_name, repeat, rests
 from unitracker.direct.swcode import CODE, STATE
 
 VERSION = "1.23"
-CLOCK = (PAL_CYCLES_PER_FRAME, 985248)
+# The clock whose note table F is nearest FREQTBL/FREQTBH at note k + 1: no clock is exact.
+CLOCK = (PAL_CYCLES_PER_FRAME, 985256)
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 SLOTS = {
     "freq": [
@@ -507,12 +508,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             state={c: n for c, n in state.items() if n} or None,
         )
 
-    def _words(self) -> list:
-        """``W``: generic note k's word, the player's FREQTBL/FREQTBH at its note k + 1, which
-        it indexes with the note masked to 7 bits."""
-        lo, hi = self.ref.freq_lo, self.ref.freq_hi
-        return [hi[(k + 1) & 0x7F] << 8 | lo[(k + 1) & 0x7F] for k in range(256)]
-
     def document(self) -> str:
         """The document of the song to its loop."""
         rows, loop = self.timeline()
@@ -529,7 +524,6 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         ]
         doc = Document(
             self._header(named),
-            tables={"W": self._words()} if "W.lo" in named else {},
             mods=mods,
             defs=defs,
             init=[Event("-", commands={"vol": 15})] + [Event("-")] * (VOICES - 1),
@@ -550,6 +544,27 @@ def transcriber(raw: bytes, subtune: int = 0, frames: int = 20000) -> Transcribe
 def transcribe(raw: bytes, subtune: int = 0) -> str:
     """The document text of one subtune of a SID."""
     return transcriber(raw, subtune).document()
+
+
+def standard(swm) -> SWMPlayer:
+    """The reference player of ``swm`` with the document's note table: note k + 1 sounds
+    ``F(k)`` at :data:`CLOCK`; SETFMOD's amplitudes still read the native table."""
+    ref = SWMPlayer(swm)
+    native = ref.freq_lo, ref.freq_hi
+    words = [frequency(k - 1, CLOCK[1]) for k in range(256)]
+    table = bytes(w & 0xFF for w in words), bytes(w >> 8 for w in words)
+    ref.freq_lo, ref.freq_hi = table
+    freqmod = ref._freqmod  # pylint: disable=protected-access
+
+    def native_freqmod(raw: int, dpitch: int) -> tuple:
+        ref.freq_lo, ref.freq_hi = native
+        try:
+            return freqmod(raw, dpitch)
+        finally:
+            ref.freq_lo, ref.freq_hi = table
+
+    ref._freqmod = native_freqmod  # pylint: disable=protected-access
+    return ref
 
 
 def compare(swm, text: str, frames: int = 20000):

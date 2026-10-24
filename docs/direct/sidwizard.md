@@ -11,7 +11,8 @@ python -m unitracker.direct.sidwizard --verify [--frames N] [--diff K] [--jobs J
 ```
 
 `--verify` plays each document with unitracker-player and compares its register grid with the
-reference player's (`SWMPlayer(parse_sid_song(raw, 1))`) over `--frames` ticks; `--diff K` lists
+reference player's (`SWMPlayer(parse_sid_song(raw, 1))`, its native note table) over `--frames`
+ticks; `--diff K` lists
 up to `K` differing runs per register.
 
 ## Time
@@ -55,8 +56,10 @@ the player runs the voices last to first, so the lower voice holds the filter.
 
 The frequency cell has two code-modulator slots, `slots: {freq: {tick: {hold: [note-1, note-2]},
 wave: {hold: [legato], reset: [row.note]}}}`, firing in the player's order: VIBSLIDE, then the
-WF table's pitch and WRPITCH. `W` is the player's FREQTBL/FREQTBH, `W[k]` the word of generic
-note `k` (SID-Wizard note `k + 1`, masked to 7 bits as the player indexes it).
+WF table's pitch and WRPITCH. The pitch is the standard note table `F`: generic note `k` (SID-Wizard
+note `k + 1`) sounds `F(k)` at `clock_hz: 985256`, the clock whose table is nearest FREQTBL/FREQTBH.
+No clock reproduces it: 19 of its 95 notes differ by one, so a document's frequency low bytes
+differ from the native player's there, and `--verify` reports those cells.
 
 | state | SID-Wizard |
 |---|---|
@@ -66,10 +69,10 @@ note `k` (SID-Wizard note `k + 1`, masked to 7 bits as the player indexes it).
 
 | template | routine |
 |---|---|
-| `tone()` | on `φ = 0` (a WF pitch row): `o = 0`, `s = 1`; with `s`, `v = W[N] + o` |
+| `tone()` | on `φ = 0` (a WF pitch row): `o = 0`, `s = 1`; with `s`, `v = F(N) + o` |
 | `vib(d, k, f, p)` | on `φ = 0` STRTSND: `o = 0`, `s = 0`, the counters and amplitude; then NORMVIB and DOVIBRA |
 | `vibfx(k, f, p)` | SETVIBR from the note's amplitude, `o = 0`, the delay left running, then the vibrato's step |
-| `leg()` | on `φ = 0`: `o = v - W[n]`, FREQMODH `$7F`; then PORTAME toward the new note |
+| `leg()` | on `φ = 0`: `o = v - F(n)`, FREQMODH `$7F`; then PORTAME toward the new note |
 
 `f` is SETFMOD's amplitude of the vibrato nibble: these builds read it pitch-independent.
 
