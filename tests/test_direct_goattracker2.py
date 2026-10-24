@@ -2,8 +2,7 @@
 
 import pytest
 from pygoattracker import constants as GT
-from unitracker_grammar import parse
-from unitracker_grammar.expr import compile_expr
+from unitracker_grammar import code, parse
 
 from conftest import gt_tune
 from unitracker.direct import goattracker2 as g
@@ -20,22 +19,8 @@ def exact(tune, ticks: int = TICKS) -> str:
     return text
 
 
-def test_letters_and_notes():
-    assert [g.letters(i) for i in (0, 25, 26, 27, 701, 702)] == ["a", "z", "aa", "ab", "zz", "aaa"]
+def test_notes():
     assert [g.note_name(k) for k in (0, 24, 37, 95)] == ["C0", "C2", "C#3", "B7"]
-
-
-@pytest.mark.parametrize("start", [0, 3, 7])
-def test_index_walks_the_orbit(start):
-    """The index expression is the orbit position of each firing."""
-    outs, prefix, period = g.orbit(lambda s: ((s + 1) % 5 if s >= 3 else s + 1, s), start)
-    at = compile_expr(g.index(prefix, period), {"_T": {}})
-    seq = [outs[at(0, phi, 0)] for phi in range(30)]
-    state, expect = start, []
-    for _ in range(30):
-        expect.append(state)
-        state = (state + 1) % 5 if state >= 3 else state + 1
-    assert seq == expect
 
 
 def test_loop_and_runs():
@@ -72,6 +57,24 @@ CASES = {
         "wave": WAVE,
         "rows": [(24, 1, 0, 0), REST, (31, 0, 3, 1)] + [REST] * 13,
         "speed": [(0, 64)],
+    },
+    "calculated toneporta": {
+        "wave": WAVE,
+        "rows": [(24, 1, 0, 0), REST, (31, 0, 3, 1)] + [REST] * 13,
+        "speed": [(128, 1)],
+    },
+    "toneporta at once": {
+        "wave": WAVE,
+        "rows": [(24, 1, 0, 0), REST, (31, 0, 3, 0)] + [REST] * 13,
+    },
+    "wavetable portamento": {
+        "wave": [(0x41, 0), (0xF1, 1), (0xF3, 2), (0xF2, 1), (0xFF, 2)],
+        "speed": [(1, 16), (0, 2)],
+    },
+    "calculated vibrato": {
+        "wave": WAVE,
+        "rows": [(24, 1, 4, 1)] + [REST] * 15,
+        "speed": [(131, 2)],
     },
     "vibrato": {"wave": WAVE, "rows": [(24, 1, 4, 1)] + [REST] * 15, "speed": [(3, 48)]},
     "instrument vibrato": {
@@ -140,6 +143,22 @@ CASES = {
 @pytest.mark.parametrize("case", CASES)
 def test_synthetic_tunes_play_exactly(case):
     exact(gt_tune(**CASES[case]))
+
+
+@pytest.mark.parametrize(
+    "case, state",
+    [
+        ("a plain note", "{freq: {t: 1, m: 1}}"),
+        ("a pulse table", "{freq: {t: 1, m: 1}, pw: {r: 1, q: 1}}"),
+    ],
+)
+def test_state_and_code_of_the_templates_used(case, state):
+    """The state line declares the variables the used routines name; each ``mod:`` record is
+    a code block, its routine's one text."""
+    text = exact(gt_tune(**CASES[case]))
+    assert f"\norder: {g.ORDER}\nstate: {state}\ntables:" in text
+    templates = code.templates(parse(text))
+    assert templates and all(code.printed(t) == g.CODE[name] for name, t in templates.items())
 
 
 def test_holds_follow_the_build():

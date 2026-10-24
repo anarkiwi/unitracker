@@ -13,6 +13,10 @@ class FlowMap(dict):
     """A mapping written in flow style."""
 
 
+class Block(str):
+    """A string written as a literal block scalar: a code template's lines."""
+
+
 class Atom(str):
     """A plain scalar written as is: event atoms, names, entries."""
 
@@ -49,3 +53,6 @@ Dumper.add_representer(Flow, lambda d, x: d.represent_sequence("tag:yaml.org,200
 Dumper.add_representer(FlowMap, lambda d, x: d.represent_mapping("tag:yaml.org,2002:map", x, True))
 Dumper.add_representer(Atom, _atom)
 Dumper.add_representer(type(None), lambda d, _: d.represent_scalar("tag:yaml.org,2002:null", "~"))
+Dumper.add_representer(
+    Block, lambda d, x: d.represent_scalar("tag:yaml.org,2002:str", str(x), style="|")
+)
