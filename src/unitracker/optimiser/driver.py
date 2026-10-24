@@ -13,6 +13,7 @@ from unitracker.optimiser import templates, transpose
 from unitracker.optimiser.guarantee import Guarantee
 from unitracker.optimiser.inline import inline as inline_definitions
 from unitracker.optimiser.measure import Rewrite, size
+from unitracker.optimiser.refusals import Refusals
 
 PASSES = (
     ("defaults", passes.defaults),
@@ -40,13 +41,16 @@ class Result(Rewrite):
     saved: Counter = field(default_factory=Counter)
 
 
-class _Run:
-    """One optimisation: the guarantee, the current document and its size."""
+class _Run:  # pylint: disable=too-many-instance-attributes
+    """One optimisation: the guarantee, the current document and its size, and the edits the
+    guarantee refused (:class:`Refusals`), not proposed again while what they touch and read
+    stays as it was."""
 
     def __init__(self, doc: Document, guarantee: Guarantee, progress: bool):
         self.doc, self.guarantee, self.progress = doc, guarantee, progress
         self.size, self.refused, self.saved = size(doc), [], Counter()
         self.horizon = len(guarantee.reference[0])
+        self.refusals = Refusals()
 
     def _apply(self, edits: list) -> Document | None:
         doc = self.doc
@@ -54,28 +58,35 @@ class _Run:
             doc = edit.apply(doc)
         return doc
 
-    def prove(self, edits: list, meter) -> list:
+    def prove(self, edits: list, meter, name: str = "") -> list:
         """The edits of ``edits`` kept: all where their composite proves, else each half's
         in turn, so ``k`` refusals of ``n`` cost ``O(k log n)`` proofs."""
         doc = self._apply(edits)
-        smaller = size(doc)
-        if smaller < self.size and self.guarantee.holds(printed(doc)):
-            self.doc, self.size = doc, smaller
+        smaller = size(doc) < self.size
+        if smaller and self.guarantee.holds(printed(doc)):
+            self.doc, self.size = doc, size(doc)
             meter.update(len(edits))
             return edits
         if len(edits) == 1:
             meter.update(1)
             self.refused.append(edits[0].label)
+            if smaller:
+                self.refusals.add(self.refusals.key(name, edits[0], self.doc, doc))
             return []
         half = len(edits) // 2
-        return self.prove(edits[:half], meter) + self.prove(edits[half:], meter)
+        return self.prove(edits[:half], meter, name) + self.prove(edits[half:], meter, name)
 
     def run(self, name: str, propose, round_: int) -> list:
         """The edits pass ``name`` proposes and the guarantee keeps."""
         candidates, before = [], self.size
         traced = (self.horizon,) if getattr(propose, "traced", False) else ()
         for edit in propose(self.doc, *traced):
-            if size(edit.apply(self.doc)) < self.size:
+            after = edit.apply(self.doc)
+            if size(after) >= self.size:
+                continue
+            if self.refusals.known(self.refusals.key(name, edit, self.doc, after)):
+                self.refused.append(edit.label)
+            else:
                 candidates.append(edit)
         if not candidates:
             return []
@@ -83,7 +94,7 @@ class _Run:
         with tqdm(
             total=len(candidates), desc=desc, unit="edit", disable=not self.progress
         ) as meter:
-            kept = self.prove(candidates, meter)
+            kept = self.prove(candidates, meter, name)
         self.saved[name] += before - self.size
         return kept
 
