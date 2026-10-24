@@ -21,11 +21,10 @@ NAMES = tuple(STATE["freq"])
 
 
 @pytest.fixture(name="builds", scope="module")
-def fixture_builds(mega_run, csillag):
-    """Transcribers of a light and a normal build, each over the standard note table."""
-    return [
-        Transcriber(parse_sid_song(p.read_bytes(), 1), check=False) for p in (mega_run, csillag)
-    ]
+def fixture_builds(mega_run, csillag, samwise):
+    """Transcribers of a light, a normal and an extra build, over the standard note table."""
+    paths = (mega_run, csillag, samwise)
+    return [Transcriber(parse_sid_song(p.read_bytes(), 1), check=False) for p in paths]
 
 
 def routine(one, call):
@@ -87,26 +86,34 @@ def voice(rng, one) -> VoiceState:
     return v
 
 
+def held_vibrato(one, v: VoiceState) -> dict:
+    """The instrument vibrato STRTSND keeps for a portamento's end (PORTAVIBRA)."""
+    call = one.strtsnd(v.instrument, 0)
+    params = dict(zip(code.params(one.routines["snd"]), call.args))
+    keys = {"vt": "c", "vi": "i", "vq": "q", "vr": "r", "vg": "g"}
+    return {name: params[key] for name, key in keys.items() if key in params}
+
+
 def compare(state: bytearray, v: VoiceState, keys: str, phi: int) -> None:
     got, want = unpack(state), state_of(v)
     assert {k: got[k] for k in keys.split()} == {k: want[k] for k in keys.split()}, phi
 
 
 @pytest.mark.parametrize("seed", range(30))
-@pytest.mark.parametrize("build", [0, 1])
+@pytest.mark.parametrize("build", [0, 1, 2])
 def test_stp_is_vibslide(builds, build, seed):
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
-    fire, state = routine(one, one.call("stp")), pack(state_of(v))
+    fire, state = routine(one, one.call("stp")), pack(state_of(v) | held_vibrato(one, v))
     for phi in range(200):
         value = rng.randrange(65536)
-        assert fire(value, phi, 0, 0, state) == value
+        assert fire(value, phi, 0, v.note - 1, state) == value
         one.ref._tick_vibrato(v)
         compare(state, v, "o dc vc fm k", phi)
 
 
 @pytest.mark.parametrize("seed", range(30))
-@pytest.mark.parametrize("build", [0, 1])
+@pytest.mark.parametrize("build", [0, 1, 2])
 def test_snd_is_strtsnd(builds, build, seed):
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
@@ -117,13 +124,14 @@ def test_snd_is_strtsnd(builds, build, seed):
     one.ref._setup_vibrato(v)
     v.detune = 0
     compare(state, v, "o s dc vc p fm k dd", 0)
-    high = dict(zip(code.params(one.routines["snd"]), call.args))["h"]
-    expect = value if not high else one.ref.freq_hi[v.note] << 8 | value & 0xFF
+    params = dict(zip(code.params(one.routines["snd"]), call.args))
+    index = {0: None, 1: v.note, 2: (params["t"] + 1) & 0xFF}[params["h"]]
+    expect = value if index is None else one.ref.freq_hi[index] << 8 | value & 0xFF
     assert out == expect
 
 
 @pytest.mark.parametrize("seed", range(30))
-@pytest.mark.parametrize("build", [0, 1])
+@pytest.mark.parametrize("build", [0, 1, 2])
 def test_vfx_is_setvibr_then_vibslide(builds, build, seed):
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
@@ -140,14 +148,14 @@ def test_vfx_is_setvibr_then_vibslide(builds, build, seed):
 
 
 @pytest.mark.parametrize("seed", range(30))
-@pytest.mark.parametrize("build", [0, 1])
+@pytest.mark.parametrize("build", [0, 1, 2])
 def test_por_and_leg_are_portame(builds, build, seed):
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
     value, legato = rng.randrange(256), rng.random() < 0.4
     note = rng.randrange(1, 0x60)
     call = one.call("leg") if legato else one.call("por", m=0x83, **one.amp(value, False))
-    fire, state = routine(one, call), pack(state_of(v))
+    fire, state = routine(one, call), pack(state_of(v) | held_vibrato(one, v))
     fire(0, 0, 0, note - 1, state)
     v.note = note
     if legato:
@@ -164,13 +172,13 @@ def test_por_and_leg_are_portame(builds, build, seed):
 
 
 @pytest.mark.parametrize("seed", range(30))
-@pytest.mark.parametrize("build", [0, 1])
+@pytest.mark.parametrize("build", [0, 1, 2])
 def test_sld_is_setslid(builds, build, seed):
     one, rng = builds[build], random.Random(seed)
     v = voice(rng, one)
     fx, value = rng.choice((1, 2, 3)), rng.choice((0, rng.randrange(256)))
     fire = routine(one, one.call("sld", m=0x80 + fx, **one.amp(value, fx != 3)))
-    state = pack(state_of(v))
+    state = pack(state_of(v) | held_vibrato(one, v))
     one.ref._apply_fx_columns(v, None, fx, value, False)
     for phi in range(40):
         fire(0, phi, 0, v.note - 1, state)
