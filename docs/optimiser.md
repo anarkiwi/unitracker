@@ -55,6 +55,20 @@ A candidate the grammar or the player refuses does not hold.
 | `template` | per program kind (`ctrl`, `restart`, `pw`, `filter`), each group of two or more programs, records or instruments' inline ones, alike but for integers (a row's `wait`, `hold`, `ctrl`, `mask`, `gate`, `ad`, `sr`, `res`, `route`, `route_on`, `route_off`, `mode`, `vol`, a relative `note`, a constant cell value; `wait:0` and `hold:1` written out to compare) becoming one program template `{kind}_k` with a parameter per position whose values differ (positions of equal values across the group sharing one, named by the key's stem), each member a call of it: `ctrl:ctrl_1(7,4)`, `restart:restart_1(2,9,240)`, ` run:ctrl_1(7,3)` |
 | `hoist` | a binding every instrument carries identically for a slot without a default becoming that slot's default in the `slots` line, reset on `note` where it reads phi, its fields dropped |
 | `once` | a command binding a slot that a later event of its phrase stops with `none`, no command of the cell between, becoming a binding that fires once (`snap()!`), the `none` dropped and the rests it leaves merged |
+| `repeats` | each phrase's events (a record, an inline phrase; groups played out first) in their cheapest encoding with groups, `[D,E]x4`, `[D,E\|F\|G]`, nested; the song's rows in sections and groups, the loop item the first of the looped rows (see [Repeats](#repeats)) |
+
+### Repeats
+
+A phrase's encoding is an exact interval DP over its events: the cheapest encoding of each span
+is a sequence of events and groups, a group a tandem repeat `[B]xk` of a primitive body or a
+volta `[B|E1|E2...]` (endings of one length, the body their longest common prefix), its parts
+encoded alike. Costs are cl100k tokens: an event's text alone (its octave written), a group's
+brackets, bars and count; the driver measures the true size. The song's rows are split at the
+loop row, Re-Pair (`unitracker_player.streams.repair`) compresses both parts over shared rules,
+a rule whose definition costs at least what its uses save (by the same DP) is inlined, one at a
+time, deepest first, to a fixpoint, and each kept rule is a section `sK` (numbered in reading
+order); the song and each section body are then encoded by the DP, a repeated section a part
+`s3x2`. Both edits are the input once their sugar is expanded, and a second round proposes none.
 
 After the last round the `names` rename (`optimise(..., rename=True)`, the default) gives each
 program template the `template` pass named `{kind}_k` a name by its shape, in document order:
@@ -211,7 +225,7 @@ language model) learns the format from without resolving names
 | mode | writes inline |
 |---|---|
 | `named` | nothing (the default) |
-| `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record; shared ones and templates stay named |
+| `single` | every definition referenced exactly once, anonymously: an instrument, a phrase, a `restart`, `ctrl`, `pw` or `filter` record, a section (its items in place in the song or the section that plays it, the loop item kept); shared ones and templates stay named |
 | `all` | every definition the song reaches, templates included, at its first use in reading order (`NAME=` before its value, a template's `SIGNATURE=` before its body and its call's arguments: `C4.i3={ad:9}`, `freq:vib(d)='v + d*(phi % 4)'(2)`), referenced by name after (`unitracker_grammar.document.first_use`); a definition the song never reaches is dropped, so no section is left |
 
 In `single`, templates (`mod:` records and program templates) are the format's shared
@@ -228,6 +242,7 @@ Definitions):
 | a `run:` row key or command of a program | the program after its kind, `run:pw[{pw:800},end]` |
 | a `pw` or `filter` record that is a binding `b` | in an instrument's field the binding `b`; in a `run:` the program of its one row, `pw[{pw:b},end]` |
 | a record that is a call of a program template | the call |
+| a song item `s1`, `s1x2` | its items, `[...]x2` |
 
 A binding record plays where its name stands as the binding written there (the player's
 semantics, format 2.3), so an instrument's field takes the binding itself. A definition that reaches itself (a

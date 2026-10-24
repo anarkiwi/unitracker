@@ -7,7 +7,9 @@ from unitracker_grammar.document import (
     Call,
     Document,
     Event,
+    Group,
     Instrument,
+    Part,
     Play,
     Program,
     Row,
@@ -48,6 +50,8 @@ def references(node, defs: dict):
         yield node.ins
     if isinstance(node, Play) and _named(defs, node.phrase):
         yield node.phrase
+    if isinstance(node, Part) and _named(defs, node.section):
+        yield node.section
     if isinstance(node, Instrument):
         yield from (v for k, v in node.fields if base(k) in _FIELDS and _named(defs, v))
     if type(node) in _RUNS:
@@ -115,9 +119,19 @@ class _Inliner:  # pylint: disable=too-few-public-methods
             return value if isinstance(value, Call) else Run(kind, value)
         return Run(kind, Program((Row(((_CELL[kind], value),)),)))
 
+    def items(self, item) -> tuple:
+        """A song item's inline form: a section of the targets its items, or a group of
+        them where it plays more than once."""
+        if not isinstance(item, Part) or not _named(self.defs, item.section):
+            return (item,)
+        body = self.body(item.section)
+        return body if item.times is None else (Group(body, item.times),)
+
     def node(self, node):
         """``node`` with its references of the targets inline."""
         defs = self.defs
+        if isinstance(node, tuple) and any(isinstance(i, Part) for i in node):
+            node = tuple(x for i in node for x in self.items(i))
         if isinstance(node, Event) and _named(defs, node.ins):
             node = replace(node, ins=self.body(node.ins))
         if isinstance(node, Play) and _named(defs, node.phrase):
@@ -148,8 +162,10 @@ def inlined(doc: Document, targets: set) -> Document:
     with any section it leaves empty."""
     if not targets:
         return doc
-    doc = transform(doc, _Inliner(doc, targets).node)
-    return replace(doc, defs=_kept(doc.defs, targets))
+    inliner = _Inliner(doc, targets)
+    loop = doc.loop and sum(len(inliner.items(i)) for i in doc.rows[: doc.loop])
+    doc = transform(doc, inliner.node)
+    return replace(doc, defs=_kept(doc.defs, targets), loop=loop)
 
 
 def _reached(doc: Document) -> Document:
