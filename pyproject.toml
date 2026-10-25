@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tokenize = ["tokenizers>=0.23.3", "huggingface_hub>=0.24"]
-learn = ["torch>=2.14", "transformers>=5.19"]
+learn = ["torch>=2.14", "transformers>=5.19", "zstandard>=0.25"]
 dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "zstandard>=0.25.0", "pytest-timeout>=2.2", "import-linter>=2.15", "tokenizers>=0.23.3", "huggingface_hub>=0.24"]
 
 [project.urls]
