@@ -21,7 +21,7 @@ dependencies = [
     "pymusicassembler>=0.8.6",
     "unitracker-grammar>=0.15.0",
     "unitracker-player>=0.22.0",
-    "tiktoken>=0.7",
+    "tiktoken>=0.14.0",
     "lark>=1.1",
     "music21>=9",
 ]
