@@ -23,7 +23,7 @@ from unitracker_player.player import Player, load, play
 
 import shared
 from unitracker import cli
-from unitracker.optimiser import Guarantee, optimise
+from unitracker.optimiser import PASSES, Guarantee, optimise
 from unitracker.optimiser.inline import MODES, inline
 
 FIELDS = ("doc", "path", "md5", "player", "verified", "cells", "first", "gap")
@@ -103,10 +103,12 @@ def check(args) -> int:
     return 0
 
 
-def forms() -> dict:
+def forms(ablations: bool = True) -> dict:
     """``{form: (base form, optimise keywords)}`` of the forms this optimiser writes, each after
     its base: the lifted document, the named form, each other inline mode of it, and where the
-    optimiser has a lossy mode, the lossy form at its default tolerances and its inline modes."""
+    optimiser has a lossy mode, the lossy form at its default tolerances and its inline modes,
+    and with ``ablations`` the same without phrase templates (``lossy-nophrases``, its passes
+    but ``phrases``)."""
     modes = [m for m in MODES if m != "named"]
     out = {"lifted": (None, None), "named": ("lifted", {})}
     out |= {m: ("named", {"inline": m}) for m in modes}
@@ -115,6 +117,11 @@ def forms() -> dict:
 
         out["lossy"] = ("lifted", {"lossy": dict(TOLERANCES)})
         out |= {f"lossy-{m}": ("lossy", {"inline": m}) for m in modes}
+        if not ablations:
+            return out
+        order = tuple(p for p in PASSES if p[0] != "phrases")
+        out["lossy-nophrases"] = ("lifted", {"lossy": dict(TOLERANCES), "order": order})
+        out |= {f"lossy-nophrases-{m}": ("lossy-nophrases", {"inline": m}) for m in modes}
     return out
 
 
