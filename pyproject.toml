@@ -13,7 +13,7 @@ authors = [{ name = "Josh Bailey" }]
 classifiers = ["Operating System :: POSIX :: Linux", "Programming Language :: Python :: 3"]
 dependencies = [
     "numpy>=1.23",
-    "tqdm>=4",
+    "tqdm>=4.70.1",
     "pysidtracker>=0.36.0",
     "pygoattracker>=0.8.0",
     "pydefmon>=0.10.1",
