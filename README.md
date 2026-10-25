@@ -17,6 +17,7 @@ edit proved to keep the register grid.
 | [docs/optimiser.md#passes](docs/optimiser.md#passes) | the passes: defaults, merge, transposition folding, the legato snap, templates and their structural names, hoist (`python tools/passes_eval.py`) |
 | [docs/optimiser.md#inline](docs/optimiser.md#inline) | the optimiser's inline forms (`--inline single`, `--inline all`): definitions written at their uses |
 | [docs/optimiser.md#lossy-mode](docs/optimiser.md#lossy-mode) | the lossy mode: code modulators replaced by fitted expressions within a tolerance per cell (`--lossy`) |
+| [docs/learnability.md](docs/learnability.md) | how well language models learn documents: per form and tokenizer from scratch, and Qwen2.5 fine-tuned, in held-out bits per song tick and playable samples (`python tools/learn.py`) |
 | [docs/tokenization.md](docs/tokenization.md) | how documents tokenize, by form, tokenizer and lexical category; printer changes and their savings; a document BPE (`python -m unitracker.optimiser.tokenizer`) |
 
 ## Install
@@ -64,6 +65,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | what does the lossy mode replace, save and cost per tune; how does it sound? | `python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR]` |
 | each tune's lifted and optimised forms, cached, for a corpus study | `python tools/corpus.py forms TUNES_DIR\|LIST.csv [--out out/tokenize] [--forms ...] [--timeout S] [--multi-sid]` |
 | tokens per form, tokenizer and lexical category; what each printer transform saves | `python tools/tokens.py [out/tokenize] [--forms ...] [--encoders ...]` |
+| how learnable is each form and tokenizer; can a fine-tuned LLM write tunes? (GPU, in Docker, detached) | `python tools/learn.py {launch,status,run} [--preset smoke\|full] [--set KEY=VALUE ...]` |
 | do the docs' links resolve; which lines did coverage lose? | `python tools/maint.py {links,coverage BEFORE.json AFTER.json}` |
 | which generator (semitone offset, `clock_hz`, rounding) reproduces each tracker's native note table, and which entries it misses | `python tools/notetables.py [--tune TRACKER=PATH ...] [--json OUT]` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `table`, `hvsc_tune` |
