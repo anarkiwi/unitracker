@@ -133,6 +133,9 @@ def _gt2(raw: bytes, subtune: int, frames: int):
         "cmd9": cmds[9],
         "cmdA": cmds[0xA],
         "filter_voices": _filter_voices(model.song, model.subtune),
+        "wavecmds": "".join(
+            sorted({f"{w & 15:X}" for w in model.song.wavetable.left if 0xF0 <= w < 0xFF})
+        ),
     }
     return ours, alt, ref, flags
 

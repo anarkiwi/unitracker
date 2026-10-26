@@ -3,11 +3,14 @@
 State: the freq cell's ``t`` (vibrato phase) and ``m`` (the note a wavetable note row or a
 reached toneporta last set), the pw cell's ``r``, ``q`` (pulse row and time).
 Params: ``s`` step, ``k`` shift of ``F[m + 1] - F[m]`` (computed into ``phi``), ``g`` sign,
-``c`` depth, ``l`` delay, ``b`` first pulse row; a ``1`` variant fires on ``phi`` 0 only.
+``c`` depth, ``l`` delay, ``b`` first pulse row, ``i``, ``j`` the start's ``t`` and ``m``; a
+``1`` variant fires on ``phi`` 0 only.
 """
 
 STATE = {"freq": {"t": 1, "m": 1}, "pw": {"r": 1, "q": 1}}
 
+_PUT = "lda #l\nsta v\nlda #h\nsta v+1\n"
+_SEED = "lda #i\nsta t\nlda #j\nsta m\nrts"
 _ONCE = "lda phi\nora phi+1\nbeq first\nrts\nfirst:\n"
 _DELAY = "lda phi+1\nbne go\nlda phi\ncmp #l\nbcs go\nrts\ngo:\n"
 _CALC = (
@@ -54,7 +57,9 @@ _PTABS = _PTAB_ROW.format("") + (
 
 
 CODE = {
-    "put": "lda #l\nsta v\nlda #h\nsta v+1\nrts",
+    "put": _PUT + "rts",
+    "seed": _SEED,
+    "start": _PUT + _SEED,
     "note": _NOTE,
     "snap": _SNAP,
     "ptab": _PTAB,
@@ -70,6 +75,7 @@ for _name, _prefix, _body, _step in (
 CODE.update(
     (f"{base}1", _ONCE + CODE[base]) for base in ("porta", "portan", "tporta", "tportan", "snap")
 )
+CODE.update(vib1=_ONCE + _VIB.format("#s", "#0"), vibn1=_ONCE + _CALC + _VIB.format("phi", "phi+1"))
 # A pattern portamento's tick 0 zeroes the phase on each of its rows, and nothing else moves it.
 CODE.update((name, "sta t\n" + CODE[name]) for name in ("porta", "portan"))
 CODE = {name: f"{text}\n" for name, text in CODE.items()}
