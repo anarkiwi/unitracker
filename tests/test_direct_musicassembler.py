@@ -23,7 +23,10 @@ def standard_cells(one, text: str, ticks: int = TICKS):
     """The cells where ``text``'s grid differs from the reference player's at the standard
     note table."""
     ours = play(text, ticks=ticks)
-    return gridcmp.cell_diff(ours, m.standard(one.song).render_grid(len(ours)))
+    ref = m.standard(one.song)
+    for at, value in getattr(one, "edits", ()):
+        ref._wr(at, value)
+    return gridcmp.cell_diff(ours, ref.render_grid(len(ours)))
 
 
 @pytest.mark.parametrize("name", ["space_invadarz", "eastern_promise"])
@@ -57,8 +60,10 @@ def fixture_one(space_invadarz):
 
 
 def write(one, at: int, *values):
+    """Writes ``values`` from ``at`` to ``one``'s memory, kept for its reference player."""
     for k, value in enumerate(values):
         one.ref._wr(at + k, value)
+        one.edits = getattr(one, "edits", []) + [(at + k, value)]
 
 
 def pattern(one, voice: int = 0) -> int:
@@ -105,10 +110,7 @@ def test_player_refusals(one, monkeypatch):
 
 
 EDITS = {
-    "note control \\$21": lambda one: (pattern(one) + 2, (0x21,), {}),
     "legato note before": lambda one: (pattern(one) + 2, (0x40,), {}),
-    "an instrument selected without a note": lambda one: (pattern(one) + 3, (0x83, 0x61), {}),
-    "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
     "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
     "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 1), {"order_jump": 1}),
@@ -150,6 +152,31 @@ def test_song_refusals(one, match):
         one.document()
 
 
+def test_an_inner_program_filter_byte_pokes_the_sweep(one, monkeypatch):
+    """The byte fires once into the sweep's accumulator, after the owner's step: on the owner's
+    voice or a later one, none where nothing owns the sweep."""
+    poke = {"post.cut": m.Once(one.call("poke", u=0x21))}
+    monkeypatch.setattr(one, "sweep", lambda tick, v: (0, 0x45, 7, 0xFA))
+    assert one._poke(0, 0x21, 5) == poke and one._poke(2, 0x21, 5) == poke
+    monkeypatch.setattr(one, "sweep", lambda tick, v: (1, 0x45, 7, 0xFA))
+    with pytest.raises(m.TranscribeError, match="before the sweep's owner"):
+        one._poke(0, 0x21, 5)
+    monkeypatch.setattr(one, "sweep", lambda tick, v: (VOICES, 0, 0, 0))
+    assert one._poke(0, 0x21, 5) == {}
+
+
+def test_an_inner_program_filter_byte_plays_exactly(one):
+    write(one, program(one, 4) + 2, 0x21)
+    try:
+        text = one.document()
+    except m.TranscribeError as err:
+        assert "before the sweep's owner" in str(err)
+        return
+    assert "post.cut:poke(33)!" in text and "post:{}" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
 def test_a_pattern_of_no_end_is_refused(one):
     pid = one._rd(one.lay.pattern_id)
     write(one, one.lay.pattern_lo + pid, 0x00)
@@ -159,39 +186,98 @@ def test_a_pattern_of_no_end_is_refused(one):
         one.document()
 
 
-def filtered(one, voice: int = 0):
-    """Voice ``voice``'s first pattern replaced by a filter note, a rest and a plain note;
-    the sweep init left unowned."""
+def filtered(one, voice: int = 0, at: int = 0xC000):
+    """Voice ``voice``'s first pattern replaced, at ``at``, by a filter note, a rest and a
+    plain note; the sweep init left unowned."""
     pid = one._rd(one.lay.pattern_id + voice)
-    write(one, one.lay.pattern_lo + pid, 0x00)
-    write(one, one.lay.pattern_hi + pid, 0xC0)
-    write(one, 0xC000, 0x30, 0x83, 0x45, 0x07, 0xA1, 0x32, 0x03, MA.PATTERN_END)
-    one.start = (VOICES, 0, 0, 0)
+    write(one, one.lay.pattern_lo + pid, at & 0xFF)
+    write(one, one.lay.pattern_hi + pid, at >> 8)
+    write(one, at, 0x30, 0x83, 0x45, 0x07, 0xA1, 0x32, 0x03, MA.PATTERN_END)
+    write(one, one.lay.trigger_owner, VOICES)
+    one.start = one.running = (VOICES, 0, 0, 0)
     return pid
 
 
 def test_a_filter_command_binds_the_sweep(one):
     pid = filtered(one)
     tokens = list(one._tokens(pid))
-    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07), False)
-    assert tokens[2] == ("note", 3, None, 0x32, None, False)
+    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07), False, None)
+    assert tokens[2] == ("note", 3, None, 0x32, None, False, None)
     one._filters(100)
     assert one.sweeps[0] == ((1, 0), 0, 0x45, 0x07, 0xFA)
     voice = m.Voice(0, 0)
     bind = one.call("csweep", u=0x45, c=7, s=0xFA)
     first = dict(one.event(voice, tokens[0], 0, 1).commands)
     preset = one._rd(one.lay.res_presets)
-    assert (first["res"], first["route"], first["cut"]) == (preset >> 4, preset & 0xF, bind)
-    again = dict(one.event(voice, tokens[2], 0, 10).commands)
-    assert "cut" not in again and "res" not in again
+    assert first["cut"] == bind and "res" not in first
+    assert one.resonance(0, tokens[0]) == {"res": preset >> 4, "route": preset & 0xF}
+    assert one.resonance(0, tokens[2]) == {} and one.resonance(0, None) == {}
+    assert "cut" not in dict(one.event(voice, tokens[2], 0, 10).commands)
     assert "cut" not in dict(one.event(m.Voice(0, 1), tokens[2], 0, 10).commands)
 
 
-def test_a_filter_sweep_on_two_voices_is_refused(one):
-    filtered(one)
-    one.start = (1, 0x10, 5, 0xF0)
-    with pytest.raises(m.TranscribeError, match="more than one voice"):
-        one._filters(100)
+def slid(one, *pattern_bytes, voice: int = 0):
+    """Voice ``voice``'s first pattern replaced by ``pattern_bytes``."""
+    pid = one._rd(one.lay.pattern_id + voice)
+    write(one, one.lay.pattern_lo + pid, 0x00)
+    write(one, one.lay.pattern_hi + pid, 0xC0)
+    write(one, 0xC000, *pattern_bytes, MA.PATTERN_END)
+    return pid
+
+
+def test_a_slide_note_reads_its_two_step_bytes(one):
+    pid = slid(one, 0x30, 0x23, 0x11, 0x02, 0x32, 0x03, 0xA3, 0x31, 0xA3, 0x05, 0x06)
+    assert [t[3:] for t in one._tokens(pid)] == [
+        (0x30, None, False, (0x11, 0x02)),
+        (0x32, None, False, None),
+        (None, None, False, None),
+        (0x31, (0x05, 0x06), False, ()),
+    ]
+
+
+@pytest.mark.parametrize("lo", [0x00, 0x20, 0x80, 0x01, 0x7F, 0xFF])
+def test_a_frequency_slide_plays_exactly(one, lo):
+    slid(one, 0x30, 0x23, lo, 0x02, 0x3F, 0x83)
+    text = one.document()
+    assert "vslide(" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
+@pytest.mark.parametrize(
+    "notes",
+    [
+        (0x30, 0x23, 0x11, 0x02, 0x32, 0x63, 0x05, 0x01),
+        (0x30, 0x23, 0x11, 0x02, 0x32, 0x43),
+        (0x30, 0x03, 0x32, 0x63, 0x05, 0x01, 0x34, 0x43),
+    ],
+)
+def test_a_legato_note_with_or_after_a_slide_plays_exactly(one, notes):
+    """A legato slide starts afresh from its note; a plain legato note after one sounds it."""
+    slid(one, *notes)
+    text = one.document()
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
+def test_a_legato_note_before_a_trigger_or_with_a_filter_command_is_refused(one):
+    slid(one, 0x30, 0x63, 0x11, 0x02)
+    with pytest.raises(m.TranscribeError, match="before the voice's first trigger"):
+        one.document()
+    slid(one, 0x30, 0x03, 0x32, 0xC3, 0x11, 0x02)
+    with pytest.raises(m.TranscribeError, match="a filter command on a legato note"):
+        one.document()
+
+
+def test_the_sweep_passes_between_voices(one):
+    """Each owner's first trigger since the sweep or its owner changed binds it again; one
+    taking it from a later voice stops it on its parse tick."""
+    filtered(one, voice=2, at=0xC000)
+    filtered(one, voice=1, at=0xC100)
+    text = one.document()
+    assert one.takes and "cut:idle()" in text and text.count("cut:csweep(") >= 2
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
 
 
 def test_cli(space_invadarz, capsys):
@@ -233,8 +319,9 @@ def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
     write(one, one.lay.pw_lo, 0x4E)
     write(one, one.lay.pw_hi, 0x1C)
     text = one.document()
-    assert "freq:10000" in text and "pw:3150" in text and "ctrl:64" in text
-    assert "off pw:3150 ctrl:64 freq:10000" in text
+    assert "off.i" in text and " pw:3150 ctrl:64 freq:9722" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
     write(one, one.lay.ctrl, 0x41)
     with pytest.raises(m.TranscribeError, match="a voice whose first row plays no note"):
         one.document()
@@ -287,10 +374,33 @@ def test_legato_notes_play_exactly(one, every):
     assert not cells.size, summary(cells, 3)
 
 
-def test_a_legato_note_over_a_running_arpeggio_is_refused(one):
-    assert legato_notes(one, 2, voices=(0,))
-    with pytest.raises(m.TranscribeError, match="legato note over a running arpeggio"):
-        one.document()
+@pytest.mark.parametrize("every", [2, 3])
+def test_a_legato_note_over_a_running_arpeggio_plays_exactly(one, every):
+    """The arpeggio runs on from the legato note's frequency at phase 0, its delay left."""
+    edits = legato_notes(one, every, voices=(0,))
+    assert edits
+    text = one.document()
+    assert "vibl(" in text and "reset:[legato]" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
+@pytest.mark.parametrize(
+    "notes",
+    [
+        (0x30, 0x03, 0x83, 0x61, 0x32, 0x03),
+        (0x30, 0x03, 0x84, 0xA2, 0x32, 0x03),
+        (0x30, 0x03, 0x84, 0x32, 0x43, 0x82, 0x34, 0x43),
+        (0x30, 0x03, 0x84, 0x32, 0x63, 0x05, 0x01),
+    ],
+)
+def test_an_instrument_selected_without_a_trigger_plays_exactly(one, notes):
+    """A note-less or legato selection: the trigger's modes, the selected record's steps."""
+    for v in range(VOICES):
+        slid(one, *notes, voice=v)
+    text = one.document()
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
 
 
 def test_orderlist_jump_is_followed():
