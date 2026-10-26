@@ -199,12 +199,15 @@ SNAP = doc(
     head="voices:1\nslots:{freq:{wave:{},tick:{}}}\n",
     mods=SNAP_MODS,
 )
+
 # SNAP with a repeat group before and around the binding events: the compiled phrase's events
 # are not the document phrase's
 SNAP_GROUP = SNAP.replace(
-    "p1:[C4.i1,-,E tick.freq:snap() legato,-,D.i2,-,G tick.freq:snap() legato,-,D.i2,-,E tick.freq:up() legato,-*3]",
+    "p1:[C4.i1,-,E tick.freq:snap() legato,-,D.i2,-,G tick.freq:snap() legato,-,"
+    "D.i2,-,E tick.freq:up() legato,-*3]",
     "p1:[[C4.i1,-]x2,[D.i2,-,E tick.freq:snap() legato,-]x2,D.i2,-,G tick.freq:snap() legato,-]",
 )
+
 SNAP_STATE = doc(
     "      ins:\n"
     "        i1:{ad:9,ctrl:[{ctrl:65},end]}\n"
