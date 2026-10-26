@@ -5,6 +5,7 @@ from unitracker_grammar import parse
 
 from unitracker.direct import cli
 from unitracker.direct import defmon as dm
+from unitracker.direct.traps import Trap
 
 TICKS = 3000
 
@@ -67,6 +68,9 @@ def test_helpers():
     assert dm.event_at(bytes([0x70, 3, 4, 48]), 0) == (3, 4, 48)
     assert dm.event_at(bytes([0x90, 48]), 0) == (None, None, 48)
     assert cli.summary(dm.np.zeros((0, 4))) == "exact"
+    traps = (Trap(3, 0, 95, 1, 0),)
+    assert cli.summary(dm.np.zeros((0, 4)), 0, traps) == "exact with pitch trapped (1 traps)"
+    assert cli.summary(dm.np.zeros((1, 4)), 0, traps).startswith("first")
 
 
 def test_a_frozen_program_ends_and_a_cycling_one_loops(cross):
@@ -147,3 +151,11 @@ def test_main_transcribes_and_verifies(crosseyed, tmp_path, capsys):
     assert dm.main(["--verify", "--frames", "300", "--diff", "2", str(crosseyed), str(bad)]) == 0
     out = capsys.readouterr().out
     assert f"{crosseyed}: exact" in out and f"{bad}: SidFormatError" in out
+
+
+def test_the_reference_logs_the_note_table_reads_that_differ_from_f(crosseyed):
+    """Every trap is a note-table load at a voice offset whose native word is not F(k - 24)."""
+    grid, found = dm.reference(crosseyed.read_bytes(), ticks=300)
+    assert len(grid) == 300
+    assert all(t.native != t.word == dm.frequency(t.k - 24) for t in found)
+    assert all(0 <= t.tick < 300 for t in found)

@@ -12,11 +12,12 @@ from pysidtracker import gridcmp
 from tqdm import tqdm
 
 
-def summary(cells, runs: int = 0) -> str:
-    """``exact``, or the first differing cell and the count; with ``runs``, that many of each
-    register's differing runs."""
+def summary(cells, runs: int = 0, traps: tuple = ()) -> str:
+    """``exact``, ``exact with pitch trapped`` (the frequency-table reads ``traps`` the
+    reference answered by ``F(k)``), or the first differing cell and the count; with ``runs``,
+    that many of each register's differing runs."""
     if not cells.size:
-        return "exact"
+        return f"exact with pitch trapped ({len(traps)} traps)" if traps else "exact"
     out = [f"first {tuple(int(c) for c in cells[0][:2])} cells {len(cells)}"]
     for reg in gridcmp.runs(cells) if runs else ():
         spans = ", ".join(f"{r['from']}-{r['to']} {r['values'][0][2:]}" for r in reg["runs"][:runs])
@@ -33,8 +34,8 @@ def _check(job: tuple) -> tuple:
     signal.signal(signal.SIGALRM, _expired)
     signal.alarm(limit)
     try:
-        cells = verify(path.read_bytes(), subtune, frames)[0]
-        return path, not cells.size, summary(cells, runs)
+        cells, _, *traps = verify(path.read_bytes(), subtune, frames)
+        return path, not cells.size, summary(cells, runs, *traps)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         return path, False, f"{type(exc).__name__}: {exc}"
     finally:

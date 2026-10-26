@@ -77,7 +77,7 @@ def test_tunes_play_exactly(name, request):
     portamentos and slides, a normal build with chords and chord FX, extra builds (one of a
     pre-1.8 driver, one with staccato restarts)."""
     raw = request.getfixturevalue(name).read_bytes()
-    cells, text = s.verify(raw, frames=3000)
+    cells, text, _ = s.verify(raw, frames=3000)
     assert not cells.size, summary(cells, 3)
     assert "{loop:" in text or text.endswith(" - end\n")
     assert "\ntables:" not in text and "F.lo-1,x" in text
@@ -94,6 +94,15 @@ def test_the_native_table_is_the_standard_one_but_for_note_0(name, request):
     assert (words[0][0], words[1][0]) == (263, 262)
     cells = s.compare(one.swm, one.document(), 3000, native=True)
     assert not cells.size, summary(cells, 3)
+
+
+def test_the_reference_traps_the_note_0_load(mega_run):
+    """The native table's one difference in range is note 0's word: a load of it is trapped."""
+    one = s.transcriber(mega_run.read_bytes())
+    grid, found = s.trapped(one.swm, 300)
+    assert len(grid) == 300
+    assert all((t.native, t.word) == (263, 262) and t.k == 0 for t in found)
+    assert s.reference(mega_run.read_bytes(), 0, 50)[0].shape[0] == 50
 
 
 LIGHT = {
