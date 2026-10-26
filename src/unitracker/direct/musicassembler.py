@@ -47,6 +47,8 @@ VOICES = MA.VOICES
 JMP_ABS = 0x4C
 NOTE_CTL = MA.CTL_DUR_MASK | MA.CTL_FILTER | MA.CTL_VIBARP | MA.CTL_TRIGGERED
 FROZEN = "row.ad"
+# The bound sweep after a legato filter command: the owner's next trigger loads it afresh.
+STALE = (VOICES, 0, 0, 0)
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 SLOTS = {
     "freq": [Slot("freq", hold=(FROZEN,))],
@@ -59,6 +61,7 @@ POKE = Slot("post")
 LEGATO = Slot("freq", hold=(FROZEN,), reset=("legato",))
 CELL = {
     "csweep": "cut",
+    "csweeps": "cut",
     "poke": "cut",
     "idle": "cut",
     "pulse": "pw",
@@ -105,6 +108,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.rowlen = self._rd(self.lay.tempo_reload) + 1
         self.ins, self.ctrl, self.phrases, self.used = {}, {}, {}, []
         self.sweeps, self.binds, self.takes = [], set(), set()
+        self.sweeps_at = set()
         self.start = self.running = (VOICES, 0, 0, 0)
         self._check()
         lay = self.lay
@@ -343,12 +347,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         its ticks' control rows, the last its next parse's, of token ``nxt``, which writes
         only its filter command's resonance and holds the sweeps; a ``first`` non-note writes
         the voice's image cells and only sets its instrument, none running yet."""
-        kind, dur, ins, note, filt, legato, steps = token
+        kind, dur, ins, note, _, legato, steps = token
         length = (dur + 1) * self.rowlen
         if legato and not voice.live:
             raise TranscribeError("a legato note before the voice's first trigger")
-        if legato and filt is not None:
-            raise TranscribeError("a filter command on a legato note")
         cmds = {}
         if ins is not None and ins != voice.ins and (kind != "note" or legato):
             cmds = self._select(voice, ins)
@@ -371,8 +373,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if first and kind != "note":
             name, cmds = self.instrument(voice.ins), self.image(voice.v)
         cmds = {"run": self._program(rows)} | cmds
-        if kind == "note" and not legato:
-            cmds |= self._filter(voice, tick)
+        if kind == "note":
+            cmds |= self._legato_filter(voice, tick) if legato else self._filter(voice, tick)
         if legato:
             cmds["legato"] = True
         return Event(note_name(voice.index) if kind == "note" else kind, name, cmds, steps=length)
@@ -434,6 +436,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         _, u, c, s = self.sweep(tick, voice.v)
         return {"cut": self.call("csweep", u=u, c=c, s=s)}
 
+    def _legato_filter(self, voice: Voice, tick: int) -> dict:
+        """The commands of a legato note of ``voice`` at ``tick``: the sweep running on, with
+        the filter command's step, where it has one; the trigger runs no reload."""
+        if (tick, voice.v) not in self.sweeps_at:
+            return {}
+        _, _, _, s = self.sweep(tick, voice.v)
+        return {"cut": self.call("csweeps", s=s)}
+
     # ---- the song -----------------------------------------------------------------------
 
     def _ticks(self, pid: int) -> int:
@@ -489,10 +499,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                     if token[4] is not None:
                         u, c = token[4]
                         found.append(((tick, v), v, u, c, ((u & 0x0F) << 1) - 0x10 & 0xFF))
-                    if token[0] == "note" and not token[5]:
-                        notes.append((tick, v))
+                    if token[0] == "note":
+                        notes.append((tick, v, token[5]))
                     tick += (token[1] + 1) * self.rowlen
         self.sweeps, owner, self.takes = sorted(found), self.start[0], set()
+        self.sweeps_at = {at for at, *_ in self.sweeps}
         for at, v, *_ in self.sweeps:
             if v < owner < VOICES:
                 self.takes.add(at)
@@ -500,7 +511,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         bound, self.binds = None, set()
         if self.running[0] < VOICES and (self.running[2] or self.start[2]):
             bound = self.running
-        for tick, v in sorted(notes):
+        for tick, v, legato in sorted(notes):
+            if legato:
+                bound = bound and STALE if (tick, v) in self.sweeps_at else bound
+                continue
             want = self.sweep(tick, v)
             if want[0] == v and want != bound and (want[2] or bound):
                 self.binds.add((tick, v))

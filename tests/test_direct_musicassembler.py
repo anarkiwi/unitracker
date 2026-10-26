@@ -274,13 +274,20 @@ def test_a_legato_note_with_or_after_a_slide_plays_exactly(one, notes):
     assert not cells.size, summary(cells, 3)
 
 
-def test_a_legato_note_before_a_trigger_or_with_a_filter_command_is_refused(one):
+def test_a_legato_note_before_a_trigger_is_refused(one):
     slid(one, 0x30, 0x63, 0x11, 0x02)
     with pytest.raises(m.TranscribeError, match="before the voice's first trigger"):
         one.document()
-    slid(one, 0x30, 0x03, 0x32, 0xC3, 0x11, 0x02)
-    with pytest.raises(m.TranscribeError, match="a filter command on a legato note"):
-        one.document()
+
+
+def test_a_filter_command_on_a_legato_note_steps_the_running_sweep(one):
+    """The accumulator and count run on; only the step changes, then the owner's next trigger
+    binds the sweep afresh."""
+    slid(one, 0x30, 0x03, 0x32, 0xC3, 0x11, 0x02, 0x34, 0x03, 0x36, 0x03)
+    text = one.document()
+    assert "csweeps(" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
 
 
 def test_the_sweep_passes_between_voices(one):
