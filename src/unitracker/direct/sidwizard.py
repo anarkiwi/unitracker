@@ -74,12 +74,12 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         feats = self.feats
         held = feats.arpspeedsupp and feats.detunesupport and rows
         self.hrc = held and not feats.vibslidealways
-        self.mirror = held and self.pwkb
+        self.mirror = held and (self.pwkb or any(i.pw_table for i in self.swm.instruments))
         self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
         if self.pwkb or self.fkb:
             self.code |= track_templates(feats.finefiltsweep)
         if self.mirror:
-            self.code |= mirror_templates()
+            self.code |= mirror_templates(self.pwkb)
         self.routines = {name: code.read(text) for name, text in self.code.items()}
 
     def _unsupported(self) -> list:

@@ -94,12 +94,12 @@ class Tables:  # pylint: disable=too-few-public-methods
             return []
         if not self.feats.detunesupport:
             return [Row({"hold": ticks})]
-        if self.feats.pwkeybtrack:
-            carry = 2 if self.mirror else 0
-        elif not ins.pw_table:
-            carry = 1
+        if self.mirror:
+            carry = 2
+        elif self.feats.pwkeybtrack:
+            carry = 0
         else:
-            raise TranscribeError("WF rows held over ticks with a pulse table, its carry")
+            carry = 1
         return [Row(self._det({"hold": ticks} if ticks > 1 else {}, None, 3, carry))]
 
     def _rest(self, rows: list, ins, reload: int, carry: int) -> tuple:
@@ -252,7 +252,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         # pylint: disable=too-many-arguments,too-many-positional-arguments
         rows, at = [Row(rows_of["started"] if count is None else rows_of["resumed"])], {}
         rows = rows if lead else []
-        first = True
+        first, carry = True, 0
         while True:
             if pos >= len(image) or image[pos] == 0xFF:
                 return rows + rows_of["rest"], None
@@ -262,8 +262,9 @@ class Tables:  # pylint: disable=too-few-public-methods
                     return rows + rows_of["rest"], None
                 if image[target] in (0xFE, 0xFF):
                     raise TranscribeError(f"a {cell} jump to a jump or an end")
+                carry = int(target >= pos)
                 if image[target] < 0x80:
-                    rows.append(Row(rows_of["jump"]))
+                    rows.append(Row(rows_of["jump"](carry)))
                 pos = target
             if pos in at:
                 return rows, at[pos]
@@ -277,12 +278,12 @@ class Tables:  # pylint: disable=too-few-public-methods
                 continue
             at[pos] = len(rows)
             if byte & 0x80:
-                rows.append(Row(rows_of["set"](pos)))
+                rows.append(Row(rows_of["set"](pos, carry)))
             elif first:
                 raise TranscribeError(f"a {cell} table that starts with a sweep")
             else:
                 rows += self._sweep(rows_of, pos, byte)
-            first = False
+            first, carry = False, 0
             pos += 3
 
     @staticmethod
@@ -301,27 +302,35 @@ class Tables:  # pylint: disable=too-few-public-methods
 
         if self.pwkb:
             rows_of = {
-                "set": lambda p: self._pulsed("st", w=width(p), j=_col(image, p + 2)),
+                "set": lambda p, _: self._pulsed("st", w=width(p), j=_col(image, p + 2)),
                 "sweep": lambda p: self._pulsed("sw", d=_signed(_col(image, p + 1))),
                 "advance": lambda p, _: self._pulsed("id", j=_col(image, p + 2)),
-                "jump": self._pulsed("wr"),
+                "jump": lambda _: self._pulsed("wr"),
                 "rest": [Row(self._pulsed("wr"))],
                 "resumed": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
                 "started": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
             }
         else:
             rows_of = {
-                "set": lambda p: {"pw": width(p)},
-                "sweep": lambda p: {"pw": Expr(canonical(f"v + {_signed(_col(image, p + 1))}"))},
-                "advance": lambda p, swept: {"pw": "none"} if swept else {},
-                "jump": {},
-                "rest": [],
-                "resumed": {"pw": "none"},
-                "started": {"pw": "none"},
+                "set": lambda p, c: {"pw": width(p)}
+                | self._carried("st", w=_col(image, p + 1), c=c),
+                "sweep": lambda p: {"pw": Expr(canonical(f"v + {_signed(_col(image, p + 1))}"))}
+                | self._carried("sw", d=_col(image, p + 1)),
+                "advance": lambda p, swept: ({"pw": "none"} if swept else {})
+                | self._carried("cs", c=1),
+                "jump": lambda c: self._carried("cs", c=c),
+                "rest": [Row(self._carried("cs", c=1))] if self.mirror else [],
+                "resumed": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
+                "started": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
             }
         start = INST_WF_TABLE_POS + len(ins.wf_table) + 1 if pos is None else pos
         rows, loop = self._swept(image, start, "pw", rows_of, count, lead)
         return self._named("pw", "pw", Program(rows, loop))
+
+    def _carried(self, kind: str, **params) -> dict:
+        """An untracked pulse row's mirror binding of template ``k`` + ``kind``: SETPWID's
+        carry, for WF rows held over ticks."""
+        return {"pm.freq": self.call("k" + kind, **params)} if self.mirror else {}
 
     def _pulsed(self, kind: str, **params) -> dict:
         """A tracked pulse row's binding of template ``p`` + ``kind``, and its mirror's."""
@@ -350,22 +359,22 @@ class Tables:  # pylint: disable=too-few-public-methods
 
         if self.fkb:
             rows_of = {
-                "set": lambda p: bands(p) | fladvan(p, "fst", c=_col(image, p + 1)),
+                "set": lambda p, _: bands(p) | fladvan(p, "fst", c=_col(image, p + 1)),
                 "sweep": lambda p: {self.walk: self.call("fsw", d=_signed(_col(image, p + 1)))},
                 "advance": lambda p, _: fladvan(p, "fid"),
-                "jump": {self.walk: self.call("frs")},
+                "jump": lambda _: {self.walk: self.call("frs")},
                 "rest": [Row({self.walk: self.call("frs")})],
                 "resumed": {self.walk: self.call("frs")},
                 "started": {self.walk: self.call("frs")},
             }
         else:
             rows_of = {
-                "set": lambda p: bands(p) | {"cut": _col(image, p + 1) << 3},
+                "set": lambda p, _: bands(p) | {"cut": _col(image, p + 1) << 3},
                 "sweep": lambda p: {
                     "cut": Expr(canonical(f"v + {scale * _signed(_col(image, p + 1))}"))
                 },
                 "advance": lambda p, swept: {"cut": "none"} if swept else {},
-                "jump": {},
+                "jump": lambda _: {},
                 "rest": [],
                 "resumed": {"cut": "none"},
                 "started": {"cut": "none"},

@@ -109,8 +109,18 @@ def unnoted(text: str) -> str:
     return re.sub(r"\bne\b", "#255", text)
 
 
-def mirror_templates() -> dict:
-    """The pulse templates mirrored on the freq cell, for WRPITCH's carry on skipped WF ticks."""
+def mirror_templates(tracked: bool = True) -> dict:
+    """The pulse templates mirrored on the freq cell, for WRPITCH's carry on skipped WF ticks:
+    WRPULS's where the pulse tracks the keyboard, else SETPWID's (``ml`` PWLOGHO)."""
+    if not tracked:
+        return {
+            # SETPULW: PWLOGHO, the carry ``c`` (a jump's ``cmp PWTPOS``).
+            "kst": "lda phi\nora phi+1\nbne go\nlda #w\nsta ml\nlda #c\nsta cs\ngo:\nrts\n",
+            # PWSWEEP's step: the carry of PWLOGHO's add.
+            "ksw": "clc\nlda ml\nadc #d\nsta ml\nlda #0\nrol\nsta cs\nrts\n",
+            # PWADVAN, a jump to a sweep, the table's end: a carry ``c``.
+            "kcs": "lda #c\nsta cs\nrts\n",
+        }
     pulse = track_templates(False)
     return {"m" + name[1:]: _mirrored(pulse[name]) for name in ("pst", "psw", "pid", "pwr")}
 
