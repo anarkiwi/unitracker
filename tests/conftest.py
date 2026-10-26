@@ -101,6 +101,29 @@ whammer = hvsc_tune(
     "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
 )
 
+come_at_me_bro = hvsc_tune(
+    "come_at_me_bro",
+    "MUSICIANS/J/Jammer/Come_at_Me_Bro.sid",
+    "Path to Jammer's Come at Me Bro, a GoatTracker 2 tune whose init routine writes the SID.",
+)
+el_loco = hvsc_tune(
+    "el_loco",
+    "MUSICIANS/J/Jammer/El_Loco_Challenge_intro.sid",
+    "Path to Jammer's El Loco Challenge intro, a GoatTracker 2 tune whose init routine writes"
+    " the SID.",
+)
+pantheon = hvsc_tune(
+    "pantheon",
+    "MUSICIANS/T/Toggle/Pantheon.sid",
+    "Path to Toggle's Pantheon, a SID-Wizard export whose init routine writes the voices.",
+)
+pimp_my_commodore = hvsc_tune(
+    "pimp_my_commodore",
+    "MUSICIANS/H/Hermit/Pimp_My_Commodore.sid",
+    "Path to Hermit's Pimp My Commodore, a SID-Wizard export whose init routine writes the"
+    " voices.",
+)
+
 space_invadarz = hvsc_tune(
     "space_invadarz",
     "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",

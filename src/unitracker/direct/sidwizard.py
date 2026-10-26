@@ -47,6 +47,7 @@ from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, tra
 
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
 DUMMY = 256
+VOICE_REGISTERS = 21  # three voices of seven
 
 
 class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
@@ -562,6 +563,14 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
                     raise
         raise AssertionError("unreachable")
 
+    def regs(self) -> tuple | None:
+        """The registers before tick 0 where the tune's init routine wrote the voices': they
+        hold until the player writes them. None where it wrote none."""
+        start = tuple(self.ref.image.sid_init[:VOICE_REGISTERS])
+        if not any(start):
+            return None
+        return start + (0,) * (VOICE_REGISTERS - len(start)) + (0, 0, 0, 15)
+
     def document(self) -> str:
         """The document of the song to its loop or end."""
         rows, loop, dummies = self.traced()
@@ -581,6 +590,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             tempo=1,
             slots=self.slots(),
             state={cell: names for cell, names in state.items() if names} or None,
+            regs=self.regs(),
         )
         mods = [
             (signature(name, code.params(self.routines[name])), Code(self.routines[name]))

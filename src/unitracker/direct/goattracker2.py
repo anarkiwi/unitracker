@@ -27,6 +27,7 @@ from unitracker_grammar.document import (
     Expr,
     Header,
     Instrument,
+    Once,
     Play,
     Program,
     Row,
@@ -49,6 +50,7 @@ TICK = "tick.freq"
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 FREQ_CMDS = (C.CMD_PORTAUP, C.CMD_PORTADOWN, C.CMD_TONEPORTA, C.CMD_VIBRATO)
 LEAD = 2
+INTRO = 64  # the ticks the start registers are fitted over
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 PHASES = ("events", "ctrl", "pulse", "filter", "freq", "pw", "cut", "read")
 _PLAIN = re.compile(r"[^\s,\[\]{}'\"#&*!|>%@`:?-][^,\[\]{}]*")
@@ -530,25 +532,55 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             return rows, None
         return rows[: loop[0] + loop[1] + 1], loop[0] + 1
 
-    def init(self) -> tuple:
-        """The init events: instrument 1 on every voice, its vibrato running from the intro."""
+    def init(self, undo: tuple = (), lag: bool = False) -> tuple:
+        """The init events: instrument 1 on every voice, its vibrato running from the intro;
+        ``undo`` the ``(voice, command, value)`` cells the start registers set that the first
+        tick must leave as the document would, the lag's tick lasting a tick less."""
         ins = self.instrument(1)
         speed = self.ref._instr[1].speed_ptr  # pylint: disable=protected-access
         intro = {TICK: self.vibrato(speed, 1)} if speed else {}
-        first = Event("-", ins, {"vol": 15, "tempo": LEAD} | intro)
-        return (first,) + (Event("-", ins, intro),) * (len(self.order) - 1)
+        out = []
+        for v in range(len(self.order)):
+            commands = {
+                k: Once(self.call("put", l=n & 0xFF, h=n >> 8)) if k == "freq" else n
+                for u, k, n in undo
+                if u == v
+            }
+            if not v:
+                commands = {"vol": 15, "tempo": LEAD - lag} | commands
+            out.append(Event("-", ins, commands | intro))
+        return tuple(out)
 
     def document(self, frames: int = 200000) -> str:
-        """The document of the song to its loop, sequenced over at most ``frames`` frames."""
+        """The document of the song to its loop, sequenced over at most ``frames`` frames. Where
+        the reference player's first ticks differ from it, the start registers are the header's,
+        the output lagging the document a tick: the first tick's registers, then the init
+        events setting back the cells the tick after them shows differently."""
+        text = self.build(frames)
+        theirs = np.asarray(standard(self.model).render_grid(INTRO), dtype=np.uint8)
+        have = play(text, ticks=INTRO)
+        if not gridcmp.cell_diff(have[:2], theirs[:2]).size:
+            return text
+        start = tuple(int(r) for r in theirs[0])
+        pairs = zip(start_cells(theirs[1]), start_cells(start), start_cells(have[0]))
+        undo = tuple(c for c, *others in pairs if any(c != o for o in others))
+        return self.build(frames, start, undo)
+
+    def build(  # pylint: disable=too-many-locals
+        self, frames: int, start: tuple | None = None, undo: tuple = ()
+    ) -> str:
+        """The document over ``frames`` frames, from registers ``start`` before tick 0 where
+        given, ``undo`` the cells its first tick sets back."""
         run = sequence(self.model, frames)
         rowlen = self.ref._default_tempo() + 1  # pylint: disable=protected-access
         if rowlen < 3:
             raise TranscribeError("funk default tempo")
-        first = {run.starts[c][0].tick for c in self.order if run.starts[c]}
-        if first != {LEAD + rowlen}:
+        if (first := {run.starts[c][0].tick for c in self.order if run.starts[c]}) != {
+            LEAD + rowlen
+        }:
             raise TranscribeError(f"first patterns start at {sorted(first)}")
         rows, loop = self.timeline(run)
-        init = self.init()
+        init = self.init(undo, start is not None)
         phrases = [("p0", (Event("-"), Event("-", commands={"tempo": rowlen})))]
         phrases += [(name, events) for events, name in self.phrases.items()]
         defs = [Section("ins", tuple(self.ins.items()))]
@@ -556,10 +588,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if self.filter:
             defs.append(Section("filter", tuple(self.filter.items())))
         defs.append(Section("phrase", phrases))
-        song = [SongRow(r) for r in rows]
-        header = self.model.header
-        meta = {k: meta_text(v) for k, v in (("title", header.name), ("author", header.author))}
-        meta["released"] = meta_text(header.released)
+        info = self.model.header
+        meta = {k: meta_text(v) for k, v in (("title", info.name), ("author", info.author))}
+        meta["released"] = meta_text(info.released)
         head = Header(
             meta,
             clock=(CLOCK["cycles_per_tick"], CLOCK["clock_hz"]),
@@ -567,10 +598,32 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             slots=self.slots(),
             order=PHASES,
             state=self.state(),
+            regs=start,
+            lag=1 if start else None,
             voices=len(self.order) if len(self.order) != C.MAX_CHN else None,
         )
-        doc = Document(head, self.tables, (), defs, init, song, loop)
+        doc = Document(head, self.tables, (), defs, init, [SongRow(r) for r in rows], loop)
         return printed(replace_mods(doc, self.used))
+
+
+def start_cells(regs) -> list:
+    """``regs`` as ``(voice, command, value)`` cells: a voice's frequency, pulse width,
+    control, attack/decay and sustain/release, voice 0's filter and mode."""
+    regs, out = [int(r) for r in regs], []
+    for v in range(C.MAX_CHN):
+        b = v * C.VOICE_REG_SIZE
+        out += [
+            (v, "freq", regs[b] | regs[b + 1] << 8),
+            (v, "pw", regs[b + 2] | regs[b + 3] << 8),
+        ]
+        out += [(v, "ctrl", regs[b + 4]), (v, "ad", regs[b + 5]), (v, "sr", regs[b + 6])]
+    return out + [
+        (0, "cut", regs[21] & 7 | regs[22] << 3),
+        (0, "res", regs[23] >> 4),
+        (0, "route", regs[23] & 15),
+        (0, "mode", regs[24] & 0xF0),
+        (0, "vol", regs[24] & 15),
+    ]
 
 
 def _calls(node):

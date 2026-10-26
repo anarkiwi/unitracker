@@ -53,7 +53,13 @@ _PTABS = _PTAB_ROW.format("") + (
 )
 
 
-CODE = {"note": _NOTE, "snap": _SNAP, "ptab": _PTAB, "ptabs": _PTABS}
+CODE = {
+    "put": "lda #l\nsta v\nlda #h\nsta v+1\nrts",
+    "note": _NOTE,
+    "snap": _SNAP,
+    "ptab": _PTAB,
+    "ptabs": _PTABS,
+}
 for _name, _prefix, _body, _step in (
     ("porta", "", _PORTA, ("#<s", "#>s")),
     ("tporta", "", _TOWARD, ("#<s", "#>s")),

@@ -384,3 +384,12 @@ def test_a_cutoff_fx_of_an_earlier_voice_lands_after_the_filter_walk(border_odys
     swm = song(raw, first, [second], i1={"filter_table": bytes.fromhex("9f0800051000")})
     swm.patterns[0].rows[0] = Row(note=40, instrument=3)
     assert "late.cut:fhi(48)" in exact(swm)
+
+
+@pytest.mark.parametrize("name", ["pantheon", "pimp_my_commodore"])
+def test_init_routine_tunes_play_exactly(name, request):
+    """The tunes whose init routine writes the voices' registers lift, and play as the
+    reference does, the registers the header's."""
+    cells, text, _ = s.verify(request.getfixturevalue(name).read_bytes(), frames=TICKS)
+    assert not cells.size, summary(cells, 3)
+    assert "\nregs:" in text
