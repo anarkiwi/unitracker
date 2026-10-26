@@ -46,13 +46,18 @@ def write_failure(path: Path, line: str) -> None:
 
 @functools.cache
 def versions() -> dict:
-    """The unitracker commit (else its package version) and its libraries' installed versions."""
+    """The unitracker commit (``UNITRACKER_COMMIT``, else git's, else its package version, else
+    None) and its libraries' installed versions."""
     git = ["git", "-C", str(shared.ROOT), "rev-parse", "HEAD"]
+    commit = os.environ.get("UNITRACKER_COMMIT")
     try:
-        commit = subprocess.run(git, capture_output=True, check=True, text=True).stdout.strip()
+        commit = commit or subprocess.run(git, capture_output=True, check=True, text=True).stdout
     except (OSError, subprocess.CalledProcessError):
-        commit = metadata.version("unitracker")
-    out = {"unitracker": commit}
+        try:
+            commit = metadata.version("unitracker")
+        except metadata.PackageNotFoundError:
+            commit = None
+    out = {"unitracker": commit and commit.strip()}
     for lib in LIBRARIES:
         try:
             out[lib] = metadata.version(lib)
