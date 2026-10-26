@@ -111,7 +111,7 @@ EDITS = {
     "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
     "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
-    "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 0), {"order_jump": 1}),
+    "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 1), {"order_jump": 1}),
     "orderlist command \\$FC": lambda one: (order(one) + 2, (0xFC,), {"order_tempo": (1,)}),
     "start the orderlists": lambda one: (one.lay.pat_cursor, (1,), {}),
 }
