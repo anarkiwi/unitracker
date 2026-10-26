@@ -43,6 +43,7 @@ from unitracker.direct.macode import CODE, STATE
 # The clock whose F is nearest the player's note table: 53 of its notes 0-94 differ by one.
 CLOCK = (PAL_CYCLES_PER_FRAME, 985056)
 VOICES = MA.VOICES
+JMP_ABS = 0x4C
 FROZEN = "row.ad"
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 SLOTS = {
@@ -88,9 +89,17 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         cells = (lay.trigger_owner, lay.trigger_acc, lay.trigger_ctr, lay.sweep_step)
         self.start = tuple(self._rd(c) for c in cells)
 
+    def _follow_jmp(self, addr: int) -> int:
+        """Where a chain of ``JMP abs`` from ``addr`` ends, or the address that repeats."""
+        seen = set()
+        while addr not in seen and self._rd(addr) == JMP_ABS:
+            seen.add(addr)
+            addr = self._rd(addr + 1) | self._rd(addr + 2) << 8
+        return addr
+
     def _check(self) -> None:
         lay, rd = self.lay, self._rd
-        if self.song.play_addr != lay.entry:
+        if self._follow_jmp(self.song.play_addr) != lay.entry:
             raise TranscribeError("a play routine that is not the player's entry")
         offsets = tuple(rd(lay.voice_reg + v) for v in range(VOICES))
         if lay.output_voices != (0, 1, 2) or offsets != MA.SID_VOICE_OFFSET[:VOICES]:
