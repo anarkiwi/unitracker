@@ -382,9 +382,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         events = [{"res": res_filt >> 4, "route": res_filt & 0x0F, "mode": mode_vol & 0xF0}]
         events[0]["vol"] = mode_vol & 0x0F
         events += [{} for _ in range(VOICES - 1)]
-        owner, u, count, step = self.start
+        rd, lay = self._rd, self.lay
+        owner, count = rd(lay.trigger_owner), rd(lay.trigger_ctr)
         if owner < VOICES and count:
-            events[owner]["cut"] = self.call("csweep", u=u, c=count, s=step)
+            sweep = self.call("csweep", u=rd(lay.trigger_acc), c=count, s=rd(lay.sweep_step))
+            events[owner]["cut"] = sweep
         return [Event("-", commands=c) for c in events]
 
     def _defs(self, phrases: list) -> list:
