@@ -256,3 +256,10 @@ def test_cli(metal_warrior, capsys):
     assert capsys.readouterr().out.startswith(f"unitracker:{VERSION}\n")
     assert g.main(["--verify", "--frames", "400", str(metal_warrior)]) == 0
     assert ": exact" in capsys.readouterr().out
+
+
+def test_native_table_differs_from_the_standard_only_in_pitch():
+    model = gt_tune(WAVE, voice2=V2)[0]
+    assert not g.compare(model, TICKS)[0].size
+    cells, _ = g.compare(model, TICKS, native=True)
+    assert set(cells[:, 1].tolist()) <= {0, 1, 7, 8, 14, 15}
