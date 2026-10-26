@@ -384,3 +384,12 @@ def test_a_cutoff_fx_of_an_earlier_voice_lands_after_the_filter_walk(border_odys
     swm = song(raw, first, [second], i1={"filter_table": bytes.fromhex("9f0800051000")})
     swm.patterns[0].rows[0] = Row(note=40, instrument=3)
     assert "late.cut:fhi(48)" in exact(swm)
+
+
+def test_init_routine_writes_play_exactly(pimp_my_commodore):
+    """A tune whose init routine writes the SID lifts, and plays as the reference does, the
+    registers its first tick shows the header's, to the tick before voice 3's frequency steps
+    one off on a note the document differs on with or without the header."""
+    cells, text, _ = s.verify(pimp_my_commodore.read_bytes(), frames=280)
+    assert not cells.size, summary(cells, 3)
+    assert "\nregs:" in text

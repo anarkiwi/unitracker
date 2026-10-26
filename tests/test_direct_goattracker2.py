@@ -2,6 +2,7 @@
 
 import pytest
 from pygoattracker import constants as GT
+from pygoattracker.packed import PlayerState
 from unitracker_grammar import code, parse
 from unitracker_grammar.document import VERSION, Event
 
@@ -279,3 +280,20 @@ def test_native_table_differs_from_the_standard_only_in_pitch():
     assert not g.compare(model, TICKS)[0].size
     cells, _ = g.compare(model, TICKS, native=True)
     assert set(cells[:, 1].tolist()) <= {0, 1, 7, 8, 14, 15}
+
+
+def test_init_routine_writes_are_the_header_registers():
+    """The SID writes of the tune's init routine are the registers before tick 0."""
+    text = exact(gt_tune(WAVE, voice2=V2, init_regs=((0, 0x34), (1, 0x12), (23, 0x01))))
+    assert "\nregs:[" in text.replace("regs: [", "regs:[") or "regs:" in text
+
+
+def test_start_state_registers_are_the_header_registers():
+    """The registers a build's init leaves, as its first tick writes them from."""
+    regs = tuple([0x34, 0x12, 0, 0, 0, 0, 0xF0] + [0] * 17 + [0x0F])
+    state = PlayerState(regs, cutoff=0x40, filttype=0x10, volume=0x0F, funk=(8, 5), ghost=False)
+    assert "regs:" in exact(gt_tune(WAVE, voice2=V2, state=state))
+
+
+def test_the_editor_start_state_has_no_header_registers():
+    assert "regs:" not in exact(gt_tune(WAVE, voice2=V2))

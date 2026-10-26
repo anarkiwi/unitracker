@@ -86,7 +86,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def _unsupported(self) -> list:
         """What the tune uses that this transcription refuses."""
         swm, feats, out = self.swm, self.feats, []
-        if swm.frame_speed != 1 or self.ref.image.play_gate or any(self.ref.image.filter_init):
+        if swm.frame_speed != 1 or self.ref.image.play_gate or any(self.ref.image.filter_init[:3]):
             out.append("multispeed, a play gate or an initial filter")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
@@ -563,7 +563,17 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         raise AssertionError("unreachable")
 
     def document(self) -> str:
-        """The document of the song to its loop or end."""
+        """The document of the song to its loop or end; where the reference player's first tick
+        differs from it, as after an init routine that wrote the SID, the registers it shows
+        are the header's, held until the player writes them."""
+        text = self.assemble()
+        first = standard(self.swm).render_grid(1)[0]
+        if play(text, ticks=1)[0].tolist() == list(first):
+            return text
+        return self.assemble(tuple(int(r) for r in first))
+
+    def assemble(self, start: tuple | None = None) -> str:
+        """The document of the song to its loop or end, from registers ``start`` before tick 0."""
         rows, loop, dummies = self.traced()
         phrases = Section("phrase", [(name, list(events)) for events, name in self.phrases.items()])
         song = [SongRow(r) for r in rows]
@@ -581,6 +591,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             tempo=1,
             slots=self.slots(),
             state={cell: names for cell, names in state.items() if names} or None,
+            regs=start,
         )
         mods = [
             (signature(name, code.params(self.routines[name])), Code(self.routines[name]))

@@ -101,6 +101,13 @@ whammer = hvsc_tune(
     "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
 )
 
+pimp_my_commodore = hvsc_tune(
+    "pimp_my_commodore",
+    "MUSICIANS/H/Hermit/Pimp_My_Commodore.sid",
+    "Path to Hermit's Pimp My Commodore, a SID-Wizard export whose init routine writes the"
+    " voices.",
+)
+
 space_invadarz = hvsc_tune(
     "space_invadarz",
     "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",
