@@ -325,9 +325,12 @@ def test_a_lower_voice_takes_the_filter_claimed_in_the_same_tick(mega_run):
 
 
 REFUSED = {
-    "FX \\$09": [Row(note=37, instrument=1, fx=9, fx_value=1), EMPTY],
     "a note before any instrument": [Row(note=37), EMPTY],
-    "a waveform FX on a note": [Row(note=37, instrument=1, fx=0x41), EMPTY],
+    "a waveform FX setting a gate": [
+        Row(note=37, instrument=1),
+        Row(note=0x7E),
+        Row(fx=4, fx_value=0x41),
+    ],
     "two FX of one cell": [Row(note=37, instrument=1), Row(note=0x65, fx=0x01, fx_value=1)],
 }
 
@@ -360,18 +363,36 @@ def test_a_filter_row_routes_by_its_fswitch_column(samwise, third):
     assert ("route:4" in text) == (third == 0x84)
 
 
-def test_song_refusals(lykia_boss, csillag):
-    swm = song(csillag.read_bytes(), notes((37, 1)))
+def test_arpscnt_kept_over_strtsnd_plays_exactly(csillag):
+    """Without MULTISPEEDSUPP the first WF read after STRTSND waits out ARPSCNT."""
+    swm = song(csillag.read_bytes(), notes((37, 1), (40, 1)))
     swm.instruments[0].arp_speed = 2
     swm.player = dataclasses.replace(
         swm.player, features=dataclasses.replace(swm.player.features, multispeedsupp=False)
     )
-    with pytest.raises(s.TranscribeError, match="without STRTSND's ARPSCNT reset"):
-        s.Transcriber(swm, META)
+    exact(swm)
+
+
+@pytest.mark.parametrize("speed", [2, 3])
+def test_multispeed_plays_exactly(speed, csillag, lykia_boss):
+    """A tick a play call: the rows on the PLAYER calls, the WF walk on every call; a build
+    without MULTISPEEDSUPP refused."""
+    swm = song(csillag.read_bytes(), notes((37, 1), (40, 1)))
+    swm.frame_speed = speed
+    assert "ms.freq:ph()" in exact(swm)
     swm = song(lykia_boss.read_bytes(), notes((37, 1)))
-    swm.frame_speed = 2
-    with pytest.raises(s.TranscribeError, match="multispeed"):
+    swm.frame_speed = speed
+    with pytest.raises(s.TranscribeError, match="without MULTISPEEDSUPP"):
         s.Transcriber(swm, META)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [Row(note=37, instrument=1, fx=9, fx_value=1), Row(note=37, instrument=1, fx=0x41)],
+)
+def test_note_fx_plays_exactly(row, csillag):
+    """A WF position FX and a waveform FX on a note, both past STRTSND's write."""
+    exact(song(csillag.read_bytes(), [row, EMPTY] + notes((40, None))))
 
 
 def test_cli(mega_run, capsys):
@@ -422,3 +443,26 @@ def test_lifted_gaps_play_exactly(name, marks, request):
 def test_an_unnoted_walk_reads_dpitch_0():
     """A template on a voice yet to play a note reads the note as -1, so DPITCH as 0."""
     assert unnoted("ldx ne\ninx\nbne x\n") == "ldx #255\ninx\nbne x\n"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "jt_style",
+        "lenore",
+        "stompbox",
+        "csango_boogie",
+        "samar_is_20",
+        "pantheon",
+        "grumps",
+        "x_copy",
+        "emomyst",
+    ],
+)
+def test_lifted_tunes_play_exactly(name, request):
+    """Multispeed (orderlist transposes and raw bytes, big FX $05 and $08, MULCNTP's pulse
+    and filter walks, instrument 0's before the first note), orderlist MainVolume, a wrapped
+    DPITCH, big FX $09 with a chord offset down, a first frame that keeps its waveform, and
+    STRTSND keeping ARPSCNT."""
+    cells, _, _ = s.verify(request.getfixturevalue(name).read_bytes(), frames=3000)
+    assert not cells.size, summary(cells, 3)

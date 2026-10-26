@@ -126,6 +126,51 @@ twenty_first = hvsc_tune(
     "MUSICIANS/V/Vincenzo/21st.sid",
     "Path to Vincenzo's 21st, WF rows held over ticks with an untracked pulse table.",
 )
+jt_style = hvsc_tune(
+    "jt_style",
+    "MUSICIANS/H/Hermit/JT_Style.sid",
+    "Path to Hermit's JT Style, a multispeed SID-Wizard tune with orderlist transposes.",
+)
+lenore = hvsc_tune(
+    "lenore",
+    "MUSICIANS/H/Hermit/Lenore.sid",
+    "Path to Hermit's Lenore, multispeed, with big FX $08 and MULCNTP filter walks.",
+)
+stompbox = hvsc_tune(
+    "stompbox",
+    "MUSICIANS/V/Vincenzo/Stompbox.sid",
+    "Path to Vincenzo's Stompbox, multispeed, with orderlist raw bytes.",
+)
+csango_boogie = hvsc_tune(
+    "csango_boogie",
+    "MUSICIANS/V/Vincenzo/Csango_Boogie.sid",
+    "Path to Vincenzo's Csango Boogie, multispeed, with big FX $05 and a wrapped DPITCH.",
+)
+samar_is_20 = hvsc_tune(
+    "samar_is_20",
+    "MUSICIANS/H/Hermit/Samar_Is_20.sid",
+    "Path to Hermit's Samar Is 20, with big FX $09 and chord offset $FB.",
+)
+pantheon = hvsc_tune(
+    "pantheon",
+    "MUSICIANS/T/Toggle/Pantheon.sid",
+    "Path to Toggle's Pantheon, a first frame keeping the waveform with no hard restart.",
+)
+grumps = hvsc_tune(
+    "grumps",
+    "MUSICIANS/G/Goerp/Grumps.sid",
+    "Path to Goerp's Grumps, multispeed, with orderlist MainVolume.",
+)
+x_copy = hvsc_tune(
+    "x_copy",
+    "MUSICIANS/M/Moellpauk/X-Copy-The_Intro.sid",
+    "Path to Moellpauk's X-Copy intro, whose instrument 0 walks its pulse on MULPLY calls.",
+)
+emomyst = hvsc_tune(
+    "emomyst",
+    "MUSICIANS/H/Hermit/Emomyst.sid",
+    "Path to Hermit's Emomyst, a build whose STRTSND keeps ARPSCNT.",
+)
 pimp_my_commodore = hvsc_tune(
     "pimp_my_commodore",
     "MUSICIANS/H/Hermit/Pimp_My_Commodore.sid",

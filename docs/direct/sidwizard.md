@@ -30,6 +30,8 @@ row lasts from its read to the voice's next read (tempo, funk tempo and tempo FX
 | SID-Wizard | generic |
 |---|---|
 | a row read at frame `f`, the next at `f + n` | `n` events: TICK_0, TICK_1, TICK_2, then `-` |
+| multispeed (`frame_speed` calls a frame) | a tick a call; TICK_0, TICK_1, TICK_2 a PLAYER call apart, the calls before the first PLAYER call a lead-in phrase; `ms.freq:ph()` counts the phase |
+| an orderlist MainVolume | `vol` on the row read that copies SEQVOLU |
 | the orderlists' pattern starts | the timeline: a row where some voice starts a pattern, `~` elsewhere |
 | orderlist end | `end` on that voice |
 | orderlist loop | `{loop:k}`, the earliest row from which the timeline repeats |
@@ -57,13 +59,22 @@ A binding already held keeps its phi: TICK_1 rebinds `tick.freq:stp()`, `fx.cut:
 | `$60`-`$77` | `tick.freq:vfx(…)` |
 | `$78` NPORTAM | `tick.freq:sld(255,…)` |
 | an instrument without a note | `run` of its tables resumed from where they are |
+| an instrument on a note without STRTSND | the glide's walk through the new instrument at the latched ARPSPED; the next STRTSND names it |
+| DPITCH past `$7F` (a negative octave shift) | the note `DPITCH - 1`, the templates masking it as the player does |
+
+Multispeed: MULPLY calls walk only the WF table, and the pulse (ARPSPED bit 6 or 7) and filter
+(bit 7) tables of instruments that ask; STRTSND's ARPSCNT `$FF` keeps the voice untouched to the
+next PLAYER call (`mf`); a pulse or filter table walked on PLAYER calls only lasts `frame_speed`
+ticks a row, its sweeps stepping every `frame_speed`-th (`psws`, `fsws`, `ksws`, `v + d *
+((phi % s) == 0)`). Before a voice's first note MULCNTP walks instrument 0's tables on the MULPLY
+calls; a new note's setup PLAYER calls skip the pulse and filter that its MULPLY calls walk.
 
 ## FX
 
 | FX | commands |
 |---|---|
 | small `$2x` `$3x` `$5x` `$6x` | `ad`, `sr` as applied |
-| small `$4x`, BIGFX04 | `ctrl` |
+| small `$4x`, BIGFX04 | `ctrl`; on a note, the first frame's waveform |
 | small `$7x`, BIGFX07 | `run` of the WF walk on the new chord (chord builds) |
 | small `$8x`, BIGFX08 | `tick.freq:vfx(…)` |
 | small `$9x` | `tick.freq:vfq(q)` |
@@ -73,6 +84,7 @@ A binding already held keeps its phi: TICK_1 rebinds `tick.freq:stp()`, `fx.cut:
 | BIGFX01, 02 | `tick.freq:sld(129/130,…)` |
 | BIGFX03 | `tick.freq:sld(131,…)` without a note, `por` with one |
 | BIGFX05, 06 | `ad`, `sr` |
+| BIGFX09, 0A, 0B | `run` of the WF, pulse or filter walk from the row it sets (on a note from STRTSND's next tick, on a glide past TICK_2) |
 | BIGFX0F | `fx.cut:fhi(c)` before the filter walk (a voice after the filter's), else `late.cut` |
 | BIGFX16 | `tick.freq:kty(c)` |
 
@@ -103,14 +115,15 @@ A binding already held keeps its phi: TICK_1 rebinds `tick.freq:stp()`, `fx.cut:
 | | `dd`, `cm`, `ca`, `cv` | DETUNER, WRPITCH's carry mode, arp, HARDRST carry |
 | | `ml`, `mk`, `cs`, `mt` | the pulse mirror: PWLOGHO/HIGHO, PKBDTRK, WRPULS's (untracked: SETPWID's) carry, scratch |
 | | `vt`, `vi`, `vq`, `vr`, `vg` | the instrument vibrato PORTAVIBRA's end restores |
-| pw | `pl`, `pk` | PWLOGHO/PWHIGHO, PKBDTRK |
-| cut | `ch`, `cl`, `ck` | CTFH, CTFL, the filter's keyboard track |
+| | `mp`, `mf`, `mc` | multispeed: the call's phase, STRTSND's freeze, the mirror's sweep pace |
+| pw | `pl`, `pk`, `pc` | PWLOGHO/PWHIGHO, PKBDTRK, a multispeed sweep's pace |
+| cut | `ch`, `cl`, `ck`, `fc` | CTFH, CTFL, the filter's keyboard track, a multispeed sweep's pace |
 
 Slots, in the player's order:
 
 | cell | slots |
 |---|---|
-| freq | `snd`; `tick` (hold `note-2`, `note-1`, `note`; `note` where VIBSLIDE runs every tick); `wave` (hold `note`, `legato`, reset `row.note`); `hr` (WF rows held); `pm` (pulse mirror); `dt` (detune builds, reset `row.freq`) |
+| freq | `ms` (multispeed); `snd`; `tick` (hold `note-2s`, `note-s`, `note` at `frame_speed` `s`; `note` where VIBSLIDE runs every tick); `wave` (hold `note`, `legato`, reset `row.note`); `hr` (WF rows held); `pm` (pulse mirror); `dt` (detune builds, reset `row.freq`) |
 | cut | `fx`, `walk`, `late` (BIGFX0F tunes) |
 
 | template | routine |
@@ -123,6 +136,8 @@ Slots, in the player's order:
 | `tone` | FREQLO/FREQHI of the WF note; a pitch row clears `o` |
 | `det`, `dfx` | WRPITCH: detune and the carry of the WF read (mode 3: pulse carry `cs`) |
 | `hrc` | HARDRST's carry on a note's skipped WF ticks |
+| `ph` | multispeed: the PLAYER call's phase |
+| `<name>0` | a template on a voice yet to play a note: DPITCH 0 |
 | `pst`, `psw`, `pid`, `pwr` | SETPULW, PWSWEEP step, PWADVAN, WRPULS with `EXPTABH[(DPITCH & $7F) + PKBDTRK]` |
 | `mst`, `msw`, `mid`, `mwr` | the pulse templates on the freq cell, keeping only WRPULS's carry in `cs` |
 | `kst`, `ksw`, `kcs` | an untracked pulse table on the freq cell: PWLOGHO and SETPWID's carry in `cs` (set, sweep step, advance/jump/end) |
@@ -139,28 +154,25 @@ rest read past note 95.
 ## Refused
 
 `TranscribeError` (or the trace's `TraceError`); counts over the 1017 single-subtune, single-SID
-SID-Wizard tunes of the corpus at 3000 frames (531 exact, 52 differing):
+SID-Wizard tunes of the corpus at 3000 frames (763 exact, 59 differing):
 
 | cause | tunes |
 |---|---|
-| FX `$09`, `$0A`, `$0B`, `$0C`, `$0E`, `$1C` | 125 |
-| multispeed or a play gate | 65 |
-| a first frame that keeps a waveform no hard restart gated off | 63 |
-| an instrument selected without a note on a row that runs a table | 48 |
-| an arp speed FX on a note or before any instrument | 18 |
-| a note sounding below note 0 | 17 |
-| no loop within 200000 frames | 17 |
-| chord past the chord table or empty | 14 |
-| a cut or pw jump to a jump or an end | 19 |
-| a filter handover on a note that runs another table | 8 |
-| a waveform FX on a note or setting a gate the voice has off | 8 |
-| a legato note with a vibrato FX | 6 |
-| WF rows held over ticks without STRTSND's ARPSCNT reset | 5 |
-| a pw table that starts with a sweep | 5 |
-| two FX of one cell on a row | 5 |
-| a spare instrument with no image (pysidwizard) | 4 |
-| others (small FX `$Fx`, a FX or note before any instrument, a timeline that does not repeat, a 1-tick row) | 6 |
+| FX `$0E`, `$17`-`$1C`, `$1F` | 43 |
+| no loop within 200000 frames | 21 |
+| a cut or pw jump to a jump or an end | 21 |
+| chord past the chord table or empty | 20 |
+| an arp speed FX on a note or before any instrument | 19 |
+| a filter handover on a note that runs another table | 17 |
+| a pw table that starts with a sweep | 12 |
+| a legato note with a vibrato FX | 7 |
+| two FX of one cell on a row | 7 |
+| a filter position FX on a voice without the filter | 6 |
+| an idle walk that reads no row | 5 |
+| small FX `$Fx` | 4 |
+| a waveform FX setting a gate the voice has off | 4 |
+| a first frame that keeps a waveform before a hold row | 3 |
+| others (FX $08 before any instrument, a play gate, a timeline that does not repeat, a detune FX on a note, a gate-off pointer on a row that runs another table, a 2-tick row) | 6 |
 
-Also refused (no corpus tune): FX `$17`-`$1B`, `$1F`; other
-note-column values; a detune FX on a note; a gate-off pointer on a row that runs another
-table; a WF jump chain; no instruments or fewer orderlists than voices.
+Also refused (no corpus tune): other note-column values; a WF jump chain; multispeed
+without MULTISPEEDSUPP; no instruments or fewer orderlists than voices.

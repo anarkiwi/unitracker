@@ -236,7 +236,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
         reset switches, the pulse or filter walk ``kept`` resumed instead of restarted (the
         filter's routed, or not, by SETFLTP)."""
-        # pylint: disable=too-many-locals
+        # pylint: disable=too-many-locals,too-many-branches
         feats, (pulse, filt, routed) = self.feats, kept
         table = ins.filter_table
         first = {"route_on" if table and table[0] != 0xFF else "route_off": 0}

@@ -88,6 +88,8 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         swm, feats, out = self.swm, self.feats, []
         if self.ref.image.play_gate:
             out.append("a play gate")
+        if swm.frame_speed > 1 and not feats.multispeedsupp:
+            out.append("multispeed without MULTISPEEDSUPP")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
         return out
@@ -340,7 +342,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             raise TranscribeError("a filter position FX on a voice without the filter")
         if rec.tick2:
             # The glide's walk resumes past TICK_2 from where the FX left it.
-            wave, was, cut = rec.resume
+            _, was, cut = rec.resume
             rec.resume = (rec.arp, pulse if fx == 0x0A else was, filt if fx == 0x0B else cut)
             return {}
         if rec.newnote:
@@ -367,7 +369,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         new = rec.newnote and not rec.dummy and not self.feats.vibslidealways
         if new and not tick:
             commands = {"pw": "hold", "cut": "hold"} | ({"pm.freq": "none"} if self.mirror else {})
-            dropped, run = self.mulcntp(rec)
+            dropped, run = self._mulcntp(rec)
             commands = {k: v for k, v in commands.items() if k not in dropped}
             commands |= {"run": run} if run else {}
         if new and tick and self.fkb and rec.holder:
@@ -375,7 +377,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             commands = {self.walk: self.call("frs")}
         if rec.vol is not None and not tick:
             commands["vol"] = rec.vol
-        if rec.newnote and rec.dummy and not tick and self.speed == 1:
+        if rec.newnote and rec.dummy and not tick and self.speed == 1 and rec.hr is not None:
             state["dummy"] = state["dummy"] or self.dummy(rec.hr)
             commands["run"] = self.ins[state["dummy"]].get("ctrl")
         if rec.newnote and not tick and self.hrc:
@@ -386,17 +388,22 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             commands |= self._hr_commands(rec.hr)
             atom = "-" if rec.dummy else "off"
         if tick * self.speed in rec.skips and not rec.dummy:
-            wave, ins, pulse, filt, gate = rec.skips[tick * self.speed]
-            gate = gate if rec.unnoted else None
-            if self.feats.vibslidealways:
-                # The staccato tick walks no table and no vibrato, which this build would.
-                commands["run"] = self.resume(ins, wave, pulse, filt, gate=gate)
-                commands["tick.freq"] = self.call("wt")
-            else:
-                commands["run"] = self.resume(ins, wave, gate=gate)
+            commands |= self._skip(rec, tick)
         return Event(atom, commands=commands)
 
-    def mulcntp(self, rec) -> tuple:
+    def _skip(self, rec, tick: int) -> dict:
+        """A staccato hard restart's TICK_0 or TICK_1: the tables resumed where it left them."""
+        wave, ins, pulse, filt, gate = rec.skips[tick * self.speed]
+        gate = gate if rec.unnoted else None
+        if self.feats.vibslidealways:
+            # The staccato tick walks no table and no vibrato, which this build would.
+            return {
+                "run": self.resume(ins, wave, pulse, filt, gate=gate),
+                "tick.freq": self.call("wt"),
+            }
+        return {"run": self.resume(ins, wave, gate=gate)}
+
+    def _mulcntp(self, rec) -> tuple:
         """``(commands it drops, program it runs)`` of a new note's TICK_0 where the
         instrument's ARPSPED has MULCNTP walk the pulse (and the filter) on the MULPLY calls to
         STRTSND, which HARDRST's skip."""
@@ -471,21 +478,8 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         state["ins"] = name
         if self.hrc:
             commands["hr.freq"] = "none"
-        pulse, filt, routed = rec.kept
-        start = INST_WF_TABLE_POS + len(ins.wf_table) + 1
-        if pulse is None and _swept_first(ins.pw_table):
-            pulse = (start, rec.counts[0])
-        table = ins.filter_table
-        if filt is None and _swept_first(table) and table[0] and not rec.keep_filter:
-            filt, routed = (start + len(ins.pw_table) + 1, rec.counts[1]), True
-        start = None
-        if rec.moved is not None:
-            fx, wave, moved, cut = rec.moved
-            start = wave if fx == 0x09 else None
-            pulse = moved if fx == 0x0A else pulse
-            filt, routed = (cut, True) if fx == 0x0B else (filt, routed)
-        if (pulse, filt, routed) != rec.kept:
-            rec.kept = (pulse, filt, routed)
+        start = self._kept(rec, ins)
+        pulse, filt, _ = rec.kept
         if rec.handover is not None:
             if "run" in commands or pulse is not None or filt is not None:
                 raise TranscribeError("a filter handover on a note that runs another table")
@@ -504,6 +498,25 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             commands["run"] = self.wave(ins, chord, gated=rec.gated)
         keep = rec.keep_filter or filt is not None
         return Event(self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep)
+
+    def _kept(self, rec, ins):
+        """``rec.kept`` as STRTSND leaves the walks: a pulse or filter table starting with a
+        sweep resumed at its count, a position FX's row; the WF row a BIGFX09 sets, or None."""
+        pulse, filt, routed = rec.kept
+        start = INST_WF_TABLE_POS + len(ins.wf_table) + 1
+        if pulse is None and _swept_first(ins.pw_table):
+            pulse = (start, rec.counts[0])
+        table = ins.filter_table
+        if filt is None and _swept_first(table) and table[0] and not rec.keep_filter:
+            filt, routed = (start + len(ins.pw_table) + 1, rec.counts[1]), True
+        start = None
+        if rec.moved is not None:
+            fx, wave, moved, cut = rec.moved
+            start = wave if fx == 0x09 else None
+            pulse = moved if fx == 0x0A else pulse
+            filt, routed = (cut, True) if fx == 0x0B else (filt, routed)
+        rec.kept = (pulse, filt, routed)
+        return start
 
     def apply(self, rec, voice: int, state: dict) -> Event:
         """The TICK_2 event of an applied row."""
