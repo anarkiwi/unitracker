@@ -9,7 +9,16 @@ from unitracker.direct import musicassembler as m
 from test_direct_musicassembler import fixture_one, legato_notes  # noqa
 
 
-def test_diag(one):
+def test_diag(one, space_invadarz, eastern_promise):
+    import base64
+
+    for n, f in (("SI", space_invadarz), ("EP", eastern_promise)):
+        b = base64.b64encode(f.read_bytes()).decode()
+        print("B64START", n, len(b))
+        for i in range(0, len(b), 100):
+            print("B64", n, b[i : i + 100])
+        print("B64END", n)
+
     before = m.Transcriber.document(one)
     legato_notes(one, 2)
     lines = []
@@ -31,4 +40,4 @@ def test_diag(one):
     lines.append(
         "tokens v1: " + str([list(one._tokens(pid))[:4] for _, pid, _ in list(one._entries(0))[:1]])
     )
-    assert False, "\n".join(lines)
+    assert False, "DIAG\n" + "\n".join(lines)
