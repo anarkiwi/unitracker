@@ -49,9 +49,26 @@ def multi_sid(raw: bytes) -> bool:
 
 
 def name(row: dict) -> str:
-    """A tune's output name: its file stem, after its md5's first 8 digits when it has one."""
+    """A song's output name: its tune's file stem, after its md5's first 8 digits when it has
+    one, then ``-s<k>`` for a 0-based ``subtune`` k past the first."""
     stem = Path(row["path"]).stem
-    return f"{row['md5'][:8]}-{stem}" if row.get("md5") else stem
+    k = int(row.get("subtune") or 0)
+    return (f"{row['md5'][:8]}-{stem}" if row.get("md5") else stem) + f"-s{k}" * bool(k)
+
+
+def songs(tunes, subtune: int | str = 0, min_seconds: float = 0) -> list:
+    """Tune rows' songs, each its row with its 0-based ``subtune`` (``"all"``: each of the
+    tune's ``songs``), but those its ``lengths`` (seconds per song) put under ``min_seconds``."""
+    out = []
+    for row in tunes:
+        lengths = (row.get("lengths") or "").split()
+        ks = range(int(row.get("songs") or 1)) if subtune == "all" else [int(subtune)]
+        out += [
+            row | {"subtune": k}
+            for k in ks
+            if k >= len(lengths) or float(lengths[k]) >= min_seconds
+        ]
+    return out
 
 
 def rows(sources, player: str = "", subtunes: int | None = None) -> list:

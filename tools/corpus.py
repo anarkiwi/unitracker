@@ -7,12 +7,16 @@ list or an earlier ``check`` table. Usage: README.md, "Triage".
 
 import argparse
 import csv
+import functools
 import inspect
 import json
 import os
 import re
+import subprocess
 import sys
+import traceback
 from collections import Counter
+from importlib import metadata
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +31,44 @@ from unitracker.optimiser import PASSES, Guarantee, optimise
 from unitracker.optimiser.inline import MODES, inline
 
 FIELDS = ("doc", "path", "md5", "player", "verified", "cells", "first", "gap")
+LIBRARIES = ("pysidtracker", "unitracker-grammar", "unitracker-player")
+
+
+def failure(exc: Exception) -> str:
+    """An exception's one line: its type and its message's first line."""
+    return f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
+
+
+def write_failure(path: Path, line: str) -> None:
+    """``path``: an exception's ``line``, then the traceback being handled."""
+    path.write_text(f"{line}\n{traceback.format_exc()}", encoding="utf-8")
+
+
+@functools.cache
+def versions() -> dict:
+    """The unitracker commit (else its package version) and its libraries' installed versions."""
+    git = ["git", "-C", str(shared.ROOT), "rev-parse", "HEAD"]
+    try:
+        commit = subprocess.run(git, capture_output=True, check=True, text=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = metadata.version("unitracker")
+    out = {"unitracker": commit}
+    for lib in LIBRARIES:
+        try:
+            out[lib] = metadata.version(lib)
+        except metadata.PackageNotFoundError:
+            pass
+    return out
+
+
+def verified(raw: bytes, subtune: int, frames: int) -> dict:
+    """Whether a song's document plays the native grid over ``frames`` ticks and its cells that
+    differ, or the exception verifying it raised."""
+    try:
+        bad = len(cli.verify(raw, subtune, frames))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return {"verified": False, "verify_error": failure(exc)}
+    return {"verified": not bad, "bad_cells": bad}
 
 
 def check_one(row: dict, opts: dict) -> dict | None:
@@ -44,8 +86,8 @@ def check_one(row: dict, opts: dict) -> dict | None:
             res["player"], _, verify = cli.lifter(raw)
             cells, text, *_ = verify(raw, opts["subtune"], opts["frames"])
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        res["gap"] = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-        (out / f"{res['doc']}.err").write_text(res["gap"] + "\n", encoding="utf-8")
+        res["gap"] = failure(exc)
+        write_failure(out / f"{res['doc']}.err", res["gap"])
         return res
     (out / f"{res['doc']}.yaml").write_text(text, encoding="utf-8")
     res.update(verified="no" if len(cells) else "yes", cells=len(cells))
@@ -162,11 +204,11 @@ def _form(name: str, text: dict, opts: dict) -> str:
 
 
 def forms_one(row: dict, opts: dict) -> dict | None:
-    """One tune's forms under ``out/<form>/<doc>.yaml``, each kept from an earlier run, a failed
-    one's exception (a timeout's from the start) in ``<doc>.err``, and ``out/meta/<doc>.json``
-    with its format and song length in ticks; None for a multi-SID tune it lifts unless
-    ``opts["multi"]``."""
-    out, doc = Path(opts["out"]), shared.name(row)
+    """One song's forms under ``out/<form>/<doc>.yaml``, each kept from an earlier run, a failed
+    one's exception and traceback (a timeout's from the start) in ``<doc>.err``, and
+    ``out/meta/<doc>.json``: its format, versions, song length in ticks and verification; None
+    for a multi-SID tune it lifts unless ``opts["multi"]``."""
+    out, doc, subtune = Path(opts["out"]), shared.name(row), int(row.get("subtune") or 0)
     meta, text = out / "meta" / f"{doc}.json", {}
     res = {"doc": doc} | dict.fromkeys(opts["forms"], "")
     for name in opts["forms"]:
@@ -176,7 +218,7 @@ def forms_one(row: dict, opts: dict) -> dict | None:
             text[name], res[name] = path.read_text(encoding="utf-8"), "ok"
             continue
         if err.exists() and not opts["retry"]:
-            res[name] = err.read_text(encoding="utf-8").strip()
+            res[name] = err.read_text(encoding="utf-8").split("\n", 1)[0]
             continue
         base = forms()[name][0]
         if base and base not in text:
@@ -192,15 +234,16 @@ def forms_one(row: dict, opts: dict) -> dict | None:
                         err.unlink()
                         return None
                     meta.parent.mkdir(parents=True, exist_ok=True)
-                    meta.write_text(json.dumps({"player": cli.lifter(raw)[0]}), "utf-8")
-                    text[name] = cli.lift(raw, opts["subtune"])
-                    ticks = song_ticks(text[name], opts["limit"])
-                    meta.write_text(json.dumps(json.loads(meta.read_text()) | {"ticks": ticks}))
+                    rec = {"player": cli.lifter(raw)[0], "versions": versions()}
+                    meta.write_text(json.dumps(rec), "utf-8")
+                    text[name] = cli.lift(raw, subtune)
+                    rec["ticks"] = song_ticks(text[name], opts["limit"])
+                    meta.write_text(json.dumps(rec | verified(raw, subtune, rec["ticks"])))
                 else:
                     text[name] = _form(name, text, opts)
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            res[name] = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-            err.write_text(res[name] + "\n", encoding="utf-8")
+            res[name] = failure(exc)
+            write_failure(err, res[name])
             continue
         path.write_text(text[name], encoding="utf-8")
         err.unlink()
@@ -209,11 +252,12 @@ def forms_one(row: dict, opts: dict) -> dict | None:
 
 
 def write_forms(args) -> int:
-    """The ``forms`` command: each tune's forms and ``forms.csv``, its forms' status."""
+    """The ``forms`` command: each song's forms and ``forms.csv``, its forms' status."""
     opts = {"out": str(args.out), "hvsc": args.hvsc, "timeout": args.timeout}
-    opts.update(subtune=args.subtune, ticks=args.ticks, limit=args.limit, retry=args.retry)
+    opts.update(ticks=args.ticks, limit=args.limit, retry=args.retry)
     opts.update(forms=with_bases(args.forms or forms()), multi=args.multi_sid)
     tunes = shared.rows(args.tunes, args.player, args.subtunes)
+    tunes = shared.songs(tunes, args.subtune, args.min_seconds)
     rows = []
     for i, value, error in tqdm(
         imap(forms_one, [(r, opts) for r in tunes], args.jobs), total=len(tunes), unit="sid"
@@ -221,8 +265,9 @@ def write_forms(args) -> int:
         if value or error is not None:
             rows.append(value or {"doc": shared.name(tunes[i]), "lifted": repr(error)})
     print(f"{len(tunes) - len(rows)} multi-SID tunes excluded")
+    print(f"{sum(r.get('verified') is True for r in rows)}/{len(rows)} verified")
     rows.sort(key=lambda r: r["doc"])
-    fields = ["doc", "player", "ticks", *opts["forms"]]
+    fields = ["doc", "player", "ticks", "verified", *opts["forms"]]
     with (args.out / "forms.csv").open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fields, extrasaction="ignore")
         writer.writeheader()
@@ -241,6 +286,11 @@ def render(data, song, nframes):
     text = cli.lift(data, song - 1)
     played = play(text, ticks=nframes)
     return np.asarray(played, np.int16), {"backend": cli.lifter(data)[0], "chars": len(text)}
+
+
+def _subtune(value: str) -> int | str:
+    """A ``--subtune``: 0-based, or ``all``."""
+    return value if value == "all" else int(value)
 
 
 def main(argv=None) -> int:
@@ -262,7 +312,8 @@ def main(argv=None) -> int:
     p.add_argument("tunes", nargs="+", metavar="TUNE.sid|LIST.csv|DIR")
     p.add_argument("--hvsc", type=Path, default=os.environ.get("HVSC"))
     p.add_argument("--out", type=Path, default=Path("out/tokenize"))
-    p.add_argument("--subtune", type=int, default=0, help="0-based")
+    p.add_argument("--subtune", type=_subtune, default=0, help="0-based, or all")
+    p.add_argument("--min-seconds", type=float, default=0, help="shortest song length kept")
     p.add_argument("--forms", nargs="*", help=f"of {', '.join(forms())} (default all)")
     p.add_argument("--ticks", type=int, default=3000, help="the optimiser's guarantee horizon")
     p.add_argument("--limit", type=int, default=100000, help="most ticks of a song's length")
