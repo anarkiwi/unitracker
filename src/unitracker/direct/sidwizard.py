@@ -58,46 +58,50 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         refused = self._unsupported() if check else []
         if refused:
             raise TranscribeError(f"{self.feats.name} build: {', '.join(refused)}")
-        feats = self.feats
-        self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
         # A table walk can read any instrument byte as a track amount: write as the player.
         self.pwkb, self.fkb = self.feats.pwkeybtrack, self.feats.filtkbtrack
         # BIGFX0F writes CTFH under the filter walk: the walk keeps its cutoff in code.
         self.cutfx = any(r.fx == 0x0F for p in swm.patterns for r in p.rows)
         self.fkb = self.fkb or self.cutfx
         self.walk = "walk.cut" if self.cutfx else "cut"
-        feats = self.feats
-        self.hrc = (
-            feats.arpspeedsupp
-            and feats.detunesupport
-            and not feats.vibslidealways
-            and self._held_rows()
-        )
-        held = feats.arpspeedsupp and feats.detunesupport and self._held_rows()
-        self.mirror = held and self.pwkb
-        if self.pwkb or self.fkb:
-            self.code |= track_templates(self.feats.finefiltsweep)
-        if self.mirror:
-            self.code |= mirror_templates()
-        self.routines = {name: code.read(text) for name, text in self.code.items()}
+        self._bind(self._held_rows())
         self.programs = {"ctrl": {}, "pw": {}, "filter": {}}
         self.ins, self.used, self.phrases, self.dummies = {}, [], {}, []
+
+    def _bind(self, rows: bool) -> None:
+        """The templates, with HARDRST's carry and the pulse mirror where WF rows hold
+        (``rows``)."""
+        feats = self.feats
+        held = feats.arpspeedsupp and feats.detunesupport and rows
+        self.hrc = held and not feats.vibslidealways
+        self.mirror = held and (self.pwkb or any(i.pw_table for i in self.swm.instruments))
+        self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
+        if self.pwkb or self.fkb:
+            self.code |= track_templates(feats.finefiltsweep)
+        if self.mirror:
+            self.code |= mirror_templates(self.pwkb)
+        self.routines = {name: code.read(text) for name, text in self.code.items()}
 
     def _unsupported(self) -> list:
         """What the tune uses that this transcription refuses."""
         swm, feats, out = self.swm, self.feats, []
-        if swm.frame_speed != 1 or self.ref.image.play_gate or any(self.ref.image.filter_init[:3]):
-            out.append("multispeed, a play gate or an initial filter")
+        if swm.frame_speed != 1 or self.ref.image.play_gate:
+            out.append("multispeed or a play gate")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
         if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
             out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
         return out
 
-    def _held_rows(self) -> bool:
-        """Whether a WF row lasts more than a tick: an arp speed or a hold row."""
+    def _held_rows(self, header: bool = False) -> bool:
+        """Whether a WF row lasts more than a tick: an arp speed or a hold row (with
+        ``header``, also a header byte a walk from position 0 reads as one)."""
+        image = self.ref._image  # pylint: disable=protected-access
         return any(
-            i.arp_speed & 0x3F or any(r[0] < 0x10 for r in _rows3(i.wf_table))
+            i.arp_speed & 0x3F
+            or any(r[0] < 0x10 for r in _rows3(i.wf_table))
+            or header
+            and any(r[0] < 0x10 for r in _rows3(image(i)[:INST_WF_TABLE_POS]))
             for i in self.swm.instruments
         )
 
@@ -340,13 +344,14 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             commands |= self._hr_commands(rec.hr)
             atom = "-" if rec.dummy else "off"
         if tick in rec.skips and not rec.dummy:
-            wave, ins, pulse, filt = rec.skips[tick]
+            wave, ins, pulse, filt, gate = rec.skips[tick]
+            gate = gate if rec.unnoted else None
             if self.feats.vibslidealways:
                 # The staccato tick walks no table and no vibrato, which this build would.
-                commands["run"] = self.resume(ins, wave, pulse, filt)
+                commands["run"] = self.resume(ins, wave, pulse, filt, gate=gate)
                 commands["tick.freq"] = self.call("wt")
             else:
-                commands["run"] = self.resume(ins, wave)
+                commands["run"] = self.resume(ins, wave, gate=gate)
         return Event(atom, commands=commands)
 
     def events(self, rec, voice: int, state: dict, length: int) -> list:
@@ -379,8 +384,11 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             raise TranscribeError(
                 "an instrument selected without a note on a row that runs a table"
             )
-        wave, pulse, filt, reload = rec.switch
-        commands["run"] = self.resume(rec.ins, wave, pulse, filt, skip=False, reload=reload)
+        wave, pulse, filt, reload, gate = rec.switch
+        gate = gate if rec.unnoted else None
+        commands["run"] = self.resume(
+            rec.ins, wave, pulse, filt, skip=False, reload=reload, gate=gate
+        )
         name = self.instrument(rec.ins, rec.number, voice)
         state["ins"] = name
         return Event(event.note, name, commands, event.keep_pw, event.keep_filter, event.steps)
@@ -553,6 +561,9 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             tr = trace(self.swm, loops=loops)
             if tr.refused:
                 raise TranscribeError(tr.refused[0])
+            if any(r.switch and r.unnoted for v in tr.reads for r in v):
+                # An instrument selected before any note walks its header from position 0.
+                self._bind(self._held_rows(header=True))
             self.phrases, self.programs = {}, {"ctrl": {}, "pw": {}, "filter": {}}
             self.ins, self.used, self.dummies = {}, [], []
             try:
@@ -572,6 +583,13 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             return text
         return self.assemble(tuple(int(r) for r in first))
 
+    def _cutoff(self) -> dict:
+        """The cutoff the tune's init leaves in CTFH and CTFL, where the cutoff is code."""
+        _, high, low, _ = self.ref.image.filter_init
+        if not self.fkb or not high | low:
+            return {}
+        return {self.walk: self.call("fho", c=high, l=low & 7, j=0)}
+
     def assemble(self, start: tuple | None = None) -> str:
         """The document of the song to its loop or end, from registers ``start`` before tick 0."""
         rows, loop, dummies = self.traced()
@@ -580,6 +598,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]
         defs += [Section(kind, store) for kind, store in self.programs.items() if store]
         defs.append(phrases)
+        # No HARDRST carry until a voice's first note sets one.
+        carry = {"hr.freq": self.call("hrc", c=255)} if self.hrc else {}
+        init = [Event("-", dummy, dict(carry)) for dummy in dummies]
+        init[0] = Event("-", dummies[0], carry | {"vol": 15} | self._cutoff())
         named = {s for t in self.used for s in code.symbols(self.routines[t])}
         state = {
             cell: [(k, size) for k, size in names.items() if k in named]
@@ -597,8 +619,6 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             (signature(name, code.params(self.routines[name])), Code(self.routines[name]))
             for name in self.used
         ]
-        init = [Event("-", dummy) for dummy in dummies]
-        init[0] = Event("-", dummies[0], {"vol": 15})
         doc = Document(header, mods=mods, defs=defs, init=init, rows=song, loop=loop)
         return printed(doc)
 

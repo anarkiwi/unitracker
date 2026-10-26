@@ -34,7 +34,7 @@ row lasts from its read to the voice's next read (tempo, funk tempo and tempo FX
 | orderlist end | `end` on that voice |
 | orderlist loop | `{loop:k}`, the earliest row from which the timeline repeats |
 | loop detection | every voice ended, or its pattern starts repeated 4 times their period's lcm (16, 64 if the timeline does not yet repeat; at most 200000 frames) |
-| `init` | each voice's dummy instrument, `vol:15` |
+| `init` | each voice's dummy instrument, `vol:15`; `hr.freq:hrc(255)` (no HARDRST carry yet) where WF rows hold; `fho` of the cutoff the init leaves where the cutoff is code (the start registers hold the rest) |
 
 ## A row's events
 
@@ -88,6 +88,7 @@ A binding already held keeps its phi: TICK_1 rebinds `tick.freq:stp()`, `fx.cut:
 | filter table (claimed) | `filter`: set `{res,mode,cut}`, sweep `{hold:n,cut:v + 8d}` (`v + d` FINEFILTSWEEP), advance tick; with keyboard tracking or BIGFX0F `fst`/`fsw`/`fid`/`frs` (`fho` a handover) |
 | a resumed table (legato, switch, staccato, reset switch) | a program from the player's position and sweep count |
 | the dummy instrument | instrument 0's header walked as two WF rows (and its pulse table where VIBSLIDE runs every tick) |
+| a walk before a voice's first note (an instrument selected without one, a staccato tick) | its rows unnoted (relative arps from DPITCH 0), waveforms ANDed with PTNGATE (0 before any note), each template's variant `<name>0` reading the note as -1; WF rows held from the header where a walk starts at position 0 |
 
 ## Code
 
@@ -100,7 +101,7 @@ A binding already held keeps its phi: TICK_1 rebinds `tick.freq:stp()`, `fx.cut:
 | | `z` | FREQLO/FREQHI |
 | | `dc`, `vc`, `p`, `fm`, `k` | VIDELCNT, VIBRACNT, VIBFREQU, FREQMOD, SLIDEVIB |
 | | `dd`, `cm`, `ca`, `cv` | DETUNER, WRPITCH's carry mode, arp, HARDRST carry |
-| | `ml`, `mk`, `cs`, `mt` | the pulse mirror: PWLOGHO/HIGHO, PKBDTRK, WRPULS's carry, scratch |
+| | `ml`, `mk`, `cs`, `mt` | the pulse mirror: PWLOGHO/HIGHO, PKBDTRK, WRPULS's (untracked: SETPWID's) carry, scratch |
 | | `vt`, `vi`, `vq`, `vr`, `vg` | the instrument vibrato PORTAVIBRA's end restores |
 | pw | `pl`, `pk` | PWLOGHO/PWHIGHO, PKBDTRK |
 | cut | `ch`, `cl`, `ck` | CTFH, CTFL, the filter's keyboard track |
@@ -124,6 +125,7 @@ Slots, in the player's order:
 | `hrc` | HARDRST's carry on a note's skipped WF ticks |
 | `pst`, `psw`, `pid`, `pwr` | SETPULW, PWSWEEP step, PWADVAN, WRPULS with `EXPTABH[(DPITCH & $7F) + PKBDTRK]` |
 | `mst`, `msw`, `mid`, `mwr` | the pulse templates on the freq cell, keeping only WRPULS's carry in `cs` |
+| `kst`, `ksw`, `kcs` | an untracked pulse table on the freq cell: PWLOGHO and SETPWID's carry in `cs` (set, sweep step, advance/jump/end) |
 | `fst`, `fsw`, `fid`, `frs` | SETFILT, FILTPRG step (11-bit with FINEFILTSWEEP), advance, the cutoff write with its track |
 | `fho`, `fhi` | a filter handover's cutoff; BIGFX0F's CTFH |
 
@@ -136,31 +138,29 @@ rest read past note 95.
 
 ## Refused
 
-`TranscribeError` (or the trace's `TraceError`); counts over the 182 single-subtune SID-Wizard
-tunes of the corpus at 3000 frames (109 exact, 0 differing):
+`TranscribeError` (or the trace's `TraceError`); counts over the 1017 single-subtune, single-SID
+SID-Wizard tunes of the corpus at 3000 frames (531 exact, 52 differing):
 
 | cause | tunes |
 |---|---|
-| WF rows held over ticks with a pulse table, its carry | 10 |
-| multispeed, a play gate or an initial filter | 15 |
-| multi-SID (pysidwizard `SIDFormatError`) | 8 |
-| an instrument selected before any note | 7 |
-| a cut jump to a jump or an end | 4 |
-| an instrument selected without a note on a row that runs a table | 4 |
-| chord past the chord table or empty | 4 |
-| FX `$09`, `$0B`, `$1C` | 5 |
-| a note sounding below note 0 | 4 |
-| no loop within 200000 frames | 2 |
-| an arp speed FX on a note or before any instrument | 2 |
-| a filter handover on a note that runs another table | 2 |
-| an instrument of another octave selected without a note | 2 |
-| a legato note with a vibrato FX | 1 |
-| WF rows held over ticks without STRTSND's ARPSCNT reset | 1 |
-| two FX of one cell on a row | 1 |
-| a first frame that keeps a waveform no hard restart gated off | 1 |
+| FX `$09`, `$0A`, `$0B`, `$0C`, `$0E`, `$1C` | 125 |
+| multispeed or a play gate | 65 |
+| a first frame that keeps a waveform no hard restart gated off | 63 |
+| an instrument selected without a note on a row that runs a table | 48 |
+| an arp speed FX on a note or before any instrument | 18 |
+| a note sounding below note 0 | 17 |
+| no loop within 200000 frames | 17 |
+| chord past the chord table or empty | 14 |
+| a cut or pw jump to a jump or an end | 19 |
+| a filter handover on a note that runs another table | 8 |
+| a waveform FX on a note or setting a gate the voice has off | 8 |
+| a legato note with a vibrato FX | 6 |
+| WF rows held over ticks without STRTSND's ARPSCNT reset | 5 |
+| a pw table that starts with a sweep | 5 |
+| two FX of one cell on a row | 5 |
+| a spare instrument with no image (pysidwizard) | 4 |
+| others (small FX `$Fx`, a FX or note before any instrument, a timeline that does not repeat, a 1-tick row) | 6 |
 
-Also refused (no corpus tune): FX `$0A`, `$0E`, `$17`-`$1B`, `$1F`, small FX `$Fx`; other
-note-column values; a detune FX on a note; a waveform FX on a note or gating a voice gated
-off; a gate-off pointer on a row that runs another table; a WF jump chain; a pulse or filter
-table that starts with a sweep where no count is left; a timeline that does not repeat; no
-instruments or fewer orderlists than voices.
+Also refused (no corpus tune): FX `$17`-`$1B`, `$1F`; other
+note-column values; a detune FX on a note; a gate-off pointer on a row that runs another
+table; a WF jump chain; no instruments or fewer orderlists than voices.
