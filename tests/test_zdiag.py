@@ -1,5 +1,7 @@
 """Temporary diagnostic."""
 
+# pylint: skip-file
+
 import numpy as np
 from unitracker_player.player import play
 
