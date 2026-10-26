@@ -113,7 +113,6 @@ EDITS = {
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
     "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 0), {"order_jump": 1}),
     "orderlist command \\$FC": lambda one: (order(one) + 2, (0xFC,), {"order_tempo": (1,)}),
-    "the silence pattern": lambda one: (order(one) + 2, (0xFE, 0), {}),
     "start the orderlists": lambda one: (one.lay.pat_cursor, (1,), {}),
 }
 
@@ -297,3 +296,13 @@ def test_orderlist_jump_is_followed():
         (2, 6, 1),
         (2, 6, 1),
     ]
+
+
+def test_silence_pattern_ends_the_voice():
+    """An orderlist reaching ``$FE`` has no loop, and its walk stops there."""
+    stub = SimpleNamespace(
+        _entries=lambda v: iter([(0, 5, 0), (2, MA.SILENCE_PATTERN, 0), (4, 9, 0)]),
+        _ticks=lambda pid: 10,
+    )
+    assert m.Transcriber._period(stub, 0) == (10, 0)
+    assert list(m.Transcriber._walk(stub, 0, 100)) == [(1, 5, 0), (11, MA.SILENCE_PATTERN, 0)]

@@ -75,6 +75,10 @@ functions; each slot holds on the voice's parse ticks (`hold:[row.ad]`).
 
 ## Not transcribed
 
+A voice whose orderlist reaches the silence pattern `$FE` is parked there by the player, gate off,
+its modulators running; it lifts as a gate-off event held to the end of the song, and the voice
+does not count towards the song's loop.
+
 Refused with a `TranscribeError`:
 
 - a play routine other than the player's entry (a wrapper, interrupts), a voice dispatch other
@@ -82,7 +86,7 @@ Refused with a `TranscribeError`:
 - an init that leaves the tempo or a duration running, writes a voice or the cutoff, or does
   not start the orderlists; a voice whose first token is no note while the image's control has the gate set (the image
   would sound);
-- the orderlist `$FC` tempo command, the silence pattern, a pattern without an end;
+- the orderlist `$FC` tempo command, a pattern without an end;
 - a note control byte with the vibrato bit (`$20`), a legato note before its voice's first
   trigger, with an instrument selected, or over a running arpeggio (the vibrato would need to
   start again from the new note's frequency); a filter command sweeping
