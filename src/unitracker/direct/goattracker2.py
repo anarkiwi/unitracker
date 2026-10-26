@@ -254,7 +254,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         the pulse slot, so a table already running restarts instead of keeping its phi."""
         return {"pw": self.pulse(pos), "pulse.pw": RESET}
 
-    def set_cut(self, value: int) -> Once:
+    def _set_cut(self, value: int) -> Once:
         """The cutoff command slot's binding to ``value``, once: a filter table running on
         steps from it."""
         self.cut = True
@@ -351,7 +351,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             C.CMD_SETFILTERPTR: lambda: {"run": self.filt(arg)},
             C.CMD_SETFILTERCTRL: lambda: {"res": arg >> 4, "route": arg & 0x0F}
             | ({} if arg else {"run": self.filt(0)}),
-            C.CMD_SETFILTERCUTOFF: lambda: {"cut": self.set_cut(arg << 3)},
+            C.CMD_SETFILTERCUTOFF: lambda: {"cut": self._set_cut(arg << 3)},
             C.CMD_SETMASTERVOL: lambda: {"vol": arg} if arg < 0x10 else {},
             C.CMD_PORTAUP: step,
             C.CMD_PORTADOWN: step,
@@ -543,7 +543,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             C.CMD_SETFILTERPTR: lambda: {"run": self.filt(data)},
             C.CMD_SETFILTERCTRL: lambda: {"res": data >> 4, "route": data & 0x0F}
             | ({} if data else {"run": self.filt(0)}),
-            C.CMD_SETFILTERCUTOFF: lambda: {"cut": self.set_cut(data << 3)},
+            C.CMD_SETFILTERCUTOFF: lambda: {"cut": self._set_cut(data << 3)},
             C.CMD_SETMASTERVOL: lambda: {"vol": data} if data < 0x10 else {},
             C.CMD_FUNKTEMPO: lambda: {"tempo": funk},
             C.CMD_SETTEMPO: lambda: self._tempo(data, funk),
@@ -638,7 +638,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         modulated cell, the pulse width's in its start slot, which no skip holds."""
         if cell == "pw":
             return START_PW, Once(value)
-        return cell, self.set_cut(value) if cell == "cut" else value
+        return cell, self._set_cut(value) if cell == "cut" else value
 
     def document(self, frames: int = 200000) -> str:
         """The document of the song to its loop, sequenced over at most ``frames`` frames. Where
