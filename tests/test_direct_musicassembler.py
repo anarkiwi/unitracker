@@ -106,7 +106,6 @@ def test_player_refusals(one, monkeypatch):
 EDITS = {
     "note control \\$41": lambda one: (pattern(one) + 2, (0x41,), {}),
     "an instrument selected without a note": lambda one: (pattern(one) + 3, (0x83, 0x61), {}),
-    "a voice whose first row plays no note": lambda one: (pattern(one), (0x61,), {}),
     "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
     "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
@@ -196,3 +195,20 @@ def test_rests_and_gate_offs_play_exactly(one):
     cells = gridcmp.cell_diff(ours, ref.render_grid(len(ours)))
     assert not cells.size, summary(cells, 3)
     assert "- run:c2*6" in text and "off run:c3*9" in text
+
+
+def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
+    """The image's cells are the init events', the token an ordinary ``off``; a gated image is
+    refused."""
+    write(one, pattern(one), 0x61)
+    write(one, one.lay.ctrl, 0x40)
+    write(one, one.lay.freq_lo_w, 0x10)
+    write(one, one.lay.freq_hi_w, 0x27)
+    write(one, one.lay.pw_lo, 0x4E)
+    write(one, one.lay.pw_hi, 0x1C)
+    text = one.document()
+    assert "freq:10000" in text and "pw:3150" in text and "ctrl:64" in text
+    assert text.count("off run:") >= 1
+    write(one, one.lay.ctrl, 0x41)
+    with pytest.raises(m.TranscribeError, match="a voice whose first row plays no note"):
+        one.document()

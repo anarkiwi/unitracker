@@ -350,8 +350,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         ``voice`` to ``out``."""
         events, at = [], tick
         for token in self._tokens(pid):
-            if tick == 1 and not events and token[0] != "note":
-                raise TranscribeError("a voice whose first row plays no note")
+            if (
+                tick == 1
+                and not events
+                and token[0] != "note"
+                and self._rd(self.lay.ctrl + voice.v) & 1
+            ):
+                raise TranscribeError("a voice whose first row plays no note and whose image gates")
             events.append(self.event(voice, token, trans, at))
             at += events[-1].steps
         out.append((tick, self.phrases.setdefault(tuple(events), f"p{len(self.phrases) + 1}")))
@@ -376,13 +381,19 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return [(Play("p0"),) * VOICES] + rows[: loop[0] + loop[1]], loop[0] + 1
 
     def init(self) -> list:
-        """The init events: the volume and filter init wrote, and the owner's cutoff sweep."""
+        """The init events: the volume and filter init wrote, each voice's image cells (the
+        frequency, pulse width and control the player outputs until the voice's first note), and
+        the owner's cutoff sweep."""
         regs = self.ref.snapshot()
         res_filt, mode_vol = regs[MA.RES_FILT_REG], regs[MA.MODE_VOL_REG]
         events = [{"res": res_filt >> 4, "route": res_filt & 0x0F, "mode": mode_vol & 0xF0}]
         events[0]["vol"] = mode_vol & 0x0F
         events += [{} for _ in range(VOICES - 1)]
         rd, lay = self._rd, self.lay
+        for v, cmds in enumerate(events):
+            cmds["freq"] = rd(lay.freq_hi_w + v) << 8 | rd(lay.freq_lo_w + v)
+            cmds["pw"] = (rd(lay.pw_hi + v) & 0x0F) << 8 | rd(lay.pw_lo + v)
+            cmds["ctrl"] = rd(lay.ctrl + v)
         owner, count = rd(lay.trigger_owner), rd(lay.trigger_ctr)
         if owner < VOICES and count:
             sweep = self.call("csweep", u=rd(lay.trigger_acc), c=count, s=rd(lay.sweep_step))
