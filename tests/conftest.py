@@ -144,6 +144,12 @@ eastern_promise = hvsc_tune(
     "MUSICIANS/M/Merman/Eastern_Promise.sid",
     "Path to Merman's Eastern Promise, a Music Assembler native song with transposes.",
 )
+chodel = hvsc_tune(
+    "chodel",
+    "MUSICIANS/J/Joan/Chodel.sid",
+    "Path to Joan's Chodel, a Music Assembler tune whose first voice starts on a rest with no"
+    " trigger yet played.",
+)
 
 
 def table(*rows) -> Table:
