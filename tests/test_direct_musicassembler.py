@@ -180,32 +180,37 @@ def test_an_inner_program_jump_is_bound_by_its_own_cursor(one, to, cursor):
     """Where the bound cell is the voice's cursor cell, the bound is the cursor's next step."""
     write(one, program(one, 4) + 3, 0xFD, to)
     one.lay = replace(one.lay, program_jump=one.lay.instr_cursor)
-    voice = SimpleNamespace(flags=4, cursor=0, v=1, index=0)
+    voice = SimpleNamespace(flags=4, cursor=0, v=1, index=0, mask=0xFF, image=False)
     one._step(voice, 0)
     assert voice.cursor == cursor
 
 
 def test_an_inner_program_filter_byte_pokes_the_sweep(one, monkeypatch):
-    """The byte fires once into the sweep's accumulator, after the owner's step: on the owner's
-    voice or a later one, none where nothing owns the sweep."""
-    poke = {"post.cut": m.Once(one.call("poke", u=0x21))}
+    """The byte fires once into the sweep's accumulator: after the owner's step on the owner's
+    voice or a later one, before it on an earlier one; none where nothing owns the sweep."""
+    poke = m.Once(one.call("poke", u=0x21))
     monkeypatch.setattr(one, "sweep", lambda tick, v: (0, 0x45, 7, 0xFA))
-    assert one._poke(0, 0x21, 5) == poke and one._poke(2, 0x21, 5) == poke
+    assert one._poke(0, 0x21, 5) == {"post.cut": poke} == one._poke(2, 0x21, 5)
     monkeypatch.setattr(one, "sweep", lambda tick, v: (1, 0x45, 7, 0xFA))
-    with pytest.raises(m.TranscribeError, match="before the sweep's owner"):
+    with pytest.raises(m._NeedPre):
         one._poke(0, 0x21, 5)
+    one.pre = True
+    assert one._poke(0, 0x21, 5) == {"pre.cut": poke} and "pre" in one.pokes
     monkeypatch.setattr(one, "sweep", lambda tick, v: (VOICES, 0, 0, 0))
     assert one._poke(0, 0x21, 5) == {}
 
 
-def test_an_inner_program_filter_byte_plays_exactly(one):
+@pytest.mark.parametrize("owner", range(VOICES))
+def test_an_inner_program_filter_byte_plays_exactly(one, owner):
+    """Whichever voice owns the sweep, the byte of voice 1's inner program is written before
+    or after the owner's step (the ``pre`` slot is the song's only change)."""
+    filtered(one, voice=owner)
     write(one, program(one, 4) + 2, 0x21)
-    try:
-        text = one.document()
-    except m.TranscribeError as err:
-        assert "before the sweep's owner" in str(err)
-        return
-    assert "post.cut:poke(33)!" in text and "post:{}" in text
+    text = one.document()
+    assert ("pre.cut:poke(33)!" in text) == (owner > 0)
+    assert ("post.cut:poke(33)!" in text) == (owner == 0)
+    assert ("cut:{pre:{},cut:{" in text) == (owner > 0)
+    assert ("cut.cut:csweep(" in text) == (owner > 0) and ("post:{}" in text) == (owner == 0)
     cells = standard_cells(one, text)
     assert not cells.size, summary(cells, 3)
 

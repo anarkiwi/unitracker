@@ -100,7 +100,11 @@ An inner program row with a filter byte writes it to the sweep's accumulator (`p
 sweep's own cell) on its tick, a `post.cut:poke(u)!` row key: the `post` slot after the sweep's
 fires `poke(u)`, `acc = u`, once, so the sweep steps on from `u` while its `ctr` lasts. The
 player steps the sweep in its owner's output call, so the write is exact on the owner's voice and
-the voices after it; a voice before the owner is refused.
+the voices after it. On a voice before the owner the player's write comes before the owner's
+step in the same call, so the key is `pre.cut:poke(u)!`: a song that needs it has the slot
+`pre` before the sweep's in the header (`cut:{pre:{},cut:{...},post:{}}`) and writes the
+sweep's own bindings `cut.cut:`, since a key without a prefix binds a cell's first slot. Other
+songs are unchanged.
 
 ## Not transcribed
 
@@ -120,5 +124,4 @@ Refused with a `TranscribeError`:
 - the orderlist `$FC` tempo command, a pattern without an end;
 - a legato note before its voice's first trigger, or with a filter command (its step would
   apply at once, its accumulator and count at the next trigger);
-- an inner program filter byte on a voice before the sweep's owner;
 - an arpeggio whose code reads other cells or compares on its descent.
