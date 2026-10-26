@@ -345,11 +345,12 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             "ctrl": rd(lay.ctrl + v),
         }
 
-    def _idle_start(self, v: int) -> bool:
-        """Whether voice ``v``'s first output call runs init's note control: its first token
-        is no note."""
+    def _idle_triggers(self, v: int) -> list:
+        """``[(1, v, False)]``, the trigger of voice ``v``'s first output call, if its first token
+        is no note and init left its note control without the trigger latch; else none."""
         pid = next(self._entries(v))[1]
-        return pid == MA.SILENCE_PATTERN or next(self._tokens(pid))[0] != "note"
+        idle = pid == MA.SILENCE_PATTERN or next(self._tokens(pid))[0] != "note"
+        return [(1, v, False)] * (idle and not self._rd(self.lay.note_ctl + v) & MA.CTL_TRIGGERED)
 
     def _prime(self, voice: Voice):
         """The trigger row of the first output call of ``voice`` whose note control init left
@@ -539,8 +540,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         take the sweep from a later voice, which the player stops on their parse tick."""
         found, notes = [], []
         for v in range(VOICES):
-            if self._idle_start(v) and not self._rd(self.lay.note_ctl + v) & MA.CTL_TRIGGERED:
-                notes.append((1, v, False))
+            notes += self._idle_triggers(v)
             for tick, pid, _ in self._reach(v, horizon):
                 if pid == MA.SILENCE_PATTERN:
                     continue
