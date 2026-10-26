@@ -229,7 +229,9 @@ class Tables:  # pylint: disable=too-few-public-methods
         return self._det(keys, None if detune == 0xFF else detune, carry, arp or 0), hold
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
-    def wave(self, ins, chord=None, kept=(None, None, False), gated=1, start=None) -> str:
+    def wave(
+        self, ins, chord=None, kept=(None, None, False), gated=1, start=None, waved=None
+    ) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
         waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
         reset switches, the pulse or filter walk ``kept`` resumed instead of restarted (the
@@ -260,6 +262,9 @@ class Tables:  # pylint: disable=too-few-public-methods
             if not gated or not (feats.hardrestypes and not ins.control & 0x03):
                 first["gate"] = 0
             lead = [Row({"hold": 0, "gate": 1})]
+        if waved is not None:
+            # A waveform FX on the note writes WFGHOST past STRTSND.
+            first = {k: v for k, v in first.items() if k != "gate"} | {"ctrl": waved}
         if ins.wf_table:
             image = self.ref._image(ins)  # pylint: disable=protected-access
             number = ins.default_chord if chord is None else chord

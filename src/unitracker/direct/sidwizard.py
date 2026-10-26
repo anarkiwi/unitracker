@@ -324,8 +324,12 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def _waveform(self, rec) -> dict:
         """A FX writing WFGHOST: the control byte it leaves, gated as the voice is."""
         value, gate = rec.ctrl
-        if rec.newnote or value & 1 and not gate:
-            raise TranscribeError("a waveform FX on a note or setting a gate the voice has off")
+        if rec.newnote:
+            # Past STRTSND's write, in its tick: the first frame's waveform.
+            rec.waved = value
+            return {}
+        if value & 1 and not gate:
+            raise TranscribeError("a waveform FX setting a gate the voice has off")
         return {"ctrl": value}
 
     def _moved(self, rec, fx: int) -> dict:
@@ -489,9 +493,9 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
                 raise TranscribeError("a filter handover on a note that runs another table")
             commands["run"] = self.filter(ins, handover=rec.handover)
         chord = rec.chord[2] if "run" in commands else None
-        if pulse is not None or filt is not None or start is not None:
+        if pulse is not None or filt is not None or start is not None or rec.waved is not None:
             # A chord FX (its own run) picks the chord the kept walk plays.
-            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated, start)
+            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated, start, rec.waved)
         elif self.wave(ins, chord, gated=rec.gated) != self.wave(ins, chord):
             if rec.handover is not None:
                 raise TranscribeError("a filter handover on a note that keeps a gate off")

@@ -65,6 +65,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     gated: int = 1
     after: tuple = (None, None)
     moved: tuple = None
+    waved: int = None
 
 
 @dataclass
@@ -217,6 +218,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
             rec.arp = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
             rec.after = _tables(ref, v)
+            rec.ctrl = (v.sid_ctrl, v.ptn_gate & 1)
 
     def filter_state():
         return (
