@@ -280,8 +280,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         nxt = cur + 3 & 0xFF
         marker = rd(base + nxt)
         if lay.program_jump and marker == MA.PROGRAM_JUMP:
-            raise TranscribeError("an inner program jump")
-        if marker == MA.PROGRAM_STOP:
+            to = rd(base + (nxt + 1 & 0xFF))
+            nxt = 0 if to == 0 or to >= rd(lay.program_jump + voice.v) + 3 & 0xFF else to * 3 & 0xFF
+        elif marker == MA.PROGRAM_STOP:
             voice.flags &= 0xF0
         elif marker == MA.PROGRAM_RESTART:
             nxt = 0

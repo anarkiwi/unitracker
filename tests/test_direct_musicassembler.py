@@ -111,7 +111,6 @@ def test_player_refusals(one, monkeypatch):
 
 EDITS = {
     "legato note before": lambda one: (pattern(one) + 2, (0x40,), {}),
-    "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
     "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 1), {"order_jump": 1}),
     "orderlist command \\$FC": lambda one: (order(one) + 2, (0xFC,), {"order_tempo": (1,)}),
@@ -150,6 +149,21 @@ def test_song_refusals(one, match):
     one.lay = replace(one.lay, **changes)
     with pytest.raises(m.TranscribeError, match=match):
         one.document()
+
+
+@pytest.mark.parametrize(
+    "to, bound, cursor", [(2, 4, 6), (0, 4, 0), (4, 4, 0), (9, 4, 0), (3, 4, 9)]
+)
+def test_an_inner_program_jump_follows_the_player(one, to, bound, cursor):
+    """``$FD`` continues at row ``to``, or the first row where that is 0 or past the voice's
+    bound cell."""
+    cell = 0x0300
+    one.lay = replace(one.lay, program_jump=cell)
+    write(one, cell, bound - 3)
+    write(one, program(one, 4) + 3, 0xFD, to)
+    voice = SimpleNamespace(flags=4, cursor=0, v=0, index=0)
+    one._step(voice, 0)
+    assert voice.cursor == cursor
 
 
 def test_an_inner_program_filter_byte_pokes_the_sweep(one, monkeypatch):
