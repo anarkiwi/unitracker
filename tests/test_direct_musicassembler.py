@@ -49,6 +49,15 @@ def test_an_init_that_sets_the_voices_control_plays_exactly(cannon_craze):
     assert not cells.size, summary(cells, 3)
 
 
+def test_a_long_duration_stored_apart_from_the_counter_lasts_a_row(one):
+    """A build whose long duration token stores elsewhere leaves the counter running, so the
+    voice parses the next row; the loops it makes may then not commensurate."""
+    pid = slid(one, 0x30, 0x03, 0xAF, 0x32, 0x03)
+    assert [t[1] for t in one._tokens(pid)] == [3, 15, 3]
+    one.lay = replace(one.lay, dur_long=one.lay.dur + 0x80)
+    assert [t[1] for t in one._tokens(pid)] == [3, 0, 3]
+
+
 def test_the_templates_bound(space_invadarz):
     text = m.transcribe(space_invadarz.read_bytes())
     for bound in ("vib(", "pong(", "pulse(", " cut:csweep(", "pw:2056"):
