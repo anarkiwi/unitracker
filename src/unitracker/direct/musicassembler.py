@@ -63,11 +63,13 @@ class Voice:
     inner program, its note index, the AD its last trigger wrote and whether its arpeggio runs."""
 
     ins: int
+    v: int = 0
     flags: int = 0
     cursor: int = 0
     index: int = 0
     ad: int = 0
     arp: bool = False
+    cut: Call | None = None
 
 
 class Transcriber:  # pylint: disable=too-many-instance-attributes
@@ -78,7 +80,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.lay, self._rd = self.ref.layout, self.ref._rd  # pylint: disable=protected-access
         self.rowlen = self._rd(self.lay.tempo_reload) + 1
         self.ins, self.ctrl, self.phrases, self.used = {}, {}, {}, []
+        self.sweeps, self.start = [], (VOICES, 0, 0, 0)
         self._check()
+        lay = self.lay
+        cells = (lay.trigger_owner, lay.trigger_acc, lay.trigger_ctr, lay.sweep_step)
+        self.start = tuple(self._rd(c) for c in cells)
 
     def _check(self) -> None:
         lay, rd = self.lay, self._rd
@@ -126,7 +132,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 y = lay.order_restart
 
     def _tokens(self, pid: int):
-        """``(kind, duration, instrument, note)`` of each token of pattern ``pid``."""
+        """``(kind, duration, instrument, note, filter)`` of each token of pattern ``pid``, the
+        filter command's two bytes if its note has one."""
         if pid == MA.SILENCE_PATTERN:
             raise TranscribeError("the silence pattern")
         rd = self._rd
@@ -137,15 +144,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 ins, y = val & 0x1F, y + 1 & 0xFF
                 val = rd(pat + y)
             if val >= MA.LONGDUR_MIN and ins is None:
-                yield "-", val & MA.CTL_DUR_MASK, None, None
+                yield "-", val & MA.CTL_DUR_MASK, None, None, None
             elif val >= MA.DUR_MIN:
-                yield "off", val & MA.CTL_DUR_MASK, ins, None
+                yield "off", val & MA.CTL_DUR_MASK, ins, None, None
             else:
                 y = y + 1 & 0xFF
-                ctl = rd(pat + y)
-                if ctl & ~MA.CTL_DUR_MASK:
+                ctl, sweep = rd(pat + y), None
+                if ctl & MA.CTL_FILTER:
+                    sweep = (rd(pat + (y + 1 & 0xFF)), rd(pat + (y + 2 & 0xFF)))
+                    y = y + 2 & 0xFF
+                if ctl & ~(MA.CTL_DUR_MASK | MA.CTL_FILTER):
                     raise TranscribeError(f"note control ${ctl:02X}")
-                yield "note", ctl, ins, val
+                yield "note", ctl & MA.CTL_DUR_MASK, ins, val, sweep
             y = y + 1 & 0xFF
             if rd(pat + y) == MA.PATTERN_END:
                 return
@@ -234,10 +244,21 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         program = Program([Row(k | ({"hold": h} if h != 1 else {})) for k, h in merged])
         return self.ctrl.setdefault(program, f"c{len(self.ctrl) + 1}")
 
-    def event(self, voice: Voice, token: tuple, trans: int) -> Event:
-        """The event of ``token`` on ``voice`` under ``trans``: its ticks' control rows, the
-        last its next parse's, which writes nothing and holds the sweeps."""
-        kind, dur, ins, note = token
+    def sweep(self, tick: int, v: int) -> tuple:
+        """``(owner, u, c, s)``, the filter sweep a note of voice ``v`` at ``tick`` triggers:
+        the init's, then each filter command parsed up to it, the voices in order."""
+        state = self.start
+        for at, owner, u, c, s in self.sweeps:
+            if at > (tick, v):
+                break
+            state = (owner, u, c if c else state[2], s)
+        return state
+
+    def event(self, voice: Voice, token: tuple, trans: int, tick: int = 1) -> Event:
+        """The event of ``token`` on ``voice`` under ``trans`` from ``tick``:
+        its ticks' control rows, the last its next parse's, which writes nothing and holds the
+        sweeps."""
+        kind, dur, ins, note = token[:4]
         length = (dur + 1) * self.rowlen
         if ins is not None and kind != "note" and ins != voice.ins:
             raise TranscribeError("an instrument selected without a note")
@@ -251,8 +272,25 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             name = self.instrument(voice.ins)
         rows += [self._step(voice) for _ in range(length - 1 - len(rows))]
         rows.append({"ad": voice.ad})
-        atom = note_name(voice.index) if kind == "note" else kind
-        return Event(atom, name, {"run": self._program(rows)}, steps=length)
+        cmds = {"run": self._program(rows)}
+        if kind == "note":
+            cmds |= self._filter(voice, token[4], tick)
+        return Event(note_name(voice.index) if kind == "note" else kind, name, cmds, steps=length)
+
+    def _filter(self, voice: Voice, filt, tick: int) -> dict:
+        """The commands of a note of ``voice`` at ``tick``: a filter command's resonance and
+        routing, and the cutoff sweep its trigger restarts if ``voice`` owns it, bound again
+        when the song's sweep changed since ``voice`` bound it."""
+        v, cmds = voice.v, {}
+        if filt is not None:
+            preset = self._rd(self.lay.res_presets + v) if filt[1] else 0xF0
+            cmds |= {"res": preset >> 4, "route": preset & 0x0F}
+        owner, u, c, s = self.sweep(tick, v)
+        if owner == v and c:
+            want = self.call("csweep", u=u, c=c, s=s)
+            if want != voice.cut:
+                cmds["cut"], voice.cut = want, want
+        return cmds
 
     # ---- the song -----------------------------------------------------------------------
 
@@ -269,26 +307,51 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             total += ((transrep & 0x0F) + 1) * self._ticks(pid)
         return None  # pragma: no cover
 
-    def _starts(self, v: int, horizon: int) -> list:
-        """``(tick, phrase)`` of each pattern voice ``v`` starts before ``horizon``."""
-        voice, tick, out = Voice(self._rd(self.lay.instr_x8 + v) >> 3), 1, []
+    def _walk(self, v: int, horizon: int):
+        """``(tick, pid, trans)`` of each pattern voice ``v`` starts before ``horizon``."""
+        tick = 1
         for _, pid, transrep in self._entries(v):
             if tick >= horizon:
                 break
             for _ in range((transrep & 0x0F) + 1):
-                tick = self._play(voice, pid, transrep >> 4, tick, out)
+                yield tick, pid, transrep >> 4
+                tick += self._ticks(pid)
+
+    def _filters(self, horizon: int) -> None:
+        """The song's filter commands before ``horizon``, in the order the player parses them:
+        ``self.sweeps`` is ``((tick, voice), voice, u, c, s)`` of each."""
+        found = []
+        for v in range(VOICES):
+            for tick, pid, _ in self._walk(v, horizon):
+                for token in self._tokens(pid):
+                    if token[4] is not None:
+                        u, c = token[4]
+                        found.append(((tick, v), v, u, c, ((u & 0x0F) << 1) - 0x10 & 0xFF))
+                    tick += (token[1] + 1) * self.rowlen
+        owners = {f[1] for f in found} | ({self.start[0]} if self.start[2] else set())
+        if len(owners) > 1:
+            raise TranscribeError("a filter sweep owned by more than one voice")
+        self.sweeps = sorted(found)
+
+    def _starts(self, v: int, horizon: int) -> list:
+        """``(tick, phrase)`` of each pattern voice ``v`` starts before ``horizon``."""
+        voice, out = Voice(self._rd(self.lay.instr_x8 + v) >> 3, v), []
+        if v == self.start[0] and self.start[2]:
+            voice.cut = self.call("csweep", u=self.start[1], c=self.start[2], s=self.start[3])
+        for tick, pid, trans in self._walk(v, horizon):
+            self._play(voice, pid, trans, tick, out)
         return out
 
-    def _play(self, voice: Voice, pid: int, trans: int, tick: int, out: list) -> int:
+    def _play(self, voice: Voice, pid: int, trans: int, tick: int, out: list) -> None:
         """Appends ``(tick, phrase)`` of pattern ``pid`` under ``trans`` from ``tick`` on
-        ``voice`` to ``out``; the tick after it."""
-        events = []
+        ``voice`` to ``out``."""
+        events, at = [], tick
         for token in self._tokens(pid):
             if tick == 1 and not events and token[0] != "note":
                 raise TranscribeError("a voice whose first row plays no note")
-            events.append(self.event(voice, token, trans))
+            events.append(self.event(voice, token, trans, at))
+            at += events[-1].steps
         out.append((tick, self.phrases.setdefault(tuple(events), f"p{len(self.phrases) + 1}")))
-        return tick + sum(e.steps for e in events)
 
     def timeline(self) -> tuple:
         """``(rows, loop row)`` of the orderlists' pattern starts, after tick 0's parse."""
@@ -297,6 +360,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if cycle > 1 << 20:
             raise TranscribeError("orderlists of incommensurate loops")
         horizon = 1 + max(i for i, _ in periods) + 4 * cycle
+        self._filters(horizon)
         plays = {}
         for v in range(VOICES):
             for tick, name in self._starts(v, horizon):
@@ -315,11 +379,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         events = [{"res": res_filt >> 4, "route": res_filt & 0x0F, "mode": mode_vol & 0xF0}]
         events[0]["vol"] = mode_vol & 0x0F
         events += [{} for _ in range(VOICES - 1)]
-        rd, lay = self._rd, self.lay
-        owner, count = rd(lay.trigger_owner), rd(lay.trigger_ctr)
+        owner, u, count, step = self.start
         if owner < VOICES and count:
-            sweep = self.call("csweep", u=rd(lay.trigger_acc), c=count, s=rd(lay.sweep_step))
-            events[owner]["cut"] = sweep
+            events[owner]["cut"] = self.call("csweep", u=u, c=count, s=step)
         return [Event("-", commands=c) for c in events]
 
     def _defs(self, phrases: list) -> list:
@@ -355,6 +417,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         defs = self._defs(phrases)
         bound = [v for s in defs for _, d in s.records for v in _values(d)]
         bound += [v for e in init for _, v in e.commands]
+        bound += [v for _, events in phrases for e in events for _, v in e.commands]
         called = {b.name for b in bound if isinstance(b, Call)}
         used = [t for t in self.used if t in called]
         mods = [(signature(t, code.params(ROUTINES[t])), Code(ROUTINES[t])) for t in used]

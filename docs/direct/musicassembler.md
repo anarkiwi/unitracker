@@ -70,7 +70,7 @@ functions; each slot holds on the voice's parse ticks (`hold:[row.ad]`).
 |---|---|---|---|
 | `pulse(p,s)`, `pong(p,s,k)` | pw | `d`, `q`: direction and count | the trigger's width, then `_pulse` |
 | `vib(w,m,s,k)` | freq | `dl`, `sc`, `ph`: delay, count, phase | `_arp`: after `w = speed >> 3` calls, the word steps by `s` down or up as bit `phase & 3` of `m` (the player's 4-byte table), the phase turning every `k = speed & $0F` |
-| `csweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
+| `csweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, or by a note control `$80` (its two bytes `u` and `c`, `s = ((u & $0F) << 1) - $10`, `c` kept if 0; with `res`/`route` from the voice's preset or `$F0`) on that voice, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
 
 ## Not transcribed
 
@@ -81,7 +81,8 @@ Refused with a `TranscribeError`:
 - an init that leaves the tempo or a duration running, writes a voice or the cutoff, or does
   not start the orderlists; a voice whose first token is no note (the image's cells would play);
 - orderlist `$FC`/`$FD` commands, the silence pattern, a pattern without an end;
-- a note control byte with the filter, vibrato or legato bit (`$80`, `$20`, `$40`);
+- a note control byte with the vibrato or legato bit (`$20`, `$40`); a filter command sweeping
+  from more than one voice (the one sweep would need unbinding from the old owner);
 - an instrument selected without a note that is not the voice's own;
 - an inner program row with a filter byte, an inner program `$FD` jump;
 - an arpeggio whose code reads other cells or compares on its descent.

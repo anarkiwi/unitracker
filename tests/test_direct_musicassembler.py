@@ -10,6 +10,7 @@ from unitracker_player.player import play
 
 from unitracker import cli
 from unitracker.direct import musicassembler as m
+from unitracker.direct.musicassembler import MA, VOICES
 from unitracker.direct.cli import summary
 
 # pylint: disable=protected-access
@@ -103,7 +104,7 @@ def test_player_refusals(one, monkeypatch):
 
 
 EDITS = {
-    "note control \\$81": lambda one: (pattern(one) + 2, (0x81,), {}),
+    "note control \\$41": lambda one: (pattern(one) + 2, (0x41,), {}),
     "an instrument selected without a note": lambda one: (pattern(one) + 3, (0x83, 0x61), {}),
     "a voice whose first row plays no note": lambda one: (pattern(one), (0x61,), {}),
     "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
@@ -131,6 +132,41 @@ def test_a_pattern_of_no_end_is_refused(one):
     write(one, 0xC000, *(0x7F,) * 0x100)
     with pytest.raises(m.TranscribeError, match="a pattern of no end"):
         one.document()
+
+
+def filtered(one, voice: int = 0):
+    """Voice ``voice``'s first pattern replaced by a filter note, a rest and a plain note;
+    the sweep init left unowned."""
+    pid = one._rd(one.lay.pattern_id + voice)
+    write(one, one.lay.pattern_lo + pid, 0x00)
+    write(one, one.lay.pattern_hi + pid, 0xC0)
+    write(one, 0xC000, 0x30, 0x83, 0x45, 0x07, 0xA1, 0x32, 0x03, MA.PATTERN_END)
+    one.start = (VOICES, 0, 0, 0)
+    return pid
+
+
+def test_a_filter_command_binds_the_sweep(one):
+    pid = filtered(one)
+    tokens = list(one._tokens(pid))
+    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07))
+    assert tokens[2] == ("note", 3, None, 0x32, None)
+    one._filters(100)
+    assert one.sweeps[0] == ((1, 0), 0, 0x45, 0x07, 0xFA)
+    voice = m.Voice(0, 0)
+    bind = one.call("csweep", u=0x45, c=7, s=0xFA)
+    first = dict(one.event(voice, tokens[0], 0, 1).commands)
+    preset = one._rd(one.lay.res_presets)
+    assert (first["res"], first["route"], first["cut"]) == (preset >> 4, preset & 0xF, bind)
+    again = dict(one.event(voice, tokens[2], 0, 10).commands)
+    assert "cut" not in again and "res" not in again
+    assert "cut" not in dict(one.event(m.Voice(0, 1), tokens[2], 0, 10).commands)
+
+
+def test_a_filter_sweep_on_two_voices_is_refused(one):
+    filtered(one)
+    one.start = (1, 0x10, 5, 0xF0)
+    with pytest.raises(m.TranscribeError, match="more than one voice"):
+        one._filters(100)
 
 
 def test_cli(space_invadarz, capsys):
