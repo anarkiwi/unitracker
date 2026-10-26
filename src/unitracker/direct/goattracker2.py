@@ -19,6 +19,7 @@ from unitracker_grammar.document import (
     CONT,
     HOLD,
     NONE,
+    RESET,
     Call,
     Code,
     Document,
@@ -227,6 +228,11 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         player's own pulse table."""
         return self.call("ptabs" if self.ref.simplepulse else "ptab", b=pos)
 
+    def pulse_start(self, pos: int) -> dict:
+        """The row keys that start the pulse table at row ``pos``: its call, and a ``reset`` of
+        the pulse slot, so a table already running restarts instead of keeping its phi."""
+        return {"pw": self.pulse(pos), "pulse.pw": RESET}
+
     # ---- programs -----------------------------------------------------------------------
 
     @staticmethod
@@ -299,7 +305,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             C.CMD_SETAD: lambda: {"ad": arg},
             C.CMD_SETSR: lambda: {"sr": arg},
             C.CMD_SETWAVE: lambda: {"ctrl": arg},
-            C.CMD_SETPULSEPTR: lambda: {"pw": self.pulse(arg) if arg else stop},
+            C.CMD_SETPULSEPTR: lambda: self.pulse_start(arg) if arg else {"pw": stop},
             C.CMD_SETFILTERPTR: lambda: {"run": self.filt(arg)} if arg else {"cut": stop},
             C.CMD_SETFILTERCTRL: lambda: {"res": arg >> 4, "route": arg & 0x0F}
             | ({} if arg else {"cut": stop}),
@@ -456,7 +462,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             C.CMD_SETSR: lambda: {"sr": data},
             C.CMD_SETWAVE: lambda: {"ctrl": data},
             C.CMD_SETWAVEPTR: lambda: {"run": self.wave(data, gated) if data else NONE},
-            C.CMD_SETPULSEPTR: lambda: {"pw": self.pulse(data) if data else HOLD},
+            C.CMD_SETPULSEPTR: lambda: self.pulse_start(data) if data else {"pw": HOLD},
             C.CMD_SETFILTERPTR: lambda: {"run": self.filt(data)} if data else {"cut": HOLD},
             C.CMD_SETFILTERCTRL: lambda: {"res": data >> 4, "route": data & 0x0F}
             | ({} if data else {"cut": HOLD}),
