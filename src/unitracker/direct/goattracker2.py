@@ -364,12 +364,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     def filt(self, pos: int) -> str:
         """The ``filter`` name of the filter program at ``pos``: one row per execution; at 0,
-        the program that stops the running one, keeping the cutoff."""
+        the program that stops the running one, keeping the cutoff. A jump is followed once,
+        and the row it lands on, a jump row too, runs as an ordinary row."""
         rows, at = [], {}
         while pos and pos not in at:
             if self._lt(C.FTBL, pos) == C.TABLEJUMP:
                 pos = self._rt(C.FTBL, pos)
-                continue
+                if not pos or pos in at:
+                    break
             at[pos] = len(rows)
             left, right = self._lt(C.FTBL, pos), self._rt(C.FTBL, pos)
             pos = (pos + 1) & 0xFF
