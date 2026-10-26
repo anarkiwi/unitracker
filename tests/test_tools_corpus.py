@@ -1,6 +1,7 @@
 """tools/corpus.py: tune lists, corpus checks by cause and the survey renderer."""
 
 import csv
+import json
 from pathlib import Path
 
 import corpus
@@ -58,6 +59,61 @@ def test_tune_lists_filter_by_player_and_subtunes_and_name_their_outputs(tmp_pat
     assert shared.tune(tunes) == tunes
 
 
+def test_a_tunes_songs_are_its_subtunes_but_those_too_short():
+    rows = [_row(1, "x", 3) | {"lengths": "30 5.5 12"}, _row(2, "x", 2), {"path": "a/b.sid"}]
+    got = shared.songs(rows, "all", 10)
+    assert [shared.name(r) for r in got] == [
+        "00000000-t1",
+        "00000000-t1-s2",
+        "00000000-t2",
+        "00000000-t2-s1",
+        "b",
+    ]
+    assert [r["subtune"] for r in shared.songs(rows, 1)] == [1, 1, 1]
+    assert len(shared.songs(rows)) == 3 and shared.songs(rows, "all", 31) == got[2:]
+
+
+def test_versions_fall_back_to_the_package_without_git(monkeypatch):
+    corpus.versions.cache_clear()
+    got = corpus.versions()
+    assert len(got["unitracker"]) == 40 and set(corpus.LIBRARIES) <= set(got)
+    corpus.versions.cache_clear()
+    monkeypatch.setattr(corpus.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError))
+    assert corpus.versions()["unitracker"] == corpus.metadata.version("unitracker")
+    corpus.versions.cache_clear()
+
+
+def test_a_lifted_song_is_verified_and_its_versions_recorded(metal_warrior, tmp_path, monkeypatch):
+    opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 200, "retry": False}
+    opts["forms"] = ["lifted"]
+    row = {"path": str(metal_warrior), "subtune": 1}
+    got = corpus.forms_one(row, opts)
+    assert got["lifted"] == "ok" and got["verified"] is True and got["bad_cells"] == 0
+    assert got["versions"] == corpus.versions() and got["ticks"] == 200
+    meta = json.loads((tmp_path / "meta" / f"{metal_warrior.stem}-s1.json").read_text())
+    assert meta == {k: got[k] for k in meta}
+
+    def fail(*_):
+        raise RuntimeError("no grid")
+
+    monkeypatch.setattr(corpus.cli, "verify", fail)
+    got = corpus.forms_one(row | {"subtune": 0}, opts)
+    assert got["lifted"] == "ok" and got["verified"] is False
+    assert got["verify_error"] == "RuntimeError: no grid" and "bad_cells" not in got
+
+
+def test_a_failed_forms_traceback_follows_its_line(tmp_path):
+    sid = tmp_path / "junk.sid"
+    sid.write_bytes(b"not a sid")
+    opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 10, "retry": False}
+    opts["forms"] = ["lifted", "named"]
+    got = corpus.forms_one({"path": str(sid)}, opts)
+    assert got["lifted"].startswith("FormatError") and got["named"] == "no lifted form"
+    text = (tmp_path / "lifted" / "junk.err").read_text()
+    assert text.startswith(got["lifted"] + "\nTraceback")
+    assert corpus.forms_one({"path": str(sid)}, opts)["lifted"] == got["lifted"]
+
+
 def test_rows_fall_into_categories():
     row = dict.fromkeys(corpus.FIELDS, "")
     assert corpus.category({**row, "verified": "yes"}) == "verified"
@@ -71,7 +127,8 @@ def test_a_tune_that_does_not_lift_is_a_gap(tmp_path):
     opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "subtune": 0, "frames": 8}
     row = corpus.check_one({"path": str(sid)}, opts)
     assert row["verified"] == "no" and row["gap"].startswith("FormatError")
-    assert (tmp_path / "junk.err").read_text() == row["gap"] + "\n"
+    first, rest = (tmp_path / "junk.err").read_text().split("\n", 1)
+    assert first == row["gap"] and rest.startswith("Traceback") and "FormatError" in rest
 
 
 def test_tunes_are_checked_and_reported(metal_warrior, tmp_path, capsys):
