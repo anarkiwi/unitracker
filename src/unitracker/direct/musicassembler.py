@@ -285,7 +285,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             "ctrl": rd(lay.ctrl + v),
         }
 
-    def event(
+    def event(  # pylint: disable=too-many-locals
         self, voice: Voice, token: tuple, trans: int, tick: int = 1, first: bool = False
     ) -> Event:
         """The event of ``token`` on ``voice`` under ``trans`` from ``tick``:
