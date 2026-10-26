@@ -31,6 +31,11 @@ _PONG = (
     + "count:\ninc q\nlda q\ncmp #k\nbne done\nlda #0\nsta q\nlda d\neor #1\nsta d\ndone:\nrts\n"
 )
 
+_CSTEP = (
+    "lda ctr\nbeq done\ndec ctr\nclc\nlda acc\nadc #s\nsta acc\nlda #0\nsta v+1\nlda acc\n"
+    + "asl\nrol v+1\nasl\nrol v+1\nasl\nrol v+1\nsta v\ndone:\nrts\n"
+)
+
 CODE = {
     # From the sounding note's frequency, after w calls, each phase k steps of the word down (a
     # borrow to 0 then up) or up by s.
@@ -55,10 +60,9 @@ CODE = {
     "pong": _TRIGGER + "lda #0\nsta d\nsta q\nrts\nstep:\n" + _PONG,
     "pongs": _PONG,
     # The owner's trigger loads acc and ctr; while ctr lasts each tick steps acc into FC_HI.
-    "csweep": _FIRST
-    + "lda #u\nsta acc\nlda #c\nsta ctr\nrts\nstep:\nlda ctr\nbeq done\ndec ctr\nclc\nlda acc\n"
-    + "adc #s\nsta acc\nlda #0\nsta v+1\nlda acc\nasl\nrol v+1\nasl\nrol v+1\nasl\nrol v+1\n"
-    + "sta v\ndone:\nrts\n",
+    "csweep": _FIRST + "lda #u\nsta acc\nlda #c\nsta ctr\nrts\nstep:\n" + _CSTEP,
+    # A legato note's filter command: the sweep running on from its accumulator and count, by s.
+    "csweeps": _CSTEP,
     # The sweep taken from its owner, still until the new owner's trigger.
     "idle": "rts\n",
     # An inner program's filter byte: the sweep's accumulator, which the sweep steps from.
