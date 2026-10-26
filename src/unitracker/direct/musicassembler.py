@@ -548,18 +548,27 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         out.append((tick, self.phrases.setdefault(tuple(events), f"p{len(self.phrases) + 1}")))
 
     def timeline(self) -> tuple:
-        """``(rows, loop row)`` of the orderlists' pattern starts, after tick 0's parse."""
+        """``(rows, loop row)`` of the orderlists' pattern starts, after tick 0's parse; the
+        loop row None where every voice parks on the silence pattern and the song ends."""
         periods = [self._period(v) for v in range(VOICES)]
-        cycle = math.lcm(*(p for _, p in periods if p))
+        loops = [p for _, p in periods if p]
+        cycle = math.lcm(*loops)
         if cycle > 1 << 20:
             raise TranscribeError("orderlists of incommensurate loops")
         horizon = 1 + max(i for i, _ in periods) + 4 * cycle
+        if not loops:
+            # one row past the last voice's park: every parked event ends there, on the row
+            # that ends the voices
+            horizon = 1 + max(i for i, _ in periods) + self.rowlen
         self._filters(horizon)
         plays = {}
         for v in range(VOICES):
             for tick, name in self._starts(v, horizon):
                 plays.setdefault(tick, [CONT] * VOICES)[v] = Play(name)
         ticks = sorted(plays)
+        if not loops:
+            rows = [tuple(plays[t]) for t in ticks] + [("end",) * VOICES]
+            return [(Play("p0"),) * VOICES] + rows, None
         rows = [tuple(plays[t]) for t in ticks[:-1]]
         loop = repeat(rows, [b - a for a, b in zip(ticks, ticks[1:])])
         if loop is None:
