@@ -87,7 +87,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def _unsupported(self) -> list:
         """What the tune uses that this transcription refuses."""
         swm, feats, out = self.swm, self.feats, []
-        if swm.frame_speed != 1 or self.ref.image.play_gate or any(self.ref.image.filter_init):
+        if swm.frame_speed != 1 or self.ref.image.play_gate or any(self.ref.image.filter_init[:3]):
             out.append("multispeed, a play gate or an initial filter")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
@@ -564,12 +564,15 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         raise AssertionError("unreachable")
 
     def regs(self) -> tuple | None:
-        """The registers before tick 0 where the tune's init routine wrote the voices': they
-        hold until the player writes them. None where it wrote none."""
-        start = tuple(self.ref.image.sid_init[:VOICE_REGISTERS])
-        if not any(start):
+        """The registers before tick 0 where the tune's init routine wrote the voices' or left
+        the filter's routing: they hold until the player writes them. None where it left none."""
+        image = self.ref.image
+        start = tuple(image.sid_init[:VOICE_REGISTERS])
+        start += (0,) * (VOICE_REGISTERS - len(start))
+        route = image.filter_init[3] & 15
+        if not any(start) and not route:
             return None
-        return start + (0,) * (VOICE_REGISTERS - len(start)) + (0, 0, 0, 15)
+        return start + (0, 0, route, 15)
 
     def document(self) -> str:
         """The document of the song to its loop or end."""

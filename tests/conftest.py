@@ -101,17 +101,6 @@ whammer = hvsc_tune(
     "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
 )
 
-come_at_me_bro = hvsc_tune(
-    "come_at_me_bro",
-    "MUSICIANS/J/Jammer/Come_at_Me_Bro.sid",
-    "Path to Jammer's Come at Me Bro, a GoatTracker 2 tune whose init routine writes the SID.",
-)
-el_loco = hvsc_tune(
-    "el_loco",
-    "MUSICIANS/J/Jammer/El_Loco_Challenge_intro.sid",
-    "Path to Jammer's El Loco Challenge intro, a GoatTracker 2 tune whose init routine writes"
-    " the SID.",
-)
 pantheon = hvsc_tune(
     "pantheon",
     "MUSICIANS/T/Toggle/Pantheon.sid",

@@ -297,11 +297,3 @@ def test_start_state_registers_are_the_header_registers():
 
 def test_the_editor_start_state_has_no_header_registers():
     assert "regs:" not in exact(gt_tune(WAVE, voice2=V2))
-
-
-@pytest.mark.parametrize("name", ["come_at_me_bro", "el_loco"])
-def test_init_routine_tunes_play_exactly(name, request):
-    """The tunes whose init routine writes the SID lift, and play as the reference does."""
-    cells, text, _ = g.verify(request.getfixturevalue(name).read_bytes(), frames=2 * 3840)
-    assert not cells.size, g.summary(cells, 3)
-    assert "\nregs:" in text

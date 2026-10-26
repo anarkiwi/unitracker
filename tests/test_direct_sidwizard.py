@@ -393,12 +393,3 @@ def test_init_routine_tunes_play_exactly(name, request):
     cells, text, _ = s.verify(request.getfixturevalue(name).read_bytes(), frames=TICKS)
     assert not cells.size, summary(cells, 3)
     assert "\nregs:" in text
-
-
-@pytest.mark.parametrize("name", ["pantheon", "pimp_my_commodore"])
-def test_diag(name, request):  # temporary
-    swm = parse_sid_song(request.getfixturevalue(name).read_bytes(), 1)
-    play = swm.player
-    raise AssertionError(
-        f"DIAG {name} {swm.frame_speed} {play.play_gate} {play.filter_init} {play.sid_init.hex()}"
-    )
