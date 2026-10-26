@@ -31,7 +31,7 @@ def test_a_read_past_the_note_table_is_trapped_to_f():
     grid, found = g.trapped(tune, 40)
     assert found == (Trap(8, 0, 95, 0xFFFF, 0),)
     assert not grid[8:, :2].any()
-    assert g.trapped(gt_tune([(0x41, 0x80 + 30), (0xFF, 0)])[0], 40)[1] == ()
+    assert not g.trapped(gt_tune([(0x41, 0x80 + 30), (0xFF, 0)])[0], 40)[1]
 
 
 def test_loop_and_runs():
