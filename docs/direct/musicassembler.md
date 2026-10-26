@@ -34,6 +34,7 @@ index the player reads its frequency table at sounds `F(k)`.
 |---|---|
 | a note (`< $60`) and its control byte, after any instrument `$80-$9F` | the note at its index (transpose + note), `.iN`, `run:cK` |
 | a note whose control byte has `$40` (the player's trigger latch, already set: no trigger) | the note with `legato`, no `.iN`: its first tick is a sustain row (with `note:` the new index, as the program rows' absolute note would hold the old one), not the trigger, so the instrument's programs, pulse and sweep run on |
+| a note whose control byte has `$20` (two step bytes follow it, or the filter command's three where `$80` is set too) | the note with `freq:slide(l,h)` in its trigger row; no arpeggio, and the program rows have no `note` |
 | `$60-$7F`, or an instrument then a duration (the voice's instrument) | `off run:cK` |
 | `$A0-$FE` | `- run:cK`: the gate is kept |
 
@@ -42,7 +43,7 @@ call writes them:
 
 | tick | row |
 |---|---|
-| a note's first (the trigger) | `{ctrl:waveform}` |
+| a note's first (the trigger) | `{ctrl:waveform}`, with `freq:slide(l,h)` for a note with `$20` |
 | a later one, inner program running | `{ctrl:wave,note:N}`: the row's pitch, absolute or added to the note's index, `& $7F` |
 | one with the program stopped and the instrument's `$10` flag, the first | `{freq:vib(w,m,s,k)}` |
 | any other | none: the row before holds |
@@ -71,6 +72,7 @@ functions; each slot holds on the voice's parse ticks (`hold:[row.ad]`).
 |---|---|---|---|
 | `pulse(p,s)`, `pong(p,s,k)` | pw | `d`, `q`: direction and count | the trigger's width, then `_pulse` |
 | `vib(w,m,s,k)` | freq | `dl`, `sc`, `ph`: delay, count, phase | `_arp`: after `w = speed >> 3` calls, the word steps by `s` down or up as bit `phase & 3` of `m` (the player's 4-byte table), the phase turning every `k = speed & $0F` |
+| `slide(l,h)` | freq | `wl`, `wh`: the word; `bl`, `bh`: the note's frequency; `tg`: the toggle | `_sid_final` of a note control `$20` (its two bytes `l`, `h`, kept from the voice's last note where a filter command `$80` takes their place): the word starts at the note's frequency and steps by `h << 8 \| l` a tick from the trigger tick, the ticks of an odd `l` alternating with ticks that sound the note's frequency; the note's arpeggio does not run and its inner program's `note` rows are dropped |
 | `csweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, or by a note control `$80` (its two bytes `u` and `c`, `s = ((u & $0F) << 1) - $10`, `c` kept if 0; with `res`/`route` from the voice's preset or `$F0`) on that voice, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
 
 ## Not transcribed
@@ -87,9 +89,10 @@ Refused with a `TranscribeError`:
   not start the orderlists; a voice whose first token is no note while the image's control has the gate set (the image
   would sound);
 - the orderlist `$FC` tempo command, a pattern without an end;
-- a note control byte with the vibrato bit (`$20`), a legato note before its voice's first
-  trigger, with an instrument selected, or over a running arpeggio (the vibrato would need to
-  start again from the new note's frequency); a filter command sweeping
+- a legato note before its voice's first trigger, with an instrument selected, over a running
+  arpeggio (the arpeggio would need to start again from the new note's frequency), with a
+  frequency slide or after one; a note whose frequency slide has an odd low step over an inner
+  program (the ticks it skips sound the program's pitch); a filter command sweeping
   from more than one voice (the one sweep would need unbinding from the old owner);
 - an instrument selected without a note that is not the voice's own;
 - an inner program row with a filter byte, an inner program `$FD` jump;

@@ -43,6 +43,7 @@ from unitracker.direct.macode import CODE, STATE
 # The clock whose F is nearest the player's note table: 53 of its notes 0-94 differ by one.
 CLOCK = (PAL_CYCLES_PER_FRAME, 985056)
 VOICES = MA.VOICES
+NOTE_CTL = MA.CTL_DUR_MASK | MA.CTL_FILTER | MA.CTL_VIBARP | MA.CTL_TRIGGERED
 FROZEN = "row.ad"
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 SLOTS = {
@@ -50,7 +51,7 @@ SLOTS = {
     "pw": [Slot("pw", hold=(FROZEN,))],
     "cut": [Slot("cut", hold=(FROZEN,), reset=("note",))],
 }
-CELL = {"vib": "freq", "pulse": "pw", "pong": "pw", "csweep": "cut"}
+CELL = {"vib": "freq", "slide": "freq", "pulse": "pw", "pong": "pw", "csweep": "cut"}
 
 
 class TranscribeError(ValueError):
@@ -61,7 +62,8 @@ class TranscribeError(ValueError):
 class Voice:  # pylint: disable=too-many-instance-attributes
     """A voice's cells as its tokens are written: its instrument, the flags and cursor of its
     inner program, its note index, the AD its last trigger wrote and whether its arpeggio runs,
-    and whether a trigger has run (a legato note before it never sounds)."""
+    whether a trigger has run (a legato note before it never sounds), and its frequency slide's
+    step bytes (``steps``, which a note with a filter command keeps) and whether its note slides."""
 
     ins: int
     v: int = 0
@@ -72,6 +74,8 @@ class Voice:  # pylint: disable=too-many-instance-attributes
     arp: bool = False
     cut: Call | None = None
     live: bool = False
+    steps: tuple = (0, 0)
+    slide: bool = False
 
 
 class Transcriber:  # pylint: disable=too-many-instance-attributes
@@ -140,8 +144,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 y = lay.order_restart
 
     def _tokens(self, pid: int):
-        """``(kind, duration, instrument, note, filter, legato)`` of each token of pattern ``pid``,
-        the filter command's two bytes if its note has one, and whether its note is legato."""
+        """``(kind, duration, instrument, note, filter, legato, steps)`` of each token of pattern
+        ``pid``, the filter command's two bytes if its note has one, whether its note is legato,
+        and the slide's two step bytes if its note slides: ``()`` where a filter command takes
+        the place of the bytes and the voice's last steps stay."""
         rd = self._rd
         pat, y = self._ptr(self.lay.pattern_lo, self.lay.pattern_hi, pid), 0
         while True:
@@ -150,18 +156,23 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 ins, y = val & 0x1F, y + 1 & 0xFF
                 val = rd(pat + y)
             if val >= MA.LONGDUR_MIN and ins is None:
-                yield "-", val & MA.CTL_DUR_MASK, None, None, None, False
+                yield "-", val & MA.CTL_DUR_MASK, None, None, None, False, None
             elif val >= MA.DUR_MIN:
-                yield "off", val & MA.CTL_DUR_MASK, ins, None, None, False
+                yield "off", val & MA.CTL_DUR_MASK, ins, None, None, False, None
             else:
                 y = y + 1 & 0xFF
-                ctl, sweep = rd(pat + y), None
+                ctl, sweep, steps = rd(pat + y), None, None
                 if ctl & MA.CTL_FILTER:
                     sweep = (rd(pat + (y + 1 & 0xFF)), rd(pat + (y + 2 & 0xFF)))
                     y = y + 2 & 0xFF
-                if ctl & ~(MA.CTL_DUR_MASK | MA.CTL_FILTER | MA.CTL_TRIGGERED):
+                    steps = () if ctl & MA.CTL_VIBARP else None
+                elif ctl & MA.CTL_VIBARP:
+                    steps = (rd(pat + (y + 1 & 0xFF)), rd(pat + (y + 2 & 0xFF)))
+                    y = y + 2 & 0xFF
+                if ctl & ~NOTE_CTL:
                     raise TranscribeError(f"note control ${ctl:02X}")
-                yield "note", ctl & MA.CTL_DUR_MASK, ins, val, sweep, bool(ctl & MA.CTL_TRIGGERED)
+                legato = bool(ctl & MA.CTL_TRIGGERED)
+                yield "note", ctl & MA.CTL_DUR_MASK, ins, val, sweep, legato, steps
             y = y + 1 & 0xFF
             if rd(pat + y) == MA.PATTERN_END:
                 return
@@ -217,13 +228,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         """The row of one sustain tick of ``voice``: its inner program's step, if running."""
         prog = voice.flags & 0x0F
         if not prog:
-            if not voice.flags & 0x10 or voice.arp:
+            if not voice.flags & 0x10 or voice.arp or voice.slide:
                 return {}
             voice.arp = True
             return {"freq": self.arpeggio(voice.ins)}
         rd, lay = self._rd, self.lay
         base, cur = self._ptr(lay.inner_lo, lay.inner_hi, prog), voice.cursor
         wave, pitch = rd(base + cur), rd(base + (cur + 1 & 0xFF))
+        if voice.slide and voice.steps[0] & 1:
+            raise TranscribeError("an inner program under an odd frequency slide")
         if rd(base + (cur + 2 & 0xFF)):
             raise TranscribeError("an inner program's filter byte")
         nxt = cur + 3 & 0xFF
@@ -237,6 +250,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         voice.cursor = nxt
         if pitch < 0x80 or not lay.pitch_skip:
             pitch += voice.index
+        if voice.slide:
+            return {"ctrl": wave}
         return {"ctrl": wave, "note": note_name(pitch & 0x7F)}
 
     def _program(self, rows: list) -> str:
@@ -278,7 +293,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         sweeps; a ``first`` non-note writes the voice's image cells instead, no instrument
         running yet."""
         kind, dur, ins, note = token[:4]
-        legato = token[5]
+        legato, steps = token[5], token[6]
         length = (dur + 1) * self.rowlen
         if ins is not None and kind != "note" and ins != voice.ins:
             raise TranscribeError("an instrument selected without a note")
@@ -290,10 +305,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError("an instrument selected on a legato note")
         if legato and voice.arp:
             raise TranscribeError("a legato note over a running arpeggio")
+        if legato and (steps is not None or voice.slide):
+            raise TranscribeError("a legato note with or after a frequency slide")
+        if steps:
+            voice.steps = steps
         if kind == "note" and legato:
             voice.index = trans + note & 0xFF
         elif kind == "note":
-            rows, name = [self._trigger(voice, trans + note & 0xFF)], self.instrument(voice.ins)
+            rows = [self._trigger(voice, trans + note & 0xFF, steps is not None)]
+            name = self.instrument(voice.ins)
         rows += [self._step(voice) for _ in range(length - 1 - len(rows))]
         if legato:
             rows[0] = {"note": note_name(voice.index)} | rows[0]
@@ -305,12 +325,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             cmds["legato"] = True
         return Event(note_name(voice.index) if kind == "note" else kind, name, cmds, steps=length)
 
-    def _trigger(self, voice: Voice, index: int) -> dict:
-        """The row of ``voice``'s note trigger at ``index``: its cells take the instrument's."""
+    def _trigger(self, voice: Voice, index: int, slide: bool = False) -> dict:
+        """The row of ``voice``'s note trigger at ``index``: its cells take the instrument's, and
+        its frequency the note's table value stepped by the ``slide``'s bytes a tick."""
         ad, _, wave, *_, flags = self._record(voice.ins)
         voice.index = index
         voice.flags, voice.cursor, voice.ad, voice.arp = flags, 0, ad, False
-        voice.live = True
+        voice.live, voice.slide = True, slide
+        if slide:
+            return {"ctrl": wave, "freq": self.call("slide", l=voice.steps[0], h=voice.steps[1])}
         return {"ctrl": wave}
 
     def _filter(self, voice: Voice, filt, tick: int) -> dict:
@@ -380,7 +403,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     def _starts(self, v: int, horizon: int) -> list:
         """``(tick, phrase)`` of each pattern voice ``v`` starts before ``horizon``."""
-        voice, out = Voice(self._rd(self.lay.instr_x8 + v) >> 3, v), []
+        lay = self.lay
+        steps = (self._rd(lay.vib_lo_step + v), self._rd(lay.vib_hi_step + v))
+        voice, out = Voice(self._rd(lay.instr_x8 + v) >> 3, v, steps=steps), []
         if v == self.start[0] and self.start[2]:
             voice.cut = self.call("csweep", u=self.start[1], c=self.start[2], s=self.start[3])
         for tick, pid, trans in self._walk(v, horizon):
@@ -394,7 +419,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         """Appends ``(tick, phrase)`` of ``voice`` parked on the silence pattern from ``tick``:
         the gate off, its modulators running, held to ``horizon``."""
         dur = max((horizon - tick) // self.rowlen - 1, 0)
-        event = self.event(voice, ("off", dur, None, None, None, False), 0, tick, tick == 1)
+        event = self.event(voice, ("off", dur, None, None, None, False, None), 0, tick, tick == 1)
         out.append((tick, self.phrases.setdefault((event,), f"p{len(self.phrases) + 1}")))
 
     def _play(self, voice: Voice, pid: int, trans: int, tick: int, out: list) -> None:

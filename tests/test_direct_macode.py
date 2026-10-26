@@ -5,7 +5,7 @@ import random
 
 import pymusicassembler
 import pytest
-from unitracker_grammar import code
+from unitracker_grammar import code, frequency
 from unitracker_player.code import Machine
 
 from unitracker.direct.macode import CODE, STATE
@@ -109,3 +109,24 @@ def test_sweep_is_the_owners_trigger_then_its_cutoff_sweep(one, seed):
         assert value >> 3 == ref.snapshot()[22], phi
         value = fire(value, phi, 0, 0, state) & 0x7FF
         ref._sustain(0, rec, 0x40)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_slide_is_the_note_stepped(seed):
+    """``_sid_final``'s word: the note's frequency plus the step each tick, the odd ones' every
+    other tick sounding the note's frequency."""
+    rng = random.Random(seed)
+    lo, hi, note = rng.randrange(256), rng.randrange(256), rng.randrange(96)
+    machine = Machine({}, {"freq": tuple(STATE["freq"].items())}, CLOCK[1])
+    statements = code.read(CODE["slide"])
+    fire = machine.compile("slide", statements, {"l": lo, "h": hi}, "freq")
+    base = frequency(note, CLOCK[1])
+    state, word, toggle, value = bytearray(sum(STATE["freq"].values())), base, 0xFF, 0
+    for phi in range(64):
+        toggled = 0
+        if lo & 1:
+            toggled = toggle = toggle ^ 0xFF
+        if not toggled:
+            word = (word + (hi << 8 | lo)) & 0xFFFF
+        value = fire(value, phi, note, 0, state)
+        assert value == (base if toggled else word), phi

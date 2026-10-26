@@ -105,7 +105,6 @@ def test_player_refusals(one, monkeypatch):
 
 
 EDITS = {
-    "note control \\$21": lambda one: (pattern(one) + 2, (0x21,), {}),
     "legato note before": lambda one: (pattern(one) + 2, (0x40,), {}),
     "an instrument selected without a note": lambda one: (pattern(one) + 3, (0x83, 0x61), {}),
     "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
@@ -149,8 +148,8 @@ def filtered(one, voice: int = 0):
 def test_a_filter_command_binds_the_sweep(one):
     pid = filtered(one)
     tokens = list(one._tokens(pid))
-    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07), False)
-    assert tokens[2] == ("note", 3, None, 0x32, None, False)
+    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07), False, None)
+    assert tokens[2] == ("note", 3, None, 0x32, None, False, None)
     one._filters(100)
     assert one.sweeps[0] == ((1, 0), 0, 0x45, 0x07, 0xFA)
     voice = m.Voice(0, 0)
@@ -161,6 +160,45 @@ def test_a_filter_command_binds_the_sweep(one):
     again = dict(one.event(voice, tokens[2], 0, 10).commands)
     assert "cut" not in again and "res" not in again
     assert "cut" not in dict(one.event(m.Voice(0, 1), tokens[2], 0, 10).commands)
+
+
+def slid(one, *pattern_bytes, voice: int = 0):
+    """Voice ``voice``'s first pattern replaced by ``pattern_bytes``; the sweep init left
+    unowned."""
+    pid = one._rd(one.lay.pattern_id + voice)
+    write(one, one.lay.pattern_lo + pid, 0x00)
+    write(one, one.lay.pattern_hi + pid, 0xC0)
+    write(one, 0xC000, *pattern_bytes, MA.PATTERN_END)
+    one.start = (VOICES, 0, 0, 0)
+    return pid
+
+
+def test_a_slide_note_reads_its_two_step_bytes(one):
+    pid = slid(one, 0x30, 0x23, 0x11, 0x02, 0x32, 0xA3, 0x31, 0xA3, 0x05, 0x06, 0x31, 0x23)
+    tokens = list(one._tokens(pid))
+    assert [t[3:] for t in tokens[:2]] == [
+        (0x30, None, False, (0x11, 0x02)),
+        (0x32, None, False, None),
+    ]
+    assert tokens[2][4:] == ((0x05, 0x06), False, ())
+
+
+@pytest.mark.parametrize("lo", [0x00, 0x20, 0x80, 0x01, 0x7F, 0xFF])
+def test_a_frequency_slide_plays_exactly(one, lo):
+    slid(one, 0x30, 0x23, lo, 0x02, 0x3F, 0x83)
+    text = one.document()
+    assert "slide(" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
+def test_a_slide_over_a_legato_note_is_refused(one):
+    slid(one, 0x30, 0x23, 0x11, 0x02, 0x32, 0x63)
+    with pytest.raises(m.TranscribeError, match="legato note with or after a frequency slide"):
+        one.document()
+    slid(one, 0x30, 0x63, 0x11, 0x02)
+    with pytest.raises(m.TranscribeError, match="legato note"):
+        one.document()
 
 
 def test_a_filter_sweep_on_two_voices_is_refused(one):
