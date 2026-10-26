@@ -230,7 +230,7 @@ class Tables:  # pylint: disable=too-few-public-methods
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def wave(
-        self, ins, chord=None, kept=(None, None, False), gated=1, start=None, waved=None
+        self, ins, chord=None, kept=(None, None, False), gated=1, start=None, waved=None, left=None
     ) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
         waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
@@ -274,6 +274,9 @@ class Tables:  # pylint: disable=too-few-public-methods
                 raise TranscribeError("a first frame that keeps a waveform before a hold row")
         else:
             (rows, loop), lead = self._rest([], ins, 0, 1), []
+        if left is not None:
+            # ARPSCNT's ticks left from before STRTSND.
+            lead = self.skipped(ins, left) + lead
         if self.speed > 1 and feats.multispeedsupp:
             # STRTSND's ARPSCNT $FF keeps MULCNTP off the voice to the next PLAYER call.
             lead = [Row({"hold": self.speed - 1})] + lead

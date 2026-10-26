@@ -90,8 +90,6 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             out.append("a play gate")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
-        if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
-            out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
         return out
 
     def _held_rows(self, header: bool = False) -> bool:
@@ -493,9 +491,12 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
                 raise TranscribeError("a filter handover on a note that runs another table")
             commands["run"] = self.filter(ins, handover=rec.handover)
         chord = rec.chord[2] if "run" in commands else None
-        if pulse is not None or filt is not None or start is not None or rec.waved is not None:
+        # Without MULTISPEEDSUPP STRTSND leaves ARPSCNT: the first WF read waits it out.
+        counter = rec.arp[1] if self.feats.arpspeedsupp and not self.feats.multispeedsupp else 0xFF
+        counter = counter if counter < 0x80 else None
+        if pulse is not None or filt is not None or {start, rec.waved, counter} != {None}:
             # A chord FX (its own run) picks the chord the kept walk plays.
-            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated, start, rec.waved)
+            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated, start, rec.waved, counter)
         elif self.wave(ins, chord, gated=rec.gated) != self.wave(ins, chord):
             if rec.handover is not None:
                 raise TranscribeError("a filter handover on a note that keeps a gate off")
