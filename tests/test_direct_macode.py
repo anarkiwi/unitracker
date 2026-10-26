@@ -121,12 +121,12 @@ def test_slide_is_the_note_stepped(seed):
     statements = code.read(CODE["slide"])
     fire = machine.compile("slide", statements, {"l": lo, "h": hi}, "freq")
     base = frequency(note, CLOCK[1])
-    state, word, toggle, value = bytearray(sum(STATE["freq"].values())), base, 0xFF, 0
+    state, slid, toggle, value = bytearray(sum(STATE["freq"].values())), base, 0xFF, 0
     for phi in range(64):
         toggled = 0
         if lo & 1:
             toggled = toggle = toggle ^ 0xFF
         if not toggled:
-            word = (word + (hi << 8 | lo)) & 0xFFFF
+            slid = (slid + (hi << 8 | lo)) & 0xFFFF
         value = fire(value, phi, note, 0, state)
-        assert value == (base if toggled else word), phi
+        assert value == (base if toggled else slid), phi
