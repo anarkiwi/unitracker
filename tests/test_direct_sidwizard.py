@@ -397,11 +397,8 @@ def test_init_routine_tunes_play_exactly(name, request):
 
 @pytest.mark.parametrize("name", ["pantheon", "pimp_my_commodore"])
 def test_diag(name, request):  # temporary
-    from pysidwizard import parse_sid_song as p
-    from unitracker.direct.swtrace import standard as st
-
-    swm = p(request.getfixturevalue(name).read_bytes(), 1)
-    pl = swm.player
+    swm = parse_sid_song(request.getfixturevalue(name).read_bytes(), 1)
+    play = swm.player
     raise AssertionError(
-        f"DIAG {name} fs={swm.frame_speed} gate={pl.play_gate} filt={pl.filter_init} init={pl.sid_init.hex()} ins={len(swm.instruments)} seq={len(swm.sequences)}"
+        f"DIAG {name} {swm.frame_speed} {play.play_gate} {play.filter_init} {play.sid_init.hex()}"
     )
