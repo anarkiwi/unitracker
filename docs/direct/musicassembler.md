@@ -81,7 +81,8 @@ does not count towards the song's loop.
 
 Refused with a `TranscribeError`:
 
-- a play routine other than the player's entry (a wrapper, interrupts), a voice dispatch other
+- a play routine that is not the player's entry, directly or through a chain of `JMP abs`
+  (a wrapper that calls it, interrupts), a voice dispatch other
   than voices 1-3 in order, tempo 0;
 - an init that leaves the tempo or a duration running, writes a voice or the cutoff, or does
   not start the orderlists; a voice whose first token is no note while the image's control has the gate set (the image

@@ -117,6 +117,30 @@ EDITS = {
 }
 
 
+def test_follow_jmp_chains_and_cycles():
+    mem = {0x100: 0x4C, 0x101: 0x10, 0x102: 0x02, 0x210: 0x4C, 0x211: 0x00, 0x212: 0x03}
+    tr = m.Transcriber.__new__(m.Transcriber)
+    tr._rd = lambda at: mem.get(at, 0)
+    assert tr._follow_jmp(0x100) == 0x300
+    assert tr._follow_jmp(0x300) == 0x300
+    mem.update({0x300: 0x4C, 0x301: 0x00, 0x302: 0x01})
+    assert tr._follow_jmp(0x100) == 0x100
+
+
+def test_a_jmp_trampoline_to_the_entry_is_followed(one):
+    entry = one.lay.entry
+    first, second = 0x0200, 0x0210
+    for at, to in ((first, second), (second, entry)):
+        for k, byte in enumerate((m.JMP_ABS, to & 0xFF, to >> 8)):
+            write(one, at + k, byte)
+    one.song.play_addr = first
+    one._check()
+    write(one, second + 1, first & 0xFF)
+    write(one, second + 2, first >> 8)
+    with pytest.raises(m.TranscribeError, match="not the player's entry"):
+        one._check()
+
+
 @pytest.mark.parametrize("match", EDITS)
 def test_song_refusals(one, match):
     at, values, changes = EDITS[match](one)
