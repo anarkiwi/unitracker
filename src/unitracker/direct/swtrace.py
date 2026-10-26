@@ -63,6 +63,8 @@ class Read:  # pylint: disable=too-many-instance-attributes
     walking: tuple = (None, 0, 0, 0, 0)
     vol: int = None
     gated: int = 1
+    after: tuple = (None, None)
+    moved: tuple = None
 
 
 @dataclass
@@ -196,6 +198,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
         rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
         rec.ctrl = (v.sid_ctrl, v.ptn_gate & 1)
         rec.arp = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
+        rec.after = _tables(ref, v)
         ins = v.instrument
         if row.note == 0x7E and ref.features.gateoffptr and ins is not None:
             held = ref.filter_controller_voice is v
@@ -212,6 +215,8 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             rec = out.reads[voices[id(v)]][-1]
             rec.adsr = (v.sid_ad, v.sid_sr)
             rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
+            rec.arp = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
+            rec.after = _tables(ref, v)
 
     def filter_state():
         return (
@@ -265,6 +270,13 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             out.frames = frame + 1
             return out
     raise TraceError(f"no loop within {frames} frames")
+
+
+def _tables(ref, v) -> tuple:
+    """``(pulse, filter)`` positions and sweep counts of voice ``v``, the filter's where it
+    holds it."""
+    held = ref.filter_controller_voice is v
+    return (v.pw_pos, v.pw_sweep_count), (ref.filt_pos, ref.filter_sweep_count) if held else None
 
 
 def _looped(out: Trace, frame: int, loops: int) -> bool:

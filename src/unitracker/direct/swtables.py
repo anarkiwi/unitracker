@@ -228,7 +228,8 @@ class Tables:  # pylint: disable=too-few-public-methods
         detune = _col(image, pos + 2, 0xFF)
         return self._det(keys, None if detune == 0xFF else detune, carry, arp or 0), hold
 
-    def wave(self, ins, chord=None, kept=(None, None, False), gated=1) -> str:
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    def wave(self, ins, chord=None, kept=(None, None, False), gated=1, start=None) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
         waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
         reset switches, the pulse or filter walk ``kept`` resumed instead of restarted (the
@@ -262,7 +263,8 @@ class Tables:  # pylint: disable=too-few-public-methods
         if ins.wf_table:
             image = self.ref._image(ins)  # pylint: disable=protected-access
             number = ins.default_chord if chord is None else chord
-            rows, loop = self.wave_rows(image, INST_WF_TABLE_POS, ins, chord=(number, None))
+            start = INST_WF_TABLE_POS if start is None else start
+            rows, loop = self.wave_rows(image, start, ins, chord=(number, None))
             if lead and rows[0].get("ctrl") is None:
                 raise TranscribeError("a first frame that keeps a waveform before a hold row")
         else:

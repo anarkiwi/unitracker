@@ -308,9 +308,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         }
         if fx == 0x0C:
             made[fx] = lambda: {"run": self._paced(rec, value)} if self.feats.arpspeedsupp else {}
-        elif fx in (0x07, 0x09, 0x0A, 0x0B, 0x0E) or 0x17 <= fx <= 0x1C or fx == 0x1F:
-            if fx != 0x07:
-                raise TranscribeError(f"FX ${fx:02X}")
+        elif fx in (0x09, 0x0A, 0x0B):
+            made[fx] = lambda: self._moved(rec, fx)
+        elif fx == 0x0E or 0x17 <= fx <= 0x1C or fx == 0x1F:
+            raise TranscribeError(f"FX ${fx:02X}")
         if fx == 0x07 and self.feats.chordsupport:
             made[fx] = lambda: {"run": self.rechord(rec)}
         commands = made[fx]() if fx in made else {}
@@ -326,6 +327,25 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         if rec.newnote or value & 1 and not gate:
             raise TranscribeError("a waveform FX on a note or setting a gate the voice has off")
         return {"ctrl": value}
+
+    def _moved(self, rec, fx: int) -> dict:
+        """BIGFX09, 0A, 0B: the WF, pulse or filter walk on from the row it sets, from the
+        tick (on a note, from STRTSND's next; on a glide, past TICK_2)."""
+        pulse, filt = rec.after
+        if rec.ins is None:
+            return {}
+        if fx == 0x0B and filt is None:
+            raise TranscribeError("a filter position FX on a voice without the filter")
+        if rec.tick2:
+            # The glide's walk resumes past TICK_2 from where the FX left it.
+            wave, was, cut = rec.resume
+            rec.resume = (rec.arp, pulse if fx == 0x0A else was, filt if fx == 0x0B else cut)
+            return {}
+        if rec.newnote:
+            rec.moved = (fx, rec.arp[0], pulse, filt)
+            return {}
+        pulse, filt = (pulse if fx == 0x0A else None), (filt if fx == 0x0B else None)
+        return {"run": self.resume(rec.ins, rec.arp, pulse, filt, skip=False)}
 
     def _paced(self, rec, speed: int) -> str:
         """An arp speed FX: the WF walk from where it is at its new pace."""
@@ -456,6 +476,12 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         table = ins.filter_table
         if filt is None and _swept_first(table) and table[0] and not rec.keep_filter:
             filt, routed = (start + len(ins.pw_table) + 1, rec.counts[1]), True
+        start = None
+        if rec.moved is not None:
+            fx, wave, moved, cut = rec.moved
+            start = wave if fx == 0x09 else None
+            pulse = moved if fx == 0x0A else pulse
+            filt, routed = (cut, True) if fx == 0x0B else (filt, routed)
         if (pulse, filt, routed) != rec.kept:
             rec.kept = (pulse, filt, routed)
         if rec.handover is not None:
@@ -463,9 +489,9 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
                 raise TranscribeError("a filter handover on a note that runs another table")
             commands["run"] = self.filter(ins, handover=rec.handover)
         chord = rec.chord[2] if "run" in commands else None
-        if pulse is not None or filt is not None:
+        if pulse is not None or filt is not None or start is not None:
             # A chord FX (its own run) picks the chord the kept walk plays.
-            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated)
+            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated, start)
         elif self.wave(ins, chord, gated=rec.gated) != self.wave(ins, chord):
             if rec.handover is not None:
                 raise TranscribeError("a filter handover on a note that keeps a gate off")
