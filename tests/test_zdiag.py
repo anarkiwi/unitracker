@@ -4,7 +4,7 @@ import numpy as np
 from unitracker_player.player import play
 
 from unitracker.direct import musicassembler as m
-from tests.test_direct_musicassembler import fixture_one, legato_notes  # noqa
+from test_direct_musicassembler import fixture_one, legato_notes  # noqa
 
 
 def test_diag(one):
