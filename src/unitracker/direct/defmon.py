@@ -184,7 +184,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def __call__(self, addr: int, voice: int = 0) -> int:
         return self.mem[self.at[addr] + VOICES[voice]]
 
-    def floor(self) -> int:
+    def _floor(self) -> int:
         """The ACID floor: the cell $10CE, or a direct build's two immediates, which must agree."""
         if not self.direct:
             return self(0x10CE)
@@ -193,7 +193,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError("the ACID floors differ")
         return first
 
-    def cutoff(self) -> int:
+    def _cutoff(self) -> int:
         """The cutoff output's opcode ($10D4): NOP where the build has none."""
         return 0xEA if self.uncut else self(0x10D4)
 
@@ -208,7 +208,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError("a multi-SID tune")
         if self(0x10B8) != self(0x10BF) or self(0x10B8) not in (0x69, 0xE9):
             raise TranscribeError("ACID opcodes are not a matching SBC/ADC pair")
-        if self.cutoff() not in (0xEA, 0x0A):
+        if self._cutoff() not in (0xEA, 0x0A):
             raise TranscribeError("the cutoff output is neither NOP nor ASL")
         for v in range(3):
             if (self(0x101F, v), self(0x1020, v), self(0x1021, v)) != (v, 1 << v, 0xFF ^ 1 << v):
@@ -429,7 +429,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 ("ctrl", 1),
             ]
             if not v:
-                dbl = int(self.cutoff() == 0x0A)
+                dbl = int(self._cutoff() == 0x0A)
                 commands += [
                     ("vol", 15),
                     (
@@ -437,7 +437,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                         call(
                             "cinitd" if self.direct else "cinit",
                             u=self(0x10B8) == 0xE9,
-                            f=self.floor(),
+                            f=self._floor(),
                             k=dbl,
                         ),
                     ),
