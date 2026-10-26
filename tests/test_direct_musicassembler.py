@@ -440,3 +440,20 @@ def test_silence_pattern_ends_the_voice():
     )
     assert m.Transcriber._period(stub, 0) == (10, 0)
     assert list(m.Transcriber._walk(stub, 0, 100)) == [(1, 5, 0), (11, MA.SILENCE_PATTERN, 0)]
+
+
+def test_every_voice_parked_ends_the_song():
+    """Voices that all reach ``$FE`` have no loop: their parked events end together on a
+    final row that ends the voices."""
+    horizons = []
+    stub = SimpleNamespace(
+        rowlen=6,
+        _period=lambda v: (v * 12, 0),
+        _filters=horizons.append,
+        _starts=lambda v, horizon: [(1 + v * 12, f"s{v}")],
+    )
+    rows, loop = m.Transcriber.timeline(stub)
+    assert loop is None
+    assert horizons == [1 + 24 + 6]
+    assert rows[-1] == ("end",) * VOICES
+    assert len(rows) == 1 + VOICES + 1
