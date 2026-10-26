@@ -17,13 +17,17 @@ _WORD = "lda nn\nclc\nadc #24\nand #127\ntay\nlda F.lo-24,y\nsta {0}\nlda F.hi-2
 _NOTE = _WORD.format("fq")
 _SUM = _NOTE + "clc\nlda s\nadc fq\nsta v\nlda fq+1\nadc s+1\nsta v+1\nrts\n"
 _W = "lda w\nsta v\nlda w+1\nsta v+1\nrts\n"
-# $10B5: step the accumulator, saturate to the floor, add cp and the carry, clamp, double.
-_ACID = (
+# $10B5: step the accumulator, saturate to the floor, add cp and the carry, clamp, double. A
+# direct build floors a negative sum only.
+_CLAMP = "bmi low\ncmp l\nbcs put\nlow:\nlda l\nput:\n"
+_ACID_STEP = (
     "lda o\nbne sb\nclc\nlda r\nadc z\nsta r\nlda r+1\nadc z+1\njmp hi\n"
     "sb:\nclc\nlda r\nsbc z\nsta r\nlda r+1\nsbc z+1\n"
-    "hi:\nbpl keep\nlda l\nkeep:\nsta r+1\nadc cp\nbmi low\ncmp l\nbcs put\nlow:\nlda l\n"
-    "put:\nldx b\nbeq out\nasl\nout:\nsta v\nlda #0\nsta v+1\n" + "asl v\nrol v+1\n" * 3 + "rts\n"
+    "hi:\nbpl keep\nlda l\nkeep:\nsta r+1\nadc cp\n{0}"
+    "ldx b\nbeq out\nasl\nout:\nsta v\nlda #0\nsta v+1\n" + "asl v\nrol v+1\n" * 3 + "rts\n"
 )
+_ACID_DIRECT = _ACID_STEP.format("bpl put\nlda l\nput:\n")
+_ACID = _ACID_STEP.format(_CLAMP)
 
 CODE = {
     # init's detune, frequency and slide accumulator; i marks them until nr's first firing
@@ -65,6 +69,9 @@ CODE = {
     "sub:\nldy q\nlda w\nsbc q\nsta w\nbcs out\n"
     "lda w+1\nbeq bot\ndec w+1\njmp out\nbot:\nlda #1\nsta w\ntya\neor #128\nsta q\nout:\n" + _W,
     "cinit": _FIRST.format("step") + "lda #u\nsta o\nlda #f\nsta l\nlda #k\nsta b\nstep:\n" + _ACID,
+    "cinitd": _FIRST.format("step")
+    + "lda #u\nsta o\nlda #f\nsta l\nlda #k\nsta b\nstep:\n"
+    + _ACID_DIRECT,
     # g bit 0 sets cp, bit 1 the accumulator, bits 2/3 an adding/subtracting step
     "acid": _FIRST.format("done") + "lda #g\nlsr\nbcc acc\nlda #c\nsta cp\n"
     "acc:\nlda #g\nand #2\nbeq add\nlda #<j\nsta r\nlda #>j\nsta r+1\nlda #0\nsta z\nsta z+1\n"
