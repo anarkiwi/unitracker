@@ -59,6 +59,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     counts: tuple = (0, 0)
     arp: tuple = ()
     skips: dict = field(default_factory=dict)
+    unnoted: bool = False
 
 
 @dataclass
@@ -118,6 +119,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
     # pylint: disable=protected-access,too-many-statements,too-many-locals
     ref, out = standard(swm), Trace()
     voices = {id(v): i for i, v in enumerate(ref.voices)}
+    noted = [False] * VOICES
     advance_row, apply_row = ref._advance_row, ref._apply_row
     deferred, setfltp, staccato = ref._run_deferred_fx, ref._setfltp, ref._is_staccato_hr_tick
     claims = []
@@ -134,6 +136,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             dummy = v.instrument is None
             out.reads[i].append(Read(ref.frame_idx, v.pending_row, start, new, hr, dummy))
             out.reads[i][-1].holder = ref.filter_controller_voice is v
+            out.reads[i][-1].unnoted = not noted[i]
 
     def applied(v, row):
         rec = out.reads[voices[id(v)]][-1]
@@ -164,17 +167,16 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
         apply_row(v, row)
         rec.applied, rec.ins, rec.number = True, v.instrument, v.instrument_idx
         if v.instrument is not before and not rec.newnote:
-            frame = ref.frame_idx
-            if before is None:
-                out.refused.append(f"an instrument selected before any note, frame {frame}")
             held = ref.filter_controller_voice is v
             rec.switch = (
                 (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos),
                 (v.pw_pos, v.pw_sweep_count),
                 (ref.filt_pos, ref.filter_sweep_count) if held else None,
                 v.arp_speed_reload & 0x3F if ref.features.arpspeedsupp else 0,
+                v.ptn_gate | 1,
             )
         rec.note = v.dpitch - 1
+        noted[voices[id(v)]] |= note is not None and 0 < note < 0x60 and v.instrument is not None
         rec.adsr = (v.sid_ad, v.sid_sr)
         rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
         rec.ctrl = (v.sid_ctrl, v.ptn_gate & 1)
@@ -223,7 +225,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             held = ref.filter_controller_voice is v
             filt = (ref.filt_pos, ref.filter_sweep_count) if held else None
             pulse = (v.pw_pos, v.pw_sweep_count)
-            rec.skips[ref.frame_idx - rec.frame] = (wave, v.instrument, pulse, filt)
+            rec.skips[ref.frame_idx - rec.frame] = (wave, v.instrument, pulse, filt, v.ptn_gate | 1)
         return fires
 
     ref._advance_row, ref._apply_row, ref._run_deferred_fx = read, applied, run_deferred

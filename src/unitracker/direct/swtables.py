@@ -8,6 +8,7 @@ from unitracker_grammar.document import Call, Expr, Program, Row, Signed
 from unitracker_grammar.expr import canonical
 
 from unitracker.direct.goattracker2 import note_name
+from unitracker.direct.swcode import unnoted
 from unitracker.direct.swtrace import TraceError, _col
 
 
@@ -15,10 +16,13 @@ class TranscribeError(TraceError):
     """The tune uses something this transcription does not spell."""
 
 
-def _unnoted(row: Row) -> Row:
+def _unnoted(row: Row, gate: int = 0xFF) -> Row:
     """WF ``row`` on a voice yet to play a note (DPITCH 0): its relative arp as the absolute
-    note it reaches, a relative arp down carrying nothing."""
+    note it reaches, a relative arp down carrying nothing, its waveform ANDed with PTNGATE
+    ``gate`` (the gate bit left to the voice's)."""
     keys = dict(row.keys)
+    if "ctrl" in keys:
+        keys["ctrl"] &= gate
     if isinstance(keys.get("note"), Signed):
         keys["note"] = note_name((keys["note"] & 0x7F) - 1)
     if "dt.freq" in keys and keys["dt.freq"].args[2] == 2:
@@ -47,11 +51,18 @@ class Tables:  # pylint: disable=too-few-public-methods
     programs: dict = {}
     used: list = []
     routines: dict = {}
-    mirror = pwkb = fkb = False
+    code: dict = {}
+    mirror = pwkb = fkb = unnoted = False
     walk = "cut"
 
     def call(self, template: str, **params) -> Call:
-        """The call of ``template`` with ``params``, its arguments in its signature's order."""
+        """The call of ``template`` with ``params``, its arguments in its signature's order;
+        on a voice yet to play a note, its variant that reads DPITCH 0."""
+        if self.unnoted and unnoted(self.code[template]) != self.code[template]:
+            if template + "0" not in self.routines:
+                self.code[template + "0"] = unnoted(self.code[template])
+                self.routines[template + "0"] = code.read(self.code[template + "0"])
+            template += "0"
         if template not in self.used:
             self.used.append(template)
         return Call(template, tuple(params[k] for k in code.params(self.routines[template])))
@@ -374,9 +385,16 @@ class Tables:  # pylint: disable=too-few-public-methods
         """The ``ctrl`` name of a program that skips a tick of the tables (a legato's TICK_2, a
         staccato hard restart; not ``skip``: a chord FX) and resumes them where the player left
         them: ``wave`` the WF position, ARPSCNT, chord and its position, ``pulse`` and ``filt``
-        positions and sweep counts."""
-        # pylint: disable=too-many-locals
-        reload = at.get("reload")
+        positions and sweep counts; with ``gate``, on a voice yet to play a note, its waveforms
+        ANDed with that PTNGATE."""
+        gate, self.unnoted = at.get("gate"), at.get("gate") is not None
+        try:
+            return self._resumed(ins, wave, pulse, filt, skip, at.get("reload"), gate)
+        finally:
+            self.unnoted = False
+
+    def _resumed(self, ins, wave, pulse, filt, skip, reload, gate) -> str:
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
         lead = []
         if pulse is not None:
             lead.append(Row({"hold": 0, "run": self.pulse(ins, *pulse, lead=skip)}))
@@ -388,6 +406,8 @@ class Tables:  # pylint: disable=too-few-public-methods
         image = self.ref._image(ins)  # pylint: disable=protected-access
         reload = self.reload(ins) if reload is None else reload
         rows, loop = self.wave_rows(image, pos, ins, chord=(chord, cpos), reload=reload)
+        if gate is not None:
+            rows = [_unnoted(r, gate) for r in rows]
         program = Program(lead + rows, None if loop is None else loop + len(lead))
         return self._named("ctrl", "c", program)
 

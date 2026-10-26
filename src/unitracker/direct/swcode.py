@@ -104,6 +104,11 @@ def _mirrored(text: str) -> str:
     )
 
 
+def unnoted(text: str) -> str:
+    """Template ``text`` on a voice yet to play a note: DPITCH 0, the note -1."""
+    return re.sub(r"\bne\b", "#255", text)
+
+
 def mirror_templates() -> dict:
     """The pulse templates mirrored on the freq cell, for WRPITCH's carry on skipped WF ticks."""
     pulse = track_templates(False)
