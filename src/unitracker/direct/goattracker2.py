@@ -48,6 +48,7 @@ CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985000}
 EVENT = "n"
 TICK = "tick.freq"
 CUT = "filter.cut"
+LATE = ("res", "route", "vol")
 START_PW = "set.pw"
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 FREQ_CMDS = (C.CMD_PORTAUP, C.CMD_PORTADOWN, C.CMD_TONEPORTA, C.CMD_VIBRATO)
@@ -301,7 +302,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         instrument's ``v``, or a step a command 8 program starts after), its note rows bind it
         to ``note``."""
         program = self._program(C.WTBL, pos, self._wave_row) if pos else Program()
-        rows, loop = program.rows, program.loop
+        rows, loop = self._late(program.rows, program.loop)
         if held or any(r.get("wave.freq") is not None for r in rows):
             note = self.call("note")
             rows = [
@@ -312,6 +313,20 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             rows = (Row({"hold": 0, "gate": 0}),) + tuple(rows)
             loop = None if loop is None else loop + 1
         return self._named(self.ctrl, "c", Program(rows, loop))
+
+    @staticmethod
+    def _late(rows, loop):
+        """The wavetable ``rows`` with each row's chip keys (``LATE``) moved to a row of no
+        hold after it: the reference sets the filter's resonance, routing and the volume in the
+        voice's routine, and the next play call's filter routine writes them, a tick on."""
+        out, at = [], []
+        for row in rows:
+            at.append(len(out))
+            late = [(k, v) for k, v in row.keys if k in LATE]
+            out.append(Row([(k, v) for k, v in row.keys if k not in LATE]) if late else row)
+            if late:
+                out.append(Row(late + [("hold", 0)]))
+        return out, None if loop is None else at[loop]
 
     def sounds(self, n: int) -> bool:
         """Whether instrument ``n``'s wavetable plays a note on its first tick; else a note of

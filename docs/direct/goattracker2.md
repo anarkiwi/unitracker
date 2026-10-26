@@ -198,7 +198,7 @@ These play differently from GoatTracker because the document has no construct fo
 
 | GoatTracker | why the document differs |
 |---|---|
-| a wavetable row's resonance, routing or volume (`$FB`, `$FD`), which the next call's filter routine writes | the document sets the chip's registers on the row's tick |
+| a wavetable row's resonance, routing or volume (`$FB`, `$FD`), which the next call's filter routine writes | the document sets them on a row of no hold after it, a tick on as GoatTracker does, but that row's `row` event holds the frequency's realtime slot a tick late and the command row sets no key to hold it on its own tick, so a tune can differ in the frequency there (`Blade_Runner_Electrocuted`, 24 cells) |
 | a voice's wavetable before its first gate, which GoatTracker's initial gate byte `$00` masks to a control register of 0 | the document's gate clears bit 0 only |
 | in a live-vibrato build, a row with an instrument and no note, whose fetch switches the vibrato | the switch has no restart row to bind on |
 | a toneporta note's note change on tick 0 | a `legato` note applies on the step's tick, GoatTracker's tick 1 |
