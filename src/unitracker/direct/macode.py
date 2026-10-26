@@ -4,8 +4,9 @@ State: freq ``dl``, ``sc``, ``ph`` the arpeggio's delay, step count and phase; `
 the slide's word, ``tg`` its toggle; pw ``d``, ``q``
 the ping-pong's direction and step count; cut ``acc``, ``ctr`` the accumulator and ticks left.
 Params: ``p`` the pulse byte, ``s`` a step, ``k`` steps per phase (0 for 256), ``w`` the delay,
-``m`` the phases that ascend (bit j phase j), ``l``, ``h`` the slide's step bytes, ``u``, ``c``
-the trigger's accumulator and count (``u`` also the accumulator an inner program writes).
+``i``, ``j`` the slide's first word, ``m`` the phases that ascend (bit j phase j), ``l``, ``h``
+the slide's step bytes, ``u``, ``c`` the trigger's accumulator and count (``u`` also the
+accumulator an inner program writes).
 """
 
 STATE = {
@@ -59,6 +60,9 @@ CODE = {
     + "lda #u\nsta acc\nlda #c\nsta ctr\nrts\nstep:\nlda ctr\nbeq done\ndec ctr\nclc\nlda acc\n"
     + "adc #s\nsta acc\nlda #0\nsta v+1\nlda acc\nasl\nrol v+1\nasl\nrol v+1\nasl\nrol v+1\n"
     + "sta v\ndone:\nrts\n",
+    # The slide of an image: from the word i, j init left, stepped by h:l (l even) a tick.
+    "vslidew": "lda phi\nora phi+1\nbne step\nlda #i\nsta wl\nlda #j\nsta wh\nstep:\nclc\nlda wl\n"
+    + "adc #l\nsta wl\nsta v\nlda wh\nadc #h\nsta wh\nsta v+1\nrts\n",
     # The sweep taken from its owner, still until the new owner's trigger.
     "idle": "rts\n",
     # An inner program's filter byte: the sweep's accumulator, which the sweep steps from.
