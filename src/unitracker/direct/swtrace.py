@@ -236,7 +236,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
         _claims(ref, claims[1:], out)
         for i, v in enumerate(ref.voices):
             rec = out.reads[i][-1] if out.reads[i] else None
-            if rec is not None and rec.frame + 2 == frame and rec.kept[1]:
+            if rec is not None and rec.frame + 2 * swm.frame_speed == frame and rec.kept[1]:
                 if ref.filter_controller_voice is not v:
                     # Another voice took the filter on the tick: the kept walk is its.
                     rec.kept = (rec.kept[0], (), rec.kept[2])
