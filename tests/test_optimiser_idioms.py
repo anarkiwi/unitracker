@@ -55,6 +55,16 @@ def test_snap_drops_a_jump_to_the_note_or_ends_the_bindings_it_followed():
     assert [e.label for e in snap.snap(read(unbound), 100)] == ["p1/2: tick.freq:snap()"]
 
 
+def test_snap_finds_a_binding_after_and_inside_a_repeat_group():
+    doc = read(D.SNAP_GROUP)
+    edits = snap.snap(doc, 100)
+    assert [e.label for e in edits] == ["p1/1/body/2: tick.freq:snap()", "p1/4: tick.freq:snap()"]
+    for edit in edits:
+        doc = edit.apply(doc)
+    assert "[D.i2,-,E freq:none tick.freq:none legato,-]x2,D.i2,-,G freq:none" in printed(doc)
+    assert Guarantee(D.SNAP_GROUP).holds(printed(doc))
+
+
 def test_snap_is_refused_where_the_modulator_writes_state_read_later():
     sites = snap.sites(D.SNAP_STATE, 100)
     assert [s.exact for s in sites.values()] == [True, False]

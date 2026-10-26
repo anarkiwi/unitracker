@@ -7,13 +7,14 @@ from collections import defaultdict
 from dataclasses import replace
 from functools import partial
 
-from unitracker_grammar.document import NONE, Document, base, printed
+from unitracker_grammar.document import NONE, Document, Group, base, printed
+from unitracker_grammar.document import read as grammar_read
 from unitracker_player import compiler
 from unitracker_player.document import read
 from unitracker_player.player import Player
 
 from unitracker.optimiser.passes import Edit, _label
-from unitracker.optimiser.tree import update
+from unitracker.optimiser.tree import at, update
 
 _SITE = 6  # a binding site, after the player's ``[fn, phi, voice, name, command, once]``
 
@@ -81,16 +82,39 @@ class _Tracer(Player):
             site.exact &= note is not None and voice.freq == self.song.table(note)
 
 
+def printed_phrases(text: str) -> dict:
+    """``text``'s phrases by name as the document keeps them, groups and all."""
+    return grammar_read(text).records("phrase")
+
+
+def _paths(items: tuple, prefix: tuple = ()) -> list:
+    """The path below a phrase body of each event of ``items`` once its groups are played out,
+    in the order the compiler expands them (``unitracker_grammar.expand.flat``)."""
+    out = []
+    for i, item in enumerate(items):
+        if not isinstance(item, Group):
+            out.append(prefix + (i,))
+        elif item.endings:
+            for k, ending in enumerate(item.endings):
+                out += _paths(item.body, prefix + (i, "body"))
+                out += _paths(ending, prefix + (i, "endings", k))
+        else:
+            out += _paths(item.body, prefix + (i, "body")) * item.times
+    return out
+
+
 def sites(text: str, ticks: int) -> dict:
-    """``{(phrase, index, slot): _Site}`` of each phrase event's frequency binding command over
-    ``ticks`` ticks of ``text``'s play."""
-    where = {}
+    """``{(phrase, path, slot): _Site}`` of each phrase event's frequency binding command over
+    ``ticks`` ticks of ``text``'s play; ``path`` runs from the phrase's body through its groups
+    to the event."""
+    where, bodies = {}, printed_phrases(text)
 
     class _Compiler(compiler._Compiler):  # pylint: disable=protected-access
         def phrase(self, name):
             out = super().phrase(name)
-            if isinstance(name, str):
-                where.update({id(e): (name, i) for i, e in enumerate(out)})
+            paths = _paths(bodies[name]) if isinstance(name, str) and name in bodies else ()
+            if len(paths) == len(out):
+                where.update({id(e): (name, path) for path, e in zip(paths, out)})
             return out
 
     player = _Tracer(compiler.compile_document(read(text), _Compiler), where)
@@ -99,17 +123,18 @@ def sites(text: str, ticks: int) -> dict:
     return dict(player.sites)
 
 
-def _snapped(phrase: str, index: int, pair: tuple, nones: tuple, doc: Document) -> Document:
-    """``doc`` with phrase event ``index``'s command ``pair`` replaced by ``nones``."""
+def _snapped(phrase: str, index: tuple, pair: tuple, nones: tuple, doc: Document) -> Document:
+    """``doc`` with the command ``pair`` of the phrase event at path ``index`` replaced by
+    ``nones``."""
 
     def edit(event):
         commands = list(event.commands)
-        at = commands.index(pair)
-        commands[at : at + 1] = [n for n in nones if n not in commands]
+        k = commands.index(pair)
+        commands[k : k + 1] = [n for n in nones if n not in commands]
         return replace(event, commands=tuple(commands))
 
     path = next(
-        ("defs", i, "records", j, 1, index)
+        ("defs", i, "records", j, 1, *index)
         for i, section in enumerate(doc.defs)
         for j, (name, _) in enumerate(section.records)
         if section.kind == "phrase" and name == phrase
@@ -126,7 +151,7 @@ def snap(doc: Document, ticks: int) -> list:
     for (phrase, index, slot), site in sorted(sites(printed(doc), ticks).items()):
         if not site.exact or not site.ticks:
             continue
-        event = phrases[phrase][index]
+        event = at(phrases[phrase], index)
         pairs = [
             (k, v)
             for k, v in event.commands
@@ -135,7 +160,7 @@ def snap(doc: Document, ticks: int) -> list:
         if len(pairs) != 1 or pairs[0][1] == NONE:
             continue
         nones = tuple((names[k] + ".freq" if k else "freq", NONE) for k in sorted(site.bound))
-        label = _label((phrase, index), f"{pairs[0][0]}:{pairs[0][1]}")
+        label = _label((phrase, *index), f"{pairs[0][0]}:{pairs[0][1]}")
         edits.append(Edit(label, partial(_snapped, phrase, index, pairs[0], nones)))
     return edits
 
