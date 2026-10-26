@@ -403,5 +403,5 @@ def test_diag(pimp_my_commodore):  # temporary
     theirs, _ = trapped(one.swm, TICKS)
     rows = [list(map(int, theirs[t][14:16])) for t in range(284, 292)]
     mine = [list(map(int, ours[t][14:16])) for t in range(284, 292)]
-    first = [int(x) for x in theirs[0]]
-    raise AssertionError(f"DIAG ref={rows} doc={mine} first={first} base0={base[0].tolist()}")
+    bas = [list(map(int, base[t][14:16])) for t in range(284, 292)]
+    raise AssertionError(f"DIAG ref={rows} doc={mine} base={bas}")
