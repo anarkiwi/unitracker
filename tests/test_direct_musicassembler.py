@@ -40,6 +40,15 @@ def test_tunes_play_exactly(name, request):
     assert "{loop:" in text and " run:c" in text
 
 
+def test_an_init_that_sets_the_voices_control_plays_exactly(cannon_craze):
+    """Each voice's control register an init leaves is an init event's ``ctrl``."""
+    one = m.transcriber(cannon_craze.read_bytes())
+    text = one.document()
+    assert "ctrl:8" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
 def test_the_templates_bound(space_invadarz):
     text = m.transcribe(space_invadarz.read_bytes())
     for bound in ("vib(", "pong(", "pulse(", " cut:csweep(", "pw:2056"):
