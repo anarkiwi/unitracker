@@ -102,7 +102,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             carry = 1
         return [Row(self._det({"hold": ticks} if ticks > 1 else {}, None, 3, carry))]
 
-    def _rest(self, rows: list, ins, reload: int, carry: int) -> tuple:
+    def _rest(self, rows: list, reload: int, carry: int) -> tuple:
         """``rows`` and the WF walk resting where it ends: re-read at its pace, each read's
         carry ``carry``, ARPSCNT's skipped ticks between."""
         if not self.feats.detunesupport:
@@ -122,14 +122,14 @@ class Tables:  # pylint: disable=too-few-public-methods
             for _ in range(4):
                 byte = _col(image, pos, 0xFF)
                 if byte == 0xFF:
-                    return self._rest(rows, ins, reload, 1)
+                    return self._rest(rows, reload, 1)
                 if byte != 0xFE:
                     break
                 target = _col(image, pos + 1)
                 if target >= 0x80 or target == pos:
-                    return self._rest(rows, ins, reload, 1)
+                    return self._rest(rows, reload, 1)
                 if target >= len(image):
-                    return self._rest(rows, ins, reload, 0)
+                    return self._rest(rows, reload, 0)
                 pos = target
             else:
                 raise TranscribeError("a WF jump chain")
@@ -139,7 +139,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             keys, hold = self._wave_row(image, pos, reload)
             first, cpos = cpos, None
             if self.feats.chordsupport and _col(image, pos + 1) == 0x7F:
-                played, looped = self._chord(ins, (keys, _col(image, pos + 2)), hold, number, first)
+                played, looped = self._chord((keys, _col(image, pos + 2)), hold, number, first)
                 if looped is not None:
                     return rows + played, len(rows) + looped
                 rows += played
@@ -151,7 +151,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             pos += 3
         return rows, None
 
-    def _chord(self, ins, row: tuple, hold: int, number: int, pos=None) -> tuple:
+    def _chord(self, row: tuple, hold: int, number: int, pos=None) -> tuple:
         """``(rows, loop)`` of a chord row playing chord ``number``: a WF read per pitch with
         the row's waveform and detune (PLYCHRD's, never kept), from ``pos`` (else the chord's
         start) to its $7E (on to the next row in the tick) or its $7F (its first pitch again:
@@ -237,7 +237,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             if lead and rows[0].get("ctrl") is None:
                 raise TranscribeError("a first frame that keeps a waveform before a hold row")
         else:
-            (rows, loop), lead = self._rest([], ins, 0, 1), []
+            (rows, loop), lead = self._rest([], 0, 1), []
         skip = len(runs) + 1 + len(lead)
         program = Program([*runs, Row(first), *lead, *rows], None if loop is None else loop + skip)
         return self._named("ctrl", "c", program)
