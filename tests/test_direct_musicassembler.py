@@ -108,7 +108,6 @@ EDITS = {
     "note control \\$21": lambda one: (pattern(one) + 2, (0x21,), {}),
     "legato note before": lambda one: (pattern(one) + 2, (0x40,), {}),
     "an instrument selected without a note": lambda one: (pattern(one) + 3, (0x83, 0x61), {}),
-    "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
     "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
     "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 1), {"order_jump": 1}),
@@ -124,6 +123,31 @@ def test_song_refusals(one, match):
     one.lay = replace(one.lay, **changes)
     with pytest.raises(m.TranscribeError, match=match):
         one.document()
+
+
+def test_an_inner_program_filter_byte_pokes_the_sweep(one, monkeypatch):
+    """The byte fires once into the sweep's accumulator, after the owner's step: on the owner's
+    voice or a later one, none where nothing owns the sweep."""
+    poke = {"post.cut": m.Once(one.call("poke", u=0x21))}
+    monkeypatch.setattr(one, "sweep", lambda tick, v: (0, 0x45, 7, 0xFA))
+    assert one._poke(0, 0x21, 5) == poke and one._poke(2, 0x21, 5) == poke
+    monkeypatch.setattr(one, "sweep", lambda tick, v: (1, 0x45, 7, 0xFA))
+    with pytest.raises(m.TranscribeError, match="before the sweep's owner"):
+        one._poke(0, 0x21, 5)
+    monkeypatch.setattr(one, "sweep", lambda tick, v: (VOICES, 0, 0, 0))
+    assert one._poke(0, 0x21, 5) == {}
+
+
+def test_an_inner_program_filter_byte_plays_exactly(one):
+    write(one, program(one, 4) + 2, 0x21)
+    try:
+        text = one.document()
+    except m.TranscribeError as err:
+        assert "before the sweep's owner" in str(err)
+        return
+    assert "post.cut:poke(33)!" in text and "post:{}" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
 
 
 def test_a_pattern_of_no_end_is_refused(one):

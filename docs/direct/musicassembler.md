@@ -73,6 +73,12 @@ functions; each slot holds on the voice's parse ticks (`hold:[row.ad]`).
 | `vib(w,m,s,k)` | freq | `dl`, `sc`, `ph`: delay, count, phase | `_arp`: after `w = speed >> 3` calls, the word steps by `s` down or up as bit `phase & 3` of `m` (the player's 4-byte table), the phase turning every `k = speed & $0F` |
 | `csweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice, or by a note control `$80` (its two bytes `u` and `c`, `s = ((u & $0F) << 1) - $10`, `c` kept if 0; with `res`/`route` from the voice's preset or `$F0`) on that voice, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
 
+An inner program row with a filter byte writes it to the sweep's accumulator (`program_acc`, the
+sweep's own cell) on its tick, a `post.cut:poke(u)!` row key: the `post` slot after the sweep's
+fires `poke(u)`, `acc = u`, once, so the sweep steps on from `u` while its `ctr` lasts. The
+player steps the sweep in its owner's output call, so the write is exact on the owner's voice and
+the voices after it; a voice before the owner is refused.
+
 ## Not transcribed
 
 A voice whose orderlist reaches the silence pattern `$FE` is parked there by the player, gate off,
@@ -92,5 +98,5 @@ Refused with a `TranscribeError`:
   start again from the new note's frequency); a filter command sweeping
   from more than one voice (the one sweep would need unbinding from the old owner);
 - an instrument selected without a note that is not the voice's own;
-- an inner program row with a filter byte, an inner program `$FD` jump;
+- an inner program `$FD` jump, an inner program filter byte on a voice before the sweep's owner;
 - an arpeggio whose code reads other cells or compares on its descent.

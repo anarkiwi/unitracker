@@ -25,6 +25,7 @@ from unitracker_grammar.document import (
     Event,
     Header,
     Instrument,
+    Once,
     Play,
     Program,
     Row,
@@ -50,7 +51,9 @@ SLOTS = {
     "pw": [Slot("pw", hold=(FROZEN,))],
     "cut": [Slot("cut", hold=(FROZEN,), reset=("note",))],
 }
-CELL = {"vib": "freq", "pulse": "pw", "pong": "pw", "csweep": "cut"}
+# The slot after the sweep's, fired once by a program row that writes the sweep's accumulator.
+POKE = Slot("post")
+CELL = {"vib": "freq", "pulse": "pw", "pong": "pw", "csweep": "cut", "poke": "cut"}
 
 
 class TranscribeError(ValueError):
@@ -213,8 +216,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         mask = sum(1 << j for j in range(4) if rd(lay.arp + j))
         return self.call("vib", w=speed >> 3, s=step, k=speed & 0x0F, m=mask)
 
-    def _step(self, voice: Voice) -> dict:
-        """The row of one sustain tick of ``voice``: its inner program's step, if running."""
+    def _step(self, voice: Voice, tick: int) -> dict:
+        """The row of the sustain tick ``tick`` of ``voice``: its inner program's step, if
+        running."""
         prog = voice.flags & 0x0F
         if not prog:
             if not voice.flags & 0x10 or voice.arp:
@@ -224,8 +228,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         rd, lay = self._rd, self.lay
         base, cur = self._ptr(lay.inner_lo, lay.inner_hi, prog), voice.cursor
         wave, pitch = rd(base + cur), rd(base + (cur + 1 & 0xFF))
-        if rd(base + (cur + 2 & 0xFF)):
-            raise TranscribeError("an inner program's filter byte")
+        acc = rd(base + (cur + 2 & 0xFF))
         nxt = cur + 3 & 0xFF
         marker = rd(base + nxt)
         if lay.program_jump and marker == MA.PROGRAM_JUMP:
@@ -237,7 +240,19 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         voice.cursor = nxt
         if pitch < 0x80 or not lay.pitch_skip:
             pitch += voice.index
-        return {"ctrl": wave, "note": note_name(pitch & 0x7F)}
+        row = {"ctrl": wave, "note": note_name(pitch & 0x7F)}
+        return row | self._poke(voice.v, acc, tick) if acc else row
+
+    def _poke(self, v: int, acc: int, tick: int) -> dict:
+        """The row key of voice ``v``'s inner program writing ``acc`` to the sweep's accumulator
+        at ``tick``: the player steps the sweep on its owner's tick, so the write fires after
+        the step on the owner's voice or a later one; none where no voice owns the sweep."""
+        owner = self.sweep(tick, v)[0]
+        if owner >= VOICES:
+            return {}
+        if v < owner:
+            raise TranscribeError("an inner program's filter byte before the sweep's owner")
+        return {"post.cut": Once(self.call("poke", u=acc))}
 
     def _program(self, rows: list) -> str:
         """The name of the control program of per-tick ``rows``, empty ones as holds."""
@@ -294,7 +309,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             voice.index = trans + note & 0xFF
         elif kind == "note":
             rows, name = [self._trigger(voice, trans + note & 0xFF)], self.instrument(voice.ins)
-        rows += [self._step(voice) for _ in range(length - 1 - len(rows))]
+        while len(rows) < length - 1:
+            rows.append(self._step(voice, tick + len(rows)))
         if legato:
             rows[0] = {"note": note_name(voice.index)} | rows[0]
         rows.append({"ad": voice.ad})
@@ -459,13 +475,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def _header(self, used: list) -> Header:
         """The header: the clock, a tick a step, and the slots and state of the ``used``."""
         cells = {CELL[t] for t in used}
+        slots = dict(SLOTS, cut=SLOTS["cut"] + [POKE] * ("poke" in used))
         named = {s for t in used for s in code.symbols(ROUTINES[t])}
         state = {c: [(k, n) for k, n in names.items() if k in named] for c, names in STATE.items()}
         return Header(
             tuple((k, meta_text(v)) for k, v in self.meta()),
             clock=CLOCK,
             tempo=1,
-            slots={c: s for c, s in SLOTS.items() if c in cells} or None,
+            slots={c: s for c, s in slots.items() if c in cells} or None,
             state={c: n for c, n in state.items() if n} or None,
         )
 
@@ -497,7 +514,7 @@ def _values(record) -> list:
     """The values of an instrument's fields or a program's rows."""
     if isinstance(record, Instrument):
         return [v for _, v in record.fields]
-    return [v for row in record.rows for _, v in row.keys]
+    return [v.value if isinstance(v, Once) else v for row in record.rows for _, v in row.keys]
 
 
 def transcriber(raw: bytes, subtune: int = 0) -> Transcriber:

@@ -6,7 +6,26 @@ import random
 import pymusicassembler
 import pytest
 from unitracker_grammar import code
+from unitracker_grammar.document import (
+    NONE,
+    Call,
+    Code,
+    Document,
+    Event,
+    Header,
+    Instrument,
+    Once,
+    Play,
+    Program,
+    Row,
+    Section,
+    Slot,
+    SongRow,
+    printed,
+    signature,
+)
 from unitracker_player.code import Machine
+from unitracker_player.player import play
 
 from unitracker.direct.macode import CODE, STATE
 from unitracker.direct.musicassembler import CLOCK, Transcriber
@@ -109,3 +128,36 @@ def test_sweep_is_the_owners_trigger_then_its_cutoff_sweep(one, seed):
         assert value >> 3 == ref.snapshot()[22], phi
         value = fire(value, phi, 0, 0, state) & 0x7FF
         ref._sustain(0, rec, 0x40)
+
+
+def test_a_poke_writes_the_accumulator_after_the_sweep_steps():
+    """A program row's filter byte: the sweep steps on its tick, then continues from the byte."""
+    ins = Instrument({"ad": 9, "sr": 9, "pw": 2048, "freq": NONE})
+    mods = [
+        (signature(t, code.params(c)), Code(c))
+        for t, c in ((t, code.read(CODE[t])) for t in ("csweep", "poke"))
+    ]
+    rows = [Row({"ctrl": 0x41}) for _ in range(5)]
+    rows[2] = Row({"ctrl": 0x41, "post.cut": Once(Call("poke", (0x10,)))})
+    head = Header(
+        (("title", "t"),),
+        clock=CLOCK,
+        tempo=1,
+        slots={"cut": [Slot("cut", hold=("row.ad",), reset=("note",)), Slot("post")]},
+        state={"cut": [("acc", 1), ("ctr", 1)]},
+    )
+    note = Event("C4", "i1", {"cut": Call("csweep", (0x20, 6, 2)), "run": "c1"}, steps=6)
+    doc = Document(
+        head,
+        mods=mods,
+        defs=[
+            Section("ins", [("i1", ins)]),
+            Section("ctrl", [("c1", Program(rows))]),
+            Section("phrase", [("p0", [Event("-", steps=6)]), ("p1", [note])]),
+        ],
+        init=[Event("-", commands={"vol": 15}), Event("-"), Event("-")],
+        rows=[SongRow((Play("p1"), Play("p0"), Play("p0")))],
+        loop=0,
+    )
+    cut = [int(x) for x in play(printed(doc), ticks=7)[:, 22]]
+    assert cut == [0, 34, 36, 18, 20, 22, 22]

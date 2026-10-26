@@ -3,7 +3,8 @@
 State: freq ``dl``, ``sc``, ``ph`` the arpeggio's delay, step count and phase; pw ``d``, ``q``
 the ping-pong's direction and step count; cut ``acc``, ``ctr`` the accumulator and ticks left.
 Params: ``p`` the pulse byte, ``s`` a step, ``k`` steps per phase (0 for 256), ``w`` the delay,
-``m`` the phases that ascend (bit j phase j), ``u``, ``c`` the trigger's accumulator and count.
+``m`` the phases that ascend (bit j phase j), ``u``, ``c`` the trigger's accumulator and count
+(``u`` also the accumulator an inner program writes).
 """
 
 STATE = {"freq": {"dl": 1, "sc": 1, "ph": 1}, "pw": {"d": 1, "q": 1}, "cut": {"acc": 1, "ctr": 1}}
@@ -31,4 +32,6 @@ CODE = {
     + "lda #u\nsta acc\nlda #c\nsta ctr\nrts\nstep:\nlda ctr\nbeq done\ndec ctr\nclc\nlda acc\n"
     + "adc #s\nsta acc\nlda #0\nsta v+1\nlda acc\nasl\nrol v+1\nasl\nrol v+1\nasl\nrol v+1\n"
     + "sta v\ndone:\nrts\n",
+    # An inner program's filter byte: the sweep's accumulator, which the sweep steps from.
+    "poke": "lda #u\nsta acc\nrts\n",
 }
