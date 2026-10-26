@@ -120,5 +120,5 @@ Refused with a `TranscribeError`:
 - the orderlist `$FC` tempo command, a pattern without an end;
 - a legato note before its voice's first trigger, or with a filter command (its step would
   apply at once, its accumulator and count at the next trigger);
-- an inner program `$FD` jump, an inner program filter byte on a voice before the sweep's owner;
+- an inner program filter byte on a voice before the sweep's owner;
 - an arpeggio whose code reads other cells or compares on its descent.

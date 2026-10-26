@@ -101,6 +101,31 @@ whammer = hvsc_tune(
     "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
 )
 
+turn_me_on = hvsc_tune(
+    "turn_me_on",
+    "MUSICIANS/E/Emarti/Turn_Me_On.sid",
+    "Path to Emarti's Turn Me On, a SID-Wizard tune that selects an instrument before any note.",
+)
+reflex = hvsc_tune(
+    "reflex",
+    "MUSICIANS/G/Garvalf/Reflex.sid",
+    "Path to Garvalf's Reflex, whose instrument selected before any note walks its header.",
+)
+axelf = hvsc_tune(
+    "axelf",
+    "MUSICIANS/G/Gregfeel/AxelF-Shots_out_of_Nowhere.sid",
+    "Path to Gregfeel's AxelF, a first note's HARDRST carry on a walk started before it.",
+)
+crapman = hvsc_tune(
+    "crapman",
+    "MUSICIANS/B/Batsman/Crapman.sid",
+    "Path to Batsman's Crapman, a SID-Wizard tune whose init leaves a tracked cutoff.",
+)
+twenty_first = hvsc_tune(
+    "twenty_first",
+    "MUSICIANS/V/Vincenzo/21st.sid",
+    "Path to Vincenzo's 21st, WF rows held over ticks with an untracked pulse table.",
+)
 pimp_my_commodore = hvsc_tune(
     "pimp_my_commodore",
     "MUSICIANS/H/Hermit/Pimp_My_Commodore.sid",

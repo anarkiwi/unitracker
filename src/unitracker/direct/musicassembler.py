@@ -47,6 +47,8 @@ VOICES = MA.VOICES
 JMP_ABS = 0x4C
 NOTE_CTL = MA.CTL_DUR_MASK | MA.CTL_FILTER | MA.CTL_VIBARP | MA.CTL_TRIGGERED
 FROZEN = "row.ad"
+# The bound sweep after a legato filter command: the owner's next trigger loads it afresh.
+STALE = (VOICES, 0, 0, 0)
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 SLOTS = {
     "freq": [Slot("freq", hold=(FROZEN,))],
@@ -59,6 +61,7 @@ POKE = Slot("post")
 LEGATO = Slot("freq", hold=(FROZEN,), reset=("legato",))
 CELL = {
     "csweep": "cut",
+    "csweeps": "cut",
     "poke": "cut",
     "idle": "cut",
     "pulse": "pw",
@@ -109,6 +112,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.rowlen = self._rd(self.lay.tempo_reload) + 1
         self.ins, self.ctrl, self.phrases, self.used = {}, {}, {}, []
         self.sweeps, self.binds, self.takes = [], set(), set()
+        self.sweeps_at = set()
         self.start = self.running = (VOICES, 0, 0, 0)
         self._check()
         lay = self.lay
@@ -284,8 +288,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         nxt = cur + 3 & 0xFF
         marker = rd(base + nxt)
         if lay.program_jump and marker == MA.PROGRAM_JUMP:
-            raise TranscribeError("an inner program jump")
-        if marker == MA.PROGRAM_STOP:
+            to = rd(base + (nxt + 1 & 0xFF))
+            nxt = 0 if to == 0 or to >= rd(lay.program_jump + voice.v) + 3 & 0xFF else to * 3 & 0xFF
+        elif marker == MA.PROGRAM_STOP:
             voice.flags &= 0xF0
         elif marker == MA.PROGRAM_RESTART:
             nxt = 0
@@ -384,12 +389,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         only its filter command's resonance and holds the sweeps; a ``first`` non-note writes
         the voice's image cells and only sets its instrument, none running yet, unless init
         left its trigger latch clear (:meth:`_prime`)."""
-        kind, dur, ins, note, filt, legato, steps = token
+        kind, dur, ins, note, _, legato, steps = token
         length = (dur + 1) * self.rowlen
         if legato and not voice.live:
             raise TranscribeError("a legato note before the voice's first trigger")
-        if legato and filt is not None:
-            raise TranscribeError("a filter command on a legato note")
         cmds = {}
         if ins is not None and ins != voice.ins and (kind != "note" or legato):
             cmds = self._select(voice, ins)
@@ -416,8 +419,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if first and kind != "note" and not primed:
             name, cmds = self.instrument(voice.ins), self.image(voice.v) | self._image_slide(voice)
         cmds = {"run": self._program(rows)} | cmds
-        if primed or kind == "note" and not legato:
-            cmds |= self._filter(voice, tick)
+        if primed or kind == "note":
+            cmds |= self._legato_filter(voice, tick) if legato else self._filter(voice, tick)
         if legato:
             cmds["legato"] = True
         label = note_name(0) if primed else note_name(voice.index) if kind == "note" else kind
@@ -480,6 +483,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         _, u, c, s = self.sweep(tick, voice.v)
         return {"cut": self.call("csweep", u=u, c=c, s=s)}
 
+    def _legato_filter(self, voice: Voice, tick: int) -> dict:
+        """The commands of a legato note of ``voice`` at ``tick``: the sweep running on, with
+        the filter command's step, where it has one; the trigger runs no reload."""
+        if (tick, voice.v) not in self.sweeps_at:
+            return {}
+        _, _, _, s = self.sweep(tick, voice.v)
+        return {"cut": self.call("csweeps", s=s)}
+
     # ---- the song -----------------------------------------------------------------------
 
     def _ticks(self, pid: int) -> int:
@@ -512,6 +523,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 yield tick, pid, transrep >> 4
                 tick += self._ticks(pid)
 
+    def _reach(self, v: int, horizon: int):
+        """:meth:`_walk` of voice ``v`` to the first pattern at or after ``horizon``, the one
+        the last event before it reads its lookahead from."""
+        for start in self._walk(v, math.inf):
+            yield start
+            if start[0] >= horizon:
+                break
+
     def _filters(self, horizon: int) -> None:
         """The song's filter commands before ``horizon``, in the order the player parses them:
         ``self.sweeps`` is ``((tick, voice), voice, u, c, s)`` of each; ``self.binds`` the
@@ -521,18 +540,19 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         found, notes = [], []
         for v in range(VOICES):
             if self._idle_start(v) and not self._rd(self.lay.note_ctl + v) & MA.CTL_TRIGGERED:
-                notes.append((1, v))
-            for tick, pid, _ in self._walk(v, horizon):
+                notes.append((1, v, False))
+            for tick, pid, _ in self._reach(v, horizon):
                 if pid == MA.SILENCE_PATTERN:
                     continue
                 for token in self._tokens(pid):
                     if token[4] is not None:
                         u, c = token[4]
                         found.append(((tick, v), v, u, c, ((u & 0x0F) << 1) - 0x10 & 0xFF))
-                    if token[0] == "note" and not token[5]:
-                        notes.append((tick, v))
+                    if token[0] == "note":
+                        notes.append((tick, v, token[5]))
                     tick += (token[1] + 1) * self.rowlen
         self.sweeps, owner, self.takes = sorted(found), self.start[0], set()
+        self.sweeps_at = {at for at, *_ in self.sweeps}
         for at, v, *_ in self.sweeps:
             if v < owner < VOICES:
                 self.takes.add(at)
@@ -540,7 +560,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         bound, self.binds = None, set()
         if self.running[0] < VOICES and (self.running[2] or self.start[2]):
             bound = self.running
-        for tick, v in sorted(notes):
+        for tick, v, legato in sorted(notes):
+            if legato:
+                bound = bound and STALE if (tick, v) in self.sweeps_at else bound
+                continue
             want = self.sweep(tick, v)
             if want[0] == v and want != bound and (want[2] or bound):
                 self.binds.add((tick, v))
@@ -554,11 +577,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             self._rd(lay.instr_x8 + v) >> 3, v, steps=steps, mask=self._rd(lay.ctrl_mask + v)
         )
         out = []
-        walk = []
-        for t, p, tr in self._walk(v, math.inf):
-            walk.append((t, p, tr, [] if p == MA.SILENCE_PATTERN else list(self._tokens(p))))
-            if t >= horizon:
-                break
+        walk = [
+            (t, p, tr, [] if p == MA.SILENCE_PATTERN else list(self._tokens(p)))
+            for t, p, tr in self._reach(v, horizon)
+        ]
         for (tick, pid, trans, tokens), nxt in zip(walk, walk[1:] + [None]):
             if tick >= horizon:
                 break
@@ -594,18 +616,27 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         out.append((tick, self.phrases.setdefault(tuple(events), f"p{len(self.phrases) + 1}")))
 
     def timeline(self) -> tuple:
-        """``(rows, loop row)`` of the orderlists' pattern starts, after tick 0's parse."""
+        """``(rows, loop row)`` of the orderlists' pattern starts, after tick 0's parse; the
+        loop row None where every voice parks on the silence pattern and the song ends."""
         periods = [self._period(v) for v in range(VOICES)]
-        cycle = math.lcm(*(p for _, p in periods if p))
+        loops = [p for _, p in periods if p]
+        cycle = math.lcm(*loops)
         if cycle > 1 << 20:
             raise TranscribeError("orderlists of incommensurate loops")
         horizon = 1 + max(i for i, _ in periods) + 4 * cycle
+        if not loops:
+            # one row past the last voice's park: every parked event ends there, on the row
+            # that ends the voices
+            horizon = 1 + max(i for i, _ in periods) + self.rowlen
         self._filters(horizon)
         plays = {}
         for v in range(VOICES):
             for tick, name in self._starts(v, horizon):
                 plays.setdefault(tick, [CONT] * VOICES)[v] = Play(name)
         ticks = sorted(plays)
+        if not loops:
+            rows = [tuple(plays[t]) for t in ticks] + [("end",) * VOICES]
+            return [(Play("p0"),) * VOICES] + rows, None
         rows = [tuple(plays[t]) for t in ticks[:-1]]
         loop = repeat(rows, [b - a for a, b in zip(ticks, ticks[1:])])
         if loop is None:

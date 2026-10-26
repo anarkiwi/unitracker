@@ -111,7 +111,6 @@ def test_player_refusals(one, monkeypatch):
 
 EDITS = {
     "legato note before": lambda one: (pattern(one) + 2, (0x40,), {}),
-    "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
     "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 1), {"order_jump": 1}),
     "orderlist command \\$FC": lambda one: (order(one) + 2, (0xFC,), {"order_tempo": (1,)}),
@@ -150,6 +149,21 @@ def test_song_refusals(one, match):
     one.lay = replace(one.lay, **changes)
     with pytest.raises(m.TranscribeError, match=match):
         one.document()
+
+
+@pytest.mark.parametrize(
+    "to, bound, cursor", [(2, 4, 6), (0, 4, 0), (4, 4, 0), (9, 4, 0), (3, 4, 9)]
+)
+def test_an_inner_program_jump_follows_the_player(one, to, bound, cursor):
+    """``$FD`` continues at row ``to``, or the first row where that is 0 or past the voice's
+    bound cell."""
+    cell = 0x0300
+    one.lay = replace(one.lay, program_jump=cell)
+    write(one, cell, bound - 3)
+    write(one, program(one, 4) + 3, 0xFD, to)
+    voice = SimpleNamespace(flags=4, cursor=0, v=0, index=0, mask=0xFF, image=False)
+    one._step(voice, 0)
+    assert voice.cursor == cursor
 
 
 def test_an_inner_program_filter_byte_pokes_the_sweep(one, monkeypatch):
@@ -260,13 +274,20 @@ def test_a_legato_note_with_or_after_a_slide_plays_exactly(one, notes):
     assert not cells.size, summary(cells, 3)
 
 
-def test_a_legato_note_before_a_trigger_or_with_a_filter_command_is_refused(one):
+def test_a_legato_note_before_a_trigger_is_refused(one):
     slid(one, 0x30, 0x63, 0x11, 0x02)
     with pytest.raises(m.TranscribeError, match="before the voice's first trigger"):
         one.document()
-    slid(one, 0x30, 0x03, 0x32, 0xC3, 0x11, 0x02)
-    with pytest.raises(m.TranscribeError, match="a filter command on a legato note"):
-        one.document()
+
+
+def test_a_filter_command_on_a_legato_note_steps_the_running_sweep(one):
+    """The accumulator and count run on; only the step changes, then the owner's next trigger
+    binds the sweep afresh."""
+    slid(one, 0x30, 0x03, 0x32, 0xC3, 0x11, 0x02, 0x34, 0x03, 0x36, 0x03)
+    text = one.document()
+    assert "csweeps(" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
 
 
 def test_the_sweep_passes_between_voices(one):
@@ -511,3 +532,20 @@ def test_silence_pattern_ends_the_voice():
     )
     assert m.Transcriber._period(stub, 0) == (10, 0)
     assert list(m.Transcriber._walk(stub, 0, 100)) == [(1, 5, 0), (11, MA.SILENCE_PATTERN, 0)]
+
+
+def test_every_voice_parked_ends_the_song():
+    """Voices that all reach ``$FE`` have no loop: their parked events end together on a
+    final row that ends the voices."""
+    horizons = []
+    stub = SimpleNamespace(
+        rowlen=6,
+        _period=lambda v: (v * 12, 0),
+        _filters=horizons.append,
+        _starts=lambda v, horizon: [(1 + v * 12, f"s{v}")],
+    )
+    rows, loop = m.Transcriber.timeline(stub)
+    assert loop is None
+    assert horizons == [1 + 24 + 6]
+    assert rows[-1] == ("end",) * VOICES
+    assert len(rows) == 1 + VOICES + 1
