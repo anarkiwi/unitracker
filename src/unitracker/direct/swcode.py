@@ -255,6 +255,18 @@ def templates(
         "npn": _FIRST + "lda #131\nsta k\nrts\n" + step,
     }
     if speed > 1:
+        # A MULPLY call's skipped WF tick: no HARDRST, SETPWID's carry only where the
+        # instrument's ARPSPED walks the pulse on it (bit 2 of ca), else none.
+        mul = (
+            f"c3:\nlda mp\ncmp #{speed - 1}\nbeq pt\nlda ca\nand #4\nbeq c0\nlda ca\nand #3\n"
+            "cmp #2\nbne cvo\nlda cs\njmp cvo\npt:\n"
+        )
+        for name in ("det", "dfx"):
+            out[name] = (
+                out[name]
+                .replace("c3:\n", mul, 1)
+                .replace("lda ca\ncmp #2\nbne cvo", "lda ca\nand #3\ncmp #2\nbne cvo")
+            )
         # STRTSND's ARPSCNT keeps MULCNTP off the voice to the next PLAYER call: no write.
         out["snd"] = out["snd"].replace("init:\nsta dd\n", "init:\nsta dd\nlda #1\nsta mf\n", 1)
         for name in ("tone", "det", "dfx"):

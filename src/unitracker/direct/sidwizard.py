@@ -212,9 +212,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         setup = [first, first + n] if n > 1 else [0, 1]
         span = first + 2 * n if held else first
         walks = [t for t in range(span) if t % n != n - 1 or t in setup[: held * 2]]
-        masks = {t: 0 for t in walks}
+        # HRGTOFF's PTNGATE $FE from the first setup tick it fires on.
+        fired = [t for k, t in enumerate(setup if held else ()) if self.hr(ins, k)]
+        masks = {t: 0xFE if fired and t >= fired[0] else 0 for t in walks}
         for k, t in enumerate(setup if held else ()):
-            masks[t] = 0xFE if self.hr(ins, k) or k and masks[setup[0]] else 0
             if staccato and self.hr(ins, k):
                 # HRGTOFF's staccato exit walks no table on its tick.
                 walks.remove(t)
@@ -234,6 +235,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         if first is None:
             raise TranscribeError("an idle walk that reads no row")
         out[first] = Row(dict(out[first].keys) | {"wave.freq": self.call("tone")})
+        if n > 1 and dummy.arp_speed & 0xC0:
+            # MULCNTP walks its pulse table too, from PWTPOS 0, on the MULPLY calls.
+            steps = [t for t in range(span) if t % n != n - 1]
+            out.insert(0, Row({"hold": 0, "run": self.pulse(dummy, 0, 0, steps=steps)}))
         if self.feats.vibslidealways:
             # The hard-restart ticks walk the pulse table too: the header's, from PWTPOS 0.
             at = min((t for t in walks if t in setup), default=0)
@@ -340,9 +345,14 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         new = rec.newnote and not rec.dummy and not self.feats.vibslidealways
         if new and not tick:
             commands = {"pw": "hold", "cut": "hold"} | ({"pm.freq": "none"} if self.mirror else {})
+            dropped, run = self.mulcntp(rec)
+            commands = {k: v for k, v in commands.items() if k not in dropped}
+            commands |= {"run": run} if run else {}
         if new and tick and self.fkb and rec.holder:
             # The cutoff is written every tick: its track follows the note STRTSND sets.
             commands = {self.walk: self.call("frs")}
+        if rec.vol is not None and not tick:
+            commands["vol"] = rec.vol
         if rec.newnote and rec.dummy and not tick and self.speed == 1:
             state["dummy"] = state["dummy"] or self.dummy(rec.hr)
             commands["run"] = self.ins[state["dummy"]].get("ctrl")
@@ -364,6 +374,25 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
                 commands["run"] = self.resume(ins, wave, gate=gate)
         return Event(atom, commands=commands)
 
+    def mulcntp(self, rec) -> tuple:
+        """``(commands it drops, program it runs)`` of a new note's TICK_0 where the
+        instrument's ARPSPED has MULCNTP walk the pulse (and the filter) on the MULPLY calls to
+        STRTSND, which HARDRST's skip."""
+        walker, pulse, swept, filt, count = rec.walking
+        if self.speed == 1 or walker is None or not walker.arp_speed & 0xC0:
+            return (), None
+        steps = [t for t in range(2 * self.speed) if t % self.speed]
+        out = {"pw": self.pulse(walker, pulse, swept, steps=steps)}
+        if walker.arp_speed & 0x80 and rec.holder:
+            out["cut"] = self.filter(walker, filt, count, steps=steps)
+        if "cut" in out:
+            # One run command: the pulse program starts the filter's.
+            pw = self.programs["pw"][out["pw"]]
+            rows = [Row({"hold": 0, "run": out["cut"]}), *pw.rows]
+            loop = None if pw.loop is None else pw.loop + 1
+            out = {"pw": self._named("pw", "pw", Program(rows, loop))}
+        return ("pw", "pm.freq", "cut") if "cut" in out else ("pw", "pm.freq"), out["pw"]
+
     def events(self, rec, voice: int, state: dict, length: int) -> list:
         """The events of one read row on ``voice``, ``length`` ticks from its TICK_0: TICK_0,
         TICK_1 and TICK_2 on its first PLAYER calls, the rests between."""
@@ -376,9 +405,9 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             if rec.switch is not None:
                 out[2] = self.switch(rec, voice, state, out[2])
             # A binding the slot already holds would keep its phi: rebind it the tick before.
-            applied = out[2].commands
+            applied, before = dict(out[2].commands), dict(out[1].commands)
             for key, value in (("tick.freq", self.call("stp")), ("fx.cut", "none")):
-                if key in applied and key not in out[1].commands:
+                if key in applied and key not in before:
                     rebind[key] = value
             if "late.cut" in applied:
                 rebind["late.cut"] = "none"
@@ -393,14 +422,16 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         return ticks
 
     def switch(self, rec, voice: int, state: dict, event: Event) -> Event:
-        """``event`` on a row that selects instrument ``rec.ins`` without a note: its tables
-        walk on from where they are, through the new instrument's bytes."""
+        """``event`` on a row that selects instrument ``rec.ins`` without STRTSND: its tables
+        walk on from where they are, through the new instrument's bytes (a FX's walk as the
+        FX left it)."""
         commands = dict(event.commands)
-        if "run" in commands or event.ins is not None:
-            raise TranscribeError(
-                "an instrument selected without a note on a row that runs a table"
-            )
         wave, pulse, filt, reload, gate = rec.switch
+        if rec.tick2:
+            # A note without STRTSND: its walk resumed through the new instrument at the
+            # ARPSPED STRTSND latched; the next STRTSND names the instrument.
+            commands["run"] = self.resume(rec.ins, *rec.resume, reload=reload)
+            return Event(event.note, event.ins, commands, event.keep_pw, event.keep_filter)
         gate = gate if rec.unnoted else None
         commands["run"] = self.resume(
             rec.ins, wave, pulse, filt, skip=False, reload=reload, gate=gate
@@ -499,7 +530,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
 
     def pitch(self, rec) -> str:
         """The note name of a row's pitch with its octave shift and transpose."""
-        if not -1 <= rec.note < 0x80:
+        if not -1 <= rec.note < 0xFF:
             raise TranscribeError(f"a note sounding at {rec.note}")
         return note_name(rec.note)
 
