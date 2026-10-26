@@ -215,10 +215,10 @@ def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
         one.document()
 
 
-def legato_notes(one, every: int) -> int:
+def legato_notes(one, every: int) -> list:
     """Sets the legato bit of every ``every``-th note after the first of each pattern the
-    voices play, and returns how many it set."""
-    done, seen = 0, set()
+    voices play, and returns the ``(address, value)`` of each cell it wrote."""
+    done, seen = [], set()
     for v in range(VOICES):
         starts = set()
         for y, pid, _ in one._entries(v):
@@ -239,7 +239,7 @@ def legato_notes(one, every: int) -> int:
                 ctl, count = one._rd(at + y), count + 1
                 if count % every == 0 and not selected and not ctl & 0xE0:
                     write(one, at + y, ctl | 0x40)
-                    done += 1
+                    done.append((at + y, ctl | 0x40))
                 y += 2 if ctl & MA.CTL_FILTER else 0
             y += 1
             if one._rd(at + y) == MA.PATTERN_END:
@@ -250,8 +250,13 @@ def legato_notes(one, every: int) -> int:
 @pytest.mark.parametrize("every", [2, 3])
 def test_legato_notes_play_exactly(one, every):
     """A note with the player's trigger latch set is a ``legato`` note that plays on."""
-    assert legato_notes(one, every)
+    edits = legato_notes(one, every)
+    assert edits
     text = one.document()
     assert " legato" in text
-    cells = standard_cells(one, text)
+    ref = m.standard(one.song)
+    for at, value in edits:
+        ref._wr(at, value)
+    ours = play(text, ticks=TICKS)
+    cells = gridcmp.cell_diff(ours, ref.render_grid(len(ours)))
     assert not cells.size, summary(cells, 3)
