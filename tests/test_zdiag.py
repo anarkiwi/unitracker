@@ -23,6 +23,10 @@ def test_diag(one):
     ref = np.asarray(ref, dtype=np.uint8)
     for v in (0, 2):
         for r in (0, 1, 2, 4):
-            lines.append(f"v{v+1} reg{r} ours {ours[:16, v*7+r].tolist()} ref {ref[:16, v*7+r].tolist()}")
-    lines.append("tokens v1: " + str([list(one._tokens(pid))[:4] for _, pid, _ in list(one._entries(0))[:1]]))
+            lines.append(
+                f"v{v+1} reg{r} ours {ours[:16, v*7+r].tolist()} ref {ref[:16, v*7+r].tolist()}"
+            )
+    lines.append(
+        "tokens v1: " + str([list(one._tokens(pid))[:4] for _, pid, _ in list(one._entries(0))[:1]])
+    )
     assert False, "\n".join(lines)
