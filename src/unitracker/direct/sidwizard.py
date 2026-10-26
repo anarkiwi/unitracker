@@ -43,7 +43,7 @@ from unitracker.direct.swtables import (
     _unnoted,
 )
 from unitracker.direct.swcode import STATE, mirror_templates, templates, track_templates
-from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, trace
+from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, trace, trapped
 
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
 DUMMY = 256
@@ -615,11 +615,20 @@ def compare(swm, text: str, frames: int = 20000, native: bool = False):
     return gridcmp.cell_diff(ours, theirs)
 
 
+def reference(raw: bytes, subtune: int = 0, ticks: int = 20000) -> tuple:
+    """``(grid, traps)`` of one subtune of a SID: the reference player's at the standard note
+    table, and the table loads its native table answers differently."""
+    return trapped(parse_sid_song(raw, subtune + 1), ticks)
+
+
 def verify(raw: bytes, subtune: int = 0, frames: int = 20000):
-    """``(cells, document)`` of one subtune of a SID: :func:`compare` of its transcription."""
+    """``(cells, document, traps)`` of one subtune of a SID: its transcription's grid against
+    the reference player's (:func:`reference`)."""
     one = transcriber(raw, subtune, frames)
     text = one.document()
-    return compare(one.swm, text, frames), text
+    ours = play(text, ticks=frames)
+    theirs, found = trapped(one.swm, len(ours))
+    return gridcmp.cell_diff(ours, theirs), text, found
 
 
 def main(argv=None) -> int:

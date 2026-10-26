@@ -17,6 +17,7 @@ from unitracker_grammar import document as d
 from unitracker_player.player import play
 
 from unitracker.direct import cli
+from unitracker.direct.traps import Log
 from unitracker.direct.dmcode import CODE, STATE
 from unitracker.direct.dmimage import LiftError, locate, row_fields
 
@@ -70,19 +71,27 @@ def clock_hz(header) -> int:
     return NTSC_HZ if (header.flags >> 2) & 3 == 2 else PAL_HZ
 
 
-def standard(raw: bytes, subtune: int = 0) -> DefmonPlayer:
+def standard(raw: bytes, subtune: int = 0, log: Log | None = None) -> DefmonPlayer:
     """The replay of ``raw`` with every note-table read answered by the document's note table:
-    index ``k``'s word is ``F(k - 24)`` at the document's clock; its other reads are its own."""
+    index ``k``'s word is ``F(k - 24)`` at the document's clock; its other reads are its own.
+    A ``log`` has the reads whose native word differs, by the voice offset in X."""
     ref = DefmonPlayer(raw, subtune=subtune)
     # pylint: disable=protected-access
     ram, cpu, bus = ref._mem, ref._mpu, ref._obs
     hz, at = clock_hz(SidImage.from_bytes(raw).header), locate(ram)[0]
     shifts = {at[NOTES[0]]: 0, at[NOTES[1]]: 8}
+    lo, hi = at[NOTES[0]], at[NOTES[1]]
 
     def read(addr):
         shift = shifts.get(base := ram[cpu.pc + 1] | ram[cpu.pc + 2] << 8)
         k = (addr - base) & 0xFFFF
-        return None if shift is None or k > 255 else frequency(k - 24, hz) >> shift & 0xFF
+        if shift is None or k > 255:
+            return None
+        word = frequency(k - 24, hz)
+        if log is not None:
+            voice = VOICES.index(cpu.x) if cpu.x in VOICES else -1
+            log.read(voice, k, ram[(lo + k) & 0xFFFF] | ram[(hi + k) & 0xFFFF] << 8, word)
+        return word >> shift & 0xFF
 
     for base in shifts:
         bus.subscribe_to_read([(base + k) & 0xFFFF for k in range(256)], read)
@@ -547,6 +556,24 @@ def transcribe(raw: bytes, subtune: int = 0) -> str:
     return Transcriber(raw, subtune).document()
 
 
+def reference(raw: bytes, subtune: int = 0, ticks: int = 20000) -> tuple:
+    """``(grid, traps)``: ``ticks`` of the replay at the standard note table and the note-table
+    loads (``lda base,y`` found per image) whose native word differs; no traps where the image's
+    loads are not found."""
+    log = Log()
+    ref = standard(raw, subtune, log)
+    log.frames(ref)
+    return np.asarray(ref.render_grid(ticks), dtype=np.uint8), log()
+
+
+def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
+    """``(cells, document, traps)``: the document's grid against :func:`reference`'s."""
+    text_ = transcribe(raw, subtune)
+    ours = play(text_, ticks=frames)
+    theirs, found = reference(raw, subtune, len(ours))
+    return gridcmp.cell_diff(ours, theirs), text_, found
+
+
 def compare(raw: bytes, subtune: int = 0, frames: int = 20000, native: bool = False) -> tuple:
     """``(cells, document)``: the ``(tick, register, ours, theirs)`` cells where the document's
     grid differs from the replay's at the standard note table (:func:`standard`), or ``native``
@@ -560,7 +587,7 @@ def compare(raw: bytes, subtune: int = 0, frames: int = 20000, native: bool = Fa
 
 def main(argv=None) -> int:
     """Transcribe a SID, or verify SIDs against pydefmon's replay."""
-    return cli.main(argv, __doc__.split("\n", 1)[0], transcribe, compare)
+    return cli.main(argv, __doc__.split("\n", 1)[0], transcribe, verify)
 
 
 if __name__ == "__main__":

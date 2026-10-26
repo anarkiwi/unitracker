@@ -5,20 +5,15 @@ wave and filter tables programs, its frequency commands and pulse table code
 modulators (:mod:`unitracker.direct.gt2code`, docs/direct/goattracker2.md).
 """
 
-import argparse
 import re
-import signal
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 from pygoattracker import constants as C
 from pygoattracker import decompile_sid
 from pygoattracker.player import Player
 from pysidtracker import gridcmp
-from tqdm import tqdm
 from unitracker_grammar import code, frequency
 from unitracker_grammar.document import (
     CONT,
@@ -44,6 +39,7 @@ from unitracker_grammar.document import (
 from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
+from unitracker.direct import cli, traps
 from unitracker.direct.gt2code import CODE, STATE
 
 CLOCK = {"cycles_per_tick": 19656, "clock_hz": 985000}
@@ -656,65 +652,47 @@ def compare(model, frames: int = 20000, native: bool = False):
     return gridcmp.cell_diff(ours, theirs), text
 
 
+def trapped(model, ticks: int = 20000) -> tuple:
+    """``(grid, traps)``: ``ticks`` of :func:`standard`'s player, and the table reads whose
+    word in the native table differs from ``F(k)``'s."""
+    # pylint: disable=protected-access
+    native, ref, log = model.player()._freq_table, standard(model), traps.Log()
+    freq, play_channel = ref._freq, ref._play_channel
+    voice = [0]
+
+    def read(note):
+        return log.read(voice[0], note & 0x7F, native[note & 0x7F], freq(note))
+
+    def channel(index):
+        voice[0] = ref._voices[index] // C.VOICE_REG_SIZE
+        return play_channel(index)
+
+    log.frames(ref, "play_frame")
+    ref._freq, ref._play_channel = read, channel
+    return np.asarray(ref.render_grid(ticks), dtype=np.uint8), log()
+
+
+def reference(raw: bytes, subtune: int = 0, ticks: int = 20000) -> tuple:
+    """:func:`trapped` of one subtune of a SID."""
+    return trapped(decompile_sid(raw, subtune), ticks)
+
+
 def verify(raw: bytes, subtune: int = 0, frames: int = 20000):
-    """:func:`compare` of one subtune of a SID."""
-    return compare(decompile_sid(raw, subtune), frames)
+    """``(cells, document, traps)`` of one subtune of a SID: the document's grid against the
+    reference player's with its frequency table trapped (:func:`reference`)."""
+    model = decompile_sid(raw, subtune)
+    text = Transcriber(model).document()
+    ours = play(text, ticks=frames)
+    theirs, found = trapped(model, len(ours))
+    return gridcmp.cell_diff(ours, theirs), text, found
 
 
-def summary(cells, runs: int = 0) -> str:
-    """``exact``, or the first differing cell and the count; with ``runs``, that many of each
-    register's differing runs."""
-    if not cells.size:
-        return "exact"
-    out = [f"first {tuple(int(c) for c in cells[0][:2])} cells {len(cells)}"]
-    for reg in gridcmp.runs(cells) if runs else ():
-        spans = ", ".join(f"{r['from']}-{r['to']} {r['values'][0][2:]}" for r in reg["runs"][:runs])
-        out.append(f"  {reg['name']} {reg['cells']}: {spans}")
-    return "\n".join(out)
-
-
-def _expired(*_):
-    raise TimeoutError("over the time limit")
-
-
-def _check(job: tuple) -> tuple:
-    path, subtune, frames, runs, limit = job
-    signal.signal(signal.SIGALRM, _expired)
-    signal.alarm(limit)
-    try:
-        cells = verify(path.read_bytes(), subtune, frames)[0]
-        return path, not cells.size, summary(cells, runs)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        return path, False, f"{type(exc).__name__}: {exc}"
-    finally:
-        signal.alarm(0)
+summary = cli.summary
 
 
 def main(argv=None) -> int:
     """Transcribe a SID, or verify SIDs against pygoattracker."""
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("sids", nargs="+", type=Path)
-    parser.add_argument("--subtune", type=int, default=0)
-    parser.add_argument("--frames", type=int, default=20000)
-    parser.add_argument("--verify", action="store_true")
-    parser.add_argument("--diff", type=int, default=0, help="differing runs per register")
-    parser.add_argument("--jobs", type=int, default=1)
-    parser.add_argument("--timeout", type=int, default=600, help="seconds per SID")
-    args = parser.parse_args(argv)
-    if not args.verify:
-        sys.stdout.write(transcribe(args.sids[0].read_bytes(), args.subtune)[0])
-        return 0
-    jobs = [(path, args.subtune, args.frames, args.diff, args.timeout) for path in args.sids]
-    exact = 0
-    with ProcessPoolExecutor(args.jobs) as pool:
-        futures = [pool.submit(_check, job) for job in jobs]
-        progress = tqdm(as_completed(futures), total=len(jobs), unit="sid")
-        for done in progress:
-            path, ok, verdict = done.result()
-            exact += ok
-            print(f"{path}: {verdict}", flush=True)
-            progress.set_postfix(exact=exact)
-    return 0
+    return cli.main(argv, __doc__.split("\n", 1)[0], transcribe, verify)
 
 
 if __name__ == "__main__":

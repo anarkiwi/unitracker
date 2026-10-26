@@ -7,6 +7,7 @@ from unitracker_grammar.document import VERSION, Event
 
 from conftest import gt_tune
 from unitracker.direct import goattracker2 as g
+from unitracker.direct.traps import Trap
 
 TICKS = 600
 REST = (None, 0, 0, 0)
@@ -22,6 +23,15 @@ def exact(tune, ticks: int = TICKS) -> str:
 
 def test_notes():
     assert [g.note_name(k) for k in (0, 24, 37, 95)] == ["C0", "C2", "C#3", "B7"]
+
+
+def test_a_read_past_the_note_table_is_trapped_to_f():
+    """The editor's table has B7's $FFFF where F(95) is 0: the reference answers F, logging it."""
+    tune = gt_tune([(0x41, 0xDF), (0xFF, 0)])[0]
+    grid, found = g.trapped(tune, 40)
+    assert found == (Trap(8, 0, 95, 0xFFFF, 0),)
+    assert not grid[8:, :2].any()
+    assert g.trapped(gt_tune([(0x41, 0x80 + 30), (0xFF, 0)])[0], 40)[1] == ()
 
 
 def test_loop_and_runs():
@@ -246,7 +256,7 @@ def test_unsupported_wavetable_commands_are_refused():
 
 
 def test_metal_warrior(metal_warrior):
-    cells, text = g.verify(metal_warrior.read_bytes(), frames=2 * 3840)
+    cells, text, _ = g.verify(metal_warrior.read_bytes(), frames=2 * 3840)
     assert not cells.size, g.summary(cells, 3)
     assert "{loop:" in text
 

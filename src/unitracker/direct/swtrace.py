@@ -5,9 +5,12 @@ table, until the orderlists loop together."""
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
 from pysidwizard import SWMPlayer
 from pysidwizard.player import PAL_CYCLES_PER_FRAME
 from unitracker_grammar import frequency
+
+from unitracker.direct.traps import Log
 
 # FREQTBL/FREQTBH at note k + 1 is F(k) rounded down at this clock, but for note 0.
 CLOCK = (PAL_CYCLES_PER_FRAME, 985240, "floor")
@@ -77,6 +80,29 @@ def standard(swm) -> SWMPlayer:
     ref.freq_lo, ref.freq_hi = bytes(w & 0xFF for w in words), bytes(w >> 8 for w in words)
     ref.exptabh = bytes(11) + ref.freq_hi
     return ref
+
+
+def trapped(swm, ticks: int) -> tuple:
+    """``(grid, traps)``: ``ticks`` of :func:`standard`'s player, and its table loads whose word
+    in the native table (:class:`SWMPlayer`'s own) differs from ``F(k)``'s; a load at note
+    ``k + 1`` is of index ``k + 1``."""
+    # pylint: disable=protected-access
+    native, ref, log = SWMPlayer(swm), standard(swm), Log()
+    load = ref._load_freq
+
+    def read(voice, index):
+        load(voice, index)
+        k = index & 0x7F
+        log.read(
+            voice.channel,
+            k,
+            native.freq_hi[k] << 8 | native.freq_lo[k],
+            ref.freq_hi[k] << 8 | ref.freq_lo[k],
+        )
+
+    log.frames(ref)
+    ref._load_freq = read
+    return np.asarray(ref.render_grid(ticks), dtype=np.uint8), log()
 
 
 def _ended(image: bytes, pos: int, wave: bool) -> bool:
