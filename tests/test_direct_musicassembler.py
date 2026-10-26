@@ -158,10 +158,20 @@ def test_an_inner_program_jump_follows_the_player(one, to, bound, cursor):
     """``$FD`` continues at row ``to``, or the first row where that is 0 or past the voice's
     bound cell."""
     cell = 0x0300
-    one.lay = replace(one.lay, program_jump=cell)
+    one.lay = replace(one.lay, program_jump=cell, instr_cursor=0x0310)
     write(one, cell, bound - 3)
     write(one, program(one, 4) + 3, 0xFD, to)
     voice = SimpleNamespace(flags=4, cursor=0, v=0, index=0)
+    one._step(voice, 0)
+    assert voice.cursor == cursor
+
+
+@pytest.mark.parametrize("to, cursor", [(2, 6), (0, 0), (3, 0), (1, 3)])
+def test_an_inner_program_jump_is_bound_by_its_own_cursor(one, to, cursor):
+    """Where the bound cell is the voice's cursor cell, the bound is the cursor's next step."""
+    write(one, program(one, 4) + 3, 0xFD, to)
+    one.lay = replace(one.lay, program_jump=one.lay.instr_cursor)
+    voice = SimpleNamespace(flags=4, cursor=0, v=1, index=0)
     one._step(voice, 0)
     assert voice.cursor == cursor
 

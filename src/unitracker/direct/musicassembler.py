@@ -284,8 +284,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         nxt = cur + 3 & 0xFF
         marker = rd(base + nxt)
         if lay.program_jump and marker == MA.PROGRAM_JUMP:
-            to = rd(base + (nxt + 1 & 0xFF))
-            nxt = 0 if to == 0 or to >= rd(lay.program_jump + voice.v) + 3 & 0xFF else to * 3 & 0xFF
+            nxt = self._jump(voice, base, nxt)
         elif marker == MA.PROGRAM_STOP:
             voice.flags &= 0xF0
         elif marker == MA.PROGRAM_RESTART:
@@ -295,6 +294,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             pitch += voice.index
         row = {"ctrl": wave, "note": note_name(pitch & 0x7F)}
         return row | self._poke(voice.v, acc, tick) if acc else row
+
+    def _jump(self, voice: Voice, base: int, nxt: int) -> int:
+        """The cursor after the ``$FD`` jump at ``nxt`` of ``voice``'s inner program at ``base``:
+        row ``to``, or the first where that is 0 or past the bound cell, which is the cursor
+        cell itself (``voice.cursor``, ahead of its step) in the players seen."""
+        lay = self.lay
+        to = self._rd(base + (nxt + 1 & 0xFF))
+        if lay.program_jump == lay.instr_cursor:
+            bound = nxt
+        else:
+            bound = self._rd(lay.program_jump + voice.v) + 3 & 0xFF
+        return 0 if to == 0 or to >= bound else to * 3 & 0xFF
 
     def _poke(self, v: int, acc: int, tick: int) -> dict:
         """The row key of voice ``v``'s inner program writing ``acc`` to the sweep's accumulator
