@@ -85,8 +85,8 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def _unsupported(self) -> list:
         """What the tune uses that this transcription refuses."""
         swm, feats, out = self.swm, self.feats, []
-        if swm.frame_speed != 1 or self.ref.image.play_gate or any(self.ref.image.filter_init[:3]):
-            out.append("multispeed, a play gate or an initial filter")
+        if swm.frame_speed != 1 or self.ref.image.play_gate:
+            out.append("multispeed or a play gate")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
         if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
@@ -583,6 +583,13 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             return text
         return self.assemble(tuple(int(r) for r in first))
 
+    def cutoff(self) -> dict:
+        """The cutoff the tune's init leaves in CTFH and CTFL, where the cutoff is code."""
+        _, high, low, _ = self.ref.image.filter_init
+        if not self.fkb or not high | low:
+            return {}
+        return {self.walk: self.call("fho", c=high, l=low & 7, j=0)}
+
     def assemble(self, start: tuple | None = None) -> str:
         """The document of the song to its loop or end, from registers ``start`` before tick 0."""
         rows, loop, dummies = self.traced()
@@ -591,6 +598,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         defs = [Section("ins", sorted(self.ins.items(), key=lambda kv: int(kv[0][1:])))]
         defs += [Section(kind, store) for kind, store in self.programs.items() if store]
         defs.append(phrases)
+        # No HARDRST carry until a voice's first note sets one.
+        carry = {"hr.freq": self.call("hrc", c=255)} if self.hrc else {}
+        init = [Event("-", dummy, dict(carry)) for dummy in dummies]
+        init[0] = Event("-", dummies[0], carry | {"vol": 15} | self.cutoff())
         named = {s for t in self.used for s in code.symbols(self.routines[t])}
         state = {
             cell: [(k, size) for k, size in names.items() if k in named]
@@ -608,10 +619,6 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             (signature(name, code.params(self.routines[name])), Code(self.routines[name]))
             for name in self.used
         ]
-        # No HARDRST carry until a voice's first note sets one.
-        carry = {"hr.freq": self.call("hrc", c=255)} if self.hrc else {}
-        init = [Event("-", dummy, dict(carry)) for dummy in dummies]
-        init[0] = Event("-", dummies[0], carry | {"vol": 15})
         doc = Document(header, mods=mods, defs=defs, init=init, rows=song, loop=loop)
         return printed(doc)
 
