@@ -194,7 +194,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 ins, y = val & 0x1F, y + 1 & 0xFF
                 val = rd(pat + y)
             if val >= MA.LONGDUR_MIN and ins is None:
-                yield "-", val & MA.CTL_DUR_MASK, None, None, None, False, None
+                # A build whose long duration stores apart from the counter leaves it running:
+                # the voice parses again the next row.
+                dur = val & MA.CTL_DUR_MASK if self.lay.dur_long == self.lay.dur else 0
+                yield "-", dur, None, None, None, False, None
             elif val >= MA.DUR_MIN:
                 yield "off", val & MA.CTL_DUR_MASK, ins, None, None, False, None
             else:
