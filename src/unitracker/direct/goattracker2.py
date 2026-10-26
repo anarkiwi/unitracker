@@ -247,7 +247,16 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def pulse(self, pos: int) -> Call:
         """The call of the pulse table from row ``pos``, read from ``PL``/``PR``, the
         player's own pulse table."""
-        return self.call("ptabs" if self.ref.simplepulse else "ptab", b=pos)
+        step = self.ref.build.pulse_step
+        if self.ref.simplepulse:
+            if step != 1:
+                raise TranscribeError(f"a pulse step of {step} in a simple pulse build")
+            return self.call("ptabs", b=pos)
+        if step == 1:
+            return self.call("ptab", b=pos)
+        if step < 1 or step & step - 1:
+            raise TranscribeError(f"a pulse step of {step}")
+        return self.call("ptabk", b=pos, k=step.bit_length() - 1)
 
     def pulse_start(self, pos: int) -> dict:
         """The row keys that start the pulse table at row ``pos``: its call, and a ``reset`` of
