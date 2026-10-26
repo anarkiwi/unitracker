@@ -215,11 +215,11 @@ def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
         one.document()
 
 
-def legato_notes(one, every: int) -> list:
+def legato_notes(one, every: int, voices=range(VOICES)) -> list:
     """Sets the legato bit of every ``every``-th note after the first of each pattern the
-    voices play, and returns the ``(address, value)`` of each cell it wrote."""
+    ``voices`` play, and returns the ``(address, value)`` of each cell it wrote."""
     done, seen = [], set()
-    for v in range(VOICES):
+    for v in voices:
         starts = set()
         for y, pid, _ in one._entries(v):
             if y in starts:
@@ -250,7 +250,7 @@ def legato_notes(one, every: int) -> list:
 @pytest.mark.parametrize("every", [2, 3])
 def test_legato_notes_play_exactly(one, every):
     """A note with the player's trigger latch set is a ``legato`` note that plays on."""
-    edits = legato_notes(one, every)
+    edits = legato_notes(one, every, voices=(2,))
     assert edits
     text = one.document()
     assert " legato" in text
@@ -260,3 +260,9 @@ def test_legato_notes_play_exactly(one, every):
     ours = play(text, ticks=TICKS)
     cells = gridcmp.cell_diff(ours, ref.render_grid(len(ours)))
     assert not cells.size, summary(cells, 3)
+
+
+def test_a_legato_note_over_a_running_arpeggio_is_refused(one):
+    assert legato_notes(one, 2, voices=(0,))
+    with pytest.raises(m.TranscribeError, match="legato note over a running arpeggio"):
+        one.document()

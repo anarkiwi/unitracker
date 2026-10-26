@@ -284,11 +284,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError("a legato note before the voice's first trigger")
         if legato and ins is not None and ins != voice.ins:
             raise TranscribeError("an instrument selected on a legato note")
+        if legato and voice.arp:
+            raise TranscribeError("a legato note over a running arpeggio")
         if kind == "note" and legato:
             voice.index = trans + note & 0xFF
         elif kind == "note":
             rows, name = [self._trigger(voice, trans + note & 0xFF)], self.instrument(voice.ins)
         rows += [self._step(voice) for _ in range(length - 1 - len(rows))]
+        if legato:
+            rows[0] = {"note": note_name(voice.index)} | rows[0]
         rows.append({"ad": voice.ad})
         cmds = self.image(voice.v) if first and kind != "note" else {"run": self._program(rows)}
         if kind == "note":

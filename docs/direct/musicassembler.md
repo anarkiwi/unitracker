@@ -33,7 +33,7 @@ index the player reads its frequency table at sounds `F(k)`.
 | token | event |
 |---|---|
 | a note (`< $60`) and its control byte, after any instrument `$80-$9F` | the note at its index (transpose + note), `.iN`, `run:cK` |
-| a note whose control byte has `$40` (the player's trigger latch, already set: no trigger) | the note with `legato`, no `.iN`: its first tick is a sustain row, not the trigger, so the instrument's programs, pulse and sweep run on |
+| a note whose control byte has `$40` (the player's trigger latch, already set: no trigger) | the note with `legato`, no `.iN`: its first tick is a sustain row (with `note:` the new index, as the program rows' absolute note would hold the old one), not the trigger, so the instrument's programs, pulse and sweep run on |
 | `$60-$7F`, or an instrument then a duration (the voice's instrument) | `off run:cK` |
 | `$A0-$FE` | `- run:cK`: the gate is kept |
 
@@ -84,7 +84,8 @@ Refused with a `TranscribeError`:
   would sound);
 - orderlist `$FC`/`$FD` commands, the silence pattern, a pattern without an end;
 - a note control byte with the vibrato bit (`$20`), a legato note before its voice's first
-  trigger; a filter command sweeping
+  trigger, with an instrument selected, or over a running arpeggio (the vibrato would need to
+  start again from the new note's frequency); a filter command sweeping
   from more than one voice (the one sweep would need unbinding from the old owner);
 - an instrument selected without a note that is not the voice's own;
 - an inner program row with a filter byte, an inner program `$FD` jump;
