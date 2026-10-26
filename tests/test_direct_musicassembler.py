@@ -180,7 +180,7 @@ def test_an_inner_program_jump_is_bound_by_its_own_cursor(one, to, cursor):
     """Where the bound cell is the voice's cursor cell, the bound is the cursor's next step."""
     write(one, program(one, 4) + 3, 0xFD, to)
     one.lay = replace(one.lay, program_jump=one.lay.instr_cursor)
-    voice = SimpleNamespace(flags=4, cursor=0, v=1, index=0)
+    voice = SimpleNamespace(flags=4, cursor=0, v=1, index=0, mask=0xFF, image=False)
     one._step(voice, 0)
     assert voice.cursor == cursor
 
