@@ -118,8 +118,8 @@ def test_slide_is_the_note_stepped(seed):
     rng = random.Random(seed)
     lo, hi, note = rng.randrange(256), rng.randrange(256), rng.randrange(96)
     machine = Machine({}, {"freq": tuple(STATE["freq"].items())}, CLOCK[1])
-    statements = code.read(CODE["slide"])
-    fire = machine.compile("slide", statements, {"l": lo, "h": hi}, "freq")
+    statements = code.read(CODE["vslide"])
+    fire = machine.compile("vslide", statements, {"l": lo, "h": hi}, "freq")
     base = frequency(note, CLOCK[1])
     state, slid, toggle, value = bytearray(sum(STATE["freq"].values())), base, 0xFF, 0
     for phi in range(64):

@@ -27,7 +27,7 @@ CODE = {
     + "inc ph\ndone:\nrts\n",
     # The note's frequency, then a 16-bit word stepped by h:l a tick: with l odd every other tick
     # steps, the others sounding the note's frequency (tg is the toggle).
-    "slide": "lda phi\nora phi+1\nbne run\nlda nn\nand #127\ntay\nlda F.lo,y\nsta wl\nsta bl\n"
+    "vslide": "lda phi\nora phi+1\nbne run\nlda nn\nand #127\ntay\nlda F.lo,y\nsta wl\nsta bl\n"
     + "lda F.hi,y\nsta wh\nsta bh\nlda #0\nsta tg\nrun:\nlda #l\nand #1\nbeq step\nlda tg\n"
     + "bne skip\ninc tg\njmp step\nskip:\nlda #0\nsta tg\nlda bl\nsta v\nlda bh\nsta v+1\nrts\n"
     + "step:\nclc\nlda wl\nadc #l\nsta wl\nlda wh\nadc #h\nsta wh\nsta v+1\nlda wl\nsta v\nrts\n",

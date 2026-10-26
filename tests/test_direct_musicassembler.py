@@ -174,7 +174,7 @@ def slid(one, *pattern_bytes, voice: int = 0):
 
 
 def test_a_slide_note_reads_its_two_step_bytes(one):
-    pid = slid(one, 0x30, 0x23, 0x11, 0x02, 0x32, 0xA3, 0x31, 0xA3, 0x05, 0x06, 0x31, 0x23)
+    pid = slid(one, 0x30, 0x23, 0x11, 0x02, 0x32, 0x03, 0x31, 0xA3, 0x05, 0x06)
     tokens = list(one._tokens(pid))
     assert [t[3:] for t in tokens[:2]] == [
         (0x30, None, False, (0x11, 0x02)),
@@ -183,20 +183,26 @@ def test_a_slide_note_reads_its_two_step_bytes(one):
     assert tokens[2][4:] == ((0x05, 0x06), False, ())
 
 
-@pytest.mark.parametrize("lo", [0x00, 0x20, 0x80, 0x01, 0x7F, 0xFF])
+@pytest.mark.parametrize("lo", [0x00, 0x20, 0x80, 0xFE])
 def test_a_frequency_slide_plays_exactly(one, lo):
     slid(one, 0x30, 0x23, lo, 0x02, 0x3F, 0x83)
     text = one.document()
-    assert "slide(" in text
+    assert "vslide(" in text
     cells = standard_cells(one, text)
     assert not cells.size, summary(cells, 3)
 
 
+def test_an_odd_slide_over_an_inner_program_is_refused(one):
+    slid(one, 0x30, 0x23, 0x01, 0x02, 0x3F, 0x83)
+    with pytest.raises(m.TranscribeError, match="inner program under an odd frequency slide"):
+        one.document()
+
+
 def test_a_slide_over_a_legato_note_is_refused(one):
-    slid(one, 0x30, 0x23, 0x11, 0x02, 0x32, 0x63)
+    slid(one, 0x30, 0x23, 0x10, 0x02, 0x32, 0x63)
     with pytest.raises(m.TranscribeError, match="legato note with or after a frequency slide"):
         one.document()
-    slid(one, 0x30, 0x63, 0x11, 0x02)
+    slid(one, 0x30, 0x63, 0x10, 0x02)
     with pytest.raises(m.TranscribeError, match="legato note"):
         one.document()
 

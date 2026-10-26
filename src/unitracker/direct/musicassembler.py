@@ -51,7 +51,7 @@ SLOTS = {
     "pw": [Slot("pw", hold=(FROZEN,))],
     "cut": [Slot("cut", hold=(FROZEN,), reset=("note",))],
 }
-CELL = {"vib": "freq", "slide": "freq", "pulse": "pw", "pong": "pw", "csweep": "cut"}
+CELL = {"vib": "freq", "vslide": "freq", "pulse": "pw", "pong": "pw", "csweep": "cut"}
 
 
 class TranscribeError(ValueError):
@@ -333,7 +333,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         voice.flags, voice.cursor, voice.ad, voice.arp = flags, 0, ad, False
         voice.live, voice.slide = True, slide
         if slide:
-            return {"ctrl": wave, "freq": self.call("slide", l=voice.steps[0], h=voice.steps[1])}
+            return {"ctrl": wave, "freq": self.call("vslide", l=voice.steps[0], h=voice.steps[1])}
         return {"ctrl": wave}
 
     def _filter(self, voice: Voice, filt, tick: int) -> dict:
