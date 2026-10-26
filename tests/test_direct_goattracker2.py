@@ -339,6 +339,15 @@ def test_unsupported_wavetable_commands_are_refused():
         g.Transcriber(gt_tune([(0xF0, 0x01), (0xFF, 0x00)])[0]).document()
 
 
+def test_wavetable_chip_commands_apply_a_tick_late():
+    """A wavetable ``$FD`` row's volume moves to a row of no hold after it, where the next play
+    call's filter routine writes it, and the loop keeps its row."""
+    text = g.Transcriber(
+        gt_tune([(0x11, 0x80), (0xFD, 0x05), (0x21, 0x80), (0xFF, 0x02)])[0]
+    ).document()
+    assert "c1:[{hold:0,gate:0},{ctrl:17},{},{hold:0,vol:5},{ctrl:33},{loop:2}]" in text
+
+
 def test_metal_warrior(metal_warrior):
     cells, text, _ = g.verify(metal_warrior.read_bytes(), frames=2 * 3840)
     assert not cells.size, g.summary(cells, 3)
