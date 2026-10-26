@@ -44,9 +44,16 @@ envelope run on. The event binds the running pulse sweep again at the new step, 
 `pw:pongs(s,k)`, and a running arpeggio at the new step and speed, `freq:vibs(m,s,k)`, none of
 them restarting.
 
-A voice whose first token is no note plays its image (the frequency, pulse width and control
-init left) as commands of that event, which only sets the voice's instrument (`off.iN`): until
-its first trigger the player's output keeps them.
+A voice whose first token is no note plays what its first output call does with init's note
+control. With the trigger latch `$40` set, it plays its image (the frequency, pulse width and
+control init left) as commands of that event, which only sets the voice's instrument
+(`off.iN`): until its first trigger the player's output keeps them. If the control also has
+`$20`, the image's frequency is the slide's word init left (`vib_out`) stepped by init's step
+bytes from the first call, `freq:vslidew(l,h,i,j)`. With the latch clear, the first call is a
+trigger of init's instrument (`.iN`, the row `{ctrl:waveform,freq:image}`: the frequency
+cell keeps the image's word until an inner program's first row, `freq:none`, or the next note
+moves it), at the note index init left; its pulse, inner program and sweep then run as after
+any trigger.
 
 Every event runs its own control program `cK`, a row per tick it lasts, as the player's output
 call writes them:
@@ -84,6 +91,7 @@ functions; each slot holds on the voice's parse ticks (`hold:[row.ad]`).
 | `pstep(s)`, `pongs(s,k)` | pw | `d`, `q` | `_pulse` at another instrument's step, from the width and state as they are |
 | `vib(w,m,s,k)` | freq | `dl`, `sc`, `ph`: delay, count, phase | `_arp`: from `F(N)` (the player's working frequency), after `w = speed >> 3` calls, the word steps by `s` down or up as bit `phase & 3` of `m` (the player's 4-byte table), the phase turning every `k = speed & $0F` |
 | `vibl(m,s,k)`, `vibs(m,s,k)` | freq | `dl`, `sc`, `ph` | `_arp` from a legato note: from `F(N)` at phase 0, the delay left; and at another instrument's step and speed, from the word and state as they are. A song that binds `vibl` or `vslide` resets its frequency slot on legato notes (`reset:[legato]`) |
+| `vslidew(l,h,i,j)` | freq | `wl`, `wh` | `vslide`'s step from the word `j << 8 \| i` init left, for a voice's image: `l` even |
 | `vslide(l,h)` | freq | `wl`, `wh`: the word; `tg`: the toggle | `_sid_final` of a note control `$20` (its two bytes `l`, `h`, kept from the voice's last note where a filter command `$80` takes their place): the word starts at the event note's frequency and steps by `h << 8 \| l` a tick from the trigger tick, the ticks of an odd `l` alternating with ticks that sound `F(N)`, the working frequency; the note's arpeggio does not run |
 | `csweep(u,c,s)` | cut | `acc`, `ctr` | bound by `init` on the filter owner's voice (from the accumulator and count init left), or by the trigger of the owner's first note since a note control `$80` (its two bytes `u` and `c`, `s = ((u & $0F) << 1) - $10`, `c` kept if 0; with `res`/`route` from the voice's preset or `$F0`) moved the sweep or changed it, reset on its notes (`reset:[note]`): the trigger's `acc = u`, `ctr = c`, then while `ctr` lasts `acc + s` to `$D416` |
 | `idle()` | cut | | a filter command taking the sweep from a later voice: on its parse tick the old owner no longer steps it |
@@ -106,8 +114,9 @@ Refused with a `TranscribeError`:
   (a wrapper that calls it, interrupts), a voice dispatch other
   than voices 1-3 in order, tempo 0;
 - an init that leaves the tempo or a duration running, writes a voice or the cutoff, or does
-  not start the orderlists; a voice whose first token is no note while the image's control has
-  the gate set (the image would sound);
+  not start the orderlists; a voice whose first token is no note while the trigger latch is set and the image's control
+  has the gate set (the image would sound); one whose init note control slides without the
+  latch, or slides by an odd low step, or whose instrument init left has an arpeggio;
 - the orderlist `$FC` tempo command, a pattern without an end;
 - a legato note before its voice's first trigger, or with a filter command (its step would
   apply at once, its accumulator and count at the next trigger);

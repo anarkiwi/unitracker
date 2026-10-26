@@ -161,7 +161,7 @@ def test_an_inner_program_jump_follows_the_player(one, to, bound, cursor):
     one.lay = replace(one.lay, program_jump=cell, instr_cursor=0x0310)
     write(one, cell, bound - 3)
     write(one, program(one, 4) + 3, 0xFD, to)
-    voice = SimpleNamespace(flags=4, cursor=0, v=0, index=0)
+    voice = SimpleNamespace(flags=4, cursor=0, v=0, index=0, mask=0xFF, image=False)
     one._step(voice, 0)
     assert voice.cursor == cursor
 
@@ -362,6 +362,77 @@ def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
     cells = standard_cells(one, text)
     assert not cells.size, summary(cells, 3)
     write(one, one.lay.ctrl, 0x41)
+    with pytest.raises(m.TranscribeError, match="a voice whose first row plays no note"):
+        one.document()
+
+
+def idle(one, ctl: int, voice: int = 0, wave: int = 0):
+    """Voice ``voice`` starting on a rest with init's note control ``ctl`` and its image set."""
+    write(one, pattern(one, voice), 0x61)
+    write(one, one.lay.note_ctl + voice, ctl)
+    write(one, one.lay.ctrl + voice, wave)
+    write(one, one.lay.freq_lo_w + voice, 0x10)
+    write(one, one.lay.freq_hi_w + voice, 0x27)
+    write(one, one.lay.vib_out_lo + voice, 0x34)
+    write(one, one.lay.vib_out_hi + voice, 0x12)
+
+
+@pytest.mark.parametrize("voice", range(VOICES))
+@pytest.mark.parametrize("ctl", [0x00, 0x03, 0x1F])
+def test_a_voice_whose_init_left_the_latch_clear_triggers_at_the_image(one, voice, ctl):
+    """The first output call triggers init's instrument at the image's frequency, gated image
+    or not."""
+    idle(one, ctl, voice, wave=0x41)
+    write(one, one.lay.instr_x8 + voice, 5 << 3)
+    text = one.document()
+    assert "freq:" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
+@pytest.mark.parametrize("ins", range(1, 32))
+def test_the_instrument_init_left_runs_its_program_and_sweep(one, ins):
+    """Whatever the instrument's inner program or pulse sweep, from the image's frequency."""
+    idle(one, 0x03)
+    write(one, one.lay.instr_x8, ins << 3)
+    flags = one._record(ins)[7]
+    if flags & 0x10 and not flags & 0x0F:
+        with pytest.raises(m.TranscribeError, match="an arpeggio on the instrument"):
+            one.document()
+        return
+    cells = standard_cells(one, one.document())
+    assert not cells.size, summary(cells, 3)
+
+
+def test_a_slide_and_no_latch_is_refused(one):
+    idle(one, 0x23)
+    with pytest.raises(m.TranscribeError, match="no trigger latch"):
+        one.document()
+
+
+@pytest.mark.parametrize("voice", range(VOICES))
+@pytest.mark.parametrize("steps", [(0x00, 0x00), (0x40, 0x00), (0xFA, 0xFD), (0x06, 0x02)])
+def test_a_voice_whose_init_left_a_slide_slides_from_the_image(one, voice, steps):
+    """The word init left in the slide's cells stepped by init's step bytes from the first call
+    on, the frequency image's cell unused."""
+    idle(one, 0x7F, voice)
+    write(one, one.lay.vib_lo_step + voice, steps[0])
+    write(one, one.lay.vib_hi_step + voice, steps[1])
+    text = one.document()
+    assert "vslidew(" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
+
+
+def test_a_slide_with_an_odd_low_step_is_refused(one):
+    idle(one, 0x7F)
+    write(one, one.lay.vib_lo_step, 0x41)
+    with pytest.raises(m.TranscribeError, match="an odd low step"):
+        one.document()
+
+
+def test_a_latched_image_that_gates_is_still_refused(one):
+    idle(one, 0x5F, wave=0x41)
     with pytest.raises(m.TranscribeError, match="a voice whose first row plays no note"):
         one.document()
 
