@@ -195,6 +195,11 @@ CASES = {
         ],
         "rows": [(24, 1, 0, 0), REST, (31, 2, 0, 0), REST, (36, 3, 0, 0)] + [REST] * 11,
     },
+    "a filter table jump onto itself plays its row once": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2}],
+        "filt": [(0x90, 0xF1), (0, 0x10), (1, 1), (0xFF, 4)],
+    },
     "a wavetable jump to a jump row plays it": {
         "wave": [(0x41, 0), (0xFF, 4), (0x41, 7), (0xFF, 3), (0xFF, 1)],
     },
