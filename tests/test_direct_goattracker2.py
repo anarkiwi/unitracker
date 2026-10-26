@@ -117,6 +117,19 @@ CASES = {
         "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
         "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
     },
+    "a pulse step of 2 doubles the modulation": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
+        "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
+        "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
+        "pulse_step": 2,
+    },
+    "a pulse step of 4 quadruples the modulation": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
+        "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
+        "pulse_step": 4,
+    },
     "command 9 restarts the running pulse table": {
         "wave": WAVE,
         "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
@@ -415,3 +428,10 @@ def test_one_filter_program_for_the_song():
     voice2 = [REST] * 4 + [(31, 2, 0, 0)] + [REST] * 3 + [(None, 0, 11, 0)] + [REST] * 7
     text = exact(gt_tune(WAVE, instruments, rows, filt=filt, voice2=voice2))
     assert "cut:{set:{},filter:{}}" in text and "cut:hold" not in text
+
+
+@pytest.mark.parametrize("opts", [{"pulse_step": 3}, {"simplepulse": True, "pulse_step": 2}])
+def test_a_pulse_step_it_cannot_scale_is_refused(opts):
+    tune = gt_tune(**CASES["a pulse table"], **opts)
+    with pytest.raises(g.TranscribeError, match="pulse step"):
+        g.Transcriber(tune[0]).document()

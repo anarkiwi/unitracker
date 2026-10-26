@@ -141,7 +141,7 @@ The note's frequency is `F[N]`, the player's built-in note table read as `F.lo`/
 | wavetable `$F1/$F2/$F3/$F4` | `wave.freq`, one step |
 | wavetable `$F5/$F6/$F7/$F9/$FA/$FB/$FC/$FD` | `ad`, `sr`, `ctrl`, `run`/`pw:hold`, `run`, `res`+`route` (and `run` for 0), `cut:c!`, `vol` |
 | wavetable `$FF xx` | `{loop:k}`, or `end` for `xx = 0` |
-| pulse table from row `b` | `ptab {b}` (`ptabs` with `SIMPLEPULSE`), `_pulse_exec` over the player's own table in `PL`/`PR` (`PL[k]`, `PR[k]` its row `k`); the pw cell's state `r` is the row and `q` the time left (on `phi = 0`, `r = b`, `q = 0`): a jump row moves `r`, a set row writes the width, a modulation row adds its signed step |
+| pulse table from row `b` | `ptab {b}` (`ptabk` shifting the step left by `k` where `Build.pulse_step` is `2**k`; `ptabs` with `SIMPLEPULSE`, which needs a step of 1), `_pulse_exec` over the player's own table in `PL`/`PR` (`PL[k]`, `PR[k]` its row `k`); the pw cell's state `r` is the row and `q` the time left (on `phi = 0`, `r = b`, `q = 0`): a jump row moves `r`, a set row writes the width, a modulation row adds its signed step |
 | filter table `$80-$F0` (+ a following `$00`) | `{mode,res,route,filter.cut}` in one row |
 | filter table `$01-$7F` | `{hold:t,filter.cut:v + 8s}`, `s` the signed step (`v - 8` for `$FF`) |
 | filter table `$00` | `{filter.cut:8c}` |

@@ -2,9 +2,9 @@
 
 State: the freq cell's ``t`` (vibrato phase) and ``m`` (the note a wavetable note row or a
 reached toneporta last set), the pw cell's ``r``, ``q`` (pulse row and time).
-Params: ``s`` step, ``k`` shift of ``F[m + 1] - F[m]`` (computed into ``phi``), ``g`` sign,
-``c`` depth, ``l`` delay, ``b`` first pulse row, ``i``, ``j`` the start's ``t`` and ``m``; a
-``1`` variant fires on ``phi`` 0 only.
+Params: ``s`` step, ``k`` shift of ``F[m + 1] - F[m]`` (computed into ``phi``) or, in ``ptabk``,
+of the pulse step's modulation, ``g`` sign, ``c`` depth, ``l`` delay, ``b`` first pulse row,
+``i``, ``j`` the start's ``t`` and ``m``; a ``1`` variant fires on ``phi`` 0 only.
 """
 
 STATE = {"freq": {"t": 1, "m": 1}, "pw": {"r": 1, "q": 1}}
@@ -49,6 +49,14 @@ _PTAB = _PTAB_ROW.format("beq done\n") + (
     "bne keep\ninc r\nkeep:\nldy #0\nlda PR.lo,x\nbpl pos\ndey\npos:\nclc\nadc v\nsta v\ntya\n"
     "adc v+1\nsta v+1\nrts"
 )
+# A build whose pulse step is 2^k adds the sign-extended PR byte shifted left by k, through phi
+# (free after the entry test).
+_PTABK = _PTAB_ROW.format("beq done\n") + (
+    "bpl time\nsta v+1\nlda PR.lo,x\nsta v\ninc r\ndone:\nrts\ntime:\ntay\nmod:\ndey\nsty q\n"
+    "bne keep\ninc r\nkeep:\nldy #0\nlda PR.lo,x\nbpl pos\ndey\npos:\nsta phi\nsty phi+1\n"
+    "ldx #k\nshift:\nasl phi\nrol phi+1\ndex\nbne shift\nclc\nlda phi\nadc v\nsta v\n"
+    "lda phi+1\nadc v+1\nsta v+1\nrts"
+)
 # PL[0] = 0 stops ptabs at row 0, where ptab tests r itself.
 _PTABS = _PTAB_ROW.format("") + (
     "bpl time\ninc r\nlda PR.lo,x\njmp put\ntime:\ntay\nbeq done\nmod:\ndey\nsty q\n"
@@ -63,6 +71,7 @@ CODE = {
     "note": _NOTE,
     "snap": _SNAP,
     "ptab": _PTAB,
+    "ptabk": _PTABK,
     "ptabs": _PTABS,
 }
 for _name, _prefix, _body, _step in (
