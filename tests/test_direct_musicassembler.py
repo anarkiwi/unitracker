@@ -208,7 +208,7 @@ def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
     write(one, one.lay.pw_hi, 0x1C)
     text = one.document()
     assert "freq:10000" in text and "pw:3150" in text and "ctrl:64" in text
-    assert text.count("off run:") >= 1
+    assert "off pw:3150 ctrl:64 freq:10000" in text
     write(one, one.lay.ctrl, 0x41)
     with pytest.raises(m.TranscribeError, match="a voice whose first row plays no note"):
         one.document()

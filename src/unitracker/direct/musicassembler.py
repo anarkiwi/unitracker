@@ -254,10 +254,23 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             state = (owner, u, c if c else state[2], s)
         return state
 
-    def event(self, voice: Voice, token: tuple, trans: int, tick: int = 1) -> Event:
+    def image(self, v: int) -> dict:
+        """The row of voice ``v``'s image cells: the frequency, pulse width and control the
+        player outputs until the voice's first note."""
+        rd, lay = self._rd, self.lay
+        return {
+            "freq": rd(lay.freq_hi_w + v) << 8 | rd(lay.freq_lo_w + v),
+            "pw": (rd(lay.pw_hi + v) & 0x0F) << 8 | rd(lay.pw_lo + v),
+            "ctrl": rd(lay.ctrl + v),
+        }
+
+    def event(
+        self, voice: Voice, token: tuple, trans: int, tick: int = 1, first: bool = False
+    ) -> Event:
         """The event of ``token`` on ``voice`` under ``trans`` from ``tick``:
         its ticks' control rows, the last its next parse's, which writes nothing and holds the
-        sweeps."""
+        sweeps; a ``first`` non-note writes the voice's image cells instead, no instrument
+        running yet."""
         kind, dur, ins, note = token[:4]
         length = (dur + 1) * self.rowlen
         if ins is not None and kind != "note" and ins != voice.ins:
@@ -268,7 +281,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             rows, name = [self._trigger(voice, trans + note & 0xFF)], self.instrument(voice.ins)
         rows += [self._step(voice) for _ in range(length - 1 - len(rows))]
         rows.append({"ad": voice.ad})
-        cmds = {"run": self._program(rows)}
+        cmds = self.image(voice.v) if first and kind != "note" else {"run": self._program(rows)}
         if kind == "note":
             cmds |= self._filter(voice, token[4], tick)
         return Event(note_name(voice.index) if kind == "note" else kind, name, cmds, steps=length)
@@ -357,7 +370,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 and self._rd(self.lay.ctrl + voice.v) & 1
             ):
                 raise TranscribeError("a voice whose first row plays no note and whose image gates")
-            events.append(self.event(voice, token, trans, at))
+            events.append(self.event(voice, token, trans, at, tick == 1 and not events))
             at += events[-1].steps
         out.append((tick, self.phrases.setdefault(tuple(events), f"p{len(self.phrases) + 1}")))
 
@@ -381,19 +394,13 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return [(Play("p0"),) * VOICES] + rows[: loop[0] + loop[1]], loop[0] + 1
 
     def init(self) -> list:
-        """The init events: the volume and filter init wrote, each voice's image cells (the
-        frequency, pulse width and control the player outputs until the voice's first note), and
-        the owner's cutoff sweep."""
+        """The init events: the volume and filter init wrote, and the owner's cutoff sweep."""
         regs = self.ref.snapshot()
         res_filt, mode_vol = regs[MA.RES_FILT_REG], regs[MA.MODE_VOL_REG]
         events = [{"res": res_filt >> 4, "route": res_filt & 0x0F, "mode": mode_vol & 0xF0}]
         events[0]["vol"] = mode_vol & 0x0F
         events += [{} for _ in range(VOICES - 1)]
         rd, lay = self._rd, self.lay
-        for v, cmds in enumerate(events):
-            cmds["freq"] = rd(lay.freq_hi_w + v) << 8 | rd(lay.freq_lo_w + v)
-            cmds["pw"] = (rd(lay.pw_hi + v) & 0x0F) << 8 | rd(lay.pw_lo + v)
-            cmds["ctrl"] = rd(lay.ctrl + v)
         owner, count = rd(lay.trigger_owner), rd(lay.trigger_ctr)
         if owner < VOICES and count:
             sweep = self.call("csweep", u=rd(lay.trigger_acc), c=count, s=rd(lay.sweep_step))
