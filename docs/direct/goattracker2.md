@@ -135,7 +135,7 @@ the playroutine's skips, so it is a code modulator of the pw slot.
 | `3` with a note | `tick.freq:call`, `tporta`, `tportan` or (`0`) `snap`, and `legato` |
 | `4` | `tick.freq:call`, `vib` or `vibn` with `l` 0 |
 | `5`, `6`, `7` | `ad`, `sr`, `ctrl` |
-| `8`, `9`, `A` | `run:c`/`run:none`, `pw:ptab(b)`/`pw:hold`, `run:f`/`cut:hold` |
+| `8`, `9`, `A` | `run:c`/`run:none`, `pw:ptab(b)` with `pulse.pw:reset`/`pw:hold`, `run:f`/`cut:hold` |
 | `B` | `res:r route:m`, `res:0 route:0 cut:hold` for 0 |
 | `C`, `D` | `cut:8c`, `vol` |
 | `E` | `tempo:a/b`, the speed entry's two lengths |
@@ -166,7 +166,6 @@ These play differently from GoatTracker because the document has no construct fo
 |---|---|
 | one filter program for the song | a document's filter slot is per voice: a second voice starting a filter program leaves the first voice's running |
 | a toneporta note's note change on tick 0 | a `legato` note applies on the step's tick, GoatTracker's tick 1 |
-| command 9 (or a wavetable `$F9`) setting the pulse program already running | it restarts the table; a binding to the modulator a slot is bound to keeps its phi |
 | a ghosting build (the SID written from the previous call's registers) | its output lags the playroutine one tick and starts from the image's registers |
 | the SID registers a build's init leaves from its image before the first notes | the document's registers start at 0 |
 | the packed frequency table's overrun entries (notes 95-127: B7's `$FFFF` and the bytes past the table) | `F(k)` is 0 there |

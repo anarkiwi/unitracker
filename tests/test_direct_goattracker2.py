@@ -116,6 +116,12 @@ CASES = {
         "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
         "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
     },
+    "command 9 restarts the running pulse table": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
+        "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
+        "rows": [(24, 1, 0, 0), REST, REST, (None, 0, 9, 1)] + [REST] * 12,
+    },
     "a filter table": {
         "wave": WAVE,
         "instruments": [{"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2}],
