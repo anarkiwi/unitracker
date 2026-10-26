@@ -55,8 +55,10 @@ SLOTS = {
     "pw": [Slot("pw", hold=(FROZEN,))],
     "cut": [Slot("cut", hold=(FROZEN,), reset=("note",))],
 }
-# The slot after the sweep's, fired once by a program row that writes the sweep's accumulator.
+# The slots after and before the sweep's, fired once by a program row that writes the sweep's
+# accumulator: on the owner's voice or a later one, and on one before the owner.
 POKE = Slot("post")
+PRE = Slot("pre")
 # The frequency slot of a song whose legato notes start a modulator afresh.
 LEGATO = Slot("freq", hold=(FROZEN,), reset=("legato",))
 CELL = {
@@ -74,6 +76,11 @@ CELL |= dict.fromkeys(("vib", "vibl", "vibs", "vslide", "vslidew"), "freq")
 
 class TranscribeError(ValueError):
     """The tune uses something this transcription does not spell."""
+
+
+class _NeedPre(Exception):
+    """The song has an inner program's filter byte on a voice before the sweep's owner, which
+    needs the cutoff's slot before the sweep's."""
 
 
 @dataclass
@@ -111,6 +118,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         self.lay, self._rd = self.ref.layout, self.ref._rd  # pylint: disable=protected-access
         self.rowlen = self._rd(self.lay.tempo_reload) + 1
         self.ins, self.ctrl, self.phrases, self.used = {}, {}, {}, []
+        self.pre, self.pokes = False, set()
         self.sweeps, self.binds, self.takes = [], set(), set()
         self.sweeps_at = set()
         self.start = self.running = (VOICES, 0, 0, 0)
@@ -313,16 +321,24 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             bound = self._rd(lay.program_jump + voice.v) + 3 & 0xFF
         return 0 if to == 0 or to >= bound else to * 3 & 0xFF
 
+    @property
+    def cut(self) -> str:
+        """The key of the sweep's slot: ``cut`` is the cell's first slot unless ``pre`` is."""
+        return "cut.cut" if self.pre else "cut"
+
     def _poke(self, v: int, acc: int, tick: int) -> dict:
         """The row key of voice ``v``'s inner program writing ``acc`` to the sweep's accumulator
         at ``tick``: the player steps the sweep on its owner's tick, so the write fires after
-        the step on the owner's voice or a later one; none where no voice owns the sweep."""
+        the step on the owner's voice or a later one, and before it on a voice before the
+        owner; none where no voice owns the sweep."""
         owner = self.sweep(tick, v)[0]
         if owner >= VOICES:
             return {}
-        if v < owner:
-            raise TranscribeError("an inner program's filter byte before the sweep's owner")
-        return {"post.cut": Once(self.call("poke", u=acc))}
+        slot = "pre" if v < owner else "post"
+        if slot == "pre" and not self.pre:
+            raise _NeedPre
+        self.pokes.add(slot)
+        return {f"{slot}.cut": Once(self.call("poke", u=acc))}
 
     def _program(self, rows: list) -> str:
         """The name of the control program of per-tick ``rows``, empty ones as holds."""
@@ -429,7 +445,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             rows[0] = {"note": note_name(voice.index)} | rows[0]
         rows.append({"ad": voice.ad} | self.resonance(voice.v, nxt))
         if (tick + length, voice.v) in self.takes:
-            rows[-1]["cut"] = self.call("idle")
+            rows[-1][self.cut] = self.call("idle")
         if first and kind != "note" and not primed:
             name, cmds = self.instrument(voice.ins), self.image(voice.v) | self._image_slide(voice)
         cmds = {"run": self._program(rows)} | cmds
@@ -505,7 +521,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if (tick, voice.v) not in self.binds:
             return {}
         _, u, c, s = self.sweep(tick, voice.v)
-        return {"cut": self.call("csweep", u=u, c=c, s=s)}
+        return {self.cut: self.call("csweep", u=u, c=c, s=s)}
 
     def _legato_filter(self, voice: Voice, tick: int) -> dict:
         """The commands of a legato note of ``voice`` at ``tick``: the sweep running on, with
@@ -513,7 +529,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if (tick, voice.v) not in self.sweeps_at:
             return {}
         _, _, _, s = self.sweep(tick, voice.v)
-        return {"cut": self.call("csweeps", s=s)}
+        return {self.cut: self.call("csweeps", s=s)}
 
     # ---- the song -----------------------------------------------------------------------
 
@@ -681,7 +697,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 events[v] |= self.resonance(v, next(self._tokens(pid)))
         owner, u, c, s = self.running
         if owner < VOICES and (c or self.start[2]):
-            events[owner]["cut"] = self.call("csweep", u=u, c=c, s=s)
+            events[owner][self.cut] = self.call("csweep", u=u, c=c, s=s)
         return [Event("-", commands=c) for c in events]
 
     def _defs(self, phrases: list) -> list:
@@ -697,7 +713,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def _header(self, used: list) -> Header:
         """The header: the clock, a tick a step, and the slots and state of the ``used``."""
         cells = {CELL[t] for t in used}
-        slots = dict(SLOTS, cut=SLOTS["cut"] + [POKE] * ("poke" in used))
+        cut = [PRE] * self.pre + SLOTS["cut"] + [POKE] * ("post" in self.pokes)
+        slots = dict(SLOTS, cut=cut)
         if {"vibl", "vslide"} & set(used):
             slots["freq"] = [LEGATO]
         named = {s for t in used for s in code.symbols(ROUTINES[t])}
@@ -711,7 +728,17 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         )
 
     def document(self) -> str:
-        """The document of the song to its loop."""
+        """The document of the song to its loop, with the cutoff's ``pre`` slot where an inner
+        program's filter byte on a voice before the sweep's owner needs it."""
+        try:
+            return self._document()
+        except _NeedPre:
+            self.pre, self.pokes = True, set()
+            self.ins, self.ctrl, self.phrases, self.used = {}, {}, {}, []
+            return self._document()
+
+    def _document(self) -> str:
+        """The document of the song to its loop, as :meth:`document`."""
         init = self.init()
         rows, loop = self.timeline()
         named = {p.phrase for r in rows for p in r if isinstance(p, Play)}
