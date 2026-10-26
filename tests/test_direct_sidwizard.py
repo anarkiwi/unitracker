@@ -15,9 +15,10 @@ from pysidwizard import (
     parse_sid_song,
 )
 from unitracker_grammar.document import VERSION, printed, read
+from unitracker_player.player import play
 
 from unitracker.direct import sidwizard as s
-from unitracker.direct.swtrace import standard
+from unitracker.direct.swtrace import standard, trapped
 from unitracker.direct.cli import summary
 
 TICKS = 800
@@ -392,3 +393,15 @@ def test_init_routine_writes_play_exactly(pimp_my_commodore):
     cells, text, _ = s.verify(pimp_my_commodore.read_bytes(), frames=TICKS)
     assert not cells.size, summary(cells, 3)
     assert "\nregs:" in text
+
+
+def test_diag(pimp_my_commodore):  # temporary
+    raw = pimp_my_commodore.read_bytes()
+    one = s.transcriber(raw, 0, TICKS)
+    base = play(one.assemble(), ticks=TICKS)
+    ours = play(one.document(), ticks=TICKS)
+    theirs, _ = trapped(one.swm, TICKS)
+    rows = [list(map(int, theirs[t][14:16])) for t in range(284, 292)]
+    mine = [list(map(int, ours[t][14:16])) for t in range(284, 292)]
+    first = [int(x) for x in theirs[0]]
+    raise AssertionError(f"DIAG ref={rows} doc={mine} first={first} base0={base[0].tolist()}")
