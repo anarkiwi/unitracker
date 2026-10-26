@@ -692,7 +692,9 @@ summary = cli.summary
 
 def main(argv=None) -> int:
     """Transcribe a SID, or verify SIDs against pygoattracker."""
-    return cli.main(argv, __doc__.split("\n", 1)[0], transcribe, verify)
+    return cli.main(
+        argv, __doc__.split("\n", 1)[0], lambda raw, subtune: transcribe(raw, subtune)[0], verify
+    )
 
 
 if __name__ == "__main__":

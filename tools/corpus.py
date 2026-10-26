@@ -42,7 +42,7 @@ def check_one(row: dict, opts: dict) -> dict | None:
             if not opts.get("multi") and shared.multi_sid(raw):
                 return None
             res["player"], _, verify = cli.lifter(raw)
-            cells, text = verify(raw, opts["subtune"], opts["frames"])
+            cells, text, *_ = verify(raw, opts["subtune"], opts["frames"])
     except Exception as exc:  # pylint: disable=broad-exception-caught
         res["gap"] = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
         (out / f"{res['doc']}.err").write_text(res["gap"] + "\n", encoding="utf-8")
