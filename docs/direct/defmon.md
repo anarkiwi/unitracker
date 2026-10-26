@@ -21,7 +21,9 @@ The replay is read at `dmimage.locate`'s places of the `$1000` build's addresses
 build reads as the `$1000` one. Its variants: the plain arranger has no jump counts (its position
 key holds 0 for them); a build of relative notes adds `tr` to the note base unwrapped, so the
 templates read the note without the 7-bit wrap of the absolute build, and `tr` is always a relative
-`note`.
+`note`. A `fixed` build's pattern events hold all three bytes whatever their flags; an `uncut` build
+has no cutoff output opcode (read as NOP); a `direct` build's ACID step floors a negative sum only
+(`cinitd`), its floor an immediate of the code. A sidTAB row's jump may lead to another jump row.
 
 A multispeed play routine calls the replay's play entry or its sub-tick entry, which skips the
 arranger and the pattern step. A call is full where it steps voice 1's counter or arms the
@@ -109,7 +111,8 @@ state), so the reset leaves the others' columns unapplied.
 
 The transcription raises `TranscribeError`, naming what it meets:
 
-- a replay whose code `dmimage.locate` does not find or places twice, a multi-SID tune;
+- a replay whose code `dmimage.locate` does not find or places twice (a build relocated with some
+  table references left at `$1800`/`$1900`), a multi-SID tune;
 - ACID opcodes that are not a matching SBC/ADC pair, a cutoff output that is neither NOP nor ASL,
   non-standard detune or routing constants;
 - a sidTAB row that resolves to a row with no body;

@@ -16,15 +16,19 @@ REGIONS = (
     (
         0x1022,
         "SID band",
-        "A2 ?? A9 ?? 8E 02 D4 8D 03 D4 A2 ?? A9 ?? 8E 00 D4 8D 01 D4 A2 ?? A0 ?? A9 ?? 49 ??"
+        "A2 ?? A9 ?? 8E 02 D4 8D 03 D4 A2 ?? A9 ?? 8E 00 D4 8D 01 D4 A2 ?? A0 ?? A9 ?? 49|09 ??"
         " 8E 06 D4 8C 05 D4 8D 04 D4",
     ),
     (
         0x10A9,
         "ACID step and arranger",
-        "A9 ?? 8D 17 D4 A9 ?? 09 0F 8D 18 D4 A9 ?? 18 ?? ?? 8D B6 10 A9 ?? ?? ?? 10 03 AD CE 10"
-        " 8D BE 10 69 ?? 30 04 C9 ?? B0 03 AD CE 10 ?? 8D 16 D4 A9 ?? 10 ?? 29 0F 8D D9 10 8D"
-        " 4A 11 8D D2 11 8D 5A 12 A0 ?? BE 00 1B 10",
+        "A9 ?? 8D 17 D4 A9 ?? 09 0F 8D 18 D4 A9 ?? 18 ?? ?? 8D B6 10 A9 ?? ?? ??",
+        {
+            "": "10 03 AD CE 10 8D BE 10 69 ?? 30 04 C9 ?? B0 03 AD CE 10",
+            "direct": "10 02 A9 ?? 8D BE 10 69 ?? 10 03 A9 ??",
+        },
+        {"": "??", "uncut": ""},
+        "8D 16 D4 A9 ?? 10 ?? 29 0F 8D D9 10 8D 4A 11 8D D2 11 8D 5A 12 A0 ?? BE 00 1B 10",
         {
             "counted": "28 B9 00 1D F0 1C CC EC 14 F0 09 8C EC 14 8D ED 14 4C 12 11 CE ED 14 D0"
             " 09 A9 00 8D EC 14 C8 4C 16 11",
@@ -36,9 +40,14 @@ REGIONS = (
     (
         0x117F,
         "pattern event",
-        "A0 01 A9 ?? 10 0A B9 ?? ?? 8D EF 12 8E E0 12 C8 A9 ?? 10 0A B9 ?? ?? 8D 82 13 8E 73 13"
-        " C8 A9 ?? 10 13 B9 ?? ?? 8D ED 12 8D 7F 13 8E 19 10 8E 1A 10 8E 1B 10 C8 A2 ?? 10 05"
-        " 8E D9 10 30 12 98 18 6D 86 11 8D 86 11 90 03 EE 87 11 A9 0F 8F 4A 11",
+        "A0 01 A9 ??",
+        {"": "10 0A", "fixed": "10 09"},
+        "B9 ?? ?? 8D EF 12 8E E0 12 C8 A9 ??",
+        {"": "10 0A", "fixed": "10 09"},
+        "B9 ?? ?? 8D 82 13 8E 73 13 C8 A9 ??",
+        {"": "10 13", "fixed": "10 12"},
+        "B9 ?? ?? 8D ED 12 8D 7F 13 8E 19 10 8E 1A 10 8E 1B 10 C8 A2 ?? 10 05 8E D9 10 30 12 98"
+        " 18 6D 86 11 8D 86 11 90 03 EE 87 11 A9 0F 8F 4A 11",
     ),
     (
         0x12DF,
@@ -78,6 +87,7 @@ REGIONS = (
         " 10 8D BF 10 60 8E B9 10 4B 7F 8D C0 10 A9 E9 8D B8 10 8D BF 10 60",
     ),
 )
+UNPLACED = {"direct"}  # variants whose own bytes are not the $1000 build's addresses
 UNRELOCATED_OPS = {0x20, 0x4C, 0x6C}
 FIXED_MODES = {"imm", "rel", "impl", "acc"}
 SID_PAGE = 0xD4
@@ -122,7 +132,12 @@ def region_builds(parts):
     for combo in itertools.product(*options):
         sizes = [len(code.split()) for _, code in combo]
         layout = zip(itertools.accumulate([0, *canon]), itertools.accumulate([0, *sizes]), sizes)
-        yield {name for name, _ in combo if name}, " ".join(c for _, c in combo), list(layout)
+        placed = zip(layout, combo)
+        yield (
+            {name for name, _ in combo if name},
+            " ".join(c for _, c in combo),
+            [part for part, (name, _) in placed if name not in UNPLACED],
+        )
 
 
 def locate(mem) -> tuple[dict, set]:

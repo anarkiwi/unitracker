@@ -108,7 +108,7 @@ class Step:
     length: int = 0
 
 
-def sequence(player, at: dict, calls: int = MAX_CALLS):
+def sequence(player, at: dict, calls: int = MAX_CALLS, fixed: bool = False):
     """The song steps of the replay's calls, its build's ``$1000`` addresses placed by ``at``.
     A full call (it steps voice 1's counter or arms the arranger; a multispeed play routine's
     sub-tick calls do neither) runs the arranger where init or an ALT event armed it, else each
@@ -120,7 +120,7 @@ def sequence(player, at: dict, calls: int = MAX_CALLS):
         before = bytes(mem[a] for a in marks)
         armed = mem[at[ARMED]]
         key = tuple(mem[at[a]] if a in at else 0 for a in (ARR_Y, ARR_JR, ARR_JC)) + (armed, full)
-        events = pending(mem, at)
+        events = pending(mem, at, fixed)
         player.play_frame()
         ran = bytes(mem[a] for a in marks) != before
         full = full[1:] + (int(ran),)
@@ -140,11 +140,11 @@ def sequence(player, at: dict, calls: int = MAX_CALLS):
     raise TranscribeError(f"the song does not loop within {calls} calls")
 
 
-def pending(mem, at: dict) -> list:
+def pending(mem, at: dict, fixed: bool = False) -> list:
     """Each voice's pattern event the next full call runs, None where its counter runs."""
     return [
         (
-            event_at(mem, mem[at[POINTER + 0x88 * v]] | mem[at[POINTER + 0x88 * v + 1]] << 8)
+            event_at(mem, mem[at[POINTER + 0x88 * v]] | mem[at[POINTER + 0x88 * v + 1]] << 8, fixed)
             if mem[at[COUNTER + 0x88 * v]] & 0x80
             else None
         )
@@ -152,12 +152,13 @@ def pending(mem, at: dict) -> list:
     ]
 
 
-def event_at(mem, ptr: int) -> tuple:
-    """``(layer A row, layer B row, note)`` of the pattern event at ``ptr``, each None absent."""
+def event_at(mem, ptr: int, fixed: bool = False) -> tuple:
+    """``(layer A row, layer B row, note)`` of the pattern event at ``ptr``, each None absent;
+    a ``fixed`` build's event holds all three bytes whatever its flags."""
     flag, out, k = mem[ptr], [], 1
     for gate in (GATE_A, GATE_B, GATE_N):
         out.append(mem[(ptr + k) & 0xFFFF] if flag & gate else None)
-        k += bool(flag & gate)
+        k += fixed or bool(flag & gate)
     return tuple(out)
 
 
@@ -174,11 +175,25 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         except LiftError as exc:
             raise TranscribeError(str(exc)) from exc
         self.absolute = "absolute" in variants
+        self.uncut, self.fixed, self.direct = (n in variants for n in ("uncut", "fixed", "direct"))
         self.check()
         self.joints, self.names, self.runs, self.lead, self.pulses = {}, {}, {}, 0, {}
 
     def __call__(self, addr: int, voice: int = 0) -> int:
         return self.mem[self.at[addr] + VOICES[voice]]
+
+    def floor(self) -> int:
+        """The ACID floor: the cell $10CE, or a direct build's two immediates, which must agree."""
+        if not self.direct:
+            return self(0x10CE)
+        first, second = self.mem[self.at[0x10B8] + 12], self.mem[self.at[0x10B8] + 21]
+        if first != second:
+            raise TranscribeError("the ACID floors differ")
+        return first
+
+    def cutoff(self) -> int:
+        """The cutoff output's opcode ($10D4): NOP where the build has none."""
+        return 0xEA if self.uncut else self(0x10D4)
 
     def word(self, lo: int, hi: int, voice: int = 0) -> int:
         """The word of the bytes at ``lo`` and ``hi``."""
@@ -191,7 +206,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError("a multi-SID tune")
         if self(0x10B8) != self(0x10BF) or self(0x10B8) not in (0x69, 0xE9):
             raise TranscribeError("ACID opcodes are not a matching SBC/ADC pair")
-        if self(0x10D4) not in (0xEA, 0x0A):
+        if self.cutoff() not in (0xEA, 0x0A):
             raise TranscribeError("the cutoff output is neither NOP nor ASL")
         for v in range(3):
             if (self(0x101F, v), self(0x1020, v), self(0x1021, v)) != (v, 1 << v, 0xFF ^ 1 << v):
@@ -201,7 +216,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
 
     def resolve(self, row: int) -> int:
         """The row a fetch of ``row`` reads after its jump."""
-        eff = row if self.sidtab(SIDTAB_HI, row) else self.sidtab(SIDTAB_LO, row)
+        eff, seen = row, set()
+        while not self.sidtab(SIDTAB_HI, eff) and eff not in seen:
+            seen.add(eff)
+            eff = self.sidtab(SIDTAB_LO, eff)
         if not self.sidtab(SIDTAB_HI, eff):
             raise TranscribeError(f"sidTAB row {row} resolves to row {eff}, which has no body")
         return eff
@@ -321,7 +339,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         states = [tuple(self(a, v) for a in (0x12EF, 0x12E0, 0x1382, 0x1373)) for v in range(3)]
         bits = [(0, 0)] * 3
         steps, seen = [], {}
-        for step in sequence(DefmonPlayer(self.raw, subtune=self.subtune), self.at, calls):
+        for step in sequence(
+            DefmonPlayer(self.raw, subtune=self.subtune), self.at, calls, self.fixed
+        ):
             key = (step.key, tuple(states), tuple(bits))
             if key in seen:
                 return steps, seen[key]
@@ -407,10 +427,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 ("ctrl", 1),
             ]
             if not v:
-                dbl = int(self(0x10D4) == 0x0A)
+                dbl = int(self.cutoff() == 0x0A)
                 commands += [
                     ("vol", 15),
-                    ("st.cut", call("cinit", u=self(0x10B8) == 0xE9, f=self(0x10CE), k=dbl)),
+                    (
+                        "st.cut",
+                        call(
+                            "cinitd" if self.direct else "cinit",
+                            u=self(0x10B8) == 0xE9,
+                            f=self.floor(),
+                            k=dbl,
+                        ),
+                    ),
                 ]
             commands.append(("legato", True))
             out.append(d.Event(note_name(self(0x12ED, v)), "i1", commands))

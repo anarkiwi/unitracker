@@ -6,12 +6,19 @@ from pydefmon import DefmonPlayer
 from unitracker.direct import dmimage as dm
 
 
-def build_mem(variant=0):
-    """A memory holding each region's code at its $1000 build address, each varying part's
-    ``variant``-th build."""
+def build_mem(*names):
+    """A memory holding each region's code at its $1000 build address, each varying part's build
+    named in ``names``, else its $1000 build's."""
     mem = bytearray(0x10000)
     for addr, _name, *parts in dm.REGIONS:
-        code = " ".join(p if isinstance(p, str) else list(p.values())[variant] for p in parts)
+        code = " ".join(
+            (
+                p
+                if isinstance(p, str)
+                else next((p[n] for n in names if n in p), next(iter(p.values())))
+            )
+            for p in parts
+        )
         for i, tok in enumerate(code.split()):
             mem[addr + i] = 0 if tok == "??" else int(tok.split("|")[-1], 16)
     return mem
@@ -21,7 +28,7 @@ def test_locate_finds_each_build():
     at, variants = dm.locate(build_mem())
     assert variants == {"counted", "absolute"}
     assert all(at[a] == a for a in (0x137F, 0x159C, 0x1800, 0x10D4, 0x14EC))
-    at, variants = dm.locate(build_mem(1))
+    at, variants = dm.locate(build_mem("plain", "relative"))
     assert variants == {"plain", "relative"} and 0x14EC not in at
     assert at[0x1146] == 0x1146 - 33 and at[0x137F] == 0x137F
     mem = build_mem()
@@ -32,6 +39,19 @@ def test_locate_finds_each_build():
     mem[mem.index(bytes([0x8C, 0xEF, 0x12]), 0x12DF) + 1] = 0xF0
     with pytest.raises(dm.LiftError, match=r"places \$12EF of the \$1000 build at both"):
         dm.locate(mem)
+
+
+@pytest.mark.parametrize("name", ["uncut", "fixed", "direct"])
+def test_region_matches_a_variant_build(name):
+    mem = build_mem(name)
+    found = [
+        addr
+        for addr, _name, *parts in dm.REGIONS
+        for names, code, _ in dm.region_builds(parts)
+        if name in names
+        and any(m.addr == addr for m in dm.find_code_all(mem, dm.code_pattern(code)[0]))
+    ]
+    assert found == [{"uncut": 0x10A9, "fixed": 0x117F, "direct": 0x10A9}[name]]
 
 
 def body(mem, addr, *data):
