@@ -123,6 +123,12 @@ CASES = {
         "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
         "rows": [(24, 1, 0, 0), REST, REST, (None, 0, 9, 1)] + [REST] * 12,
     },
+    "command 9 on a note row outranks the instrument's pulse table": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
+        "pulse": [(136, 0), (32, 16), (16, 240), (255, 2), (130, 0), (32, 8), (255, 5)],
+        "rows": [(24, 1, 9, 5)] + [REST] * 6 + [(26, 1, 9, 0)] + [REST] * 8,
+    },
     "a filter table": {
         "wave": WAVE,
         "instruments": [{"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2}],
