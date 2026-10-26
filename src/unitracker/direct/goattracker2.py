@@ -517,7 +517,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if noted and cmd == C.CMD_TONEPORTA:
             commands["legato"] = True
         name, last = self._named_instrument(row, instr, fetch, last)
-        return Event(self._atom(note), name, commands), (cur, bound, last)
+        keep_pw = noted and cmd == C.CMD_SETPULSEPTR  # the command outranks the instrument's table
+        return Event(self._atom(note), name, commands, keep_pw), (cur, bound, last)
 
     def _named_instrument(self, row, instr: int, fetch, last) -> tuple:
         """``(instrument the row names or None, instrument named last)``. In a live-vibrato
