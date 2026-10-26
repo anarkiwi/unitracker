@@ -125,19 +125,23 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         while True:
             yield y, rd(base + y), rd(base + (y + 1 & 0xFF))
             y = y + 2 & 0xFF
-            val = rd(base + y)
-            if (lay.order_tempo and val == MA.ORDER_TEMPO) or (
-                lay.order_jump and val == MA.ORDER_JUMP
-            ):
-                raise TranscribeError(f"orderlist command ${val:02X}")
+            val, seen = rd(base + y), set()
+            while True:
+                if lay.order_tempo and val == MA.ORDER_TEMPO:
+                    raise TranscribeError(f"orderlist command ${val:02X}")
+                if not (lay.order_jump and val == MA.ORDER_JUMP):
+                    break
+                if y in seen:
+                    raise TranscribeError("an orderlist jump to itself")
+                seen.add(y)
+                y = rd(base + (y + 1 & 0xFF)) << 1 & 0xFF
+                val = rd(base + y)
             if val == lay.order_end:
                 y = lay.order_restart
 
     def _tokens(self, pid: int):
         """``(kind, duration, instrument, note, filter, legato)`` of each token of pattern ``pid``,
         the filter command's two bytes if its note has one, and whether its note is legato."""
-        if pid == MA.SILENCE_PATTERN:
-            raise TranscribeError("the silence pattern")
         rd = self._rd
         pat, y = self._ptr(self.lay.pattern_lo, self.lay.pattern_hi, pid), 0
         while True:
@@ -330,9 +334,12 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return sum((t[1] + 1) * self.rowlen for t in self._tokens(pid))
 
     def _period(self, v: int) -> tuple:
-        """``(intro, loop)`` ticks of voice ``v``'s orderlist."""
+        """``(intro, loop)`` ticks of voice ``v``'s orderlist; a voice parked on the silence
+        pattern has a loop of 0, a constant tail."""
         at, total = {}, 0
         for y, pid, transrep in self._entries(v):
+            if pid == MA.SILENCE_PATTERN:
+                return total, 0
             if y in at:
                 return at[y], total - at[y]
             at[y] = total
@@ -340,11 +347,15 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         return None  # pragma: no cover
 
     def _walk(self, v: int, horizon: int):
-        """``(tick, pid, trans)`` of each pattern voice ``v`` starts before ``horizon``."""
+        """``(tick, pid, trans)`` of each pattern voice ``v`` starts before ``horizon``; the
+        silence pattern, which the player never leaves, is the last."""
         tick = 1
         for _, pid, transrep in self._entries(v):
             if tick >= horizon:
                 break
+            if pid == MA.SILENCE_PATTERN:
+                yield tick, pid, 0
+                return
             for _ in range((transrep & 0x0F) + 1):
                 yield tick, pid, transrep >> 4
                 tick += self._ticks(pid)
@@ -355,6 +366,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         found = []
         for v in range(VOICES):
             for tick, pid, _ in self._walk(v, horizon):
+                if pid == MA.SILENCE_PATTERN:
+                    continue
                 for token in self._tokens(pid):
                     if token[4] is not None:
                         u, c = token[4]
@@ -371,8 +384,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if v == self.start[0] and self.start[2]:
             voice.cut = self.call("csweep", u=self.start[1], c=self.start[2], s=self.start[3])
         for tick, pid, trans in self._walk(v, horizon):
-            self._play(voice, pid, trans, tick, out)
+            if pid == MA.SILENCE_PATTERN:
+                self._silence(voice, tick, horizon, out)
+            else:
+                self._play(voice, pid, trans, tick, out)
         return out
+
+    def _silence(self, voice: Voice, tick: int, horizon: int, out: list) -> None:
+        """Appends ``(tick, phrase)`` of ``voice`` parked on the silence pattern from ``tick``:
+        the gate off, its modulators running, held to ``horizon``."""
+        dur = max((horizon - tick) // self.rowlen - 1, 0)
+        event = self.event(voice, ("off", dur, None, None, None, False), 0, tick, tick == 1)
+        out.append((tick, self.phrases.setdefault((event,), f"p{len(self.phrases) + 1}")))
 
     def _play(self, voice: Voice, pid: int, trans: int, tick: int, out: list) -> None:
         """Appends ``(tick, phrase)`` of pattern ``pid`` under ``trans`` from ``tick`` on
@@ -393,7 +416,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
     def timeline(self) -> tuple:
         """``(rows, loop row)`` of the orderlists' pattern starts, after tick 0's parse."""
         periods = [self._period(v) for v in range(VOICES)]
-        cycle = math.lcm(*(p for _, p in periods))
+        cycle = math.lcm(*(p for _, p in periods if p))
         if cycle > 1 << 20:
             raise TranscribeError("orderlists of incommensurate loops")
         horizon = 1 + max(i for i, _ in periods) + 4 * cycle

@@ -1,6 +1,7 @@
 """The direct Music Assembler transcription plays the reference player's registers."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pymusicassembler
 import pytest
@@ -110,8 +111,8 @@ EDITS = {
     "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
     "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
     "an arpeggio on other cells": lambda one: (pattern(one), (0x82,), {"arp_down_cmp": True}),
+    "an orderlist jump to itself": lambda one: (order(one) + 2, (0xFD, 1), {"order_jump": 1}),
     "orderlist command \\$FC": lambda one: (order(one) + 2, (0xFC,), {"order_tempo": (1,)}),
-    "the silence pattern": lambda one: (order(one) + 2, (0xFE, 0), {}),
     "start the orderlists": lambda one: (one.lay.pat_cursor, (1,), {}),
 }
 
@@ -266,3 +267,42 @@ def test_a_legato_note_over_a_running_arpeggio_is_refused(one):
     assert legato_notes(one, 2, voices=(0,))
     with pytest.raises(m.TranscribeError, match="legato note over a running arpeggio"):
         one.document()
+
+
+def test_orderlist_jump_is_followed():
+    """``$FD n`` continues at entry ``n``, as the player does, and loops from there."""
+    mem = {0: 5, 1: 0x01, 2: 6, 3: 0x01, 4: 0xFD, 5: 1, 0x80: 5, 0x81: 0x01}
+    lay = SimpleNamespace(
+        order_lo=0,
+        order_hi=0,
+        order_jump=0x90,
+        order_tempo=0,
+        order_end=0xFF,
+        order_restart=0,
+        pattern_id=0x80,
+        transrep=0x81,
+        repeat=0x82,
+        order_cursor=0x83,
+        pat_cursor=0x84,
+    )
+    mem[0x81] = 0x01
+    mem[0x82] = 0x01
+    stub = SimpleNamespace(lay=lay, _ptr=lambda lo, hi, v: 0, _rd=lambda at: mem.get(at, 0))
+    entries = m.Transcriber._entries(stub, 0)
+    assert [next(entries) for _ in range(5)] == [
+        (0, 5, 1),
+        (2, 6, 1),
+        (2, 6, 1),
+        (2, 6, 1),
+        (2, 6, 1),
+    ]
+
+
+def test_silence_pattern_ends_the_voice():
+    """An orderlist reaching ``$FE`` has no loop, and its walk stops there."""
+    stub = SimpleNamespace(
+        _entries=lambda v: iter([(0, 5, 0), (2, MA.SILENCE_PATTERN, 0), (4, 9, 0)]),
+        _ticks=lambda pid: 10,
+    )
+    assert m.Transcriber._period(stub, 0) == (10, 0)
+    assert list(m.Transcriber._walk(stub, 0, 100)) == [(1, 5, 0), (11, MA.SILENCE_PATTERN, 0)]
