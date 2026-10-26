@@ -108,7 +108,9 @@ class Step:
     length: int = 0
 
 
-def sequence(player, at: dict, calls: int = MAX_CALLS, fixed: bool = False):
+def sequence(  # pylint: disable=too-many-locals
+    player, at: dict, calls: int = MAX_CALLS, fixed: bool = False
+):
     """The song steps of the replay's calls, its build's ``$1000`` addresses placed by ``at``.
     A full call (it steps voice 1's counter or arms the arranger; a multispeed play routine's
     sub-tick calls do neither) runs the arranger where init or an ALT event armed it, else each

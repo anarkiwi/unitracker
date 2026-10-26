@@ -20,14 +20,14 @@ _W = "lda w\nsta v\nlda w+1\nsta v+1\nrts\n"
 # $10B5: step the accumulator, saturate to the floor, add cp and the carry, clamp, double. A
 # direct build floors a negative sum only.
 _CLAMP = "bmi low\ncmp l\nbcs put\nlow:\nlda l\nput:\n"
-_ACID = (
+_ACID_STEP = (
     "lda o\nbne sb\nclc\nlda r\nadc z\nsta r\nlda r+1\nadc z+1\njmp hi\n"
     "sb:\nclc\nlda r\nsbc z\nsta r\nlda r+1\nsbc z+1\n"
     "hi:\nbpl keep\nlda l\nkeep:\nsta r+1\nadc cp\n{0}"
     "ldx b\nbeq out\nasl\nout:\nsta v\nlda #0\nsta v+1\n" + "asl v\nrol v+1\n" * 3 + "rts\n"
 )
-_ACID_DIRECT = _ACID.format("bpl put\nlda l\nput:\n")
-_ACID = _ACID.format(_CLAMP)
+_ACID_DIRECT = _ACID_STEP.format("bpl put\nlda l\nput:\n")
+_ACID = _ACID_STEP.format(_CLAMP)
 
 CODE = {
     # init's detune, frequency and slide accumulator; i marks them until nr's first firing
