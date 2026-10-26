@@ -138,7 +138,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             raise TranscribeError(f"tempo {self.rowlen - 1}")
         if lay.transrep != lay.transrep_byte:
             raise TranscribeError("a transpose cell apart from the orderlist byte")
-        if any(self.ref.snapshot()[:23]):
+        regs = self.ref.snapshot()
+        if any(regs[:23]) and any(r for k, r in enumerate(regs[:23]) if k % 7 != 4):
             raise TranscribeError("an init that writes a voice or the cutoff")
 
     # ---- memory -------------------------------------------------------------------------
@@ -610,6 +611,9 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         events = [{"res": res_filt >> 4, "route": res_filt & 0x0F, "mode": mode_vol & 0xF0}]
         events[0]["vol"] = mode_vol & 0x0F
         events += [{} for _ in range(VOICES - 1)]
+        for v in range(VOICES):
+            if regs[7 * v + 4]:
+                events[v]["ctrl"] = regs[7 * v + 4]
         for v in range(VOICES):
             pid = next(self._entries(v))[1]
             if pid != MA.SILENCE_PATTERN:

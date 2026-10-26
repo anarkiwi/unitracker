@@ -139,6 +139,11 @@ space_invadarz = hvsc_tune(
     "Path to Richard Bayliss's Space Invadarz on Vacation, a Music Assembler tune with inner"
     " programs, an arpeggio and pulse and filter sweeps.",
 )
+cannon_craze = hvsc_tune(
+    "cannon_craze",
+    "MUSICIANS/M/Mateus/Cannon_Craze.sid",
+    "Path to Mateus's Cannon Craze, a Music Assembler tune whose init sets each voice's test bit.",
+)
 eastern_promise = hvsc_tune(
     "eastern_promise",
     "MUSICIANS/M/Merman/Eastern_Promise.sid",
