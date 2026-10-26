@@ -16,9 +16,10 @@ from pathlib import Path
 import numpy as np
 from pygoattracker import constants as C
 from pygoattracker import decompile_sid
+from pygoattracker.player import Player
 from pysidtracker import gridcmp
 from tqdm import tqdm
-from unitracker_grammar import code
+from unitracker_grammar import code, frequency
 from unitracker_grammar.document import (
     CONT,
     HOLD,
@@ -630,12 +631,28 @@ def transcribe(raw: bytes, subtune: int = 0) -> tuple:
     return Transcriber(model).document(), model
 
 
-def compare(model, frames: int = 20000):
+def standard(model) -> Player:
+    """The reference player of ``model`` with the document's note table: every index ``k`` the
+    player reads its table at sounds ``F(k)`` at :data:`CLOCK`."""
+    table = [frequency(k, CLOCK["clock_hz"]) for k in range(len(C.FREQ_TABLE))]
+    info = model.info
+    return Player(
+        model.typed,
+        subtune=model.subtune,
+        build=info.playback,
+        state=info.state,
+        freq_table=table,
+    )
+
+
+def compare(model, frames: int = 20000, native: bool = False):
     """``(cells, document)``: the ``(tick, register, ours, theirs)`` cells where the
-    document's grid differs from the reference player's over ``frames`` ticks."""
+    document's grid differs from the reference player's at the standard note table
+    (:func:`standard`), or ``native`` at its own, over ``frames`` ticks."""
     text = Transcriber(model).document()
     ours = play(text, ticks=frames)
-    theirs = np.asarray(model.player().render_grid(len(ours)), dtype=np.uint8)
+    ref = model.player() if native else standard(model)
+    theirs = np.asarray(ref.render_grid(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, theirs), text
 
 

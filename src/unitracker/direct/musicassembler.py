@@ -398,11 +398,13 @@ def standard(song, subtune: int = 0) -> Player:
     return ref
 
 
-def compare(song, text: str, frames: int = 20000, subtune: int = 0):
+def compare(song, text: str, frames: int = 20000, subtune: int = 0, native: bool = False):
     """The ``(tick, register, ours, theirs)`` cells where document ``text``'s grid differs
-    from the reference player's over ``frames`` ticks."""
+    from the reference player's at the standard note table (:func:`standard`), or ``native``
+    at its own, over ``frames`` ticks."""
     ours = play(text, ticks=frames)
-    theirs = np.asarray(Player(song, subtune).render_grid(len(ours)), dtype=np.uint8)
+    ref = Player(song, subtune) if native else standard(song, subtune)
+    theirs = np.asarray(ref.render_grid(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, theirs)
 
 
