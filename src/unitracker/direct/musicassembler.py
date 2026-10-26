@@ -58,7 +58,7 @@ class TranscribeError(ValueError):
 
 
 @dataclass
-class Voice:
+class Voice:  # pylint: disable=too-many-instance-attributes
     """A voice's cells as its tokens are written: its instrument, the flags and cursor of its
     inner program, its note index, the AD its last trigger wrote and whether its arpeggio runs."""
 
@@ -265,17 +265,20 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         voice.ins = voice.ins if ins is None else ins
         rows, name = [], None
         if kind == "note":
-            voice.index = trans + note & 0xFF
-            ad, _, wave, *_, flags = self._record(voice.ins)
-            voice.flags, voice.cursor, voice.ad, voice.arp = flags, 0, ad, False
-            rows.append({"ctrl": wave})
-            name = self.instrument(voice.ins)
+            rows, name = [self._trigger(voice, trans + note & 0xFF)], self.instrument(voice.ins)
         rows += [self._step(voice) for _ in range(length - 1 - len(rows))]
         rows.append({"ad": voice.ad})
         cmds = {"run": self._program(rows)}
         if kind == "note":
             cmds |= self._filter(voice, token[4], tick)
         return Event(note_name(voice.index) if kind == "note" else kind, name, cmds, steps=length)
+
+    def _trigger(self, voice: Voice, index: int) -> dict:
+        """The row of ``voice``'s note trigger at ``index``: its cells take the instrument's."""
+        ad, _, wave, *_, flags = self._record(voice.ins)
+        voice.index = index
+        voice.flags, voice.cursor, voice.ad, voice.arp = flags, 0, ad, False
+        return {"ctrl": wave}
 
     def _filter(self, voice: Voice, filt, tick: int) -> dict:
         """The commands of a note of ``voice`` at ``tick``: a filter command's resonance and
