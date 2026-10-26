@@ -54,6 +54,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
 
     def __init__(self, swm, meta: tuple = (), frames: int = 20000, check: bool = True):
         self.swm, self.ref, self.meta, self.frames = swm, standard(swm), meta, frames
+        self.speed = swm.frame_speed
         self.feats = self.ref.features
         refused = self._unsupported() if check else []
         if refused:
@@ -75,22 +76,22 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         held = feats.arpspeedsupp and feats.detunesupport and rows
         self.hrc = held and not feats.vibslidealways
         self.mirror = held and (self.pwkb or any(i.pw_table for i in self.swm.instruments))
-        self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra)
+        self.code = templates(feats.calcvibrato, feats.vibratotypes, feats.portavibra, self.speed)
         if self.pwkb or self.fkb:
-            self.code |= track_templates(feats.finefiltsweep)
+            self.code |= track_templates(feats.finefiltsweep, self.speed)
         if self.mirror:
-            self.code |= mirror_templates(self.pwkb)
+            self.code |= mirror_templates(self.pwkb, self.speed)
         self.routines = {name: code.read(text) for name, text in self.code.items()}
 
     def _unsupported(self) -> list:
         """What the tune uses that this transcription refuses."""
         swm, feats, out = self.swm, self.feats, []
-        if swm.frame_speed != 1 or self.ref.image.play_gate:
-            out.append("multispeed or a play gate")
+        if self.ref.image.play_gate:
+            out.append("a play gate")
+        if swm.frame_speed > 1 and not feats.multispeedsupp:
+            out.append("multispeed without MULTISPEEDSUPP")
         if not swm.instruments or len(swm.sequences) < VOICES:
             out.append("no instruments, or fewer orderlists than voices")
-        if feats.arpspeedsupp and not feats.multispeedsupp and self._held_rows():
-            out.append("WF rows held over ticks without STRTSND's ARPSCNT reset")
         return out
 
     def _held_rows(self, header: bool = False) -> bool:
@@ -198,36 +199,50 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             return out | ({"ctrl": 0x18} if ins.control & 0x04 else {})
         return {"ad": DEFAULT_HR_ADSR >> 8, "sr": DEFAULT_HR_ADSR & 0xFF}
 
-    def dummy(self, ins) -> str:
+    def dummy(self, ins, first: int = 0) -> str:
         """The instrument whose WF program a voice's first HR ticks walk: the header of
-        instrument 0 read as WF rows from DPITCH 0, gated as PTNGATE (0 after INITER) is."""
+        instrument 0 read as WF rows from DPITCH 0, gated as PTNGATE (0 after INITER) is. A
+        multispeed tune's walks it from tick 0, MULCNTP on each MULPLY call to the first note's
+        STRTSND (TICK_0 at ``first``, or none with no ``ins``), HRENDER on its TICK_0 and TICK_1."""
         # pylint: disable=too-many-locals
-        staccato = self.feats.hardrestypes and ins.control & 0x04
+        n, held = self.speed, ins is not None
+        staccato = held and self.feats.hardrestypes and ins.control & 0x04
         dummy = self.ref._dummy  # pylint: disable=protected-access
         image = self.ref._image(dummy)  # pylint: disable=protected-access
-        rows, _ = self.wave_rows(image, 0, dummy, 2, reload=0)
-        masks = [0xFE if self.hr(ins, 0) else 0]
-        masks.append(0xFE if self.hr(ins, 1) or masks[0] else 0)
+        setup = [first, first + n] if n > 1 else [0, 1]
+        span = first + 2 * n if held else first
+        walks = [t for t in range(span) if t % n != n - 1 or t in setup[: held * 2]]
+        # HRGTOFF's PTNGATE $FE from the first setup tick it fires on.
+        fired = [t for k, t in enumerate(setup if held else ()) if self.hr(ins, k)]
+        masks = {t: 0xFE if fired and t >= fired[0] else 0 for t in walks}
+        for k, t in enumerate(setup if held else ()):
+            if staccato and self.hr(ins, k):
+                # HRGTOFF's staccato exit walks no table on its tick.
+                walks.remove(t)
+        rows, _ = self.wave_rows(image, 0, dummy, len(walks), reload=0)
         ticks = []
         for row in rows:
             keys = dict(row.keys)
             ticks += [keys] + [{}] * (keys.pop("hold", 1) - 1)
-        for k in (0, 1):
-            if staccato and self.hr(ins, k):
-                # HRGTOFF's staccato exit walks no table on its tick.
-                ticks.insert(k, {})
+        reads = dict(zip(walks, ticks))
         out = []
-        for k, keys in enumerate(ticks[:2]):
+        for t in range(walks[-1] + 1 if walks else 0):
+            keys = dict(reads.get(t, {}))
             if "ctrl" in keys:
-                keys["ctrl"] &= masks[k]
+                keys["ctrl"] &= masks[t]
             out.append(_unnoted(Row(keys)))
         first = next((k for k, r in enumerate(out) if r.keys), None)
         if first is None:
             raise TranscribeError("an idle walk that reads no row")
         out[first] = Row(dict(out[first].keys) | {"wave.freq": self.call("tone")})
+        if n > 1 and dummy.arp_speed & 0xC0:
+            # MULCNTP walks its pulse table too, from PWTPOS 0, on the MULPLY calls.
+            steps = [t for t in range(span) if t % n != n - 1]
+            out.insert(0, Row({"hold": 0, "run": self.pulse(dummy, 0, 0, steps=steps)}))
         if self.feats.vibslidealways:
             # The hard-restart ticks walk the pulse table too: the header's, from PWTPOS 0.
-            out.insert(0, Row({"hold": 0, "run": self.pulse(dummy, 0, 0, lead=False)}))
+            at = min((t for t in walks if t in setup), default=0)
+            out.insert(at, Row({"hold": 0, "run": self.pulse(dummy, 0, 0, lead=False)}))
         instrument = Instrument({"ctrl": self._named("ctrl", "c", Program(out))})
         for name, held in self.ins.items():
             if held == instrument:
@@ -293,9 +308,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         }
         if fx == 0x0C:
             made[fx] = lambda: {"run": self._paced(rec, value)} if self.feats.arpspeedsupp else {}
-        elif fx in (0x07, 0x09, 0x0A, 0x0B, 0x0E) or 0x17 <= fx <= 0x1C or fx == 0x1F:
-            if fx != 0x07:
-                raise TranscribeError(f"FX ${fx:02X}")
+        elif fx in (0x09, 0x0A, 0x0B):
+            made[fx] = lambda: self._moved(rec, fx)
+        elif fx == 0x0E or 0x17 <= fx <= 0x1C or fx == 0x1F:
+            raise TranscribeError(f"FX ${fx:02X}")
         if fx == 0x07 and self.feats.chordsupport:
             made[fx] = lambda: {"run": self.rechord(rec)}
         commands = made[fx]() if fx in made else {}
@@ -308,9 +324,32 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def _waveform(self, rec) -> dict:
         """A FX writing WFGHOST: the control byte it leaves, gated as the voice is."""
         value, gate = rec.ctrl
-        if rec.newnote or value & 1 and not gate:
-            raise TranscribeError("a waveform FX on a note or setting a gate the voice has off")
+        if rec.newnote:
+            # Past STRTSND's write, in its tick: the first frame's waveform.
+            rec.waved = value
+            return {}
+        if value & 1 and not gate:
+            raise TranscribeError("a waveform FX setting a gate the voice has off")
         return {"ctrl": value}
+
+    def _moved(self, rec, fx: int) -> dict:
+        """BIGFX09, 0A, 0B: the WF, pulse or filter walk on from the row it sets, from the
+        tick (on a note, from STRTSND's next; on a glide, past TICK_2)."""
+        pulse, filt = rec.after
+        if rec.ins is None:
+            return {}
+        if fx == 0x0B and filt is None:
+            raise TranscribeError("a filter position FX on a voice without the filter")
+        if rec.tick2:
+            # The glide's walk resumes past TICK_2 from where the FX left it.
+            _, was, cut = rec.resume
+            rec.resume = (rec.arp, pulse if fx == 0x0A else was, filt if fx == 0x0B else cut)
+            return {}
+        if rec.newnote:
+            rec.moved = (fx, rec.arp[0], pulse, filt)
+            return {}
+        pulse, filt = (pulse if fx == 0x0A else None), (filt if fx == 0x0B else None)
+        return {"run": self.resume(rec.ins, rec.arp, pulse, filt, skip=False)}
 
     def _paced(self, rec, speed: int) -> str:
         """An arp speed FX: the WF walk from where it is at its new pace."""
@@ -330,10 +369,15 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         new = rec.newnote and not rec.dummy and not self.feats.vibslidealways
         if new and not tick:
             commands = {"pw": "hold", "cut": "hold"} | ({"pm.freq": "none"} if self.mirror else {})
+            dropped, run = self._mulcntp(rec)
+            commands = {k: v for k, v in commands.items() if k not in dropped}
+            commands |= {"run": run} if run else {}
         if new and tick and self.fkb and rec.holder:
             # The cutoff is written every tick: its track follows the note STRTSND sets.
             commands = {self.walk: self.call("frs")}
-        if rec.newnote and rec.dummy and not tick:
+        if rec.vol is not None and not tick:
+            commands["vol"] = rec.vol
+        if rec.newnote and rec.dummy and not tick and self.speed == 1 and rec.hr is not None:
             state["dummy"] = state["dummy"] or self.dummy(rec.hr)
             commands["run"] = self.ins[state["dummy"]].get("ctrl")
         if rec.newnote and not tick and self.hrc:
@@ -343,48 +387,80 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         if rec.newnote and self.hr(rec.hr, tick):
             commands |= self._hr_commands(rec.hr)
             atom = "-" if rec.dummy else "off"
-        if tick in rec.skips and not rec.dummy:
-            wave, ins, pulse, filt, gate = rec.skips[tick]
-            gate = gate if rec.unnoted else None
-            if self.feats.vibslidealways:
-                # The staccato tick walks no table and no vibrato, which this build would.
-                commands["run"] = self.resume(ins, wave, pulse, filt, gate=gate)
-                commands["tick.freq"] = self.call("wt")
-            else:
-                commands["run"] = self.resume(ins, wave, gate=gate)
+        if tick * self.speed in rec.skips and not rec.dummy:
+            commands |= self._skip(rec, tick)
         return Event(atom, commands=commands)
 
+    def _skip(self, rec, tick: int) -> dict:
+        """A staccato hard restart's TICK_0 or TICK_1: the tables resumed where it left them."""
+        wave, ins, pulse, filt, gate = rec.skips[tick * self.speed]
+        gate = gate if rec.unnoted else None
+        if self.feats.vibslidealways:
+            # The staccato tick walks no table and no vibrato, which this build would.
+            return {
+                "run": self.resume(ins, wave, pulse, filt, gate=gate),
+                "tick.freq": self.call("wt"),
+            }
+        return {"run": self.resume(ins, wave, gate=gate)}
+
+    def _mulcntp(self, rec) -> tuple:
+        """``(commands it drops, program it runs)`` of a new note's TICK_0 where the
+        instrument's ARPSPED has MULCNTP walk the pulse (and the filter) on the MULPLY calls to
+        STRTSND, which HARDRST's skip."""
+        walker, pulse, swept, filt, count = rec.walking
+        if self.speed == 1 or walker is None or not walker.arp_speed & 0xC0:
+            return (), None
+        steps = [t for t in range(2 * self.speed) if t % self.speed]
+        out = {"pw": self.pulse(walker, pulse, swept, steps=steps)}
+        if walker.arp_speed & 0x80 and rec.holder:
+            out["cut"] = self.filter(walker, filt, count, steps=steps)
+        if "cut" in out:
+            # One run command: the pulse program starts the filter's.
+            pw = self.programs["pw"][out["pw"]]
+            rows = [Row({"hold": 0, "run": out["cut"]}), *pw.rows]
+            loop = None if pw.loop is None else pw.loop + 1
+            out = {"pw": self._named("pw", "pw", Program(rows, loop))}
+        return ("pw", "pm.freq", "cut") if "cut" in out else ("pw", "pm.freq"), out["pw"]
+
     def events(self, rec, voice: int, state: dict, length: int) -> list:
-        """The events of one read row on ``voice``, ``length`` ticks from its TICK_0."""
+        """The events of one read row on ``voice``, ``length`` ticks from its TICK_0: TICK_0,
+        TICK_1 and TICK_2 on its first PLAYER calls, the rests between."""
         out = [self.setup(rec, state, 0), self.setup(rec, state, 1)]
+        rebind = {}
         if rec.applied:
+            if length < 2 * self.speed + 1:
+                raise TranscribeError(f"a {length}-tick row")
             out.append(self.apply(rec, voice, state))
             if rec.switch is not None:
                 out[2] = self.switch(rec, voice, state, out[2])
             # A binding the slot already holds would keep its phi: rebind it the tick before.
-            before, applied = dict(out[1].commands), dict(out[2].commands)
-            for key, rebind in (("tick.freq", self.call("stp")), ("fx.cut", "none")):
+            applied, before = dict(out[2].commands), dict(out[1].commands)
+            for key, value in (("tick.freq", self.call("stp")), ("fx.cut", "none")):
                 if key in applied and key not in before:
-                    before[key] = rebind
+                    rebind[key] = value
             if "late.cut" in applied:
-                before["late.cut"] = "none"
-            out[1] = Event(out[1].note, out[1].ins, before, out[1].keep_pw, out[1].keep_filter)
-        if length < len(out):
-            if rec.applied:
-                raise TranscribeError(f"a {length}-tick row")
-            out = out[:length]
-        out += [Event("-")] * (length - len(out))
-        return out
+                rebind["late.cut"] = "none"
+        ticks = [Event("-")] * length
+        for k, event in enumerate(out):
+            if k * self.speed < length:
+                ticks[k * self.speed] = event
+        if rebind:
+            k = 2 * self.speed - 1
+            e = ticks[k]
+            ticks[k] = Event(e.note, e.ins, dict(e.commands) | rebind, e.keep_pw, e.keep_filter)
+        return ticks
 
     def switch(self, rec, voice: int, state: dict, event: Event) -> Event:
-        """``event`` on a row that selects instrument ``rec.ins`` without a note: its tables
-        walk on from where they are, through the new instrument's bytes."""
+        """``event`` on a row that selects instrument ``rec.ins`` without STRTSND: its tables
+        walk on from where they are, through the new instrument's bytes (a FX's walk as the
+        FX left it)."""
         commands = dict(event.commands)
-        if "run" in commands or event.ins is not None:
-            raise TranscribeError(
-                "an instrument selected without a note on a row that runs a table"
-            )
         wave, pulse, filt, reload, gate = rec.switch
+        if rec.tick2:
+            # A note without STRTSND: its walk resumed through the new instrument at the
+            # ARPSPED STRTSND latched; the next STRTSND names the instrument.
+            commands["run"] = self.resume(rec.ins, *rec.resume, reload=reload)
+            return Event(event.note, event.ins, commands, event.keep_pw, event.keep_filter)
         gate = gate if rec.unnoted else None
         commands["run"] = self.resume(
             rec.ins, wave, pulse, filt, skip=False, reload=reload, gate=gate
@@ -402,6 +478,30 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         state["ins"] = name
         if self.hrc:
             commands["hr.freq"] = "none"
+        start = self._kept(rec, ins)
+        pulse, filt, _ = rec.kept
+        if rec.handover is not None:
+            if "run" in commands or pulse is not None or filt is not None:
+                raise TranscribeError("a filter handover on a note that runs another table")
+            commands["run"] = self.filter(ins, handover=rec.handover)
+        chord = rec.chord[2] if "run" in commands else None
+        # Without MULTISPEEDSUPP STRTSND leaves ARPSCNT: the first WF read waits it out.
+        counter = rec.arp[1] if self.feats.arpspeedsupp and not self.feats.multispeedsupp else 0xFF
+        counter = counter if counter < 0x80 else None
+        if pulse is not None or filt is not None or {start, rec.waved, counter} != {None}:
+            # A chord FX (its own run) picks the chord the kept walk plays.
+            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated, start, rec.waved, counter)
+        elif self.wave(ins, chord, gated=rec.gated) != self.wave(ins, chord):
+            if rec.handover is not None:
+                raise TranscribeError("a filter handover on a note that keeps a gate off")
+            # STRTSND keeps a waveform gated off.
+            commands["run"] = self.wave(ins, chord, gated=rec.gated)
+        keep = rec.keep_filter or filt is not None
+        return Event(self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep)
+
+    def _kept(self, rec, ins):
+        """``rec.kept`` as STRTSND leaves the walks: a pulse or filter table starting with a
+        sweep resumed at its count, a position FX's row; the WF row a BIGFX09 sets, or None."""
         pulse, filt, routed = rec.kept
         start = INST_WF_TABLE_POS + len(ins.wf_table) + 1
         if pulse is None and _swept_first(ins.pw_table):
@@ -409,18 +509,14 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         table = ins.filter_table
         if filt is None and _swept_first(table) and table[0] and not rec.keep_filter:
             filt, routed = (start + len(ins.pw_table) + 1, rec.counts[1]), True
-        if (pulse, filt, routed) != rec.kept:
-            rec.kept = (pulse, filt, routed)
-        if rec.handover is not None:
-            if "run" in commands or pulse is not None or filt is not None:
-                raise TranscribeError("a filter handover on a note that runs another table")
-            commands["run"] = self.filter(ins, handover=rec.handover)
-        if pulse is not None or filt is not None:
-            # A chord FX (its own run) picks the chord the kept walk plays.
-            chord = rec.chord[2] if "run" in commands else None
-            commands["run"] = self.wave(ins, chord, rec.kept)
-        keep = rec.keep_filter or filt is not None
-        return Event(self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep)
+        start = None
+        if rec.moved is not None:
+            fx, wave, moved, cut = rec.moved
+            start = wave if fx == 0x09 else None
+            pulse = moved if fx == 0x0A else pulse
+            filt, routed = (cut, True) if fx == 0x0B else (filt, routed)
+        rec.kept = (pulse, filt, routed)
+        return start
 
     def apply(self, rec, voice: int, state: dict) -> Event:
         """The TICK_2 event of an applied row."""
@@ -483,7 +579,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
 
     def pitch(self, rec) -> str:
         """The note name of a row's pitch with its octave shift and transpose."""
-        if not -1 <= rec.note < 0x80:
+        if not -1 <= rec.note < 0xFF:
             raise TranscribeError(f"a note sounding at {rec.note}")
         return note_name(rec.note)
 
@@ -495,6 +591,10 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         reads, end = tr.reads[voice], tr.ended[voice]
         frames = [r.frame for r in reads] + ([end] if end is not None else [])
         state, plays, events, tick = {"ins": None, "dummy": None}, [], [], None
+        if self.speed > 1:
+            note = next((r for r in reads if r.newnote and r.dummy), None)
+            hr, first = (note.hr, note.frame) if note else (None, tr.frames)
+            state["dummy"] = self.dummy(hr, first)
         for k, rec in enumerate(reads):
             if rec.start and tick is not None:
                 plays.append((tick, self._phrase(events)))
@@ -517,6 +617,9 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         for v in range(VOICES):
             plays, end, cut, dummy = self.occurrences(tr, v)
             dummies.append(dummy)
+            if plays and plays[0][0]:
+                # A multispeed tune's MULPLY calls before the first PLAYER call.
+                plays.insert(0, (0, self._phrase([Event("-")] * plays[0][0])))
             for tick, phrase in plays:
                 entries.setdefault(tick, [CONT] * VOICES)[v] = Play(phrase)
             if end is not None:
@@ -535,11 +638,16 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
     def slots(self) -> dict:
         """The frequency's slots in the player's order: VIBSLIDE, WFARPTB, WRPITCH."""
         held = ("note", "legato")
-        out = [
+        out = [Slot("ms")] if self.speed > 1 else []
+        out += [
             Slot("snd"),
             Slot(
                 "tick",
-                hold=("note",) if self.feats.vibslidealways else ("note-2", "note-1", "note"),
+                hold=(
+                    ("note",)
+                    if self.feats.vibslidealways
+                    else (f"note-{2 * self.speed}", f"note-{self.speed}", "note")
+                ),
             ),
             Slot("wave", hold=held, reset=("row.note",)),
         ]
@@ -600,8 +708,16 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         defs.append(phrases)
         # No HARDRST carry until a voice's first note sets one.
         carry = {"hr.freq": self.call("hrc", c=255)} if self.hrc else {}
+        if self.speed > 1:
+            # The PLAYER call's phase among the frame's calls.
+            carry["ms.freq"] = self.call("ph")
         init = [Event("-", dummy, dict(carry)) for dummy in dummies]
-        init[0] = Event("-", dummies[0], carry | {"vol": 15} | self._cutoff())
+        if self.speed > 1:
+            init = [
+                Event("-", d, carry | ({"run": self.ins[d].get("ctrl")} if d else {}))
+                for d in dummies
+            ]
+        init[0] = Event("-", dummies[0], dict(init[0].commands) | {"vol": 15} | self._cutoff())
         named = {s for t in self.used for s in code.symbols(self.routines[t])}
         state = {
             cell: [(k, size) for k, size in names.items() if k in named]

@@ -60,6 +60,12 @@ class Read:  # pylint: disable=too-many-instance-attributes
     arp: tuple = ()
     skips: dict = field(default_factory=dict)
     unnoted: bool = False
+    walking: tuple = (None, 0, 0, 0, 0)
+    vol: int = None
+    gated: int = 1
+    after: tuple = (None, None)
+    moved: tuple = None
+    waved: int = None
 
 
 @dataclass
@@ -125,6 +131,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
     claims = []
 
     def read(v):
+        vol = ref.filter_mode_vol & 0x0F
         advance_row(v)
         if v.pending_row is not None:
             i = voices[id(v)]
@@ -137,6 +144,16 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             out.reads[i].append(Read(ref.frame_idx, v.pending_row, start, new, hr, dummy))
             out.reads[i][-1].holder = ref.filter_controller_voice is v
             out.reads[i][-1].unnoted = not noted[i]
+            if ref.filter_mode_vol & 0x0F != vol:
+                # READROW's SEQVOLU, an orderlist MainVolume's.
+                out.reads[i][-1].vol = ref.filter_mode_vol & 0x0F
+            out.reads[i][-1].walking = (
+                v.instrument,
+                v.pw_pos,
+                v.pw_sweep_count,
+                ref.filt_pos,
+                ref.filter_sweep_count,
+            )
 
     def applied(v, row):
         rec = out.reads[voices[id(v)]][-1]
@@ -153,6 +170,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
             rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
         before = v.instrument
+        rec.gated = v.sid_ctrl & 1
         holder = ref.filter_controller_voice
         rec.cutfirst = holder is None or voices[id(v)] >= voices[id(holder)]
         rec.counts = (v.pw_sweep_count, ref.filter_sweep_count)
@@ -181,6 +199,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
         rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
         rec.ctrl = (v.sid_ctrl, v.ptn_gate & 1)
         rec.arp = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
+        rec.after = _tables(ref, v)
         ins = v.instrument
         if row.note == 0x7E and ref.features.gateoffptr and ins is not None:
             held = ref.filter_controller_voice is v
@@ -197,6 +216,9 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             rec = out.reads[voices[id(v)]][-1]
             rec.adsr = (v.sid_ad, v.sid_sr)
             rec.chord = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.instrument)
+            rec.arp = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
+            rec.after = _tables(ref, v)
+            rec.ctrl = (v.sid_ctrl, v.ptn_gate & 1)
 
     def filter_state():
         return (
@@ -236,10 +258,13 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
         _claims(ref, claims[1:], out)
         for i, v in enumerate(ref.voices):
             rec = out.reads[i][-1] if out.reads[i] else None
-            if rec is not None and rec.frame + 2 == frame and rec.kept[1]:
-                if ref.filter_controller_voice is not v:
-                    # Another voice took the filter on the tick: the kept walk is its.
-                    rec.kept = (rec.kept[0], (), rec.kept[2])
+            if rec is None or rec.frame + 2 * swm.frame_speed != frame:
+                continue
+            if rec.kept[1] and ref.filter_controller_voice is not v:
+                # Another voice took the filter on the tick: the kept walk is its.
+                rec.kept = (rec.kept[0], (), rec.kept[2])
+            if rec.resume and rec.resume[2] is not None and ref.filter_controller_voice is not v:
+                rec.resume = (*rec.resume[:2], None)
         for i, v in enumerate(ref.voices):
             if v.sequence_ended and out.ended[i] is None:
                 out.ended[i] = frame
@@ -247,6 +272,13 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             out.frames = frame + 1
             return out
     raise TraceError(f"no loop within {frames} frames")
+
+
+def _tables(ref, v) -> tuple:
+    """``(pulse, filter)`` positions and sweep counts of voice ``v``, the filter's where it
+    holds it."""
+    held = ref.filter_controller_voice is v
+    return (v.pw_pos, v.pw_sweep_count), (ref.filt_pos, ref.filter_sweep_count) if held else None
 
 
 def _looped(out: Trace, frame: int, loops: int) -> bool:

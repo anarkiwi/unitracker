@@ -43,6 +43,31 @@ def _rows3(table: bytes):
     return (table[i : i + 3] for i in range(0, len(table), 3))
 
 
+def _stepped(rows: list, loop, steps: list, pause: dict) -> list:
+    """The rows of a program ``rows`` (looping to ``loop``) a tick at a time on the ticks
+    ``steps`` only, ``pause`` on the others, equal neighbours held together."""
+
+    def ticks():
+        k = 0
+        while k < len(rows) or loop is not None:
+            k = loop if k >= len(rows) else k
+            keys = dict(rows[k].keys)
+            hold = keys.pop("hold", 1)
+            yield from [keys] * hold if hold else ()
+            k += 1
+        while True:
+            yield {}
+
+    walk, out = ticks(), []
+    for t in range(steps[-1] + 1 if steps else 0):
+        keys = next(walk) if t in steps else pause
+        if out and out[-1][1] == keys:
+            out[-1][0] += 1
+        else:
+            out.append([1, keys])
+    return [Row(({"hold": n} if n > 1 else {}) | keys) for n, keys in out]
+
+
 class Tables:  # pylint: disable=too-few-public-methods
     """The table programs: methods of the transcriber, which keeps the reference player
     ``ref``, its build ``feats``, the program stores and the templates it calls."""
@@ -54,6 +79,7 @@ class Tables:  # pylint: disable=too-few-public-methods
     code: dict = {}
     mirror = pwkb = fkb = unnoted = False
     walk = "cut"
+    speed = per = 1
 
     def call(self, template: str, **params) -> Call:
         """The call of ``template`` with ``params``, its arguments in its signature's order;
@@ -88,7 +114,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         call = self.call("det", f=int(not keep), d=0 if keep else detune, c=carry, b=arp)
         return keys | {"dt.freq": call}
 
-    def skipped(self, ticks: int) -> list:
+    def skipped(self, ins, ticks: int) -> list:
         """The rows of ``ticks`` WF ticks ARPSCNT skips, their carry the pulse walk's."""
         if not ticks:
             return []
@@ -100,14 +126,16 @@ class Tables:  # pylint: disable=too-few-public-methods
             carry = 0
         else:
             carry = 1
+        if self.speed > 1 and ins.arp_speed & 0xC0:
+            carry |= 4
         return [Row(self._det({"hold": ticks} if ticks > 1 else {}, None, 3, carry))]
 
-    def _rest(self, rows: list, reload: int, carry: int) -> tuple:
+    def _rest(self, rows: list, ins, reload: int, carry: int) -> tuple:
         """``rows`` and the WF walk resting where it ends: re-read at its pace, each read's
         carry ``carry``, ARPSCNT's skipped ticks between."""
         if not self.feats.detunesupport:
             return rows, None
-        rest = [Row(self._det({}, None, carry))] + self.skipped(reload)
+        rest = [Row(self._det({}, None, carry))] + self.skipped(ins, reload)
         return rows + rest, len(rows) if reload else None
 
     def wave_rows(self, image: bytes, pos: int, ins, limit: int = 1 << 12, **at_start) -> tuple:
@@ -122,14 +150,14 @@ class Tables:  # pylint: disable=too-few-public-methods
             for _ in range(4):
                 byte = _col(image, pos, 0xFF)
                 if byte == 0xFF:
-                    return self._rest(rows, reload, 1)
+                    return self._rest(rows, ins, reload, 1)
                 if byte != 0xFE:
                     break
                 target = _col(image, pos + 1)
                 if target >= 0x80 or target == pos:
-                    return self._rest(rows, reload, 1)
+                    return self._rest(rows, ins, reload, 1)
                 if target >= len(image):
-                    return self._rest(rows, reload, 0)
+                    return self._rest(rows, ins, reload, 0)
                 pos = target
             else:
                 raise TranscribeError("a WF jump chain")
@@ -139,19 +167,19 @@ class Tables:  # pylint: disable=too-few-public-methods
             keys, hold = self._wave_row(image, pos, reload)
             first, cpos = cpos, None
             if self.feats.chordsupport and _col(image, pos + 1) == 0x7F:
-                played, looped = self._chord((keys, _col(image, pos + 2)), hold, number, first)
+                played, looped = self._chord(ins, (keys, _col(image, pos + 2)), hold, number, first)
                 if looped is not None:
                     return rows + played, len(rows) + looped
                 rows += played
                 ticks += hold * len(played)
                 pos += 3
                 continue
-            rows += [Row(keys)] + self.skipped(hold - 1)
+            rows += [Row(keys)] + self.skipped(ins, hold - 1)
             ticks += hold
             pos += 3
         return rows, None
 
-    def _chord(self, row: tuple, hold: int, number: int, pos=None) -> tuple:
+    def _chord(self, ins, row: tuple, hold: int, number: int, pos=None) -> tuple:
         """``(rows, loop)`` of a chord row playing chord ``number``: a WF read per pitch with
         the row's waveform and detune (PLYCHRD's, never kept), from ``pos`` (else the chord's
         start) to its $7E (on to the next row in the tick) or its $7F (its first pitch again:
@@ -167,7 +195,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             rows = []
             while at < len(table) and table[at] not in (0x7E, 0x7F):
                 pitch = base | {"note": Signed(table[at]), "wave.freq": self.call("tone")}
-                rows += [Row(self._det(pitch, row[1], 2, table[at]))] + self.skipped(hold - 1)
+                rows += [Row(self._det(pitch, row[1], 2, table[at]))] + self.skipped(ins, hold - 1)
                 at += 1
             return rows, at < len(table) and table[at] == 0x7F
 
@@ -200,12 +228,15 @@ class Tables:  # pylint: disable=too-few-public-methods
         detune = _col(image, pos + 2, 0xFF)
         return self._det(keys, None if detune == 0xFF else detune, carry, arp or 0), hold
 
-    def wave(self, ins, chord=None, kept=(None, None, False)) -> str:
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    def wave(
+        self, ins, chord=None, kept=(None, None, False), gated=1, start=None, waved=None, left=None
+    ) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
         waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
         reset switches, the pulse or filter walk ``kept`` resumed instead of restarted (the
         filter's routed, or not, by SETFLTP)."""
-        # pylint: disable=too-many-locals
+        # pylint: disable=too-many-locals,too-many-branches
         feats, (pulse, filt, routed) = self.feats, kept
         table = ins.filter_table
         first = {"route_on" if table and table[0] != 0xFF else "route_off": 0}
@@ -213,9 +244,9 @@ class Tables:  # pylint: disable=too-few-public-methods
             first = {}
         runs = []
         if pulse is not None:
-            runs.append(Row({"hold": 0, "run": self.pulse(ins, *pulse)}))
+            runs.append(Row({"hold": 0, "run": self.pulse(ins, *pulse, started=True)}))
         if filt:
-            runs.append(Row({"hold": 0, "run": self.filter(ins, filt[0], filt[1])}))
+            runs.append(Row({"hold": 0, "run": self.filter(ins, *filt, started=True)}))
         lead = []
         if (
             not feats.frame1switch
@@ -225,34 +256,51 @@ class Tables:  # pylint: disable=too-few-public-methods
             first["ctrl"] = 9
         elif ins.control & 0x08:
             first["ctrl"] = ins.effective_first_waveform
-        elif feats.hardrestypes and not ins.control & 0x03:
-            raise TranscribeError("a first frame that keeps a waveform no hard restart gated off")
         else:
-            first["gate"] = 0
+            # STRTSND writes no waveform: the voice keeps the one it has, gated off where a
+            # hard restart fired, the gate as it was where none does.
+            if not gated or not (feats.hardrestypes and not ins.control & 0x03):
+                first["gate"] = 0
             lead = [Row({"hold": 0, "gate": 1})]
+        if waved is not None:
+            # A waveform FX on the note writes WFGHOST past STRTSND.
+            first = {k: v for k, v in first.items() if k != "gate"} | {"ctrl": waved}
         if ins.wf_table:
             image = self.ref._image(ins)  # pylint: disable=protected-access
             number = ins.default_chord if chord is None else chord
-            rows, loop = self.wave_rows(image, INST_WF_TABLE_POS, ins, chord=(number, None))
+            start = INST_WF_TABLE_POS if start is None else start
+            rows, loop = self.wave_rows(image, start, ins, chord=(number, None))
             if lead and rows[0].get("ctrl") is None:
                 raise TranscribeError("a first frame that keeps a waveform before a hold row")
         else:
-            (rows, loop), lead = self._rest([], 0, 1), []
+            (rows, loop), lead = self._rest([], ins, 0, 1), []
+        if left is not None:
+            # ARPSCNT's ticks left from before STRTSND.
+            lead = self.skipped(ins, left) + lead
+        if self.speed > 1 and feats.multispeedsupp:
+            # STRTSND's ARPSCNT $FF keeps MULCNTP off the voice to the next PLAYER call.
+            lead = [Row({"hold": self.speed - 1})] + lead
         skip = len(runs) + 1 + len(lead)
         program = Program([*runs, Row(first), *lead, *rows], None if loop is None else loop + skip)
         return self._named("ctrl", "c", program)
 
     def _swept(
-        self, image: bytes, pos: int, cell: str, rows_of: dict, count=None, lead=True
+        self, image: bytes, pos: int, cell: str, rows_of: dict, count=None, lead=True, started=False
     ) -> tuple:
         """``(rows, loop)`` of a pulse or filter program from ``pos``; ``rows_of`` gives the
         keys of a ``set`` row and of a ``sweep``'s ticks, its ``advance`` tick, a ``jump`` to a
         sweep and the ``rest`` a tracked table keeps writing. Resumed with sweep ``count``, it
-        leaves STRTSND's tick to the voice's bindings."""
+        leaves STRTSND's tick to the voice's bindings; ``started`` on STRTSND's tick, its first
+        row lasts to the next PLAYER call."""
         # pylint: disable=too-many-arguments,too-many-positional-arguments
-        rows, at = [Row(rows_of["started"] if count is None else rows_of["resumed"])], {}
-        rows = rows if lead else []
-        first, carry = True, 0
+        rows = [Row(rows_of["started"] if count is None else rows_of["resumed"])] if lead else []
+        rows, loop = self._walked(image, pos, cell, rows_of, count, rows)
+        return self._spread(rows, lead and (count is None or started)), loop
+
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    def _walked(self, image, pos, cell, rows_of, count, rows) -> tuple:
+        """:meth:`_swept`'s rows after ``rows``, a row a tick, and its loop."""
+        first, carry, at = True, 0, {}
         while True:
             if pos >= len(image) or image[pos] == 0xFF:
                 return rows + rows_of["rest"], None
@@ -286,15 +334,30 @@ class Tables:  # pylint: disable=too-few-public-methods
             first, carry = False, 0
             pos += 3
 
+    def _spread(self, rows: list, started: bool) -> list:
+        """``rows`` each lasting ``per`` times its ticks; STRTSND's first one to the next
+        PLAYER call."""
+        if self.speed == 1:
+            return rows
+        out = []
+        for k, row in enumerate(rows):
+            keys, scale = dict(row.keys), self.speed if started and not k else self.per
+            if keys.get("hold", 1) and scale > 1:
+                keys["hold"] = keys.get("hold", 1) * scale
+            out.append(Row(keys))
+        return out
+
     @staticmethod
     def _sweep(rows_of: dict, pos: int, ticks: int) -> list:
         """A sweep row's ``ticks`` steps, then its advance tick."""
         steps = [Row({"hold": ticks} | rows_of["sweep"](pos))] if ticks > 0 else []
         return steps + [Row(rows_of["advance"](pos, ticks > 0))]
 
-    def pulse(self, ins, pos=None, count=None, lead=True) -> str:
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    def pulse(self, ins, pos=None, count=None, lead=True, started=False, steps=None) -> str:
         """The ``pw`` name of instrument ``ins``'s pulse program, from the tick after
-        STRTSND's, or resumed from ``pos`` at sweep ``count``."""
+        STRTSND's, or resumed from ``pos`` at sweep ``count``; with ``steps``, stepping on
+        those ticks from its start only (MULCNTP's calls) and holding on the others."""
         image = self.ref._image(ins)  # pylint: disable=protected-access
 
         def width(p):
@@ -303,7 +366,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         if self.pwkb:
             rows_of = {
                 "set": lambda p, _: self._pulsed("st", w=width(p), j=_col(image, p + 2)),
-                "sweep": lambda p: self._pulsed("sw", d=_signed(_col(image, p + 1))),
+                "sweep": lambda p: self._pulsed(self._sw(), d=_signed(_col(image, p + 1))),
                 "advance": lambda p, _: self._pulsed("id", j=_col(image, p + 2)),
                 "jump": lambda _: self._pulsed("wr"),
                 "rest": [Row(self._pulsed("wr"))],
@@ -314,8 +377,8 @@ class Tables:  # pylint: disable=too-few-public-methods
             rows_of = {
                 "set": lambda p, c: {"pw": width(p)}
                 | self._carried("st", w=_col(image, p + 1), c=c),
-                "sweep": lambda p: {"pw": Expr(canonical(f"v + {_signed(_col(image, p + 1))}"))}
-                | self._carried("sw", d=_col(image, p + 1)),
+                "sweep": lambda p: {"pw": self._step(_signed(_col(image, p + 1)))}
+                | self._carried(self._sw(), d=_col(image, p + 1)),
                 "advance": lambda p, swept: ({"pw": "none"} if swept else {})
                 | self._carried("cs", c=1),
                 "jump": lambda c: self._carried("cs", c=c),
@@ -324,8 +387,28 @@ class Tables:  # pylint: disable=too-few-public-methods
                 "started": {"pw": "none"} | ({"pm.freq": "none"} if self.mirror else {}),
             }
         start = INST_WF_TABLE_POS + len(ins.wf_table) + 1 if pos is None else pos
-        rows, loop = self._swept(image, start, "pw", rows_of, count, lead)
+        if steps is not None:
+            rows, loop = self._walked(image, start, "pw", rows_of, count, [])
+            pause = self._pulsed("wr") if self.pwkb else {"pw": "none"}
+            pause |= {"pm.freq": "none"} if self.mirror and not self.pwkb else {}
+            return self._named("pw", "pw", Program(_stepped(rows, loop, steps, pause)))
+        self.per = 1 if ins.arp_speed & 0xC0 else self.speed
+        try:
+            rows, loop = self._swept(image, start, "pw", rows_of, count, lead, started)
+        finally:
+            self.per = 1
         return self._named("pw", "pw", Program(rows, loop))
+
+    def _sw(self) -> str:
+        """A sweep step's template: paced to the PLAYER calls where the table walks only on
+        them."""
+        return "sws" if self.per > 1 else "sw"
+
+    def _step(self, delta: int, scale: int = 1) -> Expr:
+        """A sweep step of ``delta`` as an expression, on every ``per``-th tick."""
+        if self.per == 1:
+            return Expr(canonical(f"v + {scale * delta}"))
+        return Expr(canonical(f"v + {scale * delta} * ((phi % {self.per}) == 0)"))
 
     def _carried(self, kind: str, **params) -> dict:
         """An untracked pulse row's mirror binding of template ``k`` + ``kind``: SETPWID's
@@ -337,10 +420,13 @@ class Tables:  # pylint: disable=too-few-public-methods
         out = {"pw": self.call("p" + kind, **params)}
         return out | ({"pm.freq": self.call("m" + kind, **params)} if self.mirror else {})
 
-    def filter(self, ins, pos=None, count=None, handover=None, lead=True) -> str:
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    def filter(
+        self, ins, pos=None, count=None, handover=None, lead=True, started=False, steps=None
+    ) -> str:
         """The ``filter`` name of instrument ``ins``'s filter program, or resumed from ``pos``
         at sweep ``count``; taken on a tick the previous voice's walk stepped, from the state
-        that step ``handover`` left."""
+        that step ``handover`` left; with ``steps``, as :meth:`pulse`'s."""
         # pylint: disable=too-many-locals
         image = self.ref._image(ins)  # pylint: disable=protected-access
         scale = 1 if self.feats.finefiltsweep else 8
@@ -360,7 +446,9 @@ class Tables:  # pylint: disable=too-few-public-methods
         if self.fkb:
             rows_of = {
                 "set": lambda p, _: bands(p) | fladvan(p, "fst", c=_col(image, p + 1)),
-                "sweep": lambda p: {self.walk: self.call("fsw", d=_signed(_col(image, p + 1)))},
+                "sweep": lambda p: {
+                    self.walk: self.call("f" + self._sw(), d=_signed(_col(image, p + 1)))
+                },
                 "advance": lambda p, _: fladvan(p, "fid"),
                 "jump": lambda _: {self.walk: self.call("frs")},
                 "rest": [Row({self.walk: self.call("frs")})],
@@ -370,9 +458,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         else:
             rows_of = {
                 "set": lambda p, _: bands(p) | {"cut": _col(image, p + 1) << 3},
-                "sweep": lambda p: {
-                    "cut": Expr(canonical(f"v + {scale * _signed(_col(image, p + 1))}"))
-                },
+                "sweep": lambda p: {"cut": self._step(_signed(_col(image, p + 1)), scale)},
                 "advance": lambda p, swept: {"cut": "none"} if swept else {},
                 "jump": lambda _: {},
                 "rest": [],
@@ -387,7 +473,15 @@ class Tables:  # pylint: disable=too-few-public-methods
             rows_of["started"] = {"res": res, "mode": mode} | cut
         if pos is None:
             pos = INST_WF_TABLE_POS + len(ins.wf_table) + 1 + len(ins.pw_table) + 1
-        rows, loop = self._swept(image, pos, "cut", rows_of, count, lead)
+        if steps is not None:
+            rows, loop = self._walked(image, pos, "cut", rows_of, count, [])
+            pause = {self.walk: self.call("frs")} if self.fkb else {"cut": "none"}
+            return self._named("filter", "f", Program(_stepped(rows, loop, steps, pause)))
+        self.per = 1 if ins.arp_speed & 0x80 else self.speed
+        try:
+            rows, loop = self._swept(image, pos, "cut", rows_of, count, lead, started)
+        finally:
+            self.per = 1
         return self._named("filter", "f", Program(rows, loop))
 
     def resume(self, ins, wave: tuple, pulse=None, filt=None, skip=True, **at) -> str:
@@ -411,7 +505,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             lead.append(Row({"hold": 0, "run": self.filter(ins, *filt, lead=skip)}))
         pos, counter, chord, cpos = wave
         held = counter if self.feats.arpspeedsupp and counter < 0x80 else 0
-        lead += ([Row({})] if skip else []) + self.skipped(held)
+        lead += ([Row({})] if skip else []) + self.skipped(ins, held)
         image = self.ref._image(ins)  # pylint: disable=protected-access
         reload = self.reload(ins) if reload is None else reload
         rows, loop = self.wave_rows(image, pos, ins, chord=(chord, cpos), reload=reload)
@@ -427,5 +521,5 @@ class Tables:  # pylint: disable=too-few-public-methods
             raise TranscribeError("a chord FX before any instrument")
         pos, counter, chord, ins = rec.chord
         if rec.newnote:
-            return self.wave(ins, chord)
+            return self.wave(ins, chord, gated=rec.gated)
         return self.resume(ins, (pos, counter, chord, None), skip=False)

@@ -32,9 +32,12 @@ STATE = {
         "vq": 1,
         "vr": 1,
         "vg": 2,
+        "mp": 1,
+        "mf": 1,
+        "mc": 1,
     },
-    "pw": {"pl": 2, "pk": 1},
-    "cut": {"ch": 1, "cl": 1, "ck": 1},
+    "pw": {"pl": 2, "pk": 1, "pc": 1},
+    "cut": {"ch": 1, "cl": 1, "ck": 1, "fc": 1},
 }
 
 _FIRST = "lda phi\nora phi+1\nbne step\n"
@@ -104,12 +107,19 @@ def _mirrored(text: str) -> str:
     )
 
 
+def paced(text: str, speed: int, counter: str) -> str:
+    """Sweep template ``text`` stepping on every ``speed``-th firing from its first, counted in
+    ``counter``: a table a multispeed tune walks on its PLAYER calls only."""
+    gate = f"lda phi\nora phi+1\nbne gp\nlda #1\nsta {counter}\ngp:\ndec {counter}\nbne go\n"
+    return gate + f"lda #{speed}\nsta {counter}\n" + text
+
+
 def unnoted(text: str) -> str:
     """Template ``text`` on a voice yet to play a note: DPITCH 0, the note -1."""
     return re.sub(r"\bne\b", "#255", text)
 
 
-def mirror_templates(tracked: bool = True) -> dict:
+def mirror_templates(tracked: bool = True, speed: int = 1) -> dict:
     """The pulse templates mirrored on the freq cell, for WRPITCH's carry on skipped WF ticks:
     WRPULS's where the pulse tracks the keyboard, else SETPWID's (``ml`` PWLOGHO)."""
     if not tracked:
@@ -120,14 +130,31 @@ def mirror_templates(tracked: bool = True) -> dict:
             "ksw": "clc\nlda ml\nadc #d\nsta ml\nlda #0\nrol\nsta cs\nrts\n",
             # PWADVAN, a jump to a sweep, the table's end: a carry ``c``.
             "kcs": "lda #c\nsta cs\nrts\n",
-        }
-    pulse = track_templates(False)
-    return {"m" + name[1:]: _mirrored(pulse[name]) for name in ("pst", "psw", "pid", "pwr")}
+        } | (
+            {
+                "ksws": paced(
+                    "clc\nlda ml\nadc #d\nsta ml\nlda #0\nrol\nsta cs\ngo:\nrts\n", speed, "mc"
+                )
+            }
+            if speed > 1
+            else {}
+        )
+    pulse = track_templates(False, speed)
+    names = ("pst", "psw", "pid", "pwr") + (("psws",) if speed > 1 else ())
+    return {"m" + name[1:]: re.sub(r"\bpc\b", "mc", _mirrored(pulse[name])) for name in names}
 
 
-def track_templates(finefiltsweep: bool) -> dict:
+def track_templates(finefiltsweep: bool, speed: int = 1) -> dict:
     """The pulse and filter tables' templates where the tune tracks the keyboard: each binding
-    keeps the player's own value and writes it with the note's track term."""
+    keeps the player's own value and writes it with the note's track term (a multispeed tune's
+    sweeps also paced, ``psws``/``fsws``)."""
+    out = _tracked(finefiltsweep)
+    if speed > 1:
+        out |= {"psws": paced(out["psw"], speed, "pc"), "fsws": paced(out["fsw"], speed, "fc")}
+    return out
+
+
+def _tracked(finefiltsweep: bool) -> dict:
     return {
         # SETPULW: the width and PKBDTRK; then WRPULS.
         "pst": "lda phi\nora phi+1\nbne go\nlda #<w\nsta pl\nlda #>w\nsta pl+1\nlda #j\nsta pk\n"
@@ -165,9 +192,12 @@ def track_templates(finefiltsweep: bool) -> dict:
     }
 
 
-def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -> dict:
+def templates(
+    calcvibrato: bool, vibratotypes: bool, portavibra: bool = False, speed: int = 1
+) -> dict:
     """The templates' texts for a build: its SETFMOD, whether SLIDEVIB 0 is INCVIBR, and
-    whether a portamento ends in the instrument's vibrato."""
+    whether a portamento ends in the instrument's vibrato; a multispeed tune's VIBSLIDE steps
+    on the PLAYER calls only, the phase ``mp`` its ``ph`` counts."""
     amp = _CALC if calcvibrato else _CONST
     keep, end = "", ""
     if portavibra:
@@ -177,10 +207,12 @@ def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -
         stored = "lda #r\nsta vr\n" if calcvibrato else "lda #<g\nsta vg\nlda #>g\nsta vg+1\n"
         keep = "lda #c\nsta vt\nlda #i\nsta vi\nlda #q\nsta vq\n" + stored
     step = _STEP.format(inc=_INCVIBR if vibratotypes else "", np="tgt" if portavibra else "pm")
+    if speed > 1:
+        step = step.replace("step:\n", f"step:\nlda mp\ncmp #{speed - 1}\nbeq run\nrts\nrun:\n", 1)
     step += _PORTAME.format(
         c="clc" if portavibra else "sec", e="pe" if portavibra else "tgt", end=end
     )
-    return {
+    out = {
         # ABSPTCH/RELPTCH: a WF pitch row (phi 0) loads FREQLO/FREQHI of the note masked to 7 bits.
         "tone": "lda phi\nora phi+1\nbne go\nlda nn\nclc\nadc #1\nand #127\ntax\nlda F.lo-1,x\n"
         "sta z\nlda F.hi-1,x\nsta z+1\ngo:\nlda z\nsta v\nlda z+1\nsta v+1\nrts\n",
@@ -203,6 +235,10 @@ def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -
         "wt": _FIRST + "rts\n" + step,
         # VIBSLIDE: the vibrato or slide SLIDEVIB selects.
         "stp": step,
+        # The PLAYER call's phase: mp is speed - 1 on it, counting down on the MULPLY calls
+        # (the first PLAYER call the speed-th).
+        "ph": f"lda phi\nora phi+1\nbne st\nlda #{speed - 1}\nsta mp\nst:\n"
+        f"dec mp\nbpl pd\nlda #{speed - 1}\nsta mp\nlda #0\nsta mf\npd:\nrts\n",
         # FORCVIB and SETVIBR, then step.
         "vfx": _FIRST + "lda #c\nsta k\nlda #i\nsta vc\nlda #q\nsta p\n" + amp + step,
         # SMALFX9: VIBFREQU.
@@ -218,3 +254,21 @@ def templates(calcvibrato: bool, vibratotypes: bool, portavibra: bool = False) -
         # A note after NPORTAM: PORTAME at NPORTAM's FREQMOD.
         "npn": _FIRST + "lda #131\nsta k\nrts\n" + step,
     }
+    if speed > 1:
+        # A MULPLY call's skipped WF tick: no HARDRST, SETPWID's carry only where the
+        # instrument's ARPSPED walks the pulse on it (bit 2 of ca), else none.
+        mul = (
+            f"c3:\nlda mp\ncmp #{speed - 1}\nbeq pt\nlda ca\nand #4\nbeq c0\nlda ca\nand #3\n"
+            "cmp #2\nbne cvo\nlda cs\njmp cvo\npt:\n"
+        )
+        for name in ("det", "dfx"):
+            out[name] = (
+                out[name]
+                .replace("c3:\n", mul, 1)
+                .replace("lda ca\ncmp #2\nbne cvo", "lda ca\nand #3\ncmp #2\nbne cvo")
+            )
+        # STRTSND's ARPSCNT keeps MULCNTP off the voice to the next PLAYER call: no write.
+        out["snd"] = out["snd"].replace("init:\nsta dd\n", "init:\nsta dd\nlda #1\nsta mf\n", 1)
+        for name in ("tone", "det", "dfx"):
+            out[name] = "lda mf\nbeq on\nrts\non:\n" + out[name]
+    return out
