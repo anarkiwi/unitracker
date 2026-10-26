@@ -282,6 +282,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         rows, name = [], None
         if legato and not voice.live:
             raise TranscribeError("a legato note before the voice's first trigger")
+        if legato and ins is not None and ins != voice.ins:
+            raise TranscribeError("an instrument selected on a legato note")
         if kind == "note" and legato:
             voice.index = trans + note & 0xFF
         elif kind == "note":

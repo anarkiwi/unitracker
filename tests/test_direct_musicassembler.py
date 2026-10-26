@@ -148,8 +148,8 @@ def filtered(one, voice: int = 0):
 def test_a_filter_command_binds_the_sweep(one):
     pid = filtered(one)
     tokens = list(one._tokens(pid))
-    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07))
-    assert tokens[2] == ("note", 3, None, 0x32, None)
+    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07), False)
+    assert tokens[2] == ("note", 3, None, 0x32, None, False)
     one._filters(100)
     assert one.sweeps[0] == ((1, 0), 0, 0x45, 0x07, 0xFA)
     voice = m.Voice(0, 0)
@@ -230,14 +230,14 @@ def legato_notes(one, every: int) -> int:
         at = one._ptr(one.lay.pattern_lo, one.lay.pattern_hi, pid)
         y, count = 0, 0
         while True:
-            val = one._rd(at + y)
+            val, selected = one._rd(at + y), False
             if MA.INSTR_MIN <= val < MA.LONGDUR_MIN:
-                y += 1
+                y, selected = y + 1, True
                 val = one._rd(at + y)
             if val < MA.DUR_MIN:
                 y += 1
                 ctl, count = one._rd(at + y), count + 1
-                if count % every == 0 and not ctl & 0xE0:
+                if count % every == 0 and not selected and not ctl & 0xE0:
                     write(one, at + y, ctl | 0x40)
                     done += 1
                 y += 2 if ctl & MA.CTL_FILTER else 0
