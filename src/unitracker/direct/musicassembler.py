@@ -47,6 +47,8 @@ VOICES = MA.VOICES
 JMP_ABS = 0x4C
 NOTE_CTL = MA.CTL_DUR_MASK | MA.CTL_FILTER | MA.CTL_VIBARP | MA.CTL_TRIGGERED
 FROZEN = "row.ad"
+# The bound sweep after a legato filter command: the owner's next trigger loads it afresh.
+STALE = (VOICES, 0, 0, 0)
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 SLOTS = {
     "freq": [Slot("freq", hold=(FROZEN,))],
@@ -488,8 +490,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                     if token[4] is not None:
                         u, c = token[4]
                         found.append(((tick, v), v, u, c, ((u & 0x0F) << 1) - 0x10 & 0xFF))
-                    if token[0] == "note" and not token[5]:
-                        notes.append((tick, v))
+                    if token[0] == "note":
+                        notes.append((tick, v, token[5]))
                     tick += (token[1] + 1) * self.rowlen
         self.sweeps, owner, self.takes = sorted(found), self.start[0], set()
         self.sweeps_at = {at for at, *_ in self.sweeps}
@@ -500,7 +502,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         bound, self.binds = None, set()
         if self.running[0] < VOICES and (self.running[2] or self.start[2]):
             bound = self.running
-        for tick, v in sorted(notes):
+        for tick, v, legato in sorted(notes):
+            if legato:
+                bound = bound and STALE if (tick, v) in self.sweeps_at else bound
+                continue
             want = self.sweep(tick, v)
             if want[0] == v and want != bound and (want[2] or bound):
                 self.binds.add((tick, v))
