@@ -311,6 +311,14 @@ def test_the_sweep_passes_between_voices(one):
     assert not cells.size, summary(cells, 3)
 
 
+def test_a_voice_untriggered_at_a_rest_sounds_its_instrument(chodel):
+    """The player triggers a voice whose note control is untriggered on its first output, even
+    where its first token is a rest."""
+    one = m.transcriber(chodel.read_bytes())
+    cells = standard_cells(one, one.document(), 3000)
+    assert not cells.size, summary(cells, 3)
+
+
 def test_cli(space_invadarz, capsys):
     assert m.main([str(space_invadarz)]) == 0
     assert capsys.readouterr().out.startswith(f"unitracker:{VERSION}\nmeta:{{title:Space")

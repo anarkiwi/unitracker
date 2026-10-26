@@ -374,6 +374,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         elif kind == "note":
             rows = [self._trigger(voice, trans + note & 0xFF, steps is not None)]
             name = self.instrument(voice.ins)
+        elif first and not self._rd(self.lay.note_ctl + voice.v) & MA.CTL_TRIGGERED:
+            rows, kind, name = [self._untriggered(voice, cmds)], "note", self.instrument(voice.ins)
         while len(rows) < length - 1:
             rows.append(self._step(voice, tick + len(rows)))
         if legato:
@@ -389,6 +391,16 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         if legato:
             cmds["legato"] = True
         return Event(note_name(voice.index) if kind == "note" else kind, name, cmds, steps=length)
+
+    def _untriggered(self, voice: Voice, cmds: dict) -> dict:
+        """The trigger row of ``voice``, whose note control is untriggered, on its first rest:
+        the player sounds the instrument at the voice's note index, and ``cmds`` takes the
+        frequency's offset from that note."""
+        index = self._rd(self.lay.note_index + voice.v)
+        at = frequency(index, CLOCK[1]) - frequency(0, CLOCK[1])
+        if free := self.image(voice.v)["freq"] - at:
+            cmds["freq"] = free
+        return self._trigger(voice, index)
 
     def _select(self, voice: Voice, ins: int) -> dict:
         """The commands of ``voice`` selecting instrument ``ins`` without a trigger: its pulse
