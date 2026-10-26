@@ -79,7 +79,8 @@ Refused with a `TranscribeError`:
 - a play routine other than the player's entry (a wrapper, interrupts), a voice dispatch other
   than voices 1-3 in order, tempo 0;
 - an init that leaves the tempo or a duration running, writes a voice or the cutoff, or does
-  not start the orderlists; a voice whose first token is no note (the image's cells would play);
+  not start the orderlists; a voice whose first token is no note while the image's control has the gate set (the image
+  would sound);
 - orderlist `$FC`/`$FD` commands, the silence pattern, a pattern without an end;
 - a note control byte with the vibrato or legato bit (`$20`, `$40`); a filter command sweeping
   from more than one voice (the one sweep would need unbinding from the old owner);
