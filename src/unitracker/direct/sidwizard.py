@@ -47,7 +47,6 @@ from unitracker.direct.swtrace import CLOCK, LOOPS, VOICES, Trace, standard, tra
 
 LEGATO, GATE_OFF, GATE_ON, NPORTAM = 0x3F, 0x7E, 0x7D, 0x78
 DUMMY = 256
-VOICE_REGISTERS = 21  # three voices of seven
 
 
 class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
@@ -563,19 +562,18 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
                     raise
         raise AssertionError("unreachable")
 
-    def regs(self) -> tuple | None:
-        """The registers before tick 0 where the tune's init routine wrote the voices' or left
-        the filter's routing: they hold until the player writes them. None where it left none."""
-        image = self.ref.image
-        start = tuple(image.sid_init[:VOICE_REGISTERS])
-        start += (0,) * (VOICE_REGISTERS - len(start))
-        route = image.filter_init[3] & 15
-        if not any(start) and not route:
-            return None
-        return start + (0, 0, route, 15)
-
     def document(self) -> str:
-        """The document of the song to its loop or end."""
+        """The document of the song to its loop or end; where the reference player's first tick
+        differs from it, as after an init routine that wrote the SID, the registers it shows
+        are the header's, held until the player writes them."""
+        text = self.assemble()
+        first = standard(self.swm).render_grid(1)[0]
+        if play(text, ticks=1)[0].tolist() == list(first):
+            return text
+        return self.assemble(tuple(int(r) for r in first))
+
+    def assemble(self, start: tuple | None = None) -> str:
+        """The document of the song to its loop or end, from registers ``start`` before tick 0."""
         rows, loop, dummies = self.traced()
         phrases = Section("phrase", [(name, list(events)) for events, name in self.phrases.items()])
         song = [SongRow(r) for r in rows]
@@ -593,7 +591,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             tempo=1,
             slots=self.slots(),
             state={cell: names for cell, names in state.items() if names} or None,
-            regs=self.regs(),
+            regs=start,
         )
         mods = [
             (signature(name, code.params(self.routines[name])), Code(self.routines[name]))

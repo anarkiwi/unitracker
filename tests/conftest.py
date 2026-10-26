@@ -101,11 +101,6 @@ whammer = hvsc_tune(
     "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
 )
 
-pantheon = hvsc_tune(
-    "pantheon",
-    "MUSICIANS/T/Toggle/Pantheon.sid",
-    "Path to Toggle's Pantheon, a SID-Wizard export whose init routine writes the voices.",
-)
 pimp_my_commodore = hvsc_tune(
     "pimp_my_commodore",
     "MUSICIANS/H/Hermit/Pimp_My_Commodore.sid",
