@@ -125,11 +125,17 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         while True:
             yield y, rd(base + y), rd(base + (y + 1 & 0xFF))
             y = y + 2 & 0xFF
-            val = rd(base + y)
-            if (lay.order_tempo and val == MA.ORDER_TEMPO) or (
-                lay.order_jump and val == MA.ORDER_JUMP
-            ):
-                raise TranscribeError(f"orderlist command ${val:02X}")
+            val, seen = rd(base + y), set()
+            while True:
+                if lay.order_tempo and val == MA.ORDER_TEMPO:
+                    raise TranscribeError(f"orderlist command ${val:02X}")
+                if not (lay.order_jump and val == MA.ORDER_JUMP):
+                    break
+                if y in seen:
+                    raise TranscribeError("an orderlist jump to itself")
+                seen.add(y)
+                y = rd(base + (y + 1 & 0xFF)) << 1 & 0xFF
+                val = rd(base + y)
             if val == lay.order_end:
                 y = lay.order_restart
 

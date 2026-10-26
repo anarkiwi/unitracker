@@ -82,7 +82,7 @@ Refused with a `TranscribeError`:
 - an init that leaves the tempo or a duration running, writes a voice or the cutoff, or does
   not start the orderlists; a voice whose first token is no note while the image's control has the gate set (the image
   would sound);
-- orderlist `$FC`/`$FD` commands, the silence pattern, a pattern without an end;
+- the orderlist `$FC` tempo command, the silence pattern, a pattern without an end;
 - a note control byte with the vibrato bit (`$20`), a legato note before its voice's first
   trigger, with an instrument selected, or over a running arpeggio (the vibrato would need to
   start again from the new note's frequency); a filter command sweeping
