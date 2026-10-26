@@ -38,6 +38,12 @@ def test_diag(one, space_invadarz, eastern_promise):
                 f"v{v+1} reg{r} ours {ours[:16, v*7+r].tolist()} ref {ref[:16, v*7+r].tolist()}"
             )
     lines.append(
-        "tokens v1: " + str([list(one._tokens(pid))[:4] for _, pid, _ in list(one._entries(0))[:1]])
+        "tokens v1: "
+        + str(
+            [
+                list(one._tokens(pid))[:4]
+                for _, pid, _ in list(__import__("itertools").islice(one._entries(0), 1))
+            ]
+        )
     )
     assert False, "DIAG\n" + "\n".join(lines)
