@@ -62,6 +62,7 @@ class Read:  # pylint: disable=too-many-instance-attributes
     unnoted: bool = False
     walking: tuple = (None, 0, 0, 0, 0)
     vol: int = None
+    gated: int = 1
 
 
 @dataclass
@@ -166,6 +167,7 @@ def trace(swm, frames: int = MAX_FRAMES, loops: int = LOOPS) -> Trace:
             wave = (v.wf_pos, v.arp_speed_counter, v.current_chord, v.chord_pos)
             rec.resume = (wave, (v.pw_pos, v.pw_sweep_count), filt)
         before = v.instrument
+        rec.gated = v.sid_ctrl & 1
         holder = ref.filter_controller_voice
         rec.cutfirst = holder is None or voices[id(v)] >= voices[id(holder)]
         rec.counts = (v.pw_sweep_count, ref.filter_sweep_count)

@@ -228,7 +228,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         detune = _col(image, pos + 2, 0xFF)
         return self._det(keys, None if detune == 0xFF else detune, carry, arp or 0), hold
 
-    def wave(self, ins, chord=None, kept=(None, None, False)) -> str:
+    def wave(self, ins, chord=None, kept=(None, None, False), gated=1) -> str:
         """The ``ctrl`` name of instrument ``ins``'s WF program from STRTSND's tick: its first
         waveform (control $09 without the first-frame switch), SETFLTP's routing; with the
         reset switches, the pulse or filter walk ``kept`` resumed instead of restarted (the
@@ -253,10 +253,11 @@ class Tables:  # pylint: disable=too-few-public-methods
             first["ctrl"] = 9
         elif ins.control & 0x08:
             first["ctrl"] = ins.effective_first_waveform
-        elif feats.hardrestypes and not ins.control & 0x03:
-            raise TranscribeError("a first frame that keeps a waveform no hard restart gated off")
         else:
-            first["gate"] = 0
+            # STRTSND writes no waveform: the voice keeps the one it has, gated off where a
+            # hard restart fired, the gate as it was where none does.
+            if not gated or not (feats.hardrestypes and not ins.control & 0x03):
+                first["gate"] = 0
             lead = [Row({"hold": 0, "gate": 1})]
         if ins.wf_table:
             image = self.ref._image(ins)  # pylint: disable=protected-access
@@ -510,5 +511,5 @@ class Tables:  # pylint: disable=too-few-public-methods
             raise TranscribeError("a chord FX before any instrument")
         pos, counter, chord, ins = rec.chord
         if rec.newnote:
-            return self.wave(ins, chord)
+            return self.wave(ins, chord, gated=rec.gated)
         return self.resume(ins, (pos, counter, chord, None), skip=False)

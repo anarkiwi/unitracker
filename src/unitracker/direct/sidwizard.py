@@ -462,10 +462,15 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             if "run" in commands or pulse is not None or filt is not None:
                 raise TranscribeError("a filter handover on a note that runs another table")
             commands["run"] = self.filter(ins, handover=rec.handover)
+        chord = rec.chord[2] if "run" in commands else None
         if pulse is not None or filt is not None:
             # A chord FX (its own run) picks the chord the kept walk plays.
-            chord = rec.chord[2] if "run" in commands else None
-            commands["run"] = self.wave(ins, chord, rec.kept)
+            commands["run"] = self.wave(ins, chord, rec.kept, rec.gated)
+        elif self.wave(ins, chord, gated=rec.gated) != self.wave(ins, chord):
+            if rec.handover is not None:
+                raise TranscribeError("a filter handover on a note that keeps a gate off")
+            # STRTSND keeps a waveform gated off.
+            commands["run"] = self.wave(ins, chord, gated=rec.gated)
         keep = rec.keep_filter or filt is not None
         return Event(self.pitch(rec), given, commands, keep_pw=pulse is not None, keep_filter=keep)
 
