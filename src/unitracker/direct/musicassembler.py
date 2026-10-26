@@ -465,6 +465,14 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 yield tick, pid, transrep >> 4
                 tick += self._ticks(pid)
 
+    def _reach(self, v: int, horizon: int):
+        """:meth:`_walk` of voice ``v`` to the first pattern at or after ``horizon``, the one
+        the last event before it reads its lookahead from."""
+        for start in self._walk(v, math.inf):
+            yield start
+            if start[0] >= horizon:
+                break
+
     def _filters(self, horizon: int) -> None:
         """The song's filter commands before ``horizon``, in the order the player parses them:
         ``self.sweeps`` is ``((tick, voice), voice, u, c, s)`` of each; ``self.binds`` the
@@ -473,7 +481,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         take the sweep from a later voice, which the player stops on their parse tick."""
         found, notes = [], []
         for v in range(VOICES):
-            for tick, pid, _ in self._walk(v, horizon):
+            for tick, pid, _ in self._reach(v, horizon):
                 if pid == MA.SILENCE_PATTERN:
                     continue
                 for token in self._tokens(pid):
@@ -502,11 +510,10 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         lay = self.lay
         steps = (self._rd(lay.vib_lo_step + v), self._rd(lay.vib_hi_step + v))
         voice, out = Voice(self._rd(lay.instr_x8 + v) >> 3, v, steps=steps), []
-        walk = []
-        for t, p, tr in self._walk(v, math.inf):
-            walk.append((t, p, tr, [] if p == MA.SILENCE_PATTERN else list(self._tokens(p))))
-            if t >= horizon:
-                break
+        walk = [
+            (t, p, tr, [] if p == MA.SILENCE_PATTERN else list(self._tokens(p)))
+            for t, p, tr in self._reach(v, horizon)
+        ]
         for (tick, pid, trans, tokens), nxt in zip(walk, walk[1:] + [None]):
             if tick >= horizon:
                 break
