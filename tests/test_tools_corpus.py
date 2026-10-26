@@ -83,6 +83,22 @@ def test_versions_fall_back_to_the_package_without_git(monkeypatch):
     corpus.versions.cache_clear()
 
 
+def test_versions_take_the_launchers_commit_else_none(monkeypatch):
+    monkeypatch.setenv("UNITRACKER_COMMIT", "abc\n")
+    corpus.versions.cache_clear()
+    assert corpus.versions()["unitracker"] == "abc"
+    monkeypatch.delenv("UNITRACKER_COMMIT")
+    monkeypatch.setattr(corpus.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError))
+
+    def missing(lib):
+        raise corpus.metadata.PackageNotFoundError(lib)
+
+    monkeypatch.setattr(corpus.metadata, "version", missing)
+    corpus.versions.cache_clear()
+    assert corpus.versions() == {"unitracker": None}
+    corpus.versions.cache_clear()
+
+
 def test_a_lifted_song_is_verified_and_its_versions_recorded(metal_warrior, tmp_path, monkeypatch):
     opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 200, "retry": False}
     opts["forms"] = ["lifted"]
