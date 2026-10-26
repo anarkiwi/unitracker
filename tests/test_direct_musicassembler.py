@@ -104,7 +104,8 @@ def test_player_refusals(one, monkeypatch):
 
 
 EDITS = {
-    "note control \\$41": lambda one: (pattern(one) + 2, (0x41,), {}),
+    "note control \\$21": lambda one: (pattern(one) + 2, (0x21,), {}),
+    "legato note before": lambda one: (pattern(one) + 2, (0x40,), {}),
     "an instrument selected without a note": lambda one: (pattern(one) + 3, (0x83, 0x61), {}),
     "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
     "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
@@ -212,3 +213,45 @@ def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
     write(one, one.lay.ctrl, 0x41)
     with pytest.raises(m.TranscribeError, match="a voice whose first row plays no note"):
         one.document()
+
+
+def legato_notes(one, every: int) -> int:
+    """Sets the legato bit of every ``every``-th note after the first of each pattern the
+    voices play, and returns how many it set."""
+    done, seen = 0, set()
+    for v in range(VOICES):
+        starts = set()
+        for y, pid, _ in one._entries(v):
+            if y in starts:
+                break
+            starts.add(y)
+            seen.add(pid)
+    for pid in seen:
+        at = one._ptr(one.lay.pattern_lo, one.lay.pattern_hi, pid)
+        y, count = 0, 0
+        while True:
+            val = one._rd(at + y)
+            if MA.INSTR_MIN <= val < MA.LONGDUR_MIN:
+                y += 1
+                val = one._rd(at + y)
+            if val < MA.DUR_MIN:
+                y += 1
+                ctl, count = one._rd(at + y), count + 1
+                if count % every == 0 and not ctl & 0xE0:
+                    write(one, at + y, ctl | 0x40)
+                    done += 1
+                y += 2 if ctl & MA.CTL_FILTER else 0
+            y += 1
+            if one._rd(at + y) == MA.PATTERN_END:
+                break
+    return done
+
+
+@pytest.mark.parametrize("every", [2, 3])
+def test_legato_notes_play_exactly(one, every):
+    """A note with the player's trigger latch set is a ``legato`` note that plays on."""
+    assert legato_notes(one, every)
+    text = one.document()
+    assert " legato" in text
+    cells = standard_cells(one, text)
+    assert not cells.size, summary(cells, 3)
