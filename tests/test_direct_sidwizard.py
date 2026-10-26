@@ -399,6 +399,9 @@ def test_init_routine_tunes_play_exactly(name, request):
 def test_diag(name, request):  # temporary
     from pysidwizard import parse_sid_song as p
     from unitracker.direct.swtrace import standard as st
+
     swm = p(request.getfixturevalue(name).read_bytes(), 1)
     pl = swm.player
-    raise AssertionError(f"DIAG {name} fs={swm.frame_speed} gate={pl.play_gate} filt={pl.filter_init} init={pl.sid_init.hex()} ins={len(swm.instruments)} seq={len(swm.sequences)}")
+    raise AssertionError(
+        f"DIAG {name} fs={swm.frame_speed} gate={pl.play_gate} filt={pl.filter_init} init={pl.sid_init.hex()} ins={len(swm.instruments)} seq={len(swm.sequences)}"
+    )
