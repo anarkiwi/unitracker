@@ -104,7 +104,8 @@ def test_player_refusals(one, monkeypatch):
 
 
 EDITS = {
-    "note control \\$41": lambda one: (pattern(one) + 2, (0x41,), {}),
+    "note control \\$21": lambda one: (pattern(one) + 2, (0x21,), {}),
+    "legato note before": lambda one: (pattern(one) + 2, (0x40,), {}),
     "an instrument selected without a note": lambda one: (pattern(one) + 3, (0x83, 0x61), {}),
     "an inner program's filter byte": lambda one: (program(one, 4) + 2, (1,), {}),
     "an inner program jump": lambda one: (program(one, 4) + 3, (0xFD,), {"program_jump": 1}),
@@ -147,8 +148,8 @@ def filtered(one, voice: int = 0):
 def test_a_filter_command_binds_the_sweep(one):
     pid = filtered(one)
     tokens = list(one._tokens(pid))
-    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07))
-    assert tokens[2] == ("note", 3, None, 0x32, None)
+    assert tokens[0] == ("note", 3, None, 0x30, (0x45, 0x07), False)
+    assert tokens[2] == ("note", 3, None, 0x32, None, False)
     one._filters(100)
     assert one.sweeps[0] == ((1, 0), 0, 0x45, 0x07, 0xFA)
     voice = m.Voice(0, 0)
@@ -211,4 +212,57 @@ def test_a_voice_may_start_without_a_note_if_its_image_does_not_gate(one):
     assert "off pw:3150 ctrl:64 freq:10000" in text
     write(one, one.lay.ctrl, 0x41)
     with pytest.raises(m.TranscribeError, match="a voice whose first row plays no note"):
+        one.document()
+
+
+def legato_notes(one, every: int, voices=range(VOICES)) -> list:
+    """Sets the legato bit of every ``every``-th note after the first of each pattern the
+    ``voices`` play, and returns the ``(address, value)`` of each cell it wrote."""
+    done, seen = [], set()
+    for v in voices:
+        starts = set()
+        for y, pid, _ in one._entries(v):
+            if y in starts:
+                break
+            starts.add(y)
+            seen.add(pid)
+    for pid in seen:
+        at = one._ptr(one.lay.pattern_lo, one.lay.pattern_hi, pid)
+        y, count = 0, 0
+        while True:
+            val, selected = one._rd(at + y), False
+            if MA.INSTR_MIN <= val < MA.LONGDUR_MIN:
+                y, selected = y + 1, True
+                val = one._rd(at + y)
+            if val < MA.DUR_MIN:
+                y += 1
+                ctl, count = one._rd(at + y), count + 1
+                if count % every == 0 and not selected and not ctl & 0xE0:
+                    write(one, at + y, ctl | 0x40)
+                    done.append((at + y, ctl | 0x40))
+                y += 2 if ctl & MA.CTL_FILTER else 0
+            y += 1
+            if one._rd(at + y) == MA.PATTERN_END:
+                break
+    return done
+
+
+@pytest.mark.parametrize("every", [2, 3])
+def test_legato_notes_play_exactly(one, every):
+    """A note with the player's trigger latch set is a ``legato`` note that plays on."""
+    edits = legato_notes(one, every, voices=(2,))
+    assert edits
+    text = one.document()
+    assert " legato" in text
+    ref = m.standard(one.song)
+    for at, value in edits:
+        ref._wr(at, value)
+    ours = play(text, ticks=TICKS)
+    cells = gridcmp.cell_diff(ours, ref.render_grid(len(ours)))
+    assert not cells.size, summary(cells, 3)
+
+
+def test_a_legato_note_over_a_running_arpeggio_is_refused(one):
+    assert legato_notes(one, 2, voices=(0,))
+    with pytest.raises(m.TranscribeError, match="legato note over a running arpeggio"):
         one.document()

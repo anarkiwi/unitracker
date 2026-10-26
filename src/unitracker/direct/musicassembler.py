@@ -60,7 +60,8 @@ class TranscribeError(ValueError):
 @dataclass
 class Voice:  # pylint: disable=too-many-instance-attributes
     """A voice's cells as its tokens are written: its instrument, the flags and cursor of its
-    inner program, its note index, the AD its last trigger wrote and whether its arpeggio runs."""
+    inner program, its note index, the AD its last trigger wrote and whether its arpeggio runs,
+    and whether a trigger has run (a legato note before it never sounds)."""
 
     ins: int
     v: int = 0
@@ -70,6 +71,7 @@ class Voice:  # pylint: disable=too-many-instance-attributes
     ad: int = 0
     arp: bool = False
     cut: Call | None = None
+    live: bool = False
 
 
 class Transcriber:  # pylint: disable=too-many-instance-attributes
@@ -132,8 +134,8 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 y = lay.order_restart
 
     def _tokens(self, pid: int):
-        """``(kind, duration, instrument, note, filter)`` of each token of pattern ``pid``, the
-        filter command's two bytes if its note has one."""
+        """``(kind, duration, instrument, note, filter, legato)`` of each token of pattern ``pid``,
+        the filter command's two bytes if its note has one, and whether its note is legato."""
         if pid == MA.SILENCE_PATTERN:
             raise TranscribeError("the silence pattern")
         rd = self._rd
@@ -144,18 +146,18 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
                 ins, y = val & 0x1F, y + 1 & 0xFF
                 val = rd(pat + y)
             if val >= MA.LONGDUR_MIN and ins is None:
-                yield "-", val & MA.CTL_DUR_MASK, None, None, None
+                yield "-", val & MA.CTL_DUR_MASK, None, None, None, False
             elif val >= MA.DUR_MIN:
-                yield "off", val & MA.CTL_DUR_MASK, ins, None, None
+                yield "off", val & MA.CTL_DUR_MASK, ins, None, None, False
             else:
                 y = y + 1 & 0xFF
                 ctl, sweep = rd(pat + y), None
                 if ctl & MA.CTL_FILTER:
                     sweep = (rd(pat + (y + 1 & 0xFF)), rd(pat + (y + 2 & 0xFF)))
                     y = y + 2 & 0xFF
-                if ctl & ~(MA.CTL_DUR_MASK | MA.CTL_FILTER):
+                if ctl & ~(MA.CTL_DUR_MASK | MA.CTL_FILTER | MA.CTL_TRIGGERED):
                     raise TranscribeError(f"note control ${ctl:02X}")
-                yield "note", ctl & MA.CTL_DUR_MASK, ins, val, sweep
+                yield "note", ctl & MA.CTL_DUR_MASK, ins, val, sweep, bool(ctl & MA.CTL_TRIGGERED)
             y = y + 1 & 0xFF
             if rd(pat + y) == MA.PATTERN_END:
                 return
@@ -272,18 +274,31 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         sweeps; a ``first`` non-note writes the voice's image cells instead, no instrument
         running yet."""
         kind, dur, ins, note = token[:4]
+        legato = token[5]
         length = (dur + 1) * self.rowlen
         if ins is not None and kind != "note" and ins != voice.ins:
             raise TranscribeError("an instrument selected without a note")
         voice.ins = voice.ins if ins is None else ins
         rows, name = [], None
-        if kind == "note":
+        if legato and not voice.live:
+            raise TranscribeError("a legato note before the voice's first trigger")
+        if legato and ins is not None and ins != voice.ins:
+            raise TranscribeError("an instrument selected on a legato note")
+        if legato and voice.arp:
+            raise TranscribeError("a legato note over a running arpeggio")
+        if kind == "note" and legato:
+            voice.index = trans + note & 0xFF
+        elif kind == "note":
             rows, name = [self._trigger(voice, trans + note & 0xFF)], self.instrument(voice.ins)
         rows += [self._step(voice) for _ in range(length - 1 - len(rows))]
+        if legato:
+            rows[0] = {"note": note_name(voice.index)} | rows[0]
         rows.append({"ad": voice.ad})
         cmds = self.image(voice.v) if first and kind != "note" else {"run": self._program(rows)}
         if kind == "note":
             cmds |= self._filter(voice, token[4], tick)
+        if legato:
+            cmds["legato"] = True
         return Event(note_name(voice.index) if kind == "note" else kind, name, cmds, steps=length)
 
     def _trigger(self, voice: Voice, index: int) -> dict:
@@ -291,6 +306,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
         ad, _, wave, *_, flags = self._record(voice.ins)
         voice.index = index
         voice.flags, voice.cursor, voice.ad, voice.arp = flags, 0, ad, False
+        voice.live = True
         return {"ctrl": wave}
 
     def _filter(self, voice: Voice, filt, tick: int) -> dict:
