@@ -139,14 +139,18 @@ def test_an_inner_program_filter_byte_pokes_the_sweep(one, monkeypatch):
 
 
 def test_an_inner_program_filter_byte_plays_exactly(one):
-    write(one, program(one, 4) + 2, 0x21)
+    at = program(one, 4) + 2
+    write(one, at, 0x21)
     try:
         text = one.document()
     except m.TranscribeError as err:
         assert "before the sweep's owner" in str(err)
         return
     assert "post.cut:poke(33)!" in text and "post:{}" in text
-    cells = standard_cells(one, text)
+    ref = m.standard(one.song)
+    ref._wr(at, 0x21)
+    ours = play(text, ticks=TICKS)
+    cells = gridcmp.cell_diff(ours, ref.render_grid(len(ours)))
     assert not cells.size, summary(cells, 3)
 
 
