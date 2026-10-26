@@ -60,7 +60,8 @@ the relative one) are not carried: there the document plays `F`, 0 where the wor
 Documents are verified against `standard()`, the replay with every note-table read answered by
 `F(k - 24)` at the document's clock (`compare(..., native=True)` against the replay's own table).
 Against the native replay, tunes that play notes under index 24, past 118, or at NTSC differ in
-those notes' frequencies only.
+those notes' frequencies only, and the pulse cells a pulse sweep derives from the pitch step's
+carry (3 of the 104 corpus tunes that verify; 58 are exact).
 
 ## Programs
 
