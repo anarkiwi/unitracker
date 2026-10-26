@@ -137,7 +137,7 @@ def test_cli(space_invadarz, capsys):
     assert m.main([str(space_invadarz)]) == 0
     assert capsys.readouterr().out.startswith(f"unitracker:{VERSION}\nmeta:{{title:Space")
     assert m.main(["--verify", "--frames", "400", str(space_invadarz)]) == 0
-    assert f"{space_invadarz}: first (" in capsys.readouterr().out
+    assert f"{space_invadarz}: exact" in capsys.readouterr().out
 
 
 def test_unitracker_lift_dispatches_to_it(eastern_promise):
