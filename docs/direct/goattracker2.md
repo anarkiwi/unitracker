@@ -28,13 +28,35 @@ reference player's (`decompile_sid(raw).player()`) over `--frames` ticks; `--dif
 | orderlist transpose | the play entry's `+t` |
 | orderlist loop | `{loop:k}`, the earliest row from which the timeline repeats |
 
+## Start
+
+Where the reference player's first two ticks differ from the document's, the header's `regs`
+are the registers the init call outputs and `lag:1` delays the output a tick, the init events
+lasting a tick less: the document's first tick is the first play call, its init events setting
+the cells that tick writes from the build's start state (`PlayerState`) to their values, the
+frequency to the channel's before that call by `put(l,h)!`, the cutoff by `cut:c!` and the pulse width by `set.pw:w!` in a slot
+after the pulse table's (`slots:{pw:{pulse:{...},set:{}}}`), as that tick's skip holds the
+pulse table's. A
+full-ghosting build (`GHOSTREGS`) outputs each call the ghost the previous call left: `regs`
+are its ghost image and `lag:2`; one whose init call changes the image is refused. The channel
+variables init keeps from the image (`PlayerState.channels`) start the freq cell's state:
+`seed(i,j)!` (or `start(l,h,i,j)!`, with the frequency) sets `t` to the vibrato phase and `m`
+to the last note, and instrument 1's intro vibrato waits the vibrato delay left.
+
 ## Order
 
-`_play_channel` runs a voice's tick as tick-0 work, the wavetable, the realtime command, the
-pulse table, then the fetch, where a hard restart turns the gate off and writes its AD/SR. The
-document declares that order, `order:[events,ctrl,pulse,filter,freq,pw,cut,read]`: a
-restart's first row (the fetch) applies after the voice's programs, so it overwrites a wavetable
-row's AD or SR on the same tick.
+A play call runs the filter table first, writing the filter registers, then each voice's
+`_play_channel`: tick-0 work, the wavetable, the realtime command, the pulse table, then the
+fetch, where a hard restart turns the gate off and writes its AD/SR. The document declares that
+order, `order:[events,filter,cut,ctrl,pulse,freq,pw,read]`: a wavetable row's filter table or
+cutoff (`$FA`, `$FC`) shows from the next tick, and a restart's first row (the fetch) applies
+after the voice's programs, so it overwrites a wavetable row's AD or SR on the same tick.
+
+The song runs one filter table, as the document's filter slot does: one a voice starts stops
+the one running. The cutoff has two slots, `cut:{set:{},filter:{}}`: a cutoff command binds
+the first once (`cut:c!`), and the filter table's rows the second (`filter.cut:v + 8`), which
+steps from the value the command set. Filter pointer or control 0 stops the table, keeping
+the cutoff, as the program of the empty table, `[{filter.cut:v},end]`, any voice runs.
 
 ## Holds
 
@@ -60,7 +82,7 @@ held slot passes it on.
 | writer | slot | modulator |
 |---|---|---|
 | wavetable note row | `wave.freq` | `note` |
-| wavetable `$F1`/`$F2`/`$F3` | `wave.freq` | `porta1`/`portan1`, `tporta1`/`tportan1`/`snap1` |
+| wavetable `$F1`/`$F2`/`$F3`/`$F4` | `wave.freq` | `porta1`/`portan1`, `tporta1`/`tportan1`/`snap1`, `vib1`/`vibn1` |
 | a note's instrument | `wave.freq`, `tick.freq` | `note`; `vib`/`vibn` after `delay - 1` firings |
 | pattern commands 1-4 | `tick.freq:call` | `porta`/`portan`, `tporta`/`tportan`/`snap`, `vib`/`vibn` |
 | command 0 after a frequency command | `tick.freq:call`, or `tick.freq:none` without a vibrato | the instrument's `vib`/`vibn` after the delay left |
@@ -87,7 +109,7 @@ they name; a binding is a call, its arguments in signature order (`tick.freq:vib
 | `tporta`, `tportan` | `s`; `k` | `_toneporta`: toward `F[n & 127]` by `s` (or the calculated step), snapping to it with `t = 0`, `m = n` where it crosses |
 | `snap` | | speed entry 0: `v = F[n & 127]`, `t = 0`, `m = n` |
 | `vib`, `vibn` | `l`, `c`, `s`; `l`, `k`, `c` | after `l` firings, `_vibrato`: the phase `t` turns at depth `c` and steps by 2, `v ± s` (or the calculated step) by its low bit |
-| `porta1`, `portan1`, `tporta1`, `tportan1`, `snap1` | as above | the same on `phi = 0` only (a wavetable command row) |
+| `porta1`, `portan1`, `tporta1`, `tportan1`, `snap1`, `vib1`, `vibn1` | as above (no `l`) | the same on `phi = 0` only (a wavetable command row) |
 
 A speed table entry `(l, r)` is `s = l << 8 | r`, or with `l & $80` calculated: `k = r` (and
 `c = l & $7F` for a vibrato).
@@ -97,7 +119,8 @@ A speed table entry `(l, r)` is `s = l << 8 | r`, or with `l & $80` calculated: 
 | GoatTracker | generic instrument |
 |---|---|
 | AD, SR | `ad`, `sr` |
-| wavetable position | `ctrl`, the wavetable program (`c` of no rows for 0) |
+| wavetable position | `ctrl`, the wavetable program (`c` of no rows for 0); a jump onto a jump row plays that row |
+| a first wavetable row that plays no note | `wave.freq:v`, the note keeping the frequency until a wavetable note row binds `note()` |
 | pulse table position | `pw`, the pulse expression; 0 leaves the running one |
 | filter table position | `filter`, the filter program; 0 leaves the running one |
 | vibrato param, delay | `tick.freq`: the vibrato after `delay - 1` firings |
@@ -115,13 +138,13 @@ The note's frequency is `F[N]`, the player's built-in note table read as `F.lo`/
 | wavetable `$01-$0F` delay | `wait` |
 | wavetable `$10-$DF`, `$E0-$EF` | `ctrl` (`& $0F` for `$Ex`) |
 | wavetable note `$00-$7F`, `$81-$DF`, `$80` | `note:+n` (`$40-$7F` as `n - 128`, down), absolute `note`, none |
-| wavetable `$F1/$F2/$F3` | `wave.freq`, one step |
-| wavetable `$F5/$F6/$F7/$F9/$FA/$FB/$FC/$FD` | `ad`, `sr`, `ctrl`, `run`/`pw:hold`, `run`/`cut:hold`, `res`+`route`, `cut`, `vol` |
+| wavetable `$F1/$F2/$F3/$F4` | `wave.freq`, one step |
+| wavetable `$F5/$F6/$F7/$F9/$FA/$FB/$FC/$FD` | `ad`, `sr`, `ctrl`, `run`/`pw:hold`, `run`, `res`+`route` (and `run` for 0), `cut:c!`, `vol` |
 | wavetable `$FF xx` | `{loop:k}`, or `end` for `xx = 0` |
 | pulse table from row `b` | `ptab {b}` (`ptabs` with `SIMPLEPULSE`), `_pulse_exec` over the player's own table in `PL`/`PR` (`PL[k]`, `PR[k]` its row `k`); the pw cell's state `r` is the row and `q` the time left (on `phi = 0`, `r = b`, `q = 0`): a jump row moves `r`, a set row writes the width, a modulation row adds its signed step |
-| filter table `$80-$F0` (+ a following `$00`) | `{mode,res,route,cut}` in one row |
-| filter table `$01-$7F` | `{hold:t,cut:v + 8s}`, `s` the signed step (`v - 8` for `$FF`) |
-| filter table `$00` | `{cut:8c}` |
+| filter table `$80-$F0` (+ a following `$00`) | `{mode,res,route,filter.cut}` in one row |
+| filter table `$01-$7F` | `{hold:t,filter.cut:v + 8s}`, `s` the signed step (`v - 8` for `$FF`) |
+| filter table `$00` | `{filter.cut:8c}` |
 
 The filter table runs on every tick, so its rows are program rows; the pulse table is held on
 the playroutine's skips, so it is a code modulator of the pw slot.
@@ -135,11 +158,14 @@ the playroutine's skips, so it is a code modulator of the pw slot.
 | `3` with a note | `tick.freq:call`, `tporta`, `tportan` or (`0`) `snap`, and `legato` |
 | `4` | `tick.freq:call`, `vib` or `vibn` with `l` 0 |
 | `5`, `6`, `7` | `ad`, `sr`, `ctrl` |
-| `8`, `9`, `A` | `run:c`/`run:none`, `pw:ptab(b)` with `pulse.pw:reset`/`pw:hold`, `run:f`/`cut:hold` |
-| `B` | `res:r route:m`, `res:0 route:0 cut:hold` for 0 |
-| `C`, `D` | `cut:8c`, `vol` |
+| `8`, `9`, `A` | `run:c`/`run:none`, `pw:ptab(b)` with `pulse.pw:reset`/`pw:hold`, `run:f` |
+| `B` | `res:r route:m`, and `run` of the empty filter table for 0 |
+| `C`, `D` | `cut:8c!`, `vol` |
 | `E` | `tempo:a/b`, the speed entry's two lengths |
-| `F` | `tempo` (`vtempo` for `$80+`) |
+| `F` | `tempo` (`vtempo` for `$80+`); `0`, `1`: the funk lengths |
+
+The funk lengths of a row's `E` or `F` are those the reference player's next row reads, after
+every voice's tick 0, so a funk table another voice sets applies where it plays.
 
 A phrase is a pattern occurrence's events; the same command running into it continues without
 restarting `phi`.
@@ -150,10 +176,18 @@ Each pattern occurrence is written from the reference player's channel state at 
 tick 0: the frequency command running into it, its instrument, and the vibrato delay left.
 Occurrences whose events come out the same share a phrase. The vibrato phase is the state `t`,
 so command 0 after a frequency command resumes the instrument's vibrato after the delay left.
+Command 0 latches the speed entry of the row's instrument, so it rebinds the tick slot where
+that differs from the one bound.
+
+A live-vibrato build (`Build.live_vibrato`) reads the vibrato of the channel's current
+instrument, which the fetch switches `gatetimer` ticks before the note: a note fetched with an
+instrument while command 0 runs plays a copy of it (`i64` up) whose restart's first row binds
+the tick slot to its vibrato with the delay left, and a note names its instrument wherever the
+restart it plays differs from the one named last.
 
 ## Not transcribed
 
-Wavetable vibrato (`$F4`) and the commands that stop the song (`$F0`, `$F8`, `$FE`) are refused.
+The wavetable commands that stop the song (`$F0`, `$F8`, `$FE`) are refused.
 
 The build's played channels (those not in `Build.idle`) become the document's voices, in the
 order of the SID voices `Build.voices` writes them to (`voices:` where fewer than three). Builds
@@ -164,8 +198,8 @@ These play differently from GoatTracker because the document has no construct fo
 
 | GoatTracker | why the document differs |
 |---|---|
-| one filter program for the song | a document's filter slot is per voice: a second voice starting a filter program leaves the first voice's running |
+| a wavetable row's resonance, routing or volume (`$FB`, `$FD`), which the next call's filter routine writes | the document sets the chip's registers on the row's tick |
+| a voice's wavetable before its first gate, which GoatTracker's initial gate byte `$00` masks to a control register of 0 | the document's gate clears bit 0 only |
+| in a live-vibrato build, a row with an instrument and no note, whose fetch switches the vibrato | the switch has no restart row to bind on |
 | a toneporta note's note change on tick 0 | a `legato` note applies on the step's tick, GoatTracker's tick 1 |
-| a ghosting build (the SID written from the previous call's registers) | its output lags the playroutine one tick and starts from the image's registers |
-| the SID registers a build's init leaves from its image before the first notes | the document's registers start at 0 |
 | the packed frequency table's overrun entries (notes 95-127: B7's `$FFFF` and the bytes past the table) | `F(k)` is 0 there |

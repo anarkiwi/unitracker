@@ -155,6 +155,22 @@ CASES = {
         ]
         + [REST] * 10,
     },
+    "wavetable vibrato": {
+        "wave": [(0x41, 0), (0xF4, 1), (0x01, 0x80), (0xF4, 2), (0, 12), (0xFF, 2)],
+        "rows": [(24, 1, 0, 0)] + [REST] * 3 + [(28, 1, 0, 0)] + [REST] * 11,
+        "speed": [(3, 48), (0x82, 1)],
+    },
+    "cutoff commands into a running filter table": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2}],
+        "filt": [(0x90, 0xF1), (0, 0x10), (1, 1), (0xFF, 3)],
+        "rows": [(24, 1, 0, 0), REST, (None, 0, 12, 0x30), (None, 0, 12, 0x08)] + [REST] * 12,
+    },
+    "a wavetable cutoff and filter table, from the next tick": {
+        "wave": [(0x41, 0), (0xFC, 0x40), (0x21, 0), (0xFA, 1), (0x41, 0), (0xFF, 0)],
+        "rows": [(24, 1, 0, 0)] + [REST] * 3 + [(28, 1, 0, 0)] + [REST] * 11,
+        "filt": [(0x90, 0xF1), (0, 0x10), (4, 4), (0xFF, 3)],
+    },
     "funk tempo": {
         "wave": WAVE,
         "rows": [(24, 1, 0xE, 1), REST, REST, (26, 0, 0xF, 1)] + [REST] * 12,
@@ -169,6 +185,43 @@ CASES = {
             (GT.KEYON - GT.FIRSTNOTE, 1, 0, 0),
         ]
         + [REST] * 13,
+    },
+    "a wavetable that plays no note at once keeps the frequency": {
+        "wave": WAVE + [(0x21, 0x80), (0x21, 0x0C), (0xFF, 0)],
+        "instruments": [
+            {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0},
+            {"wave_ptr": 3, "gateoff_timer": 2, "sustain_release": 0xF0},
+            {"gateoff_timer": 2, "sustain_release": 0xF0},
+        ],
+        "rows": [(24, 1, 0, 0), REST, (31, 2, 0, 0), REST, (36, 3, 0, 0)] + [REST] * 11,
+    },
+    "a wavetable jump to a jump row plays it": {
+        "wave": [(0x41, 0), (0xFF, 4), (0x41, 7), (0xFF, 3), (0xFF, 1)],
+    },
+    "command 0 latches the row's instrument's vibrato": {
+        "wave": WAVE,
+        "instruments": [
+            {"wave_ptr": 1, "gateoff_timer": 2, "vibrato_param": 1, "vibrato_delay": 1},
+            {"wave_ptr": 1, "gateoff_timer": 2},
+        ],
+        "rows": [(24, 1, 0, 0), REST, (None, 2, 0xF, 6), REST, (None, 0, 0, 0)] + [REST] * 11,
+        "speed": [(3, 48)],
+    },
+    "command 8 after a wavetable step plays its notes": {
+        "wave": [(0x41, 0), (0xF1, 1), (0xFF, 2), (0x21, 7), (0xFF, 0)],
+        "rows": [(24, 1, 0, 0), REST, (None, 0, 8, 4)] + [REST] * 13,
+        "speed": [(0, 32)],
+    },
+    "a live-vibrato build's vibrato reads the instrument fetched": {
+        "wave": WAVE,
+        "instruments": [
+            {"wave_ptr": 1, "gateoff_timer": 2, "vibrato_param": 1, "vibrato_delay": 1},
+            {"wave_ptr": 1, "gateoff_timer": 3, "vibrato_param": 2, "vibrato_delay": 2},
+        ],
+        "rows": [(24, 1, 0, 0), (26, 2, 0, 0), (28, 0, 0, 0), (29, 1, 0, 0), (31, 2, 0, 0)]
+        + [REST] * 11,
+        "speed": [(3, 48), (2, 16)],
+        "live_vibrato": True,
     },
 }
 
@@ -201,7 +254,7 @@ def test_state_and_code_of_the_templates_used(case, state):
     "case, value",
     [
         ("an arpeggio down", "{note:-2},{note:-64}"),
-        ("a filter table", "{hold:4,cut:v - 32}"),
+        ("a filter table", "{hold:4,filter.cut:v - 32}"),
         ("vibrato", " tick.freq:vib(0,3,48)"),
         ("porta down, then command 0 holds", " tick.freq:porta(-1,48)"),
     ],
@@ -258,8 +311,8 @@ def test_unsupported_layouts_are_refused(build, match):
 
 
 def test_unsupported_wavetable_commands_are_refused():
-    with pytest.raises(g.TranscribeError, match="wavetable command 4"):
-        g.Transcriber(gt_tune([(0xF4, 0x01), (0xFF, 0x00)])[0]).document()
+    with pytest.raises(g.TranscribeError, match="wavetable command 0"):
+        g.Transcriber(gt_tune([(0xF0, 0x01), (0xFF, 0x00)])[0]).document()
 
 
 def test_metal_warrior(metal_warrior):
@@ -295,5 +348,65 @@ def test_start_state_registers_are_the_header_registers():
     assert "regs:" in exact(gt_tune(WAVE, voice2=V2, state=state))
 
 
+@pytest.mark.parametrize("ghost", [False, True])
+def test_the_start_vibrato_phase_last_note_and_delay(ghost):
+    """A channel's vibrato phase, last note and vibrato delay as the image leaves them are the
+    freq cell's start state and its intro vibrato's delay."""
+    regs = tuple([0x34, 0x12, 0, 0, 0, 0, 0xF0] + [0] * 17 + [0x0F])
+    channels = (("vibtime", (254, 3, 0)), ("lastnote", (40, 0, 0)), ("vibdelay", (3, 1, 1)))
+    state = PlayerState(regs, 0, 0, 0x0F, (8, 5), ghost=ghost, channels=channels)
+    ins = [{"wave_ptr": 1, "gateoff_timer": 2, "vibrato_param": 1, "vibrato_delay": 1}]
+    rows = [REST] * 2 + [(None, 0, 4, 2)] + [REST] * 13
+    text = exact(gt_tune(WAVE, ins, rows, speed=[(3, 48), (0x82, 1)], voice2=V2, state=state))
+    first = "freq:seed(254,40)!" if ghost else "freq:start(52,18,254,40)!"
+    assert f"{first} tick.freq:vib(2,3,48),-.i1 freq:seed(3,0)! tick.freq:vib(0,3,48)," in text
+
+
 def test_the_editor_start_state_has_no_header_registers():
     assert "regs:" not in exact(gt_tune(WAVE, voice2=V2))
+
+
+def test_a_start_pulse_width_is_set_on_the_first_tick():
+    """The start pulse width is the pw cell's on the first tick, which skips the pulse table."""
+    regs = tuple([0x34, 0x12, 0x80, 0x07, 0, 0x0B, 0xAB] + [0] * 15 + [0x10, 0, 0x1F])
+    init = ((4, 0), (11, 0), (18, 0), (21, 0))
+    state = PlayerState(regs, 0x10, 0x10, 0x0F, (8, 5), ghost=False, init=init)
+    assert "set.pw:1920!" in exact(gt_tune(WAVE, voice2=V2, state=state))
+
+
+GHOST = tuple([0x34, 0x12, 0x80, 0x07, 0, 0, 0] * 3 + [0, 0, 0, 0])
+
+
+def test_a_ghosting_build_lags_a_tick_more_from_its_ghost():
+    """Each call outputs the ghost the previous one left, the first the image's."""
+    state = PlayerState(GHOST, 0, 0, 0x0F, (8, 5), ghost=True)
+    text = exact(gt_tune(WAVE, voice2=V2, state=state))
+    assert "\nlag:2\n" in text and f"\nregs:[{','.join(map(str, GHOST))}]\n" in text
+
+
+def test_a_ghost_image_the_init_call_changes_is_refused():
+    regs = (0, 0, 0, 0, 0x41) + GHOST[5:]
+    state = PlayerState(regs, 0, 0, 0x0F, (8, 5), ghost=True)
+    with pytest.raises(g.TranscribeError, match="ghost image the init call changes"):
+        g.Transcriber(gt_tune(WAVE, voice2=V2, state=state)[0]).document()
+
+
+def test_funk_lengths_are_those_the_row_plays_with():
+    """Command F 0 reads the funk lengths another voice's command E set earlier in the song."""
+    rows = [(24, 1, 0, 0)] + [REST] * 3 + [(None, 0, 0xF, 0)] + [REST] * 11
+    voice2 = [(31, 1, 0xE, 1)] + [REST] * 15
+    assert "tempo:5/3" in exact(gt_tune(WAVE, rows=rows, voice2=voice2, speed=[(5, 3)]))
+
+
+def test_one_filter_program_for_the_song():
+    """A filter table another voice starts replaces the running one; a cutoff command sets the
+    cutoff it steps from, and another voice's filter control 0 stops it, keeping the cutoff."""
+    instruments = [
+        {"wave_ptr": 1, "filter_ptr": 1, "gateoff_timer": 2},
+        {"wave_ptr": 1, "filter_ptr": 4, "gateoff_timer": 2},
+    ]
+    filt = [(0x90, 0xF1), (1, 2), (0xFF, 2), (0xA0, 0x12), (2, 0xFF), (0xFF, 5)]
+    rows = [(24, 1, 0, 0)] + [REST] * 7 + [(None, 0, 12, 0x20)] + [REST] * 7
+    voice2 = [REST] * 4 + [(31, 2, 0, 0)] + [REST] * 3 + [(None, 0, 11, 0)] + [REST] * 7
+    text = exact(gt_tune(WAVE, instruments, rows, filt=filt, voice2=voice2))
+    assert "cut:{set:{},filter:{}}" in text and "cut:hold" not in text
