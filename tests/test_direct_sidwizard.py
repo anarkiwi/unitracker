@@ -17,6 +17,7 @@ from pysidwizard import (
 from unitracker_grammar.document import VERSION, printed, read
 
 from unitracker.direct import sidwizard as s
+from unitracker.direct.swcode import unnoted
 from unitracker.direct.swtrace import standard
 from unitracker.direct.cli import summary
 
@@ -327,9 +328,13 @@ REFUSED = {
     "FX \\$09": [Row(note=37, instrument=1, fx=9, fx_value=1), EMPTY],
     "a note before any instrument": [Row(note=37), EMPTY],
     "a waveform FX on a note": [Row(note=37, instrument=1, fx=0x41), EMPTY],
-    "an instrument selected before any note": [Row(note=0x7E, instrument=1), EMPTY],
     "two FX of one cell": [Row(note=37, instrument=1), Row(note=0x65, fx=0x01, fx_value=1)],
 }
+
+
+def test_an_instrument_selected_before_any_note_plays_exactly(mega_run):
+    """Its tables walk from the header, gated off, until the first note."""
+    exact(song(mega_run.read_bytes(), [Row(note=0x7E, instrument=1), EMPTY] + notes((37, None))))
 
 
 @pytest.mark.parametrize("match", REFUSED)
@@ -393,3 +398,27 @@ def test_init_routine_writes_play_exactly(pimp_my_commodore):
     cells, text, _ = s.verify(pimp_my_commodore.read_bytes(), frames=280)
     assert not cells.size, summary(cells, 3)
     assert "\nregs:" in text
+
+
+@pytest.mark.parametrize(
+    "name, marks",
+    [
+        ("turn_me_on", ("pwr0()",)),
+        ("reflex", ("det0(", "pm:{}")),
+        ("axelf", ("hr.freq:hrc(255)",)),
+        ("crapman", ("fho(132,0,0)", "\nregs:")),
+        ("twenty_first", ("ksw(", "kcs(1)")),
+    ],
+)
+def test_lifted_gaps_play_exactly(name, marks, request):
+    """An instrument selected before any note walks its tables from its header at DPITCH 0
+    and PTNGATE 0, a first note's HARDRST carry on that walk, an init routine's tracked
+    cutoff, and SETPWID's carry on held WF rows."""
+    cells, text, _ = s.verify(request.getfixturevalue(name).read_bytes(), frames=3000)
+    assert not cells.size, summary(cells, 3)
+    assert all(mark in text for mark in marks)
+
+
+def test_an_unnoted_walk_reads_dpitch_0():
+    """A template on a voice yet to play a note reads the note as -1, so DPITCH as 0."""
+    assert unnoted("ldx ne\ninx\nbne x\n") == "ldx #255\ninx\nbne x\n"

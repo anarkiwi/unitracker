@@ -64,11 +64,11 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         self.cutfx = any(r.fx == 0x0F for p in swm.patterns for r in p.rows)
         self.fkb = self.fkb or self.cutfx
         self.walk = "walk.cut" if self.cutfx else "cut"
-        self.bind(self._held_rows())
+        self._bind(self._held_rows())
         self.programs = {"ctrl": {}, "pw": {}, "filter": {}}
         self.ins, self.used, self.phrases, self.dummies = {}, [], {}, []
 
-    def bind(self, rows: bool) -> None:
+    def _bind(self, rows: bool) -> None:
         """The templates, with HARDRST's carry and the pulse mirror where WF rows hold
         (``rows``)."""
         feats = self.feats
@@ -563,7 +563,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
                 raise TranscribeError(tr.refused[0])
             if any(r.switch and r.unnoted for v in tr.reads for r in v):
                 # An instrument selected before any note walks its header from position 0.
-                self.bind(self._held_rows(header=True))
+                self._bind(self._held_rows(header=True))
             self.phrases, self.programs = {}, {"ctrl": {}, "pw": {}, "filter": {}}
             self.ins, self.used, self.dummies = {}, [], []
             try:
@@ -583,7 +583,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             return text
         return self.assemble(tuple(int(r) for r in first))
 
-    def cutoff(self) -> dict:
+    def _cutoff(self) -> dict:
         """The cutoff the tune's init leaves in CTFH and CTFL, where the cutoff is code."""
         _, high, low, _ = self.ref.image.filter_init
         if not self.fkb or not high | low:
@@ -601,7 +601,7 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
         # No HARDRST carry until a voice's first note sets one.
         carry = {"hr.freq": self.call("hrc", c=255)} if self.hrc else {}
         init = [Event("-", dummy, dict(carry)) for dummy in dummies]
-        init[0] = Event("-", dummies[0], carry | {"vol": 15} | self.cutoff())
+        init[0] = Event("-", dummies[0], carry | {"vol": 15} | self._cutoff())
         named = {s for t in self.used for s in code.symbols(self.routines[t])}
         state = {
             cell: [(k, size) for k, size in names.items() if k in named]

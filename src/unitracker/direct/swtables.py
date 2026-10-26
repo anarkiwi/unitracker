@@ -88,7 +88,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         call = self.call("det", f=int(not keep), d=0 if keep else detune, c=carry, b=arp)
         return keys | {"dt.freq": call}
 
-    def skipped(self, ins, ticks: int) -> list:
+    def skipped(self, ticks: int) -> list:
         """The rows of ``ticks`` WF ticks ARPSCNT skips, their carry the pulse walk's."""
         if not ticks:
             return []
@@ -107,7 +107,7 @@ class Tables:  # pylint: disable=too-few-public-methods
         carry ``carry``, ARPSCNT's skipped ticks between."""
         if not self.feats.detunesupport:
             return rows, None
-        rest = [Row(self._det({}, None, carry))] + self.skipped(ins, reload)
+        rest = [Row(self._det({}, None, carry))] + self.skipped(reload)
         return rows + rest, len(rows) if reload else None
 
     def wave_rows(self, image: bytes, pos: int, ins, limit: int = 1 << 12, **at_start) -> tuple:
@@ -146,7 +146,7 @@ class Tables:  # pylint: disable=too-few-public-methods
                 ticks += hold * len(played)
                 pos += 3
                 continue
-            rows += [Row(keys)] + self.skipped(ins, hold - 1)
+            rows += [Row(keys)] + self.skipped(hold - 1)
             ticks += hold
             pos += 3
         return rows, None
@@ -167,7 +167,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             rows = []
             while at < len(table) and table[at] not in (0x7E, 0x7F):
                 pitch = base | {"note": Signed(table[at]), "wave.freq": self.call("tone")}
-                rows += [Row(self._det(pitch, row[1], 2, table[at]))] + self.skipped(ins, hold - 1)
+                rows += [Row(self._det(pitch, row[1], 2, table[at]))] + self.skipped(hold - 1)
                 at += 1
             return rows, at < len(table) and table[at] == 0x7F
 
@@ -403,7 +403,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             self.unnoted = False
 
     def _resumed(self, ins, wave, pulse, filt, skip, reload, gate) -> str:
-        # pylint: disable=too-many-arguments,too-many-positional-arguments
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         lead = []
         if pulse is not None:
             lead.append(Row({"hold": 0, "run": self.pulse(ins, *pulse, lead=skip)}))
@@ -411,7 +411,7 @@ class Tables:  # pylint: disable=too-few-public-methods
             lead.append(Row({"hold": 0, "run": self.filter(ins, *filt, lead=skip)}))
         pos, counter, chord, cpos = wave
         held = counter if self.feats.arpspeedsupp and counter < 0x80 else 0
-        lead += ([Row({})] if skip else []) + self.skipped(ins, held)
+        lead += ([Row({})] if skip else []) + self.skipped(held)
         image = self.ref._image(ins)  # pylint: disable=protected-access
         reload = self.reload(ins) if reload is None else reload
         rows, loop = self.wave_rows(image, pos, ins, chord=(chord, cpos), reload=reload)
