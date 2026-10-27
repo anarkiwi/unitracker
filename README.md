@@ -66,6 +66,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | each tune's lifted and optimised forms, cached, for a corpus study | `python tools/corpus.py forms TUNES_DIR\|LIST.csv [--out out/tokenize] [--forms ...] [--timeout S] [--multi-sid]` |
 | tokens per form, tokenizer and lexical category; what each printer transform saves | `python tools/tokens.py [out/tokenize] [--forms ...] [--encoders ...]` |
 | which sounds of each document are percussive (one or two pitches, over and over), and how much each part repeats where a voice interleaves them | `python tools/parts.py DOC.yaml ... [--ticks N] [--out PARTS.json]` |
+| what starts each program (a note, an event's or a row's `run:`, a restart), which starts are replaced before they play a row, what binds and zeroes each modulator's phase, and which programs do nothing | `python tools/triggers.py DOC.yaml\|LIST.txt ... [--ticks N] [--out TRIGGERS.json]` |
 | does a model's sampled text keep to the document grammar; mask sampling to it | `python tools/constrain.py {check,sample,bench,hazards} TOKENIZER [DOCS...]` |
 | how learnable is each form and tokenizer; can a fine-tuned LLM write tunes? (GPU, in Docker, detached) | `python tools/learn.py {launch,status,run} [--preset smoke\|full] [--set KEY=VALUE ...]` |
 | do the docs' links resolve; which lines did coverage lose? | `python tools/maint.py {links,coverage BEFORE.json AFTER.json}` |
