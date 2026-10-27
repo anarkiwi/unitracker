@@ -5,6 +5,8 @@ A position is a voice's two sidcall cascades, its gate bits and whether a note f
 off on its first call; the walk merges both layers' rows of a call (docs/direct/defmon.md).
 """
 
+# pylint: disable=duplicate-code
+
 import sys
 
 from pydefmon import DefmonPlayer
