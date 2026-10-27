@@ -266,8 +266,8 @@ def main(argv=None) -> int:
     recs = []
     for i, rec, err in tqdm(imap(timed, tasks, args.jobs), total=len(tasks), unit="doc"):
         recs.append(rec or {"doc": paths[i].stem, "error": repr(err)})
-    args.out.write_text(json.dumps(recs, indent=1), encoding="utf-8")
     print(summary(recs))
+    args.out.write_text(json.dumps(recs, indent=1), encoding="utf-8")
     return 0
 
 
