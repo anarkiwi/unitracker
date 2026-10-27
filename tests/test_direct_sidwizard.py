@@ -326,13 +326,16 @@ def test_a_lower_voice_takes_the_filter_claimed_in_the_same_tick(mega_run):
 
 REFUSED = {
     "a note before any instrument": [Row(note=37), EMPTY],
-    "a waveform FX setting a gate": [
-        Row(note=37, instrument=1),
-        Row(note=0x7E),
-        Row(fx=4, fx_value=0x41),
-    ],
     "two FX of one cell": [Row(note=37, instrument=1), Row(note=0x65, fx=0x01, fx_value=1)],
 }
+
+
+@pytest.mark.parametrize("on", [0x7D, 0x79, 0x7B])
+def test_a_waveform_fx_setting_a_gate_the_voice_has_off_plays_exactly(on, mega_run):
+    """BIGFX04 writes WFGHOST unmasked by PTNGATE: the gate sounds for the tick it is written,
+    and a later NGATEON (or the next note) keeps it."""
+    rows = [Row(note=37, instrument=1), Row(note=0x7E), Row(fx=4, fx_value=0x41), Row(note=on)]
+    exact(song(mega_run.read_bytes(), rows + notes((40, None))))
 
 
 def test_an_instrument_selected_before_any_note_plays_exactly(mega_run):

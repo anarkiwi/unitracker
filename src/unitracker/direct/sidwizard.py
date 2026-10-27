@@ -329,7 +329,8 @@ class Transcriber(Tables):  # pylint: disable=too-many-instance-attributes
             rec.waved = value
             return {}
         if value & 1 and not gate:
-            raise TranscribeError("a waveform FX setting a gate the voice has off")
+            # The write is WFGHOST unmasked by PTNGATE: sounding gated for the tick.
+            return {"run": self._named("ctrl", "c", Program([Row({"ctrl": value, "gate": 1})]))}
         return {"ctrl": value}
 
     def _moved(self, rec, fx: int) -> dict:
