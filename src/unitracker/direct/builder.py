@@ -5,6 +5,8 @@ nothing (an all-empty tail, an empty row, a key re-setting what every execution 
 shared by content and named in order of first use; docs/direct/builder.md.
 """
 
+# pylint: disable=duplicate-code
+
 import os
 import re
 from collections import defaultdict
