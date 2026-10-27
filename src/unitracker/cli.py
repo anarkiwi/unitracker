@@ -3,6 +3,7 @@ optimised."""
 
 import argparse
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -17,8 +18,13 @@ LIFTERS = {
     "goattracker2": ("unitracker.direct.goattracker2", "verify"),
     "sidwizard": ("unitracker.direct.sidwizard", "verify"),
     "defmon": ("unitracker.direct.defmon", "verify"),
+    "defmon-trace": ("unitracker.direct.defmon_trace", "verify"),
     "musicassembler": ("unitracker.direct.musicassembler", "verify"),
 }
+
+
+# format name: the LIFTERS entry that lifts it, from UNITRACKER_LIFTERS ("defmon=defmon-trace")
+CHOSEN = dict(p.split("=", 1) for p in os.environ.get("UNITRACKER_LIFTERS", "").split(",") if p)
 
 
 class FormatError(ValueError):
@@ -33,7 +39,7 @@ def lifter(raw: bytes):
         raise FormatError(f"no tracker format recognised: {exc}") from exc
     if name not in LIFTERS:
         raise FormatError(f"no direct lifter for {name}")
-    module, check = LIFTERS[name]
+    module, check = LIFTERS[CHOSEN.get(name, name)]
     module = importlib.import_module(module)
     return name, module, getattr(module, check)
 
