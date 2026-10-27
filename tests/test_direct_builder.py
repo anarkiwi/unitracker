@@ -125,6 +125,8 @@ def test_the_built_document_names_by_first_use_and_loops():
     assert len(progs["c2"].rows) == 3 and not progs["c3"].rows
     assert "lift(m)" in built.text.split("ins:")[0]
     assert len(play(built.text, ticks=12)) == 12
+    stated = b.build(Fake(stream), {"stated"}).doc.records("phrase")
+    assert [e.ins for e in stated["p2"]] == ["i1", None, None, None]
     with pytest.raises(b.BuildError, match="without a loop"):
         b.build(Fake(stream[:-1]))
 

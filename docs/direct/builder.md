@@ -35,7 +35,9 @@ step)`; a `run` of a `Run(kind, Program)` is a nested program the builder names.
   rows and loop, its entry the join of its starts (a note's state at a note), joined at each row
   boundary with what a note during it, a command, its own pulse programs or another voice
   binding a shared slot may set; a key stays where a slot's `row.` event needs it;
-- shares programs and phrases by content and names them in order of first use.
+- shares programs and phrases by content and names them in order of first use (init, then
+  the timeline, each definition's references after it);
+- with `UNITRACKER_BUILDER=stated`, writes the voice's instrument on each phrase's first note.
 
 ## Mismatches
 

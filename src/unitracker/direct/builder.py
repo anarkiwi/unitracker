@@ -24,6 +24,8 @@ CELLS = ("freq", "pw", "cut")
 SHARED = ("cut",)
 PREFIX = {"ctrl": "c", "pw": "pw", "filter": "f", "phrase": "p"}
 MAX_WALK = 1 << 20
+# builder options from UNITRACKER_BUILDER: "stated", each phrase's first note states its instrument
+OPTIONS = frozenset(os.environ.get("UNITRACKER_BUILDER", "").split(","))
 COMPILED = {"mask": "ctrl", "route_on": "route", "route_off": "route"}
 
 
@@ -232,8 +234,9 @@ def interfere(ctx: dict, slots: dict) -> dict:
 class Builder:  # pylint: disable=too-many-instance-attributes
     """One tracer's document."""
 
-    def __init__(self, tracer):
-        self.tracer, self.head = tracer, tracer.head()
+    def __init__(self, tracer, options=OPTIONS):
+        self.tracer, self.head, self.stated = tracer, tracer.head(), "stated" in options
+        self.ins = []
         self.slots = {cell: tuple(s.name for s in slots) for cell, slots in self.head["slots"]}
         self.listen = {
             re.sub(r"[-+]\d+$", "", e)
@@ -289,6 +292,7 @@ class Builder:  # pylint: disable=too-many-instance-attributes
             for form, c in ctx.items()
         }
         bounds = [0, *steps, end]
+        self.ins = [e.ins for e in init]
         timeline = [
             tuple(self.phrase(cells, v, a, b, final) for v in range(len(init)))
             for a, b in zip(bounds, bounds[1:])
@@ -304,15 +308,19 @@ class Builder:  # pylint: disable=too-many-instance-attributes
         return d.replace(e, commands=tuple(commands) + ((("run", ("ctrl", form)),) if form else ()))
 
     def phrase(self, cells: dict, v: int, a: int, b: int, final: dict) -> tuple:
-        """Voice ``v``'s events of ticks ``a`` to ``b``, one a tick, rests folded."""
-        out = []
+        """Voice ``v``'s events of ticks ``a`` to ``b``, one a tick, rests folded; where
+        ``stated``, the first note states the voice's instrument."""
+        out, stated = [], not self.stated
         for t in range(a, b):
             note, pos, cmds = cells.get((t, v), (None, None, ()))
-            event = (
-                d.Event("-", None, tuple(cmds))
-                if note is None
-                else d.Event(note.note, note.ins, tuple(cmds))
-            )
+            if note is None:
+                event = d.Event("-", None, tuple(cmds))
+            else:
+                self.ins[v] = note.ins or self.ins[v]
+                event = d.Event(
+                    note.note, note.ins or (None if stated else self.ins[v]), tuple(cmds)
+                )
+                stated = True
             event = self.event(event, None if pos is None else final[self.walks[pos, v]])
             if out and event == d.Event("-") and out[-1].note == "-" and not out[-1].commands:
                 out[-1] = d.replace(out[-1], steps=(out[-1].steps or 1) + 1)
@@ -402,9 +410,9 @@ def mods(body: str, templates: dict) -> tuple:
     )
 
 
-def build(tracer) -> Built:
-    """The document of ``tracer``'s song."""
-    return Builder(tracer).build()
+def build(tracer, options=OPTIONS) -> Built:
+    """The document of ``tracer``'s song, with builder ``options``."""
+    return Builder(tracer, options).build()
 
 
 def verify(
