@@ -11,7 +11,7 @@ from unitracker import cli
 
 @pytest.mark.parametrize("tune", ["metal_warrior", "mega_run", "crosseyed", "space_invadarz"])
 def test_a_lifted_document_plays_the_same_with_its_definitions_at_first_use(tune, request):
-    text = cli.lift(request.getfixturevalue(tune).read_bytes())
+    text = cli.lift(request.getfixturevalue(tune).read_bytes(), check=False)
     moved = printed(first_use(read(text)))
     assert "=" in moved.split("song:")[1] and read(moved) == first_use(read(text))
     assert np.array_equal(play(moved, ticks=1500), play(text, ticks=1500))

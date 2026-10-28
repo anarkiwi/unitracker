@@ -747,6 +747,26 @@ def transcriber(raw: bytes, subtune: int = 0, frames: int = 20000) -> Transcribe
     return Transcriber(swm, tuple((k, meta_text(v)) for k, v in meta), frames)
 
 
+def native_counts(raw: bytes, subtune: int = 0) -> dict:
+    """The module's object counts (:mod:`unitracker.direct.invariants`): its instruments and the
+    player's instrument 0, whose header the hard restart walks as WF rows; the entry points of
+    each instrument's own wave, pulse and filter tables (the start and any gate-off position)
+    and instrument 0's WF walk; its patterns and each voice's sequence entries."""
+    swm = parse_sid_song(raw, subtune + 1)
+
+    def entries(gateoff: str) -> int:
+        return sum(len({0, getattr(i, gateoff)}) for i in swm.instruments)
+
+    return {
+        "instruments": len(swm.instruments) + 1,
+        "ctrl": entries("gateoff_wf") + 1,
+        "pw": entries("gateoff_pw"),
+        "filter": entries("gateoff_filt"),
+        "phrases": len(swm.patterns),
+        "song": tuple(len(s) for s in swm.sequences[:VOICES]),
+    }
+
+
 def transcribe(raw: bytes, subtune: int = 0) -> str:
     """The document text of one subtune of a SID."""
     return transcriber(raw, subtune).document()

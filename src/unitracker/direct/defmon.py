@@ -581,6 +581,21 @@ def mods(body: str, absolute: bool = True) -> tuple:
     )
 
 
+def native_counts(raw: bytes, subtune: int = 0) -> dict:
+    """The replay's object counts (:mod:`unitracker.direct.invariants`): ``sidtab``, the
+    distinct sidTAB rows the played pattern events arm, per layer, as the song's arranger
+    walks to a position it has run before."""
+    tr = Transcriber(raw, subtune)
+    rows, seen = set(), set()
+    for step in sequence(DefmonPlayer(raw, subtune=subtune), tr.at, MAX_CALLS, tr.fixed):
+        if step.key in seen:
+            break
+        seen.add(step.key)
+        events = [ev for voice in step.events for ev in voice.values()]
+        rows |= {(k, ev[k]) for ev in events for k in (0, 1) if ev[k] is not None}
+    return {"sidtab": len(rows)}
+
+
 def transcribe(raw: bytes, subtune: int = 0) -> str:
     """The document of one subtune of a defMON SID."""
     return Transcriber(raw, subtune).document()

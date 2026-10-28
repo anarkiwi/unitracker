@@ -1,6 +1,7 @@
-"""tools/liftsize.py: lifted document sizes against their native tunes, ranked per player."""
+"""tools/liftsize.py: lifted documents' objects and sizes against their native tunes."""
 
 import json
+import lzma
 
 import pytest
 from pysidtracker import SidImage
@@ -8,8 +9,14 @@ from pysidtracker import SidImage
 import optimiser_docs as D
 
 import liftsize
+from unitracker.direct import invariants
 
-DOC = D.doc("      ctrl:\n        c1:[{wait:0,ctrl:65},end]\n", head="voices:1\ntempo:6\n")
+DOC = D.doc(
+    "      ins:\n        i1:{ad:9,sr:0,ctrl:c1}\n"
+    "      ctrl:\n        c1:[{wait:0,ctrl:65},end]\n"
+    "      phrase:\n        p1:[C4.i1,-]\n",
+    head="voices:1\ntempo:6\n",
+)
 
 
 def test_sections_split_the_bytes_by_top_level_key():
@@ -55,7 +62,7 @@ def corpus(tmp_path, tune, docs: dict):
 
 def test_each_song_is_measured_against_its_tune(tmp_path, crosseyed):
     doc = f"abcdef01-{crosseyed.stem}"
-    lst = corpus(tmp_path, crosseyed, {doc: DOC, f"{doc}-s1": DOC * 3})
+    lst = corpus(tmp_path, crosseyed, {doc: DOC, f"{doc}-s1": DOC})
     todo, missing = liftsize.tasks(tmp_path, [str(lst)])
     assert missing == ["stray"] and len(todo) == 1 and len(todo[0][1]) == 2
     recs = {r["doc"]: r for r in liftsize.measure(*todo[0])}
@@ -63,37 +70,56 @@ def test_each_song_is_measured_against_its_tune(tmp_path, crosseyed):
     native = len(SidImage.from_sid(crosseyed.read_bytes()).image)
     assert one["native"] == native
     assert 0 < one["native_data"] < native
-    assert three["lifted"] == 3 * one["lifted"] == 3 * len(DOC)
-    assert three["ratio"]["lifted"] == pytest.approx(3 * one["ratio"]["lifted"])
-    assert three["xz"] < 3 * one["xz"] and one["tokens"] < one["lifted"]
+    assert one["lifted"] == len(DOC) and one["ratio"]["lifted"] == len(DOC) / native
+    assert one["xz"] == len(lzma.compress(DOC.encode())) and one["tokens"] < one["lifted"]
     assert one["data_ratio"]["xz"] == one["xz"] / one["native_data"]
     assert sum(one["sections"].values()) == pytest.approx(1)
     assert one["sections"][one["dominant"]] == max(one["sections"].values())
+    assert one["counts"]["lifted"] == invariants.lifted(DOC) and one["exceeded"] is None
+    entries = one["counts"]["native"]["sidtab"]
+    assert one["kinds"] == {"sidtab": 2 / entries} and entries >= 2
+    assert three["counts"] == one["counts"]
+
+
+def test_a_native_count_that_fails_leaves_the_kinds_unchecked():
+    got = liftsize.counted(b"not a sid", 0, DOC)
+    assert got["counts"]["error"].startswith("FormatError") and got["counts"]["native"] == {}
+    assert got["kinds"] == {} and got["exceeded"] is None
 
 
 def record(doc: str, ratio: float, player: str = "p") -> dict:
-    """A measured record of ``player`` whose sizes are ``ratio`` times its native bytes."""
+    """A measured record of ``player`` with ``ratio`` times its tune's control programs and
+    native bytes."""
+    have, native = {"ctrl": round(ratio * 10)}, {"ctrl": 10}
     return {
         "doc": doc,
         "player": player,
-        "lifted": int(ratio * 100),
         "ratio": dict.fromkeys(liftsize.MEASURES, ratio),
         "data_ratio": None,
         "sections": {"ctrl": 0.75, "song": 0.25},
         "dominant": "ctrl",
+        "counts": {"lifted": have, "native": native},
+        "kinds": liftsize.ratios(have, native),
+        "exceeded": invariants.exceeded(have, native),
     }
 
 
-def test_the_summary_ranks_the_outlier_first():
-    recs = [record(f"d{i}", 1 + i / 10) for i in range(9)] + [record("big", 300)]
+def test_kind_ratios_take_a_voice_at_most_and_an_empty_native_kind_as_unbounded():
+    have = {"song": (3, 8), "ctrl": 2, "pw": 0}
+    got = liftsize.ratios(have, {"song": (3, 4), "ctrl": 0, "pw": 0})
+    assert got == {"song": 2.0, "ctrl": float("inf"), "pw": 0.0}
+
+
+def test_the_summary_counts_broken_invariants_and_ranks_the_worst_first():
+    recs = [record(f"d{i}", 0.5 + i / 10) for i in range(9)] + [record("big", 30)]
     recs += [record("lone", 2, "q"), {"doc": "bad", "error": "x"}]
-    text = liftsize.summary(recs, 2)
-    lines = text.splitlines()
+    lines = liftsize.summary(recs, 2).splitlines()
     assert lines[0].startswith("11 songs (1 failed)")
-    tops = [i for i, line in enumerate(lines) if "top by" in line]
-    assert [lines[i + 1].split()[-1] for i in tops] == ["big", "big", "lone", "lone"]
-    assert float(lines[tops[0] + 1].split()[2]) > 10 and "ctrl 75%" in lines[tops[0] + 1]
-    assert "xz/data" not in text
+    assert lines[1] == "p: 10 songs, 4 break an invariant"
+    assert lines[2] == "  first kind exceeded: {'ctrl': 4}; 0 unread"
+    tops = [i for i, line in enumerate(lines) if "top 2 by kind ratio" in line]
+    assert lines[tops[0] + 1].split() == ["ctrl", "300/10", "30", "ctrl", "75%", "big"]
+    assert lines[tops[1] + 1].split()[-1] == "lone" and "xz/data" not in "\n".join(lines)
 
 
 def test_the_command_line_writes_records_and_summarises(tmp_path, crosseyed, capsys):

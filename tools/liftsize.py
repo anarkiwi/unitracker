@@ -1,5 +1,6 @@
-"""How large each lifted song's document is against its native tune: bytes, tokens and xz bytes
-per native byte, and each top-level section's share, ranked to find representations that blow up.
+"""How each lifted song's document compares with its native tune: its objects of each kind
+against the native model's (the lift's invariants), and its bytes, tokens and xz bytes per native
+byte with each top-level section's share, ranked to find representations that blow up.
 
 ``python tools/liftsize.py CORPUS LIST.csv ... [--hvsc DIR] [--top N] [--jobs J] [--out F.json]``
 """
@@ -10,7 +11,7 @@ import lzma
 import os
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -23,12 +24,13 @@ from pysidwizard.writer import build_swm
 from tqdm import tqdm
 
 import shared
+from unitracker.cli import lifter
+from unitracker.direct import invariants
 from unitracker.optimiser.measure import size
 
 SECTION = re.compile(rb"^([A-Za-z_]\w*):", re.M)
 QUANTILES = (0.1, 0.5, 0.9, 0.99, 1.0)
 MEASURES = ("lifted", "tokens", "xz")
-MAD_SIGMA = 1.4826
 
 
 def _musicassembler(raw: bytes) -> int:
@@ -63,28 +65,54 @@ def sections(text: bytes) -> dict:
     return {k: v / max(1, len(text)) for k, v in out.items()}
 
 
+def ratios(have: dict, native: dict) -> dict:
+    """Each kind's lifted count over its native count (``song``: its largest voice's)."""
+    out = {}
+    for kind, bound in native.items():
+        pairs = zip(have[kind], bound) if kind == "song" else [(have[kind], bound)]
+        out[kind] = max(c / b if b else float("inf") if c else 0.0 for c, b in pairs)
+    return out
+
+
+def counted(raw: bytes, subtune: int, text: str) -> dict:
+    """A song's lifted and native object counts, their :func:`ratios` and the first kind that
+    breaks the lift's invariants; a failed native count's error, its kinds unchecked."""
+    counts = {"lifted": invariants.lifted(text)}
+    try:
+        counts["native"] = lifter(raw)[1].native_counts(raw, subtune)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        counts["native"], counts["error"] = {}, repr(exc)
+    have, native = counts["lifted"], counts["native"]
+    return {"counts": counts, "kinds": ratios(have, native)} | {
+        "exceeded": invariants.exceeded(have, native)
+    }
+
+
+def sized(text: bytes, native: int, data: int | None) -> dict:
+    """A document's bytes, tokens and xz bytes, their ratios to the tune's ``native`` and song
+    ``data`` bytes, and its sections' shares."""
+    sizes = {"lifted": len(text), "tokens": size(text.decode()), "xz": len(lzma.compress(text))}
+    shares = sections(text)
+    return sizes | {
+        "sections": shares,
+        "dominant": max(shares, key=shares.get, default=""),
+        "ratio": {k: v / native for k, v in sizes.items()},
+        "data_ratio": {k: v / data for k, v in sizes.items()} if data else None,
+    }
+
+
 def measure(path: Path, docs: list) -> list:
-    """The records of one tune's lifted songs ``docs``, ``(name, document path, meta)`` each:
-    sizes, their ratios to the tune's native and song data bytes, and section shares."""
+    """The records of one tune's lifted songs ``docs``, ``(name, document path, meta, subtune)``
+    each: its :func:`counted` objects and :func:`sized` bytes."""
     raw = path.read_bytes()
     native = len(SidImage.from_sid(raw).image)
     data = native_data(docs[0][2].get("player", ""), raw)
     out = []
-    for doc, lifted, meta in docs:
+    for doc, lifted, meta, subtune in docs:
         text = lifted.read_bytes()
-        sizes = {"lifted": len(text), "tokens": size(text.decode()), "xz": len(lzma.compress(text))}
-        shares = sections(text)
-        rec = {
-            "doc": doc,
-            "path": str(path),
-            "player": meta.get("player"),
-            "ticks": meta.get("ticks"),
-        }
-        rec |= {"native": native, "native_data": data, **sizes, "sections": shares}
-        rec["ratio"] = {k: v / native for k, v in sizes.items()}
-        rec["data_ratio"] = {k: v / data for k, v in sizes.items()} if data else None
-        rec["dominant"] = max(shares, key=shares.get, default="")
-        out.append(rec)
+        rec = {"doc": doc, "path": str(path), "player": meta.get("player")}
+        rec |= {"ticks": meta.get("ticks"), "native": native, "native_data": data}
+        out.append(rec | sized(text, native, data) | counted(raw, subtune, text.decode()))
     return out
 
 
@@ -100,7 +128,9 @@ def tasks(corpus: Path, sources, hvsc=None) -> tuple:
         if meta.stem not in rows:
             missing.append(meta.stem)
             continue
-        groups[rows[meta.stem]["path"]].append((meta.stem, lifted, json.loads(meta.read_text())))
+        row = rows[meta.stem]
+        doc = (meta.stem, lifted, json.loads(meta.read_text()), int(row.get("subtune") or 0))
+        groups[row["path"]].append(doc)
     return [(shared.tune(p, hvsc), docs) for p, docs in groups.items()], missing
 
 
@@ -112,40 +142,53 @@ def run(args) -> list:
         print(f"{len(missing)} lifted songs not in the tune lists, e.g. {missing[0]}")
     out = []
     for i, recs, err in tqdm(imap(measure, todo, args.jobs), total=len(todo), unit="sid"):
-        out += recs or [{"doc": doc, "error": repr(err)} for doc, _, _ in todo[i][1]]
+        out += recs or [{"doc": doc, "error": repr(err)} for doc, *_ in todo[i][1]]
     return sorted(out, key=lambda r: r["doc"])
 
 
-def robust_z(values) -> np.ndarray:
-    """Each value's log's distance from the logs' median in MAD-estimated standard deviations."""
-    logs = np.log(values)
-    dev = logs - np.median(logs)
-    return dev / (MAD_SIGMA * (np.median(np.abs(dev)) or 1.0))
+def quantiles(values) -> str:
+    """The :data:`QUANTILES` of ``values``."""
+    return " ".join(f"{v:.3g}" for v in np.quantile(values, QUANTILES, method="nearest"))
+
+
+def distributions(rs: list) -> list:
+    """Lines of each kind's lifted/native ratio quantiles, then each size ratio's."""
+    lines = []
+    for kind in invariants.KINDS:
+        values = [r["kinds"][kind] for r in rs if kind in r["kinds"]]
+        if values:
+            lines.append(f"  {kind} lifted/native: {quantiles(values)}")
+    for base, over in (("ratio", "native"), ("data_ratio", "data")):
+        for key in MEASURES:
+            values = [r[base][key] for r in rs if r[base]]
+            if values:
+                lines.append(f"  {key}/{over} bytes: {quantiles(values)}")
+    return lines
+
+
+def worst(r: dict) -> str:
+    """A song's line: its largest kind ratio's kind and counts, size ratio and dominant section."""
+    kind = max(r["kinds"], key=r["kinds"].get, default="")
+    have, most = r["counts"]["lifted"].get(kind), r["counts"]["native"].get(kind)
+    section = f"{r['dominant']} {r['sections'].get(r['dominant'], 0):.0%}"
+    return f"    {kind} {have}/{most}  {r['ratio']['lifted']:.3g}  {section}  {r['doc']}"
 
 
 def summary(recs: list, top: int) -> str:
-    """Per player, each ratio's quantiles and the ``top`` songs by lifted and by xz ratio, each
-    with its robust z-score (:func:`robust_z`) and dominant section."""
+    """Per player, the songs breaking the lift's invariants by kind, each kind's and size
+    ratio's quantiles, and the ``top`` songs by their largest kind ratio."""
     ok = [r for r in recs if "ratio" in r]
     lines = [f"{len(ok)} songs ({len(recs) - len(ok)} failed); quantiles {QUANTILES}"]
     for player in sorted({r["player"] for r in ok}):
         rs = [r for r in ok if r["player"] == player]
-        lines.append(f"{player}: {len(rs)} songs")
-        for base in ("ratio", "data_ratio"):
-            for key in MEASURES:
-                values = [r[base][key] for r in rs if r[base]]
-                if values:
-                    q = " ".join(f"{v:.3g}" for v in np.quantile(values, QUANTILES))
-                    lines.append(f"  {key}/{'native' if base == 'ratio' else 'data'}: {q}")
-        for key in ("lifted", "xz"):
-            z = robust_z([r["ratio"][key] for r in rs])
-            lines.append(f"  top by {key}/native: lifted/native xz/native z bytes section doc")
-            lines += [
-                f"  {rs[k]['ratio']['lifted']:9.3g} {rs[k]['ratio']['xz']:6.3g} {z[k]:5.1f} "
-                f"{rs[k]['lifted']:>9} {rs[k]['dominant']} "
-                f"{rs[k]['sections'].get(rs[k]['dominant'], 0):.0%} {rs[k]['doc']}"
-                for k in np.argsort(-z)[:top]
-            ]
+        broken = Counter(r["exceeded"].split()[2] for r in rs if r["exceeded"])
+        unread = sum("error" in r["counts"] for r in rs)
+        lines.append(f"{player}: {len(rs)} songs, {broken.total()} break an invariant")
+        lines.append(f"  first kind exceeded: {dict(broken.most_common())}; {unread} unread")
+        lines += distributions(rs)
+        lines.append(f"  top {top} by kind ratio: kind lifted/native, bytes/native, section, doc")
+        rs.sort(key=lambda r: -max(r["kinds"].values(), default=0))
+        lines += [worst(r) for r in rs[:top]]
     return "\n".join(lines)
 
 

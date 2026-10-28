@@ -9,6 +9,7 @@ from pathlib import Path
 from pysidtracker import find_format
 from pysidtracker.errors import SidParseError
 
+from unitracker.direct import invariants
 from unitracker.optimiser import lossy, optimise
 from unitracker.optimiser.inline import MODES
 
@@ -38,10 +39,15 @@ def lifter(raw: bytes):
     return name, module, getattr(module, check)
 
 
-def lift(raw: bytes, subtune: int = 0) -> str:
-    """The generic document of 0-based ``subtune`` of the tune ``raw``."""
-    text = lifter(raw)[1].transcribe(raw, subtune)
-    return text[0] if isinstance(text, tuple) else text
+def lift(raw: bytes, subtune: int = 0, check: bool = True) -> str:
+    """The generic document of 0-based ``subtune`` of the tune ``raw``; where ``check``, a
+    :class:`~unitracker.direct.invariants.ModelError` where it has more objects than the tune."""
+    module = lifter(raw)[1]
+    text = module.transcribe(raw, subtune)
+    text = text[0] if isinstance(text, tuple) else text
+    if check:
+        invariants.check(text, module.native_counts(raw, subtune))
+    return text
 
 
 def verify(raw: bytes, subtune: int = 0, frames: int = 20000):
@@ -61,13 +67,16 @@ def lift_main(argv=None) -> int:
     )
     parser.add_argument("--ticks", type=int, help="--optimise: the guarantee's horizon")
     parser.add_argument(
+        "--unchecked", action="store_true", help="lift a tune whose document breaks the invariants"
+    )
+    parser.add_argument(
         "--inline", choices=MODES, default="named", help="--optimise: the definitions inline"
     )
     lossy.add_arguments(parser)
     args = parser.parse_args(argv)
     try:
-        text = lift(args.sid.read_bytes(), args.subtune)
-    except FormatError as exc:
+        text = lift(args.sid.read_bytes(), args.subtune, not args.unchecked)
+    except (FormatError, invariants.ModelError) as exc:
         print(f"{args.sid}: {exc}", file=sys.stderr)
         return 1
     if args.optimise:

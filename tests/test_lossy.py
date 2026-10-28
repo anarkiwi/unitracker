@@ -175,6 +175,7 @@ def test_the_cli_reports_the_lossy_mode(tmp_path, capsys):
 def test_unitracker_lift_runs_the_lossy_mode(metal_warrior, tmp_path, capsys):
     out = tmp_path / "out.yaml"
     argv = [str(metal_warrior), "-o", str(out), "--optimise", "--lossy", "--ticks", "300"]
+    argv.append("--unchecked")
     assert cli.lift_main(argv) == 0
     err = capsys.readouterr().err
     assert "lossy: " in err and " tokens" in err

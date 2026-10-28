@@ -29,16 +29,19 @@ pip install -e ".[dev]"
 ## Use
 
 ```sh
-unitracker-lift TUNE.sid [-o OUT.yaml] [--subtune N] [--optimise [--ticks T] [--lossy] [--inline MODE]]
+unitracker-lift TUNE.sid [-o OUT.yaml] [--subtune N] [--unchecked] [--optimise [--ticks T] [--lossy] [--inline MODE]]
 ```
 
 It detects the tune's format (pysidtracker) and writes its direct lifter's document, optimised
-with `--optimise` (with `--lossy`, code modulators first replaced by fitted expressions).
+with `--optimise` (with `--lossy`, code modulators first replaced by fitted expressions). A lift
+transliterates the tune's model: a document with more instruments, programs of a kind, phrases or
+song entries than the native model has raises `ModelError` (`unitracker.direct.invariants`)
+unless `--unchecked`.
 
 ```python
 from unitracker import cli
 
-cli.lift(raw, subtune)            # raw: the .sid bytes; the generic document's text
+cli.lift(raw, subtune)            # raw: the .sid bytes; the generic document's text (check=False: unchecked)
 cli.verify(raw, subtune, frames)  # the cells where the document's grid differs from the native
 ```
 
@@ -65,7 +68,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | what does the lossy mode replace, save and cost per tune; how does it sound? | `python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR]` |
 | each tune's lifted and optimised forms, cached, for a corpus study | `python tools/corpus.py forms TUNES_DIR\|LIST.csv [--out out/tokenize] [--forms ...] [--timeout S] [--multi-sid]` |
 | tokens per form, tokenizer and lexical category; what each printer transform saves | `python tools/tokens.py [out/tokenize] [--forms ...] [--encoders ...]` |
-| how large is each lifted document against its native tune (bytes, tokens, xz per native and song-data byte), which songs blow up most per player, and in which section | `python tools/liftsize.py CORPUS LIST.csv ... [--hvsc DIR] [--top N] [--out SIZES.json]` |
+| does each lifted document hold more instruments, programs, phrases or song entries than its native tune (the lift's invariants, `unitracker.direct.invariants`; `--unchecked` lifts anyway), and how large is it against the tune's bytes, by section | `python tools/liftsize.py CORPUS LIST.csv ... [--hvsc DIR] [--top N] [--out SIZES.json]` |
 | which sounds of each document are percussive (one or two pitches, over and over), and how much each part repeats where a voice interleaves them | `python tools/parts.py DOC.yaml ... [--ticks N] [--out PARTS.json]` |
 | what starts each program (a note, an event's or a row's `run:`, a restart), which starts are replaced before they play a row, what binds and zeroes each modulator's phase, and which programs do nothing | `python tools/triggers.py DOC.yaml\|LIST.txt ... [--ticks N] [--out TRIGGERS.json]` |
 | does a model's sampled text keep to the document grammar; mask sampling to it | `python tools/constrain.py {check,sample,bench,hazards} TOKENIZER [DOCS...]` |
