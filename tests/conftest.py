@@ -1,5 +1,6 @@
 """Shared fixtures: HVSC tunes by path, and synthetic GoatTracker 2 tunes."""
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +19,13 @@ from pygoattracker import (
     TypedSong,
 )
 from pygoattracker import constants as GT
-from pysidtracker.testing import resolve_tune
+from pydefmon import DefmonSong, PatternEvent, SidtabRow
+from pysidtracker import native_decrunch
+from pysidtracker.testing import TuneFetchError, default_cache, fetch_prgs, resolve_tune
+
+DEFMON_RELEASE = "https://csdb.dk/getinternalfile.php/204680/defmon-20201008.zip"
+DEFMON_EDITOR_SHA256 = "bc78644c5597a91b86df54aabcc6fbc76ccedf5bf0f3ddc63ac475dc6527b329"
+DEFMON_GATES = (0x715E, 0x715F, 0x7162)
 
 
 def hvsc_tune(name: str, tune: str, doc: str):
@@ -200,6 +207,97 @@ chodel = hvsc_tune(
     "Path to Joan's Chodel, a Music Assembler tune whose first voice starts on a rest with no"
     " trigger yet played.",
 )
+
+
+@pytest.fixture(scope="session", name="defmon_editor")
+def fixture_defmon_editor() -> bytes:
+    """The defMON V20201008 editor's decrunched 64K image, whose packer turns a worktune into
+    a replay: fetched from csdb once and cached under ``.tunecache``."""
+    dst = default_cache("disks") / "defmon-static.bin"
+    if dst.exists() and hashlib.sha256(dst.read_bytes()).hexdigest() == DEFMON_EDITOR_SHA256:
+        return dst.read_bytes()
+    try:
+        prgs = fetch_prgs(DEFMON_RELEASE, member="defmon-20201008.d64")
+    except TuneFetchError:
+        pytest.skip("defMON release unavailable")
+    for prg in (f.prg for f in prgs if f.name.lstrip(".").upper().startswith("DEFMON")):
+        image = native_decrunch(prg)
+        flat = bytes(image.mem) if image is not None else b""
+        if hashlib.sha256(flat).hexdigest() == DEFMON_EDITOR_SHA256:
+            dst.write_bytes(flat)
+            return flat
+    raise ValueError("no defMON editor in the release decrunches to its pinned image")
+
+
+def pack_worktune(editor: bytes, rows: dict, patterns: list, arranger: list) -> bytes:
+    """The replay defMON packs of a worktune: sidTAB ``rows`` ``{row: (dl, columns)}`` or
+    ``{row: target}`` for a jump row, ``patterns`` of events and ``arranger`` steps of three
+    patterns or ``(target, count)`` jumps."""
+    song = DefmonSong()
+    for row, value in rows.items():
+        if isinstance(value, int):
+            song.set_jp(row, value)
+            continue
+        song.sidtab_region[row * 15 : row * 15 + 15] = SidtabRow.pack(value[1])
+        song.set_jp(row)
+        song.set_dl(row, value[0])
+    for k, events in enumerate(patterns):
+        song.set_pattern_events(k, events + [PatternEvent.delay(0)] * (32 - len(events)))
+    for y, step in enumerate(arranger):
+        if len(step) == 2:
+            song.set_jump(y, target=step[0], count=step[1])
+        else:
+            song.set_step(y, v1=step[0], v2=step[1], v3=step[2])
+    for gate in DEFMON_GATES:
+        song.snapshot[gate - 0x1800] = 1
+    song.set_cia2_timer(0x4CC7)
+    song.set_sub_frame_count(1)
+    return DefmonSong.from_bytes(song.to_bytes()).to_replay(editor)
+
+
+DEFMON_ROWS = {
+    9: (2, {"WGh": 0x40, "WGl": 0x01, "AD": 0x09, "SR": 0xF0, "PW": 0x08, "PS": 0x83}),
+    10: (0x80, {"WGl": 0x00}),
+    12: (1, {"WGh": 0x20, "WGl": 0x01, "TR": 12, "AF": 0x81}),
+    13: (0, {"TR": 0, "AF": 0x05}),
+    14: 12,
+    16: (0x80, {"ACID": 0x1000, "CP": 0x10, "RE": 0xF1, "FV": 0x10}),
+    17: (0x80, {"ACID": 0xC120, "CP": 0xE0, "RE": 0x08}),
+}
+DEFMON_PATTERNS = [
+    [
+        PatternEvent.note_on(0x30, slot_a=9, duration=3),
+        PatternEvent(0x22, 0, 16, 0),
+        PatternEvent.note_on(0x34, duration=1),
+    ]
+    + [PatternEvent.alt_end(1)],
+    [
+        PatternEvent.note_on(0x3C, slot_a=12, duration=5),
+        PatternEvent.delay(3),
+        PatternEvent.alt_end(1),
+    ],
+    [PatternEvent.delay(7), PatternEvent(0x70, 9, 17, 0x40), PatternEvent.alt_end(1)],
+]
+
+
+@pytest.fixture(scope="session")
+def defmon_song(defmon_editor) -> bytes:
+    """Two steps and a loop over both layers, a slide and portamento loop and the filter."""
+    return pack_worktune(
+        defmon_editor, DEFMON_ROWS, DEFMON_PATTERNS, [(0, 1, 2), (1, 2, 0), (1, 0)]
+    )
+
+
+@pytest.fixture(scope="session")
+def defmon_gap(defmon_editor) -> bytes:
+    """A gate-off row whose waveform nibble is the previous program's."""
+    rows = {9: (0x80, {"WGh": 0x40, "WGl": 0x01}), 18: (0x80, {"WGl": 0x00})}
+    events = [
+        PatternEvent.note_on(0x30, slot_a=9, duration=3),
+        PatternEvent(0x43, 18, 0, 0),
+        PatternEvent.alt_end(1),
+    ]
+    return pack_worktune(defmon_editor, rows, [events], [(0, 0, 0), (0, 0)])
 
 
 def table(*rows) -> Table:

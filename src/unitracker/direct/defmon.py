@@ -16,7 +16,7 @@ from unitracker_grammar import code, frequency
 from unitracker_grammar import document as d
 from unitracker_player.player import play
 
-from unitracker.direct import cli
+from unitracker.direct import cli, dmcode
 from unitracker.direct.traps import Log
 from unitracker.direct.dmcode import CODE, STATE
 from unitracker.direct.dmimage import LiftError, locate, row_fields
@@ -50,7 +50,6 @@ LAYER_B = {"cp": "bcp", "acid": "bacid", "re": "bre", "fv": "bfv"}
 ACID = {"cp", "acid", "bcp", "bacid"}
 MAX_CALLS, MAX_STEP = 1 << 20, 1 << 14
 PHASE = 64
-NOTE7 = "adc #24\nand #127\n"  # the absolute build's note wraps to 7 bits
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
 TEXT = re.compile(r"[^\s,\[\]{}'\"#&*!|>%@`][^,\[\]{}]*")
 
@@ -299,10 +298,7 @@ class Transcriber:  # pylint: disable=too-many-instance-attributes
             keys.append(("gate", cols["_gate"]))
         if "_abs" in cols:
             keys.append(("note", note_name(cols["_abs"])))
-        if "tr" in cols:
-            tr = cols["tr"]
-            absolute = self.absolute and tr & 0x80
-            keys.append(("note", note_name(tr & 0x7F) if absolute else d.Signed(tr)))
+        keys += [transpose(cols["tr"], self.absolute)] if "tr" in cols else []
         keys += [(k, cols[k]) for k in ("ad", "sr") if k in cols]
         if {"pw", "ps", "af"} & cols.keys():  # any pw binding resets the sweep slot's phi
             flags = ("pw" in cols) | ("ps" in cols) << 1
@@ -517,6 +513,12 @@ def text(value: str) -> str:
     return value if TEXT.fullmatch(value) else "'" + value.replace("'", "''") + "'"
 
 
+def transpose(tr: int, absolute: bool) -> tuple:
+    """The ``note`` key of a row's TR column: in the absolute build with bit 7 the absolute
+    note ``tr & $7F``, else relative."""
+    return ("note", note_name(tr & 0x7F) if absolute and tr & 0x80 else d.Signed(tr))
+
+
 def pitch(mode: int) -> d.Call:
     """The pitch step's call in pitch mode ``mode``."""
     if not mode:
@@ -564,9 +566,9 @@ def route(re_: int) -> list:
     return [("res", re_ >> 4), ("route_on" if re_ & 0x08 else "route", re_ & 0x0F)]
 
 
-def mods(body: str, absolute: bool = True) -> tuple:
-    """Each template ``body`` calls, keyed by its signature, in first-call order; a build of
-    relative notes reads the note unwrapped."""
+def mods(body: str, absolute: bool = True, own: bool = False) -> tuple:
+    """Each template ``body`` calls, keyed by its signature, in first-call order, for the
+    build (:func:`~unitracker.direct.dmcode.native`)."""
     first = {}
     for name in CODE:
         found = re.search(rf"(?<![a-z0-9_.]){name}\(", body)
@@ -575,7 +577,7 @@ def mods(body: str, absolute: bool = True) -> tuple:
     return tuple(
         (
             d.signature(name, code.params(ROUTINES[name])),
-            d.Code.of(CODE[name] if absolute else CODE[name].replace(NOTE7, "adc #24\n")),
+            d.Code.of(dmcode.native(CODE[name], absolute, own)),
         )
         for name in sorted(first, key=first.get)
     )

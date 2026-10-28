@@ -17,7 +17,7 @@ from unitracker.optimiser.inline import MODES
 LIFTERS = {
     "goattracker2": ("unitracker.direct.goattracker2", "verify"),
     "sidwizard": ("unitracker.direct.sidwizard", "verify"),
-    "defmon": ("unitracker.direct.defmon", "verify"),
+    "defmon": ("unitracker.direct.dmlift", "verify"),
     "musicassembler": ("unitracker.direct.musicassembler", "verify"),
 }
 

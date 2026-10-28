@@ -11,7 +11,8 @@ edit proved to keep the register grid.
 |---|---|
 | [docs/direct/goattracker2.md](docs/direct/goattracker2.md) | the GoatTracker 2 transcription from pygoattracker's playroutine (`python -m unitracker.direct.goattracker2`) |
 | [docs/direct/sidwizard.md](docs/direct/sidwizard.md) | the SID-Wizard transcription from pysidwizard's playroutine (`python -m unitracker.direct.sidwizard`) |
-| [docs/direct/defmon.md](docs/direct/defmon.md) | the defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
+| [docs/direct/dmlift.md](docs/direct/dmlift.md) | the defMON transliteration of the tune's own data, format 2.4 layers and orderlists, and what the grammar cannot spell (`python -m unitracker.direct.dmlift`) |
+| [docs/direct/defmon.md](docs/direct/defmon.md) | the earlier defMON transcription from pydefmon's emulated replay (`python -m unitracker.direct.defmon`) |
 | [docs/direct/musicassembler.md](docs/direct/musicassembler.md) | the Music Assembler transcription from pymusicassembler's playroutine (`python -m unitracker.direct.musicassembler`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
 | [docs/optimiser.md#passes](docs/optimiser.md#passes) | the passes: defaults, merge, transposition folding, the legato snap, templates and their structural names, hoist (`python tools/passes_eval.py`) |
@@ -62,7 +63,8 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 |---|---|
 | does each tune lift to a document that plays its native player's grid, and why not (by cause) | `python tools/corpus.py check [TUNE.sid\|LIST.csv ...] [--out DIR] [--frames N] [--player RE] [--timeout S] [--multi-sid]` (default: the reference tunes; multi-SID tunes, by header or a GoatTracker build past three voices, excluded) |
 | why do a `check` table's differing tunes diverge (standard pitch, one-tick lag, start registers, register groups), with each GoatTracker 2 build's flags | `python tools/divergence.py out/check/results.csv [--frames N] [--jobs J]` (writes `classes.csv` beside it) |
-| where does one lifter's document differ from its native player? | `python -m unitracker.direct.{goattracker2,sidwizard,defmon,musicassembler} --verify TUNE.sid ... [--frames N] [--diff RUNS] [--jobs J]` |
+| where does one lifter's document differ from its native player? | `python -m unitracker.direct.{goattracker2,sidwizard,dmlift,musicassembler} --verify TUNE.sid ... [--frames N] [--diff RUNS] [--jobs J]` |
+| which sidTAB rows are behind a defMON document's differing control registers; each DefMon tune's verdict and size | `python tools/dmgaps.py TUNE.sid ... [--top K]`, `python tools/dmgaps.py --corpus LIST.csv [--hvsc DIR] [--jobs J] [--out F.jsonl]` |
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
 | the native player's register grid | `pysidtracker.find_format(raw).play(raw, subtune)` |
 | what does the lossy mode replace, save and cost per tune; how does it sound? | `python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR]` |
@@ -76,7 +78,7 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | how learnable is each form and tokenizer; can a fine-tuned LLM write tunes? (GPU, in Docker, detached) | `python tools/learn.py {launch,status,run} [--preset smoke\|full] [--set KEY=VALUE ...]` |
 | do the docs' links resolve; which lines did coverage lose? | `python tools/maint.py {links,coverage BEFORE.json AFTER.json}` |
 | which generator (semitone offset, `clock_hz`, rounding) reproduces each tracker's native note table, and which entries it misses | `python tools/notetables.py [--tune TRACKER=PATH ...] [--json OUT]` |
-| a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `table`, `hvsc_tune` |
+| a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `table`, `hvsc_tune`; `pack_worktune` (a defMON worktune packed by the editor's own packer, `defmon_editor`) |
 
 ## Layout
 
