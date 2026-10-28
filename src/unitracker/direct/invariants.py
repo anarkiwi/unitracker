@@ -19,17 +19,18 @@ def lifted(text: str) -> dict:
     song = load(text)
     found = {kind: {} for kind in ("instruments", "phrases", *SLOTS.values())}
     entries = [0] * song.voices
-    for row in song.timeline:
-        for v, entry in enumerate(row):
-            if entry[0] == "phrase":
-                entries[v] += 1
-                found["phrases"][id(entry[1])] = entry[1]
+    voiced = [(v, e) for row in song.timeline for v, e in enumerate(row)]
+    voiced += [(v, e) for v, (order, _) in enumerate(song.orders or ()) for e in order]
+    for v, entry in voiced:
+        if entry[0] == "phrase":
+            entries[v] += 1
+            found["phrases"][id(entry[1])] = entry[1]
     todo = [(None, e) for e in song.init]
     todo += [(None, e) for events in found["phrases"].values() for e in events]
     while todo:
         slot, obj = todo.pop()
         if slot is not None:
-            programs = found[SLOTS[slot]]
+            programs = found[SLOTS[song.kinds[slot]]]
             if obj is None or id(obj) in programs:
                 continue
             programs[id(obj)] = obj
@@ -40,6 +41,7 @@ def lifted(text: str) -> dict:
             if ins is not None and id(ins) not in found["instruments"]:
                 found["instruments"][id(ins)] = ins
                 todo += [(CONTROL, ins.ctrl), (PULSE, ins.pw), (FILTER, ins.filter)]
+                todo += list(ins.layers)
             obj = obj.ops
         todo += [value for key, value in obj if key == "run" and value is not None]
     out = {kind: len(objs) for kind, objs in found.items()}
