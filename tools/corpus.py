@@ -241,7 +241,7 @@ def forms_one(row: dict, opts: dict) -> dict | None:
                     meta.parent.mkdir(parents=True, exist_ok=True)
                     rec = {"player": cli.lifter(raw)[0], "versions": versions()}
                     meta.write_text(json.dumps(rec), "utf-8")
-                    text[name] = cli.lift(raw, subtune)
+                    text[name] = cli.lift(raw, subtune, not opts.get("unchecked"))
                     rec["ticks"] = song_ticks(text[name], opts["limit"])
                     meta.write_text(json.dumps(rec | verified(raw, subtune, rec["ticks"])))
                 else:
@@ -261,6 +261,7 @@ def write_forms(args) -> int:
     opts = {"out": str(args.out), "hvsc": args.hvsc, "timeout": args.timeout}
     opts.update(ticks=args.ticks, limit=args.limit, retry=args.retry)
     opts.update(forms=with_bases(args.forms or forms()), multi=args.multi_sid)
+    opts["unchecked"] = args.unchecked
     tunes = shared.rows(args.tunes, args.player, args.subtunes)
     tunes = shared.songs(tunes, args.subtune, args.min_seconds)
     rows = []
@@ -328,6 +329,7 @@ def main(argv=None) -> int:
     p.add_argument("--retry", action="store_true", help="retry forms that failed before")
     p.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) - 2))
     p.add_argument("--multi-sid", action="store_true", help="include multi-SID tunes")
+    p.add_argument("--unchecked", action="store_true", help="keep lifts that break invariants")
     args = ap.parse_args(argv)
     return write_forms(args) if args.command == "forms" else check(args)
 

@@ -780,6 +780,21 @@ def transcriber(raw: bytes, subtune: int = 0) -> Transcriber:
     return Transcriber(pymusicassembler.read(raw), subtune)
 
 
+def native_counts(raw: bytes, subtune: int = 0) -> dict:
+    """The song's object counts (:mod:`unitracker.direct.invariants`): its instruments, a
+    control program each and one per inner program, a pulse each, its patterns and each
+    voice's orderlist entries; the filter, written by inner program rows, unchecked."""
+    song = pymusicassembler.read(raw, subtune)
+    inner = sum(p is not None for p in song.inner_programs)
+    return {
+        "instruments": len(song.instruments),
+        "ctrl": len(song.instruments) + inner,
+        "pw": len(song.instruments),
+        "phrases": len(song.patterns),
+        "song": tuple(len(o.entries) for o in song.orderlists),
+    }
+
+
 def transcribe(raw: bytes, subtune: int = 0) -> str:
     """The document text of one subtune of a SID."""
     return transcriber(raw, subtune).document()

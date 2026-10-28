@@ -136,11 +136,12 @@ def test_a_lifted_document_inline_plays_its_grid(tune, mode, request, tmp_path):
     out = tmp_path / "out.yaml"
     path = request.getfixturevalue(tune)
     argv = [str(path), "-o", str(out), "--optimise", "--ticks", "3000", "--inline", mode]
+    argv.append("--unchecked")
     assert cli.lift_main(argv) == 0
     text = out.read_text(encoding="utf-8")
     doc = read(text)
     assert printed(doc) == text and (mode == "single" or not doc.defs and not doc.mods)
-    assert Guarantee(cli.lift(path.read_bytes()), 3000).holds(text)
+    assert Guarantee(cli.lift(path.read_bytes(), check=False), 3000).holds(text)
 
 
 def test_the_inline_pass_follows_the_lossy_mode():

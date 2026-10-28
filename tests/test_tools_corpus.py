@@ -2,6 +2,7 @@
 
 import csv
 import json
+import re
 from pathlib import Path
 
 import corpus
@@ -101,7 +102,7 @@ def test_versions_take_the_launchers_commit_else_none(monkeypatch):
 
 def test_a_lifted_song_is_verified_and_its_versions_recorded(metal_warrior, tmp_path, monkeypatch):
     opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 200, "retry": False}
-    opts["forms"] = ["lifted"]
+    opts |= {"forms": ["lifted"], "unchecked": True}
     row = {"path": str(metal_warrior), "subtune": 1}
     got = corpus.forms_one(row, opts)
     assert got["lifted"] == "ok" and got["verified"] is True and got["bad_cells"] == 0
@@ -161,7 +162,10 @@ def test_tunes_are_checked_and_reported(metal_warrior, tmp_path, capsys):
     assert (out / f"00000000-{metal_warrior.stem}.yaml").read_text().startswith("unitracker:")
 
 
-def test_the_survey_renderer_plays_the_lifted_document(mega_run):
+def test_the_survey_renderer_plays_the_lifted_document(mega_run, monkeypatch):
+    with pytest.raises(corpus.cli.invariants.ModelError):
+        corpus.render(mega_run.read_bytes(), 1, 50)
+    monkeypatch.setattr(corpus.cli.invariants, "check", lambda *_: None)
     played, info = corpus.render(mega_run.read_bytes(), 1, 50)
     assert played.shape == (50, 25) and info["backend"] == "sidwizard" and info["chars"] > 0
 
@@ -179,3 +183,9 @@ def test_multi_sid_tunes_are_excluded_unless_asked_for(metal_warrior, tmp_path, 
     assert not (out / "lifted" / "multi.err").exists()
     with pytest.raises(ValueError, match="multi-SID"):
         corpus.render(sid.read_bytes(), 1, 10)
+
+
+def test_a_lift_with_more_objects_than_its_tune_is_a_failure(metal_warrior, tmp_path):
+    opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 200, "retry": False}
+    got = corpus.forms_one({"path": str(metal_warrior)}, opts | {"forms": ["lifted"]})
+    assert re.fullmatch(r"ModelError: \d+ lifted \w+( on voice \d)? > \d+ native", got["lifted"])

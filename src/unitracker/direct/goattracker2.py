@@ -8,6 +8,7 @@ modulators (:mod:`unitracker.direct.gt2code`, docs/direct/goattracker2.md).
 import re
 import sys
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 from pygoattracker import constants as C
@@ -801,10 +802,38 @@ def repeat(rows: list, gaps: list):
     return None
 
 
+@lru_cache(maxsize=4)
+def decompiled(raw: bytes, subtune: int = 0):
+    """The decompiled model of one subtune, kept for the lift and its :func:`native_counts`."""
+    return decompile_sid(raw, subtune)
+
+
 def transcribe(raw: bytes, subtune: int = 0) -> tuple:
     """``(document text, decompiled model)`` of one subtune."""
-    model = decompile_sid(raw, subtune)
+    model = decompiled(raw, subtune)
     return Transcriber(model).document(), model
+
+
+def native_counts(raw: bytes, subtune: int = 0) -> dict:
+    """The model's object counts (:mod:`unitracker.direct.invariants`): its instruments, the
+    wave, pulse and filter table entry points instruments and pattern commands set, its
+    patterns and each played channel's orderlist entries, in voice order."""
+    model = decompiled(raw, subtune)
+    song, rows = model.song, [r for p in model.song.patterns for r in p.rows]
+
+    def entries(ptr: str, command: int) -> int:
+        starts = {getattr(i, ptr) for i in song.instruments}
+        return len((starts | {r.data for r in rows if r.command == command}) - {0})
+
+    channels = song.subtunes[model.subtune].channels
+    return {
+        "instruments": len(song.instruments),
+        "ctrl": entries("wave_ptr", C.CMD_SETWAVEPTR),
+        "pw": entries("pulse_ptr", C.CMD_SETPULSEPTR),
+        "filter": entries("filter_ptr", C.CMD_SETFILTERPTR),
+        "phrases": len(song.patterns),
+        "song": tuple(len(channels[c].entries) for c in layout(model.player())),
+    }
 
 
 def standard(model) -> Player:

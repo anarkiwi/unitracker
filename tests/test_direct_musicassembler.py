@@ -352,7 +352,7 @@ def test_cli(space_invadarz, capsys):
 def test_unitracker_lift_dispatches_to_it(eastern_promise):
     raw = eastern_promise.read_bytes()
     assert cli.lifter(raw)[0] == "musicassembler"
-    assert cli.lift(raw) == m.transcribe(raw)
+    assert cli.lift(raw, check=False) == m.transcribe(raw)
 
 
 def test_rests_and_gate_offs_play_exactly(one):
