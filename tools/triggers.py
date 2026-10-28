@@ -106,17 +106,18 @@ class Tracer(Player):  # pylint: disable=too-many-instance-attributes
             self.live[v, kind][2] = True
         self._via(("program", None), super()._run_slot, v, kind, t)
 
-    def _start(self, v, kind, prog, t):
+    def _start(self, v, slot, prog, t):
+        kind = self.song.kinds[slot]
         trigger, ins = self.via[-1] if self.via else ("init", None)
         self.starts[KINDS[kind], trigger] += 1
-        old = self.live.get((v, kind))
+        old = self.live.get((v, slot))
         if old and old[1] == t and not old[2] and old[0][0] != "init":
             self.replaced[KINDS[kind], old[0][0], trigger] += 1
             if old[0][1] is not None and kind == CONTROL:
                 self.ins_starts[old[0][1]]["replaced"] += 1
         if ins is not None and kind == CONTROL:
             self.ins_starts[ins]["starts"] += 1
-        self.live[v, kind] = [(trigger, ins), t, False]
+        self.live[v, slot] = [(trigger, ins), t, False]
         at = self.noted.get(v) == t
         if trigger == "restart" and kind == CONTROL:
             cur = self.cur_ins.get(v)
@@ -130,7 +131,7 @@ class Tracer(Player):  # pylint: disable=too-many-instance-attributes
                 self.moved.add((id(cur), id(prog)))
         if kind == CONTROL and prog is not None and prog.rows and REL0 in prog.rows[0][2]:
             self.rel0.setdefault(id(prog), Counter())[trigger, at] += 1
-        super()._start(v, kind, prog, t)
+        super()._start(v, slot, prog, t)
 
 
 def programs(song) -> dict:
