@@ -66,10 +66,11 @@ def sections(text: bytes) -> dict:
 
 
 def ratios(have: dict, native: dict) -> dict:
-    """Each kind's lifted count over its native count (``song``: its largest voice's)."""
+    """Each kind's lifted count over its native count (``song``, ``ctrl_layers``: its largest
+    voice's or layer's)."""
     out = {}
     for kind, bound in native.items():
-        pairs = zip(have[kind], bound) if kind == "song" else [(have[kind], bound)]
+        pairs = zip(have[kind], bound) if isinstance(bound, tuple) else [(have[kind], bound)]
         out[kind] = max(c / b if b else float("inf") if c else 0.0 for c, b in pairs)
     return out
 

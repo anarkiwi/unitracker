@@ -76,8 +76,9 @@ def test_each_song_is_measured_against_its_tune(tmp_path, crosseyed):
     assert sum(one["sections"].values()) == pytest.approx(1)
     assert one["sections"][one["dominant"]] == max(one["sections"].values())
     assert one["counts"]["lifted"] == invariants.lifted(DOC) and one["exceeded"] is None
-    entries = one["counts"]["native"]["sidtab"]
-    assert one["kinds"] == {"sidtab": 2 / entries} and entries >= 2
+    native = one["counts"]["native"]
+    assert set(one["kinds"]) == set(native) == {"ctrl_layers", "phrases", "song"}
+    assert one["kinds"]["phrases"] == invariants.lifted(DOC)["phrases"] / native["phrases"]
     assert three["counts"] == one["counts"]
 
 

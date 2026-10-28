@@ -2,7 +2,8 @@
 
 defMON note index ``k`` is generic note ``k - 24``: its word is the standard note table's
 ``F(k - 24)``, read as ``F.lo-24,y``. The portamento table ``P`` and the slide rates ``R`` are the
-replay's; :data:`STATE` names each cell's variables.
+replay's; :data:`STATE` names each cell's variables. :func:`native` reads the replay's own note
+table ``W`` instead.
 """
 
 STATE = {
@@ -68,6 +69,16 @@ CODE = {
     "lda fp+1\nadc t+1\njmp sub\nm0:\nlda fp\nclc\nadc e\n"
     "sub:\nldy q\nlda w\nsbc q\nsta w\nbcs out\n"
     "lda w+1\nbeq bot\ndec w+1\njmp out\nbot:\nlda #1\nsta w\ntya\neor #128\nsta q\nout:\n" + _W,
+    # a row's PW column ($16DF): the pulse's high byte, its low byte's high nibble
+    "pwset": "lda #p\nsta w+1\nand #240\nsta w\nrts\n",
+    # a row's PS column ($16F4): the sweep step
+    "psset": "lda #h\nsta q\nrts\n",
+    # a row's CP column ($1739), and each cell its ACID column ($1744) sets: the accumulator,
+    # the step, and the direction (1: subtract)
+    "cpset": "lda #c\nsta cp\nrts\n",
+    "accset": "lda #<j\nsta r\nlda #>j\nsta r+1\nrts\n",
+    "stepset": "lda #<k\nsta z\nlda #>k\nsta z+1\nrts\n",
+    "dirset": "lda #u\nsta o\nrts\n",
     "cinit": _FIRST.format("step") + "lda #u\nsta o\nlda #f\nsta l\nlda #k\nsta b\nstep:\n" + _ACID,
     "cinitd": _FIRST.format("step")
     + "lda #u\nsta o\nlda #f\nsta l\nlda #k\nsta b\nstep:\n"
@@ -78,3 +89,14 @@ CODE = {
     "add:\nlda #g\nand #12\nbeq done\nlsr\nlsr\nlsr\nsta o\nlda #<k\nsta z\nlda #>k\nsta z+1\n"
     "done:\nrts\n",
 }
+
+NOTE7 = "adc #24\nand #127\n"  # the absolute build's note wraps to 7 bits
+WORDS = (("F.lo-24,y", "W.lo,y"), ("F.hi-24,y", "W.hi,y"))
+
+
+def native(text: str, absolute: bool = True, own: bool = True) -> str:
+    """Template ``text`` for a build: reading the replay's own note table ``W`` where ``own``,
+    a build of relative notes reading the index unwrapped."""
+    for old, new in WORDS * own + ((NOTE7, "adc #24\n"),) * (not absolute):
+        text = text.replace(old, new)
+    return text

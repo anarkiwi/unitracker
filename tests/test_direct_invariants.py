@@ -22,7 +22,24 @@ COUNTS = {"instruments": 3, "ctrl": 3, "pw": 1, "filter": 1, "phrases": 3, "song
 
 
 def test_the_played_objects_are_counted_once_each():
-    assert inv.lifted(DOC) == COUNTS | {"sidtab": 6}
+    assert inv.lifted(DOC) == COUNTS | {"sidtab": 6, "ctrl_layers": (3,)}
+
+
+LAYERED = (
+    D.HEAD.replace("unitracker:2.3", "unitracker:2.4") + "voices:2\ntempo:6\nlayers:{ctrl:[a,b]}\n"
+    "ins:\n i1:{ad:9,sr:0,ctrl:c1,b.ctrl:c2}\n"
+    "ctrl:\n c1:[{ctrl:65},end]\n c2:[{ctrl:17},end]\n c3:[{ctrl:33},end]\n"
+    "phrase:\n p1:[C4.i1,D4 b.run:c3]\n p2:[E4 run:c3,-]\n"
+    "song:\n - voice:[p1,[p2,p1]x3|loop:0]\n - voice:[p2|end]\n"
+)
+
+
+def test_a_layered_orderlist_song_counts_each_layer_and_written_entry():
+    have = inv.lifted(LAYERED)
+    assert have["ctrl_layers"] == (2, 2) and have["ctrl"] == 3 and have["song"] == (3, 1)
+    assert (
+        inv.exceeded(have, {"ctrl_layers": (2, 1)}) == "2 lifted ctrl_layers on layer 2 > 1 native"
+    )
 
 
 @pytest.mark.parametrize(
@@ -51,7 +68,7 @@ def test_a_document_with_more_objects_than_its_tune_is_refused():
         ("metal_warrior", {"instruments", "ctrl", "pw", "filter", "phrases", "song"}),
         ("mega_run", {"instruments", "ctrl", "pw", "filter", "phrases", "song"}),
         ("space_invadarz", {"instruments", "ctrl", "pw", "phrases", "song"}),
-        ("crosseyed", {"sidtab"}),
+        ("crosseyed", {"ctrl_layers", "phrases", "song"}),
     ],
 )
 def test_each_lifter_counts_its_native_objects(tune, kinds, request, capsys):
