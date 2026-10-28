@@ -38,6 +38,7 @@ from unitracker_player.player import play
 
 from unitracker.direct import cli, swcode
 from unitracker.direct.goattracker2 import meta_text, note_name, rests
+from unitracker.direct.sidwizard import Transcriber
 from unitracker.direct.swtrace import CLOCK, VOICES, standard, trapped
 
 LEGATO, NPORTAM, GATE_ON, GATE_OFF = 0x3F, 0x78, 0x7D, 0x7E
@@ -151,20 +152,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes
             self.used.append(template)
         return Call(template, tuple(params[k] for k in code.params(self.routines[template])))
 
-    def _amp(self, raw: int, zero: bool = True) -> dict:
-        """SETFMOD's argument for raw amplitude ``raw``: ``r`` (CALCVIBRATO) or ``g``."""
-        if self.feats.calcvibrato:
-            return {"r": ((raw + 1) >> 1) + 1 if raw or not zero else 0}
-        if not raw:
-            return {"g": 0}
-        lo, hi = self.ref._freqmod(raw, 0)  # pylint: disable=protected-access
-        return {"g": hi << 8 | lo}
-
-    def _counter(self, kind: int, freq: int) -> int:
-        """SETVIBR's first VIBRACNT for SLIDEVIB ``kind`` and frequency nibble ``freq``."""
-        if not self.feats.vibratotypes or kind < 0x20:
-            return freq >> 1
-        return 0 if kind == 0x30 else freq
+    _amp = Transcriber.amp
+    _counter = Transcriber._counter  # pylint: disable=protected-access
 
     def _vibrato(self, ins, byte: int, template: str = "vfx", **extra) -> Call:
         """SETVIBR of vibrato ``byte`` with FORCVIB's type from ``ins``' control byte."""
