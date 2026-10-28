@@ -48,25 +48,36 @@ def onsets(ctrl: np.ndarray) -> tuple:
     return t + 1, v
 
 
+def previous(t: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Per onset, the frame of its voice's onset before it, else 0."""
+    order = np.lexsort((t, v))
+    out = np.zeros_like(t)
+    same = v[order][1:] == v[order][:-1]
+    out[order[1:]] = np.where(same, t[order][:-1], 0)
+    return out
+
+
 def lead(regs: tuple, t: np.ndarray, v: np.ndarray, k: int) -> dict:
-    """Per onset, each :data:`FEATURES` over its ``k`` lead frames (column j the (j+1)th before
-    it, false before the grid): AD and SR lowered from the onset's or zero, and whether the
-    envelope rate in effect (release, or the slower of attack and decay under a gate) is no
-    slower than the onset's attack."""
+    """Per onset, each :data:`FEATURES` over its ``k`` lead frames back to its voice's onset before
+    it (column j the (j+1)th before it): AD and SR lowered from the onset's but for the note
+    before's, or zero, and whether the envelope rate in effect (release, or the slower of attack
+    and decay under a gate) is no slower than the onset's attack; ``avail`` the frames in reach."""
+    first = previous(t, v)
     back = t[:, None] - np.arange(1, k + 1)
-    ok = back >= 0
+    ok = back >= first[:, None]
     c, a, s = (r[np.maximum(back, 0), v[:, None]] for r in regs)
-    a0, s0 = regs[1][t, v][:, None], regs[2][t, v][:, None]
+    (a0, s0), (ap, sp) = ((r[at, v][:, None] for r in regs[1:]) for at in (t, first))
     rate = np.where(c & GATE, np.maximum(a >> 4, a & 15), s & 15)
     return {
         "gate_off": ok & ((c & GATE) == 0),
         "test": ok & ((c & TEST) > 0),
-        "ad_lowered": ok & (a < a0),
-        "sr_lowered": ok & (s < s0),
+        "ad_lowered": ok & (a < a0) & (a != ap),
+        "sr_lowered": ok & (s < s0) & (s != sp),
         "ad_zero": ok & (a == 0),
         "sr_zero": ok & (s == 0),
         "rate_safe": ok & (rate <= a0 >> 4),
         "values": (a.astype(np.int32) << 8) | s,
+        "avail": ok.sum(axis=1),
     }
 
 
@@ -78,16 +89,17 @@ def run(mask: np.ndarray) -> np.ndarray:
 def classify(feat: dict) -> tuple:
     """Per onset, its class (an index into :data:`CLASSES`), its lead and its restart frames: the
     leading lead frames of lowered AD or SR or a set test bit, else of the gate off; a run filling
-    the window is a state held from before it, not a restart (a held gate off is ``none``)."""
-    k = feat["gate_off"].shape[1]
+    the frames in reach is a state held from before it, not a restart (a held gate off: ``none``).
+    """
+    avail = feat["avail"]
     frames = np.cumprod(feat["ad_lowered"] | feat["sr_lowered"] | feat["test"], axis=1) > 0
-    frames &= ~frames[:, -1:]
+    frames &= (frames.sum(axis=1) < avail)[:, None]
     ad, sr, test, off = (
         (feat[f] & frames).any(axis=1) for f in ("ad_lowered", "sr_lowered", "test", "gate_off")
     )
     gated = run(feat["gate_off"])
     cls = np.select(
-        [ad & sr & off, ad & ~sr, sr & ~ad, test, (gated > 0) & (gated < k)],
+        [ad & sr & off, ad & ~sr, sr & ~ad, test, (gated > 0) & (gated < avail)],
         np.arange(5),
         5,
     )
@@ -106,11 +118,9 @@ def histogram(values: np.ndarray, k: int) -> list:
 
 def analyse(grid, k: int = 4, clock: str | None = None) -> dict:
     """A grid's onsets, their classes, per class the lead histogram (0..``k``), per lead frame
-    each feature's count, the AD/SR values in restart frames, and the rate-safe runs; onsets
-    without ``k`` frames before them are left out."""
+    each feature's count, the AD/SR values in restart frames, and the rate-safe runs."""
     regs = voices(grid)
     t, v = onsets(regs[0])
-    t, v = t[t >= k], v[t >= k]
     feat = lead(regs, t, v, k)
     cls, leads, frames = classify(feat)
     wrap, safe = wrap_frames(clock), run(feat["rate_safe"])

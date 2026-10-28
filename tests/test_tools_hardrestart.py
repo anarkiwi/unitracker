@@ -89,9 +89,17 @@ def test_a_state_filling_the_window_is_held_not_a_restart():
     assert only(one(note([(0x40, 0, 0)] * 6), k=8)) == "classic"
 
 
-def test_onsets_without_a_full_window_are_left_out():
-    rows = [(0x40, 0, 0), (0x41, 0x09, 0xA8)]
-    assert one(rows)["onsets"] == 0 and one(rows, k=1)["onsets"] == 1
+def test_a_lead_reaches_back_only_to_the_voices_onset_before():
+    rows = [(0x40, 0, 0)] * 2 + [(0x41, 9, 0xA8)] + [(0x40, 0, 0)] * 2 + [(0x41, 9, 0xA8)]
+    rec = one(rows, k=8)
+    assert rec["onsets"] == 2 and rec["classes"]["classic"] == rec["classes"]["none"] == 1
+    assert rec["leads"]["classic"][2] == 1 and rec["features"]["gate_off"][:4] == [2, 2, 0, 0]
+    assert H.previous(np.array([5, 2, 9, 4]), np.array([0, 0, 0, 1])).tolist() == [2, 0, 5, 0]
+
+
+def test_the_note_befores_lower_envelope_is_not_lowered():
+    rows = [(0x41, 0, 0x44)] * 6 + [(0x40, 0, 0x44)] * 2 + [(0x41, 0, 0xF3)]
+    assert only(one(rows)) == "gate-off"
 
 
 def test_voices_are_measured_apart():
