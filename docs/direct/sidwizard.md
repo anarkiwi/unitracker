@@ -55,7 +55,7 @@ A binding already held keeps its phi: TICK_1 rebinds `tick.freq:stp()`, `fx.cut:
 | a note (STRTSND) | the note, `.iN` where it changes; `run` of the WF program keeping a reset-switch pulse or filter walk, or of the filter taken over mid-sweep |
 | legato `$3F`, BIGFX03, a note after NPORTAM | `legato`, `tick.freq:leg()`/`por(m,…)`/`npn()`, `run` resuming the tables past TICK_2 |
 | `$7E` | `off` (with a gate-off pointer: `run` resuming from it) |
-| `$7D`, `$79`-`$7C` | `on`/`-` with the control byte WFGHOST holds |
+| `$7D`, `$79`-`$7C` | `on`/`-` with the control byte WFGHOST holds; with its gate bit on a voice whose gate is off (after `$7E`), `run` of a one-row program `{ctrl:…,gate:1}`, as WRITEWF and SMALFX4 write WFGHOST unmasked by PTNGATE |
 | `$60`-`$77` | `tick.freq:vfx(…)` |
 | `$78` NPORTAM | `tick.freq:sld(255,…)` |
 | an instrument without a note | `run` of its tables resumed from where they are |
@@ -170,7 +170,6 @@ SID-Wizard tunes of the corpus at 3000 frames (763 exact, 59 differing):
 | a filter position FX on a voice without the filter | 6 |
 | an idle walk that reads no row | 5 |
 | small FX `$Fx` | 4 |
-| a waveform FX setting a gate the voice has off | 4 |
 | a first frame that keeps a waveform before a hold row | 3 |
 | others (FX $08 before any instrument, a play gate, a timeline that does not repeat, a detune FX on a note, a gate-off pointer on a row that runs another table, a 2-tick row) | 6 |
 
