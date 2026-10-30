@@ -95,48 +95,24 @@ def usable(words: list) -> dict:
     return out
 
 
-def goattracker2(_path=None) -> dict:
+def goattracker2() -> dict:
     """GoatTracker 2's editor table."""
     from pygoattracker import constants  # pylint: disable=import-outside-toplevel
 
     return usable(list(constants.FREQ_TABLE))
 
 
-def musicassembler(path: Path) -> dict:
-    """Music Assembler's table as a tune's image holds it."""
-    import pymusicassembler as ma  # pylint: disable=import-outside-toplevel
-
-    song = ma.read(str(path))
-    return usable([lo | hi << 8 for lo, hi in zip(song.freq_lo, song.freq_hi)])
-
-
-def defmon(path: Path) -> dict:
-    """defMON's note table ``G`` as a tune's replay holds it."""
-    from unitracker.direct import defmon as dm  # pylint: disable=import-outside-toplevel
-
-    line = dm.transcribe(path.read_bytes()).split("\n  G: [", 1)[1].split("]", 1)[0]
-    return usable([int(x) for x in line.replace("\n", " ").split(",")])
-
-
-EXTRACT = {
-    "goattracker2": goattracker2,
-    "musicassembler": musicassembler,
-    "defmon": defmon,
-}
+EXTRACT = {"goattracker2": goattracker2}
 
 
 def main(argv=None) -> int:
     """Fit every tracker's table and print one line per tracker and rounding."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--tune", action="append", default=[], metavar="TRACKER=PATH")
     parser.add_argument("--json", type=Path)
     args = parser.parse_args(argv)
-    tunes = dict(t.split("=", 1) for t in args.tune)
     report = {}
     for name, extract in EXTRACT.items():
-        if name in ("musicassembler", "defmon") and name not in tunes:
-            continue
-        r = report[name] = fit(extract(Path(tunes[name]) if name in tunes else None))
+        r = report[name] = fit(extract())
         print(f"{name}: {r['entries']} entries from index {r['first']}, octave {r['octave']}")
         for rounding in ROUNDINGS:
             f = r[rounding]

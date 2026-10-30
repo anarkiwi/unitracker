@@ -131,17 +131,15 @@ def test_the_driver_inlines_after_its_passes(tmp_path, capsys):
 
 
 @pytest.mark.parametrize("mode", ["single", "all"])
-@pytest.mark.parametrize("tune", ["metal_warrior", "crosseyed", "space_invadarz"])
-def test_a_lifted_document_inline_plays_its_grid(tune, mode, request, tmp_path):
+def test_a_lifted_document_inline_plays_its_grid(metal_warrior, mode, tmp_path):
     out = tmp_path / "out.yaml"
-    path = request.getfixturevalue(tune)
+    path = metal_warrior
     argv = [str(path), "-o", str(out), "--optimise", "--ticks", "3000", "--inline", mode]
-    argv.append("--unchecked")
     assert cli.lift_main(argv) == 0
     text = out.read_text(encoding="utf-8")
     doc = read(text)
     assert printed(doc) == text and (mode == "single" or not doc.defs and not doc.mods)
-    assert Guarantee(cli.lift(path.read_bytes(), check=False), 3000).holds(text)
+    assert Guarantee(cli.lift(path.read_bytes()), 3000).holds(text)
 
 
 def test_the_inline_pass_follows_the_lossy_mode():

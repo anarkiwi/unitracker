@@ -1,4 +1,4 @@
-"""Lift tunes by their direct lifters and verify each document against its native player, write
+"""Lift GoatTracker 2 tunes and verify each document against the reference player, write
 each tune's document forms (lifted and optimised), and the pysidtracker survey renderer.
 
 A tune is a path, a name under ``--hvsc`` or an HVSC name; a ``.csv`` is a survey ``find``
@@ -67,7 +67,7 @@ def versions() -> dict:
 
 
 def verified(raw: bytes, subtune: int, frames: int) -> dict:
-    """Whether a song's document plays the native grid over ``frames`` ticks and its cells that
+    """Whether a song's document plays the reference grid over ``frames`` ticks and its cells that
     differ, or the exception verifying it raised."""
     try:
         bad = len(cli.verify(raw, subtune, frames))
@@ -77,7 +77,7 @@ def verified(raw: bytes, subtune: int, frames: int) -> dict:
 
 
 def check_one(row: dict, opts: dict) -> dict | None:
-    """One tune's result row: its format, whether its document plays the native grid over
+    """One tune's result row: its format, whether its document plays the reference grid over
     ``frames`` ticks, the differing cells and the first, or the exception it raised; None for a
     multi-SID tune unless ``opts["multi"]``."""
     res = dict.fromkeys(FIELDS, "")
@@ -88,8 +88,8 @@ def check_one(row: dict, opts: dict) -> dict | None:
             raw = shared.tune(row["path"], opts["hvsc"]).read_bytes()
             if not opts.get("multi") and shared.multi_sid(raw):
                 return None
-            res["player"], _, verify = cli.lifter(raw)
-            cells, text, *_ = verify(raw, opts["subtune"], opts["frames"])
+            res["player"], module = cli.lifter(raw)
+            cells, text = module.verify(raw, opts["subtune"], opts["frames"])
     except Exception as exc:  # pylint: disable=broad-exception-caught
         res["gap"] = failure(exc)
         write_failure(out / f"{res['doc']}.err", res["gap"])
@@ -241,7 +241,7 @@ def forms_one(row: dict, opts: dict) -> dict | None:
                     meta.parent.mkdir(parents=True, exist_ok=True)
                     rec = {"player": cli.lifter(raw)[0], "versions": versions()}
                     meta.write_text(json.dumps(rec), "utf-8")
-                    text[name] = cli.lift(raw, subtune, not opts.get("unchecked"))
+                    text[name] = cli.lift(raw, subtune)
                     rec["ticks"] = song_ticks(text[name], opts["limit"])
                     meta.write_text(json.dumps(rec | verified(raw, subtune, rec["ticks"])))
                 else:
@@ -261,7 +261,6 @@ def write_forms(args) -> int:
     opts = {"out": str(args.out), "hvsc": args.hvsc, "timeout": args.timeout}
     opts.update(ticks=args.ticks, limit=args.limit, retry=args.retry)
     opts.update(forms=with_bases(args.forms or forms()), multi=args.multi_sid)
-    opts["unchecked"] = args.unchecked
     tunes = shared.rows(args.tunes, args.player, args.subtunes)
     tunes = shared.songs(tunes, args.subtune, args.min_seconds)
     rows = []
@@ -285,8 +284,8 @@ def write_forms(args) -> int:
 
 
 def render(data, song, nframes):
-    """The survey renderer: 1-based ``song`` of a ``.sid`` lifted by its direct lifter and its
-    document played on unitracker-player; a multi-SID tune is refused."""
+    """The survey renderer: 1-based ``song`` of a ``.sid`` lifted and its document
+    played on unitracker-player; a multi-SID tune is refused."""
     if shared.multi_sid(data):
         raise ValueError("a multi-SID tune")
     text = cli.lift(data, song - 1)
@@ -329,7 +328,6 @@ def main(argv=None) -> int:
     p.add_argument("--retry", action="store_true", help="retry forms that failed before")
     p.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) - 2))
     p.add_argument("--multi-sid", action="store_true", help="include multi-SID tunes")
-    p.add_argument("--unchecked", action="store_true", help="keep lifts that break invariants")
     args = ap.parse_args(argv)
     return write_forms(args) if args.command == "forms" else check(args)
 

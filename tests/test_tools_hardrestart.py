@@ -132,10 +132,10 @@ def test_summary_pools_each_player():
     assert "0000:4" in text and H.summary([{"player": "Q", "error": "e"}]).count("\n") == 0
 
 
-def test_main_measures_a_native_tune(crosseyed, tmp_path, capsys):
+def test_main_measures_a_native_tune(metal_warrior, tmp_path, capsys):
     out = tmp_path / "hr.json"
-    assert H.main([str(crosseyed), "--frames", "400", "--jobs", "1", "--out", str(out)]) == 0
+    assert H.main([str(metal_warrior), "--frames", "400", "--jobs", "1", "--out", str(out)]) == 0
     (rec,) = json.loads(out.read_text())
-    assert rec["path"] == str(crosseyed) and rec["onsets"] == sum(rec["classes"].values())
+    assert rec["path"] == str(metal_warrior) and rec["onsets"] == sum(rec["classes"].values())
     assert sum(rec["rate_safe"]) == rec["onsets"] > 0
     assert "tunes with onsets" in capsys.readouterr().out

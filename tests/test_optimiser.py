@@ -16,7 +16,7 @@ from unitracker.optimiser.__main__ import main
 from unitracker.optimiser.guarantee import grid, same
 
 read, printed = document.read, document.printed
-LIFTED = Path(os.environ.get("UNITRACKER_DIRECT_DOCS", ".tunecache/direct"))
+LIFTED = Path(os.environ.get("UNITRACKER_LIFTED_DOCS", ".tunecache/lifted"))
 
 
 def labels(edits) -> list:

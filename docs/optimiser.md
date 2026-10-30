@@ -277,8 +277,7 @@ replacements refused, another slot firing inside a group, a refused group's othe
 fallback, shape and parameter names, the parameter policy, each shape fitted, and the CLIs.
 `tests/test_optimiser_idioms.py`: the `transpose` and `snap` passes, the `names` rename and the
 `defaults` pass's instrument `none`s and empty rows on hand-written documents (folded and kept,
-refused by size or by the guarantee) and every pass on lifted documents of the four direct
-lifters; `python tools/passes_eval.py DOC.yaml ...` tabulates the tokens each pass saves over
+refused by size or by the guarantee) and every pass on lifted documents; `python tools/passes_eval.py DOC.yaml ...` tabulates the tokens each pass saves over
 each song's length and lists the kept edits.
 `tests/test_templates23.py`: the `prelude`, `instruments`, `chords` and `phrases` passes on
 hand-written documents (kept, and refused where a fit does not hold or shapes differ), each
@@ -289,8 +288,7 @@ prelude forms, the inline modes of templates and call records, and the reference
 pass saves.
 `tests/test_optimiser.py`: each pass on the hand-written documents of `tests/optimiser_docs.py`,
 kept and refused; the guarantee's horizons; `tests/test_inline.py` each inline mode on a
-hand-written document and on lifted documents of the four direct lifters; the CLI; and, for
-each `.tunecache/direct/*.yaml`
-(or `$UNITRACKER_DIRECT_DOCS`), a lifted document optimised over 3000 ticks. Those are written by
-the GoatTracker 2 transcriber (`python -m unitracker.direct.goattracker2 TUNE.sid > DOC.yaml`, on
-the `gt2-direct` branch).
+hand-written document and on lifted documents; the CLI; and, for
+each `.tunecache/lifted/*.yaml`
+(or `$UNITRACKER_LIFTED_DOCS`), a lifted document optimised over 3000 ticks. Those are written by
+the GoatTracker 2 lift (`python -m unitracker.lift.goattracker2 TUNE.sid > DOC.yaml`).
