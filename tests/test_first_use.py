@@ -9,7 +9,7 @@ from unitracker_player.player import play
 from unitracker import cli
 
 
-@pytest.mark.parametrize("tune", ["metal_warrior", "mega_run", "crosseyed", "space_invadarz"])
+@pytest.mark.parametrize("tune", ["metal_warrior", "crosseyed", "space_invadarz"])
 def test_a_lifted_document_plays_the_same_with_its_definitions_at_first_use(tune, request):
     text = cli.lift(request.getfixturevalue(tune).read_bytes(), check=False)
     moved = printed(first_use(read(text)))

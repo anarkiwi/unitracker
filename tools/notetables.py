@@ -102,14 +102,6 @@ def goattracker2(_path=None) -> dict:
     return usable(list(constants.FREQ_TABLE))
 
 
-def sidwizard(_path=None) -> dict:
-    """SID-Wizard's NOTE_FREQ table, indexed by its own note numbers."""
-    from pysidwizard import player  # pylint: disable=import-outside-toplevel
-
-    lo, hi = player.NOTE_FREQ_LO, player.NOTE_FREQ_HI
-    return usable([lo[k] | hi[k] << 8 for k in range(min(len(lo), len(hi)))])
-
-
 def musicassembler(path: Path) -> dict:
     """Music Assembler's table as a tune's image holds it."""
     import pymusicassembler as ma  # pylint: disable=import-outside-toplevel
@@ -128,7 +120,6 @@ def defmon(path: Path) -> dict:
 
 EXTRACT = {
     "goattracker2": goattracker2,
-    "sidwizard": sidwizard,
     "musicassembler": musicassembler,
     "defmon": defmon,
 }

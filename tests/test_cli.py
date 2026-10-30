@@ -5,14 +5,14 @@ import pytest
 from unitracker import cli
 
 
-def test_a_tune_is_lifted_by_its_format_and_verified(mega_run, tmp_path, capsys):
-    raw = mega_run.read_bytes()
-    assert cli.lifter(raw)[0] == "sidwizard"
+def test_a_tune_is_lifted_by_its_format_and_verified(persei, tmp_path, capsys):
+    raw = persei.read_bytes()
+    assert cli.lifter(raw)[0] == "defmon"
     assert cli.verify(raw, 0, 200).size == 0
     out = tmp_path / "out.yaml"
-    assert cli.lift_main([str(mega_run), "-o", str(out), "--unchecked"]) == 0
+    assert cli.lift_main([str(persei), "-o", str(out), "--unchecked"]) == 0
     assert out.read_text() == cli.lift(raw, check=False)
-    assert cli.lift_main([str(mega_run), "--unchecked"]) == 0
+    assert cli.lift_main([str(persei), "--unchecked"]) == 0
     assert capsys.readouterr().out == out.read_text()
 
 
@@ -29,11 +29,11 @@ def test_a_defmon_tune_is_lifted_exactly(crosseyed):
     assert cli.lifter(raw)[0] == "defmon" and cli.verify(raw, 0, 200).size == 0
 
 
-def test_a_tune_without_a_direct_lifter_is_refused(tmp_path, mega_run, capsys, monkeypatch):
+def test_a_tune_without_a_direct_lifter_is_refused(tmp_path, persei, capsys, monkeypatch):
     junk = tmp_path / "junk.sid"
     junk.write_bytes(b"not a sid")
     assert cli.lift_main([str(junk)]) == 1
     assert "no tracker format recognised" in capsys.readouterr().err
-    monkeypatch.delitem(cli.LIFTERS, "sidwizard")
-    with pytest.raises(cli.FormatError, match="no direct lifter for sidwizard"):
-        cli.lift(mega_run.read_bytes())
+    monkeypatch.delitem(cli.LIFTERS, "defmon")
+    with pytest.raises(cli.FormatError, match="no direct lifter for defmon"):
+        cli.lift(persei.read_bytes())

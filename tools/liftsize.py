@@ -19,8 +19,6 @@ import pymusicassembler
 from pydefmon.defmon import DefmonSong
 from pysidtracker import SidImage
 from pysidtracker.jobs import imap
-from pysidwizard import parse_sid
-from pysidwizard.writer import build_swm
 from tqdm import tqdm
 
 import shared
@@ -40,7 +38,6 @@ def _musicassembler(raw: bytes) -> int:
 
 
 DATA = {
-    "sidwizard": lambda raw: len(build_swm(parse_sid(raw))),
     "defmon": lambda raw: len(DefmonSong.from_sid_bytes(raw).to_bytes()) - 2,
     "musicassembler": _musicassembler,
 }

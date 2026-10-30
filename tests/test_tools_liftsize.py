@@ -29,7 +29,6 @@ def test_sections_split_the_bytes_by_top_level_key():
 @pytest.mark.parametrize(
     "name,player",
     [
-        ("mega_run", "sidwizard"),
         ("crosseyed", "defmon"),
         ("space_invadarz", "musicassembler"),
     ],

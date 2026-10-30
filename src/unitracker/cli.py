@@ -16,7 +16,6 @@ from unitracker.optimiser.inline import MODES
 # format name: (direct lifter module, its verify function)
 LIFTERS = {
     "goattracker2": ("unitracker.direct.goattracker2", "verify"),
-    "sidwizard": ("unitracker.direct.sidwizard", "verify"),
     "defmon": ("unitracker.direct.defmon", "verify"),
     "musicassembler": ("unitracker.direct.musicassembler", "verify"),
 }
@@ -57,7 +56,7 @@ def verify(raw: bytes, subtune: int = 0, frames: int = 20000):
 
 
 def lift_main(argv=None) -> int:
-    """Lift a GoatTracker 2, defMON, SID-Wizard or Music Assembler .sid to its generic document."""
+    """Lift a GoatTracker 2, defMON or Music Assembler .sid to its generic document."""
     parser = argparse.ArgumentParser(prog="unitracker-lift", description=lift_main.__doc__)
     parser.add_argument("sid", type=Path)
     parser.add_argument("-o", "--output", type=Path)

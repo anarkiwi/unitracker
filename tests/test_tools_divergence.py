@@ -93,7 +93,6 @@ def test_differing_rows_are_classed_into_a_table(metal_warrior, tmp_path, capsys
     "player, name",
     [
         ("goattracker2", "metal_warrior"),
-        ("sidwizard", "mega_run"),
         ("defmon", "persei"),
         ("musicassembler", "space_invadarz"),
     ],

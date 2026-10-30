@@ -35,8 +35,8 @@ def test_a_goattracker_build_past_three_voices_is_multi_sid(
     assert shared.multi_sid(metal_warrior.read_bytes()) == multi
 
 
-def test_other_formats_and_unreadable_tunes_are_single_sid(mega_run):
-    assert not shared.multi_sid(mega_run.read_bytes()) and not shared.multi_sid(b"PSID" + bytes(9))
+def test_other_formats_and_unreadable_tunes_are_single_sid(persei):
+    assert not shared.multi_sid(persei.read_bytes()) and not shared.multi_sid(b"PSID" + bytes(9))
 
 
 def _csv(path: Path, fields: list, rows: list) -> Path:
@@ -162,12 +162,9 @@ def test_tunes_are_checked_and_reported(metal_warrior, tmp_path, capsys):
     assert (out / f"00000000-{metal_warrior.stem}.yaml").read_text().startswith("unitracker:")
 
 
-def test_the_survey_renderer_plays_the_lifted_document(mega_run, monkeypatch):
-    with pytest.raises(corpus.cli.invariants.ModelError):
-        corpus.render(mega_run.read_bytes(), 1, 50)
-    monkeypatch.setattr(corpus.cli.invariants, "check", lambda *_: None)
-    played, info = corpus.render(mega_run.read_bytes(), 1, 50)
-    assert played.shape == (50, 25) and info["backend"] == "sidwizard" and info["chars"] > 0
+def test_the_survey_renderer_plays_the_lifted_document(persei):
+    played, info = corpus.render(persei.read_bytes(), 1, 50)
+    assert played.shape == (50, 25) and info["backend"] == "defmon" and info["chars"] > 0
 
 
 def test_multi_sid_tunes_are_excluded_unless_asked_for(metal_warrior, tmp_path, capsys):

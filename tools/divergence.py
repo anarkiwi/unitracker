@@ -1,7 +1,7 @@
 """Classify why a ``corpus.py check`` table's differing tunes diverge from their references.
 
 Each document's grid is compared with its verify reference and an alternative one (GoatTracker 2,
-Music Assembler: the standard note table; SID-Wizard, defMON: the native one). Usage:
+Music Assembler: the standard note table; defMON: the native one). Usage:
 ``divergence.py out/check/results.csv`` writes ``classes.csv`` beside it and prints the tally.
 """
 
@@ -152,19 +152,6 @@ def _ma(raw: bytes, subtune: int, frames: int):
     return ours, ma.standard(one.song, subtune).render_grid(len(ours)), ref, {}
 
 
-def _sw(raw: bytes, subtune: int, frames: int):
-    # pylint: disable=import-outside-toplevel
-    from pysidwizard.player import SWMPlayer
-
-    from unitracker.direct import sidwizard as sw
-
-    one = sw.transcriber(raw, subtune, frames)
-    ours = play(one.document(), ticks=frames)
-    ref = sw.standard(one.swm).render_grid(len(ours))
-    native = SWMPlayer(one.swm)
-    return ours, ref, native.render_grid(len(ours)), {"driver": one.swm.driver_type}
-
-
 def _dm(raw: bytes, subtune: int, frames: int):
     # pylint: disable=import-outside-toplevel
     from pydefmon import DefmonPlayer
@@ -176,7 +163,7 @@ def _dm(raw: bytes, subtune: int, frames: int):
     return ours, ref, DefmonPlayer(raw, subtune=subtune).render_grid(len(ours)), {}
 
 
-GRIDS = {"goattracker2": _gt2, "musicassembler": _ma, "sidwizard": _sw, "defmon": _dm}
+GRIDS = {"goattracker2": _gt2, "musicassembler": _ma, "defmon": _dm}
 
 
 def classify_one(row: dict, opts: dict) -> dict:

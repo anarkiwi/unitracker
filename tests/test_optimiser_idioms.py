@@ -141,7 +141,7 @@ def test_the_passes_run_in_order_with_the_rename_last():
     ]
 
 
-@pytest.mark.parametrize("tune", ["metal_warrior", "lykia_boss", "persei", "space_invadarz"])
+@pytest.mark.parametrize("tune", ["metal_warrior", "persei", "space_invadarz"])
 def test_a_lifted_document_optimises_through_every_pass(tune, request):
     text = cli.lift(request.getfixturevalue(tune).read_bytes(), check=False)
     result = optimise(text, 3000)

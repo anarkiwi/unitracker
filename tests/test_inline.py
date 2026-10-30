@@ -131,7 +131,7 @@ def test_the_driver_inlines_after_its_passes(tmp_path, capsys):
 
 
 @pytest.mark.parametrize("mode", ["single", "all"])
-@pytest.mark.parametrize("tune", ["metal_warrior", "mega_run", "crosseyed", "space_invadarz"])
+@pytest.mark.parametrize("tune", ["metal_warrior", "crosseyed", "space_invadarz"])
 def test_a_lifted_document_inline_plays_its_grid(tune, mode, request, tmp_path):
     out = tmp_path / "out.yaml"
     path = request.getfixturevalue(tune)

@@ -65,47 +65,6 @@ ngc1277 = hvsc_tune(
     "MUSICIANS/F/F7sus4/NGC1277_tune_1.sid",
     "Path to F7sus4's NGC1277 tune 1, a defMON replay at $0400 with its pointer at $02.",
 )
-csillag = hvsc_tune(
-    "csillag",
-    "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
-    "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
-)
-lykia_boss = hvsc_tune(
-    "lykia_boss",
-    "MUSICIANS/C/C0zmo/Lykia_Boss.sid",
-    "Path to C0zmo's Lykia Boss, a SID-Wizard bare-build export.",
-)
-mega_run = hvsc_tune(
-    "mega_run",
-    "MUSICIANS/A/Arturo_Dente/Mega-Run.sid",
-    "Path to Arturo Dente's Mega-Run, a SID-Wizard light-build export.",
-)
-border_odyssey = hvsc_tune(
-    "border_odyssey",
-    "MUSICIANS/H/Hermit/Border_Odyssey.sid",
-    "Path to Hermit's Border Odyssey, a SID-Wizard normal-build export with octave shifts.",
-)
-samwise = hvsc_tune(
-    "samwise",
-    "MUSICIANS/A/Ant1/Samwise.sid",
-    "Path to Ant1's Samwise, a SID-Wizard extra-build export of a pre-1.8 driver.",
-)
-flowing_slowly_extended = hvsc_tune(
-    "flowing_slowly_extended",
-    "MUSICIANS/T/Toggle/Flowing_Slowly_extended.sid",
-    "Path to Toggle's Flowing Slowly (extended), a SID-Wizard extra build with staccato.",
-)
-whammer = hvsc_tune(
-    "whammer",
-    "MUSICIANS/V/Vincenzo/Whammer.sid",
-    "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
-)
-
-turn_me_on = hvsc_tune(
-    "turn_me_on",
-    "MUSICIANS/E/Emarti/Turn_Me_On.sid",
-    "Path to Emarti's Turn Me On, a SID-Wizard tune that selects an instrument before any note.",
-)
 reflex = hvsc_tune(
     "reflex",
     "MUSICIANS/G/Garvalf/Reflex.sid",
@@ -116,20 +75,10 @@ axelf = hvsc_tune(
     "MUSICIANS/G/Gregfeel/AxelF-Shots_out_of_Nowhere.sid",
     "Path to Gregfeel's AxelF, a first note's HARDRST carry on a walk started before it.",
 )
-crapman = hvsc_tune(
-    "crapman",
-    "MUSICIANS/B/Batsman/Crapman.sid",
-    "Path to Batsman's Crapman, a SID-Wizard tune whose init leaves a tracked cutoff.",
-)
 twenty_first = hvsc_tune(
     "twenty_first",
     "MUSICIANS/V/Vincenzo/21st.sid",
     "Path to Vincenzo's 21st, WF rows held over ticks with an untracked pulse table.",
-)
-jt_style = hvsc_tune(
-    "jt_style",
-    "MUSICIANS/H/Hermit/JT_Style.sid",
-    "Path to Hermit's JT Style, a multispeed SID-Wizard tune with orderlist transposes.",
 )
 lenore = hvsc_tune(
     "lenore",
@@ -171,13 +120,6 @@ emomyst = hvsc_tune(
     "MUSICIANS/H/Hermit/Emomyst.sid",
     "Path to Hermit's Emomyst, a build whose STRTSND keeps ARPSCNT.",
 )
-pimp_my_commodore = hvsc_tune(
-    "pimp_my_commodore",
-    "MUSICIANS/H/Hermit/Pimp_My_Commodore.sid",
-    "Path to Hermit's Pimp My Commodore, a SID-Wizard export whose init routine writes the"
-    " voices.",
-)
-
 space_invadarz = hvsc_tune(
     "space_invadarz",
     "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",

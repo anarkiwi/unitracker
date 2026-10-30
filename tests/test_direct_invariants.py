@@ -49,7 +49,6 @@ def test_a_document_with_more_objects_than_its_tune_is_refused():
     "tune,kinds",
     [
         ("metal_warrior", {"instruments", "ctrl", "pw", "filter", "phrases", "song"}),
-        ("mega_run", {"instruments", "ctrl", "pw", "filter", "phrases", "song"}),
         ("space_invadarz", {"instruments", "ctrl", "pw", "phrases", "song"}),
         ("crosseyed", {"sidtab"}),
     ],

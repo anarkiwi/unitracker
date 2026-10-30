@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "unitracker"
 version = "0.1.0"
-description = "GoatTracker 2, defMON, SID-Wizard and Music Assembler lifters to the generic unitracker document, and its optimiser"
+description = "GoatTracker 2, defMON and Music Assembler lifters to the generic unitracker document, and its optimiser"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
@@ -14,11 +14,10 @@ classifiers = ["Operating System :: POSIX :: Linux", "Programming Language :: Py
 dependencies = [
     "numpy>=1.23",
     "tqdm>=4.70.1",
-    "pysidtracker>=0.36.0",
-    "pygoattracker>=0.8.1",
-    "pydefmon==0.11.0",
-    "pysidwizard==0.4.1",
-    "pymusicassembler==0.9.0",
+    "pysidtracker>=0.49.0",
+    "pygoattracker>=0.9.1",
+    "pydefmon==0.15.0",
+    "pymusicassembler==0.11.1",
     "unitracker-grammar>=0.15.0",
     "unitracker-player>=0.22.0",
     "tiktoken>=0.14.0",
