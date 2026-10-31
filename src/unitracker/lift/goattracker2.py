@@ -601,14 +601,32 @@ class Lift:
             (signature(n, asm.params(ROUTINES[n])), Code(ROUTINES[n])) for n in doc_text_calls
         )
 
-    def header(self, voices: int) -> Header:
-        core, lay = self.core, self.lay
-        state = core.state
+    def start(self) -> list:
+        """The registers before tick 0: the start image with the init call's writes."""
+        state = self.core.state
         regs = list(state.registers) if state else [0] * 25
         for reg, value in state.init if state else ():
             regs[reg] = value
         if not state:
             regs[24] = 0x0F
+        return regs
+
+    def first(self) -> dict:
+        """The commands setting the filter cells to the values the first filter step writes."""
+        state, regs = self.core.state, self.start()
+        cut = "set.cut" if self.cut_set else "cut"
+        want = {
+            cut: ((state.cutoff << 3) if state else 0, regs[21] & 7 | regs[22] << 3),
+            "res": (0, regs[23] >> 4),
+            "route": (0, regs[23] & 15),
+            "mode": (state.filttype if state else 0, regs[24] & 0xF0),
+            "vol": (state.volume if state else 15, regs[24] & 15),
+        }
+        return {k: v for k, (v, have) in want.items() if v != have}
+
+    def header(self, voices: int) -> Header:
+        core, lay = self.core, self.lay
+        regs = self.start()
         pulseopt = lay["pulseopt"]
         events = ("read", "note-1", "last-1") if pulseopt else ("note-1",)
         slots = {"pw": (Slot("pulse", hold=events),)}
@@ -628,6 +646,7 @@ class Lift:
             holds={"pw": events},
             state=self.state(),
             regs=tuple(regs) if any(regs) else None,
+            lag=2 if lay["fullghost"] else None,
             global_cells=glob or None,
             calls=(core.build.calls, None) if core.build.calls > 1 else None,
         )
@@ -638,7 +657,9 @@ class Lift:
         voices = [self.voice(channels[c]) for c in self.core.voices]
         for n in range(1, len(self.song.instruments) + 1):
             self.instrument(n)
-        init = [Event("-", "i1", {"tempo": PRE} if v == 0 else {}) for v in range(len(voices))]
+        lead = 1 if self.lay["fullghost"] else 0
+        first = {"tempo": PRE - lead} | (self.first() if lead else {})
+        init = [Event("-", "i1", first if v == 0 else {}) for v in range(len(voices))]
         intro = {"tempo": self.rowlen} | ({TICK: self.fx0(1)} if self.insvib else {})
         phrases = [("p0", (Event("-"), Event("-", commands=intro)))]
         phrases += [(n, e) for n, e in self.names.section("phrase")]
