@@ -290,6 +290,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.used = used
         self.keyoffs = any(isinstance(r.note, T.KeyOff) for r in rows)
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
+        if self.lay["noeffects"] and self.insvib:
+            raise Refusal("noeffects vibrato", "the instrument vibrato follows the instrument read")
         self.vib = self.insvib or any(isinstance(r.command, T.Vibrato) for r in rows)
         waved = any(
             isinstance(r, T.WaveCommand) and isinstance(r.command, FREQ[:2])
