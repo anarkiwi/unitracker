@@ -84,6 +84,8 @@ class Core:  # pylint: disable=too-many-instance-attributes
     subtune: int = 0
     play_address: int = 1
     image: object = None
+    memory: bytes | None = None
+    wrap: object = None
 
     @property
     def voices(self) -> tuple:
@@ -101,7 +103,16 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     info = model.info
     names = (head.name, head.author, head.released)
     return Core(
-        model.typed, lay, info.playback, info.state, clock, names, model.subtune, head.play_address
+        model.typed,
+        lay,
+        info.playback,
+        info.state,
+        clock,
+        names,
+        model.subtune,
+        head.play_address,
+        memory=model.memory,
+        wrap=info.wrap,
     )
 
 
@@ -118,6 +129,8 @@ def _refuse(core: Core):
         raise Refusal("interrupt", "play address 0")
     if lay["stereo"] or lay["nchan"] > C.MAX_CHN:
         raise Refusal("multi-SID", f"{lay['nchan']} channels")
+    if core.wrap is not None and core.wrap.sink is not None:
+        raise Refusal("wrapper", "the play routine flushes a ghost block itself")
     if re.search(r"\bnative\b", gt2spec.spec().source or ""):
         raise Refusal("native", "the spec has native blocks")
     for flag in ("noeffects", "directwave", "livegate", "nonormalspeed"):
@@ -150,7 +163,34 @@ def _late(key: str, value) -> bool:
     )
 
 
-def _jumps(core: Core) -> None:
+def _played(core: Core) -> tuple:
+    """``(rows, instruments)`` of the patterns the subtune's orderlists play."""
+    song = core.song
+    orders = song.subtunes[core.subtune].channels
+    played = {e.num for o in orders for e in o.entries if isinstance(e, PlayPattern)}
+    rows = [r for n in played if n < len(song.patterns) for r in song.patterns[n]]
+    return rows, {r.instrument for r in rows if r.instrument} | {1}
+
+
+def _speeds(core: Core, rows: list, used: set) -> None:
+    """Refuse a speedtable row the song uses that the player reads as other bytes than the typed
+    song holds; a vibrato of no step reads the same either way."""
+    song, lay, mem = core.song, core.lay, core.memory
+    cmds = [r.command for r in rows]
+    cmds += [r.command for r in song.wavetable if isinstance(r, T.WaveCommand)]
+    cmds = [c for c in cmds if hasattr(c, "speed")]
+    vibs = {c.speed for c in cmds if isinstance(c, T.Vibrato)}
+    vibs |= {song.instrument(n).vibrato_speed for n in used if not lay["noinstrvib"]}
+    plain = {c.speed for c in cmds if not isinstance(c, T.Vibrato)}
+    for y in (vibs | plain) - {0}:
+        row = song.speed(y)
+        word = 0 if row is None else Lift.word(row)
+        read = mem[lay["speedleft"] + y] << 8 | mem[lay["speedright"] + y]
+        if read != word and (y in plain or (read | word) & 255):
+            raise Refusal("layout", f"speedtable row {y} is not what the player reads")
+
+
+def _jumps(core: Core, rows: list, used: set) -> None:
     """Refuse a table jump onto a jump row and a pointer set onto one, which the executors play
     as an ordinary row."""
     song = core.song
@@ -159,10 +199,6 @@ def _jumps(core: Core) -> None:
         "pulse": (song.pulsetable, T.SetPulsePtr, "pulse_ptr"),
         "filter": (song.filtertable, T.SetFilterPtr, "filter_ptr"),
     }
-    orders = song.subtunes[core.subtune].channels
-    played = {e.num for o in orders for e in o.entries if isinstance(e, PlayPattern)}
-    rows = [r for n in played if n < len(song.patterns) for r in song.patterns[n]]
-    used = {r.instrument for r in rows if r.instrument} | {1}
     for kind, (table, command, field) in tables.items():
         points = [getattr(song.instrument(n), field) for n in used]
         points += [r.command.row for r in rows if type(r.command) is command]
@@ -223,7 +259,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     def __init__(self, core: Core):
         _refuse(core)
-        _jumps(core)
+        rows, used = _played(core)
+        if core.memory is not None:
+            _speeds(core, rows, used)
+        _jumps(core, rows, used)
         self.core, self.lay, self.names = core, core.lay, Names()
         self.song = canonical_song(core.song, core.subtune)
         self.rowlen = self.lay["deftempo"] + 1
@@ -250,6 +289,13 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             raise Refusal("build", "tempo")
 
     # ---- tables -----------------------------------------------------------------------------
+
+    @staticmethod
+    def word(row) -> int:
+        """The 16-bit word of speedtable ``row``."""
+        if isinstance(row, T.FixedSpeed):
+            return row.value
+        return (0x80 | row.rate) << 8 | row.shift
 
     def call(self, name: str, **params) -> Call:
         """The call of template ``name`` with ``params`` in its signature's order."""
@@ -519,7 +565,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             return 0
         if isinstance(row, T.CalculatedSpeed) and not self.lay["nocalcspeed"]:
             raise Refusal("calculated speed")
-        return row.value if isinstance(row, T.FixedSpeed) else (0x80 | row.rate) << 8 | row.shift
+        return self.word(row)
 
     def event(self, row, instr: int) -> Event:
         """The event of a pattern row played by instrument ``instr``."""
@@ -612,23 +658,49 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if state and state.ghost:
             return list(state.registers)
         regs = [0] * 25
-        for reg, value in (*(state.init if state else ()), *self.core.build.init_regs):
+        for reg, value in (*self.core.build.init_regs, *(state.init if state else ())):
             regs[reg] = value
         regs[24] = state.volume if state else 15
         return regs
 
-    def first(self) -> dict:
-        """The commands setting the filter cells to the values the first filter step writes."""
-        state, regs = self.core.state, self.start()
-        cut = "set.cut" if self.cut_set else "cut"
-        want = {
-            cut: ((state.cutoff << 3) if state else 0, regs[21] & 7 | regs[22] << 3),
-            "res": (0, regs[23] >> 4),
-            "route": (0, regs[23] & 15),
-            "mode": (state.filttype if state else 0, regs[24] & 0xF0),
-            "vol": (state.volume if state else 15, regs[24] & 15),
+    def opening(self, voice: int) -> dict:
+        """``{cell: (value the first call writes, value before it)}`` of the voice cells that
+        change: the channel variables the song-init call leaves as loaded."""
+        state = self.core.state
+        if not state or state.ghost:
+            return {}
+        b = 7 * voice
+        now, then = (r[b : b + 7] for r in (self.start(), state.registers))
+        cells = {
+            "freq": lambda r: r[0] | r[1] << 8,
+            "pw": lambda r: r[2] | (r[3] & 15) << 8,
+            "ctrl": lambda r: r[4],
+            "ad": lambda r: r[5],
+            "sr": lambda r: r[6],
         }
-        return {k: v for k, (v, have) in want.items() if v != have}
+        return {k: (f(then), f(now)) for k, f in cells.items() if f(then) != f(now)}
+
+    def first(self, voice: int = 0) -> dict:
+        """The commands setting ``voice``'s cells (the song's, on voice 0) to the values the
+        first call writes, where they differ from the registers before it."""
+        state, regs = self.core.state, self.start()
+        out = {}
+        if voice == 0:
+            cut = "set.cut" if self.cut_set else "cut"
+            want = {
+                cut: ((state.cutoff << 3) if state else 0, regs[21] & 7 | regs[22] << 3),
+                "res": (0, regs[23] >> 4),
+                "route": (0, regs[23] & 15),
+                "mode": (state.filttype if state else 0, regs[24] & 0xF0),
+                "vol": (state.volume if state else 15, regs[24] & 15),
+            }
+            out = {k: v for k, (v, have) in want.items() if v != have}
+        for key, (then, now) in self.opening(voice).items():
+            if key in ("freq", "pw"):
+                out["boot.pw" if key == "pw" else key] = Once(_plus(then - now))
+            else:
+                out[key] = then
+        return out
 
     def header(self, voices: int) -> Header:
         """The header lines."""
@@ -636,7 +708,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         regs = self.start()
         pulseopt = lay["pulseopt"]
         events = ("read", "note-1", "last-1") if pulseopt else ("note-1",)
-        slots = {"pw": (Slot("pulse", hold=events),)}
+        boot = any("pw" in self.opening(v) for v in range(voices))
+        slots = {"pw": (Slot("pulse", hold=events),) + ((Slot("boot"),) if boot else ())}
         if self.slotted:
             real = "step-1" if lay["realtimeopt"] else "note-1"
             tick = Slot("tick", hold=(real, "row.freq"))
@@ -662,7 +735,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def lead(self) -> int:
         """The GoatTracker calls before the document's first tick: its first filter step
         writes the start state."""
-        return 1 if self.lay["fullghost"] or self.first() else 0
+        return 1 if self.lay["fullghost"] or any(self.first(v) for v in range(len(self.core.voices))) else 0
 
     @property
     def lag(self) -> int:
@@ -675,8 +748,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         voices = [self.voice(channels[c]) for c in self.core.voices]
         for n in range(1, len(self.song.instruments) + 1):
             self.instrument(n)
-        first = {"tempo": PRE - self.lead} | (self.first() if self.lead else {})
-        init = [Event("-", "i1", first if v == 0 else {}) for v in range(len(voices))]
+        init = [
+            Event("-", "i1", ({"tempo": PRE - self.lead} if v == 0 else {}) | self.first(v))
+            for v in range(len(voices))
+        ]
         intro = {"tempo": self.rowlen} | ({TICK: self.fx0(1)} if self.insvib else {})
         phrases = [("p0", (Event("-"), Event("-", commands=intro)))]
         phrases += self.names.section("phrase")
