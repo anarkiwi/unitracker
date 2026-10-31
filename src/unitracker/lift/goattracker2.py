@@ -701,20 +701,19 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 since = None if since is None else since + self.rowmin * row.length
 
     def voice(self, order) -> Voice:
-        """A voice's orderlist: the loop body is played twice when the instrument it is entered
-        with the second time differs from the first, so the loop re-enters as it ran."""
+        """A voice's orderlist. The loop body is played a second time when the instrument it is
+        entered with then differs from the first pass, and the loop re-enters that copy."""
         plays, loop = self.plays(order)
         self.overlap(plays + plays[loop : loop + 1])
-        items, instr, entry = [Play("p0")], 1, 1
-        again = plays + plays[loop:]
-        for at, (num, trans) in enumerate(again):
-            if at == loop:
-                entry = instr
-            if at == len(plays) and instr == entry:
+        items, instr, entry = [Play("p0")], 1, {}
+        for at, (num, trans) in enumerate(plays + plays[loop:]):
+            entry[at] = instr
+            if at == len(plays) and instr == entry[loop]:
                 break
             name, instr = self.phrase(self.song.patterns[num], instr)
             items.append(Play(name, Signed(trans) if trans else None))
-        return Voice(tuple(items), loop + 1 if len(items) == len(plays) + 1 else len(plays) + 1)
+        again = len(items) > len(plays) + 1
+        return Voice(tuple(items), (len(plays) if again else loop) + 1)
 
     # ---- the document -----------------------------------------------------------------------
 
