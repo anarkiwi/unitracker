@@ -18,6 +18,7 @@ from pymusicassembler.model import (
 )
 from pysidtracker.testing import resolve_tune
 
+from unitracker.lift import invariants
 from unitracker.lift import musicassembler as lift
 
 BASE = "DEMOS/0-9/3LUX_Intro.sid"
@@ -31,15 +32,17 @@ CORPUS = {
     "a voice primed with a trigger": "DEMOS/A-F/Acid_Mix.sid",
     "an empty pattern": "DEMOS/A-F/Dr_Doom_01.sid",
     "filter pokes from the program": "MUSICIANS/F/Fuben/Grafix_part_4.sid",
+    "silence after a stopping program": "DEMOS/A-F/Bloodpit.sid",
+    "silence, orderlist tempo": "DEMOS/UNKNOWN/Mr_Normal.sid",
+    "a program of the bytes the pointer leads to": "DEMOS/A-F/Agyrem_001.sid",
+    "a program the bytes after the table end": "MUSICIANS/F/Fuben/Grafix_part_1.sid",
+    "a vibrato running from the image": "GAMES/A-F/Attack_of_the_Mutant_Ninja_Blueberries.sid",
 }
 REFUSED = {
     "interrupt": "MUSICIANS/F/Feekzoid/Falling.sid",
     "play routine": "DEMOS/M-R/Raccoon_intro.sid",
-    "silence": "DEMOS/A-F/Bloodpit.sid",
     "layout": "MUSICIANS/A/Amadeus_Meka_Design/Remember.sid",
     "multi-SID": "MUSICIANS/B/Bayliss_Richard/Nyaaaah_2000.sid",
-    "program": "DEMOS/A-F/Agyrem_001.sid",
-    "init": "GAMES/A-F/Attack_of_the_Mutant_Ninja_Blueberries.sid",
 }
 FRAMES = 1500
 
@@ -50,6 +53,15 @@ def tune(name: str) -> bytes:
     if path is None:
         pytest.skip(f"{name} unavailable")
     return Path(path).read_bytes()
+
+
+@pytest.mark.parametrize("name", CORPUS.values(), ids=CORPUS.keys())
+def test_a_corpus_tune_holds_no_more_objects_than_its_song(name):
+    raw = tune(name)
+    text = lift.document_text(lift.core_of_sid(raw))
+    sizes = lift.measure(raw, 0, text)
+    assert invariants.exceeded(sizes["lifted"], sizes["native"]) is None
+    assert sizes["bytes"] == len(text.encode())
 
 
 @pytest.mark.parametrize("name", CORPUS.values(), ids=CORPUS.keys())
@@ -440,10 +452,126 @@ def test_a_voice_that_starts_on_the_silence_plays_exactly():
     exact(lift.core_of_song(synthesize(tune(BASE), orders)), 1200)
 
 
-def test_a_program_row_jump_past_its_rows_is_refused(later):
-    one = lift.Lift(lift.core_of_song(reworked(later, jump=1)))
-    rows = [ArpeggioRow(0x41, 0, 0)] * 3
-    assert one.jump(Arpeggio(rows, MA.PROGRAM_JUMP, 0)) == 1
-    assert one.jump(Arpeggio(rows, MA.PROGRAM_JUMP, 2)) == 3
-    with pytest.raises(lift.Refusal, match="past the 3 rows"):
-        one.jump(Arpeggio(rows, MA.PROGRAM_JUMP, 4))
+# ---- silence while a stopping program runs, programs read from memory, image vibrato ---------
+
+
+def ends_in_silence(base, pattern):
+    """A song whose third voice plays ``pattern`` then the silence."""
+    patterns = {**PATTERNS, "last": pattern}
+    ids = {name: i for i, name in enumerate(patterns)}
+    orders = [([("tri", 0, 0)], MA.ORDER_END)] * 2
+    orders += [([("last", 0, 0), (None, 0, 0)], MA.SILENCE_PATTERN)]
+    global IDS  # pylint: disable=global-statement
+    saved, IDS = IDS, ids
+    try:
+        return synthesize(base, orders, patterns)
+    finally:
+        IDS = saved
+
+
+@pytest.mark.parametrize("tail", [[], rest(0), hold(1)], ids=["note", "rest", "hold"])
+@pytest.mark.parametrize("dur", [0, 1, 3])
+@pytest.mark.parametrize("rows", [1, 2, 4])
+def test_a_silence_while_a_stopping_program_runs_plays_exactly(monkeypatch, rows, dur, tail):
+    program = Arpeggio([ArpeggioRow(0x41, 5, 0)] * rows, MA.PROGRAM_STOP)
+    monkeypatch.setitem(PROGRAMS, 1, program)
+    song = ends_in_silence(tune(BASE), inst(5) + note(36, dur) + tail)
+    core = lift.core_of_song(song)
+    exact(core, 1400)
+
+
+def test_the_gate_stays_up_until_the_parse_that_follows_the_programs_end():
+    one = lift.Lift(lift.core_of_song(synthesize(tune(BASE))))
+    assert one.rowlen == 3
+    assert one.gate_start(age=0, rows=2) == 4
+    assert one.gate_start(age=2, rows=2) == 2
+    assert one.gate_start(age=3, rows=2) == 0
+    assert one.gate_start(age=0, rows=4) == 6
+
+
+def patched(core, **cells):
+    """``core`` with each ``name: bytes`` written at the layout cell ``name``."""
+    view = bytearray(core.view)
+    for name, data in cells.items():
+        view[core.found[name] : core.found[name] + len(data)] = data
+    return dataclasses.replace(core, view=bytes(view))
+
+
+def walked(core, data, slot=1, at=0x0400):
+    """The walk of program ``slot`` whose pointer leads to ``data`` at ``at``."""
+    view = bytearray(core.view)
+    view[at : at + len(data)] = data
+    view[core.found["inner_lo"] + slot] = at & 255
+    view[core.found["inner_hi"] + slot] = at >> 8
+    return lift.Lift(dataclasses.replace(core, view=bytes(view))).walk(slot)
+
+
+@pytest.fixture(name="core")
+def core_fixture(plain):
+    return lift.core_of_song(plain)
+
+
+def test_a_program_with_no_rows_is_the_bytes_its_pointer_leads_to(core):
+    stop = walked(core, bytes([0xFE, 0x12, 0x34, 0xFE]))
+    assert [(r.wave, r.note, r.filter) for r in stop.rows] == [(0xFE, 0x12, 0x34)]
+    assert stop.loop is None
+    restart = walked(core, bytes([0x00, 0x00, 0xFF, 0xFF]))
+    assert [(r.wave, r.note, r.filter) for r in restart.rows] == [(0, 0, 0xFF)]
+    assert restart.loop == 0
+    onward = walked(core, bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 0xFE]))
+    assert [r.wave for r in onward.rows] == [1, 4, 7]
+    assert onward.loop is None
+
+
+def test_a_program_that_never_ends_walks_the_cursor_round_the_byte(core):
+    walk = walked(core, bytes([0xEA] * 256))
+    assert len(walk.rows) == 256
+    assert walk.loop == 0
+
+
+def test_a_row_jump_may_land_past_the_rows(core):
+    bound = dataclasses.replace(
+        core, found={**core.found, "program_jump": core.found["instr_cursor"]}
+    )
+    data = bytearray(32)
+    data[0:3], data[3:6], data[6:8] = [0x41, 0, 0], [0x42, 0, 0], [0xFD, 5]
+    data[15], data[18] = 0x77, 0xFE
+    walk = walked(bound, bytes(data))
+    assert [r.wave for r in walk.rows] == [0x41, 0x42, 0x77]
+    assert walk.loop is None
+    data[7] = 1
+    assert walked(bound, bytes(data)).loop == 1
+    data[7] = 0
+    assert walked(bound, bytes(data)).loop == 0
+
+
+def spec_vibrato(word, start, toggle, calls):
+    """The frequency words the spec's output writes on ``calls`` calls from the image."""
+    out, written = start, []
+    for _ in range(calls):
+        toggle = toggle ^ 0xFF if word & 1 else 0
+        if toggle == 0 or not word & 1:
+            out = (out + word) & 0xFFFF
+            written.append(out)
+        else:
+            written.append(None)
+    return written
+
+
+@pytest.mark.parametrize("lo,toggle", [(4, 0xFF), (5, 0xFF), (5, 0), (5, 7)])
+def test_a_vibrato_running_from_the_image_steps_the_word_init_left(core, lo, toggle):
+    x, cells = 1, {"vib_lo_step": lo, "vib_hi_step": 1, "vib_out_lo": 0x10}
+    cells |= {"vib_out_hi": 0x20, "vib_toggle": toggle}
+    view = bytearray(core.view)
+    for name, value in cells.items():
+        view[core.found[name] + x] = value
+    expr = lift.Lift(dataclasses.replace(core, view=bytes(view))).running_vibrato(x)
+    want = spec_vibrato(0x100 | lo, 0x2010, toggle, 12)
+    if expr is None:
+        assert not any(want)
+        return
+    held = -1
+    for phi, written in enumerate(want):
+        env = {"phi": phi, "v": held, "ite": lambda c, a, b: a if c else b}
+        got = eval(str(expr), env)  # pylint: disable=eval-used
+        assert got & 0xFFFF == (held & 0xFFFF if written is None else written)

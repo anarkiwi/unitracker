@@ -46,9 +46,10 @@ def classify(name: str, frames: int, limit: int, only: str | None = None) -> dic
         lifter = _lifter(fmt)
         if lifter is None or only not in (None, fmt):
             return {"name": name, "verdict": "other", "detail": fmt}
-        cells, _ = lifter.verify(raw, 0, frames)
+        cells, text = lifter.verify(raw, 0, frames)
+        sizes = lifter.measure(raw, 0, text) if hasattr(lifter, "measure") else {}
         if not cells.size:
-            return {"name": name, "verdict": "exact", "detail": ""}
+            return {"name": name, "verdict": "exact", "detail": "", "sizes": sizes}
         first = tuple(int(c) for c in cells[0][:2])
         return {"name": name, "verdict": "diverged", "detail": f"{len(cells)} cells, first {first}"}
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -58,6 +59,14 @@ def classify(name: str, frames: int, limit: int, only: str | None = None) -> dic
         return {"name": name, "verdict": "error", "detail": f"{type(exc).__name__}: {exc}"[:200]}
     finally:
         signal.alarm(0)
+
+
+def _sizes_line(name: str, sizes: dict) -> str:
+    """One tune's lifted/native object counts per kind and document bytes over native bytes."""
+    have, native = sizes["lifted"], sizes["native"]
+    kinds = " ".join(f"{k}={have[k]}/{native[k]}" for k in native if k != "song")
+    song = "/".join(f"{h}:{n}" for h, n in zip(have["song"], native["song"]))
+    return f"{name}: {kinds} song={song} bytes={sizes['bytes']}/{sizes['native_bytes']}"
 
 
 def main(argv=None) -> int:
@@ -84,6 +93,9 @@ def main(argv=None) -> int:
     for r in results:
         if r["verdict"] in ("diverged", "error"):
             print(f"{r['verdict']:9} {r['name']}: {r['detail']}")
+    for r in results:
+        if r.get("sizes"):
+            print(_sizes_line(r["name"], r["sizes"]))
     if args.out:
         args.out.write_text(json.dumps(results, indent=1))
     return 0

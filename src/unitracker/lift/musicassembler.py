@@ -11,7 +11,7 @@ from pymusicassembler import playspec
 from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
 from pymusicassembler.errors import MusicAssemblerError
 from pymusicassembler.grammar import GRAMMAR, PATTERN
-from pymusicassembler.model import DurationEvent
+from pymusicassembler.model import ArpeggioRow, DurationEvent
 from pymusicassembler.model import Instrument as ModelInstrument
 from pymusicassembler.model import InstrumentEvent, NoteEvent, Song
 from pymusicassembler.player import Player
@@ -42,7 +42,7 @@ from unitracker_grammar.document import (
 from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
-from unitracker.lift import cli
+from unitracker.lift import cli, invariants
 from unitracker.lift.macode import ROUTINES, STATE
 from unitracker.lift.shared import meta_text, note_name
 
@@ -52,6 +52,8 @@ VOICES = MA.VOICES
 SID = 0xD400
 JMP_ABS = 0x4C
 MAX_ITEMS = 512
+PARSES = 128
+MAX_AGE = 1 << 12
 HELD = ("step",)
 summary = cli.summary
 
@@ -70,6 +72,15 @@ class Refusal(LiftError):
 
 class Divergence(LiftError):
     """The document's grid differs from the reference player's."""
+
+
+@dataclass(frozen=True)
+class Walk:
+    """An instrument program as the player reads it: its rows in the order the cursor visits
+    them, and the row it continues at after the last (None where it stops)."""
+
+    rows: tuple
+    loop: int | None
 
 
 @dataclass(frozen=True)
@@ -255,7 +266,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.rowlen = core.cell("tempo_reload") + 1
         self.skip = bool(self.found["pitch_skip"])
         self.always = bool(self.found["pulse_always"])
-        self.first = {}
+        self.first, self.walks = {}, {}
         self.ctl0 = [core.cell("note_ctl", x) for x in range(VOICES)]
 
     # ---- instruments and programs -----------------------------------------------------------
@@ -277,13 +288,41 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         return ((d if self.found[cell] == self.found["dur"] else 0) + 1) * self.rowlen
 
     def program_of(self, flags: int):
-        """The inner program of an instrument's ``flags``, None where it has none."""
-        if not flags & 0x0F:
-            return None
-        prog = self.song.inner_programs[flags & 0x0F]
-        if prog is None or not prog.rows:
-            raise Refusal("program", f"slot {flags & 0x0F} has no rows")
-        return prog
+        """The program an instrument with ``flags`` runs from its trigger, None where it has
+        none."""
+        return self.walk(flags & 0x0F) if flags & 0x0F else None
+
+    def walk(self, slot: int) -> Walk:
+        """The rows the player reads through program slot ``slot``'s pointer, whatever bytes
+        they are: the cursor ``y`` reads a row at ``y``, ``y + 1``, ``y + 2`` and a marker at
+        ``y + 3`` (a byte wrap included), which stops the program (``$FE``), restarts it
+        (``$FF``), jumps (``$FD`` where the build binds it) or moves on to the next row."""
+        if slot in self.walks:
+            return self.walks[slot]
+        found, view = self.found, self.core.view
+        base = view[found["inner_lo"] + slot] | view[found["inner_hi"] + slot] << 8
+
+        def byte(y: int) -> int:
+            return view[(base + (y & 255)) & 0xFFFF]
+
+        y, rows, seen, loop = 0, [], {}, None
+        while y not in seen:
+            seen[y] = len(rows)
+            rows.append(ArpeggioRow(byte(y), byte(y + 1), byte(y + 2)))
+            marker = byte(y + 3)
+            if marker == MA.PROGRAM_STOP:
+                break
+            if marker == MA.PROGRAM_JUMP and found["program_jump"]:
+                if found["program_jump"] != found["instr_cursor"]:
+                    raise Refusal("program jump", "bound apart from the cursor")
+                target = byte(y + 4)
+                y = 0 if target == 0 or target >= (y + 3) & 255 else (target * 3) & 255
+            else:
+                y = 0 if marker == MA.PROGRAM_RESTART else (y + 3) & 255
+        else:
+            loop = seen[y]
+        self.walks[slot] = Walk(tuple(rows), loop)
+        return self.walks[slot]
 
     def arpeggio(self, flags: int) -> str:
         """``arp`` where an instrument's frequency sweep runs from its trigger, ``after`` where
@@ -293,7 +332,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         prog = self.program_of(flags)
         if prog is None:
             return "arp"
-        return "after" if prog.terminator == MA.PROGRAM_STOP else ""
+        return "after" if prog.loop is None else ""
 
     def arp_args(self, k: int) -> dict:
         """The arpeggio template arguments of instrument ``k``: the phases that ascend, its
@@ -318,18 +357,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             ]
         return Row(keys)
 
-    def jump(self, prog) -> int:
-        """The loop of a program ending in ``$FD r``."""
-        found = self.found
-        if not found["program_jump"] or found["program_jump"] != found["instr_cursor"]:
-            raise Refusal("program jump", "bound apart from the cursor")
-        target, n = prog.jump or 0, len(prog.rows)
-        if target == 0 or target >= 3 * (n - 1) + 3:
-            return 1
-        if target >= n:
-            raise Refusal("program jump", f"row {target} past the {n} rows")
-        return 1 + target
-
     def stop(self, k: int, prog) -> Call:
         """The binding of the frequency sweep that follows the last row of ``prog``."""
         note = prog.rows[-1].note
@@ -349,10 +376,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         prog = self.program_of(rec.porta)
         if prog is not None:
             rows += [self.program_row(r, x) for r in prog.rows]
-            if prog.terminator == MA.PROGRAM_RESTART:
-                loop = 1
-            elif prog.terminator == MA.PROGRAM_JUMP:
-                loop = self.jump(prog)
+            if prog.loop is not None:
+                loop = 1 + prog.loop
             elif self.arpeggio(rec.porta) == "after":
                 rows.append(Row({"freq": self.stop(k, prog)}))
         if not mask:
@@ -419,6 +444,23 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if steps[0] & 1:
             return _expr(f"ite(phi % 2 == 0, F(n) + (phi // 2 + 1) * {word}, v)")
         return _expr(f"F(n) + (phi + 1) * {word}")
+
+    def running_vibrato(self, x: int) -> Expr | None:
+        """The vibrato slot's binding for voice ``x``'s vibrato running from the image: the
+        output cells' word stepped by the step bytes init left, on every call or, with an odd low
+        step, on the calls where the toggle cell init left comes out zero (None where it never
+        does, which leaves the word)."""
+        core = self.core
+        steps = (core.cell("vib_lo_step", x), core.cell("vib_hi_step", x))
+        word, start = steps[1] << 8 | steps[0], core.cell("vib_out_hi", x) << 8
+        start |= core.cell("vib_out_lo", x)
+        count = f"{start} + (phi // 2 + 1) * {word}"
+        if not steps[0] & 1:
+            return _expr(f"{start} + (phi + 1) * {word}")
+        toggle = core.cell("vib_toggle", x)
+        if toggle not in (0, 0xFF):
+            return None
+        return _expr(f"ite(phi % 2 == {int(toggle == 0)}, {count}, v)")
 
     def sweep_commands(self, ev: NoteEvent, x: int) -> dict:
         """The commands of a note's filter command on voice ``x``."""
@@ -498,9 +540,11 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         cmds = {"vtempo": self.length(ev.duration, "rest" if rest else "hold")}
         atom, trig = "-", ctx.trig
         if ctx.boot:
-            if self.ctl0[x] & MA.CTL_VIBARP or self.always:
-                raise Refusal("init", "a sweep running from the image")
+            if self.always:
+                raise Refusal("init", "a pulse sweep running from the image")
             cmds |= self.image(x)
+            if self.ctl0[x] & MA.CTL_VIBARP and (running := self.running_vibrato(x)) is not None:
+                cmds["b.freq"] = running
             cmds["m.ctrl"] = _const(self.core.cell("ctrl", x) & (0xFE if rest else 0xFF))
             if not self.ctl0[x] & MA.CTL_TRIGGERED:
                 atom, trig = note_name(self.core.cell("note_index", x)), ins
@@ -512,13 +556,26 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if sel is not None and not ctx.boot:
             cmds |= self.rebinds(ctx, ins) | self.configure(ctx, ins, ctx.trig, ctx.vib)
         name = self.instrument(ins, x) if sel is not None or atom != "-" else None
+        vib = ctx.vib or bool(ctx.boot and self.ctl0[x] & MA.CTL_VIBARP)
         return Event(atom, name, cmds), replace(
-            ctx, ins=ins, trig=trig, rest=rest or ctx.rest, boot=False
+            ctx, ins=ins, trig=trig, vib=vib, rest=rest or ctx.rest, boot=False
         )
 
-    def silence(self, ctx: Ctx, x: int, length: int) -> Event:
-        """The event of ``length`` calls of a voice on the silence pattern: the gate off at its
-        row call."""
+    def gate_start(self, age: int, rows: int) -> int:
+        """The calls of a silence before the gate stays off under a stopping program of ``rows``
+        rows that its trigger started ``age`` calls (parse calls aside) ago: each parse call
+        clears the gate, and the program's next row call sets it again while a row is left."""
+        passed, spent = 0, age
+        while True:
+            for row in range(PARSES):
+                if spent > rows:
+                    return passed
+                span = self.rowlen - 1 + (PARSES + 1) * self.rowlen * (row == PARSES - 1)
+                passed, spent = passed + span, spent + span
+
+    def silence(self, ctx: Ctx, x: int, length: int, age: int) -> Event:
+        """The event of ``length`` calls of a voice on the silence pattern, whose trigger ran
+        ``age`` calls ago: the gate off at its row call."""
         cmds = {"vtempo": length}
         prog = self.program_of(self.record(ctx.trig).porta) if ctx.trig is not None else None
         if ctx.boot:
@@ -528,8 +585,11 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             cmds["m.ctrl"] = _expr("v & 254")
         elif prog is None:
             cmds["m.ctrl"] = Once(_expr("v & 254"))
-        elif prog.terminator == MA.PROGRAM_STOP:
-            raise Refusal("silence", "while a program may run")
+        elif prog.loop is None:
+            start = self.gate_start(age, len(prog.rows))
+            cmds["m.ctrl"] = (
+                Once(_expr("v & 254")) if not start else _expr(f"ite(phi >= {start}, v & 254, v)")
+            )
         return Event("-", None, cmds)
 
     def events(self, pid: int) -> list:
@@ -559,18 +619,35 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 sel = None
         return out
 
+    @staticmethod
+    def tailed(tail: tuple, event: Event, row: tuple) -> tuple:
+        """``tail`` of a phrase after ``event``, the row ``ev`` taking ``before`` to ``after``:
+        a trigger restarts the count of calls, any other row adds its own."""
+        ev, before, after = row
+        calls = dict(event.commands)["vtempo"] - 1
+        if (isinstance(ev, NoteEvent) and not ev.tied) or (
+            before.trig is None and after.trig is not None
+        ):
+            return True, calls
+        return tail[0], tail[1] + calls
+
     def phrase(self, pid: int, ctx: Ctx, x: int) -> tuple:
-        """``(name, ctx at the end)`` of the phrase of pattern ``pid`` entered in ``ctx``."""
+        """``(name, ctx at the end, tail)`` of the phrase of pattern ``pid`` entered in ``ctx``;
+        ``tail`` is ``(triggered, calls)``: whether a row triggered an instrument and the calls
+        (parse calls aside) from the last trigger, or all of them if none did."""
         key = (pid, ctx, x)
         if key not in self.cache:
-            events, here = [], ctx
+            events, here, tail = [], ctx, (False, 0)
             for sel, ev in self.rows(pid):
                 if not events and ctx.boot:
                     self.first[x] = isinstance(ev, NoteEvent) and not ev.tied
                 step = self.note if isinstance(ev, NoteEvent) else self.other
-                event, here = step(ev, sel, here, x)
+                event, after = step(ev, sel, here, x)
                 events.append(event)
-            self.cache[key] = (self.names.name("phrase", "p", tuple(events)), here)
+                tail = self.tailed(tail, event, (ev, here, after))
+                here = after
+            name = self.names.name("phrase", "p", tuple(events))
+            self.cache[key] = (name, here, tail)
         return self.cache[key]
 
     # ---- orderlists -------------------------------------------------------------------------
@@ -598,32 +675,35 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         """Voice ``x``'s orderlist."""
         order = self.song.orderlists[x]
         real = order.entries[: len(order.entries) - (order.terminator != MA.ORDER_END)]
-        ctx, items, seen = self.start(x), [], {}
+        ctx, items, seen, age = self.start(x), [], {}, 0
         at = self.settle(order, real, 0)
         while len(items) < MAX_ITEMS:
             if at is None:
-                return self.parked(items, ctx, x)
+                return self.parked(items, ctx, x, age)
             if (at, ctx) in seen:
                 return Voice(tuple(items), seen[at, ctx])
             seen[at, ctx] = len(items)
             entry, plays = real[at], []
             for _ in range(entry.repeat + 1):
-                name, ctx = self.phrase(entry.pattern_id, ctx, x)
+                name, ctx, (triggered, calls) = self.phrase(entry.pattern_id, ctx, x)
+                age = min(calls if triggered else age + calls, MAX_AGE)
                 plays.append(name)
             items += self.compressed(plays, entry.transpose)
             at = self.settle(order, real, at + 1)
         raise Refusal("orderlist", "does not settle")
 
-    def parked(self, items: list, ctx: Ctx, x: int) -> Voice:
+    def parked(self, items: list, ctx: Ctx, x: int, age: int) -> Voice:
         """The voice ``x`` whose orderlist reaches the silence pattern after ``items``: its row
         counter, negative at the first parse and counting down, parses 128 row calls, then
         plays 128 and parses again."""
         found = self.found
         if found["dur_short"] != found["dur"] or found["dur_long"] != found["dur"]:
             raise Refusal("silence", "a build whose rows leave the row counter")
-        one = self.names.name("phrase", "p", (self.silence(ctx, x, self.rowlen),))
-        last = self.names.name("phrase", "p", (self.silence(ctx, x, 129 * self.rowlen),))
-        items += [Group((Play(one),), 127), Play(last)]
+        one = self.names.name("phrase", "p", (self.silence(ctx, x, self.rowlen, age),))
+        last = self.names.name(
+            "phrase", "p", (self.silence(ctx, x, (PARSES + 1) * self.rowlen, age),)
+        )
+        items += [Group((Play(one),), PARSES - 1), Play(last)]
         return Voice(tuple(items), len(items) - 2)
 
     @staticmethod
@@ -709,9 +789,87 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         return Document(self.header(used), (), mods, defs, init, voices, None)
 
 
+def native_counts(core: Core) -> dict:
+    """The most objects of each kind the document of ``core`` may hold, from the song alone.
+
+    A voice's carried state (instrument, last trigger, vibrato, rest mask, image) changes
+    through a pattern by what its last row sets, so applying a pattern twice is applying it once:
+    a voice's orderlist is lifted at most twice, from the state init left and then from the
+    state its own list leaves, and an entry with a repeat plays its first run from the entering
+    state and every later one from the state the first left. So per voice:
+
+    * ``phrases``: at most 2 passes x (1 + 1 if the entry repeats) phrases for each real entry,
+      and the two phrases a parked voice loops (its row and its last row);
+    * ``song``: at most the entries of those two passes, 2 per entry (a run of one phrase is one
+      item), and 2 for a parked voice;
+    * ``instruments`` and ``ctrl``: an instrument is one trigger program, which differs per voice
+      only where its inner program pokes the filter (the poke slot is the voice's), plus one
+      trigger a voice that starts without a note runs from the image;
+    * ``pw``: one binding per instrument.
+
+    Instruments are those a reached pattern selects or a voice starts on.
+    """
+    song, built = core.song, Lift(core)
+    real = [
+        [
+            e
+            for e in o.entries
+            if e.pattern_id < MA.ORDER_TEMPO or e.pattern_id == MA.SILENCE_PATTERN
+        ]
+        for o in song.orderlists
+    ]
+    reached = {e.pattern_id for entries in real for e in entries}
+    chosen = {built.start(x).ins for x in range(VOICES)}
+    for pid in reached:
+        if pid < len(song.patterns) and song.patterns[pid] is not None:
+            events = song.patterns[pid].events()
+            chosen |= {e.instrument for e in events if isinstance(e, InstrumentEvent)}
+    objects = VOICES
+
+    def pokes(k: int) -> bool:
+        prog = built.program_of(built.record(k).porta)
+        return prog is not None and any(r.filter for r in prog.rows)
+
+    objects += sum(VOICES if pokes(k) else 1 for k in chosen)
+    parked = [
+        o.terminator == MA.SILENCE_PATTERN or any(e.pattern_id == MA.SILENCE_PATTERN for e in r)
+        for o, r in zip(song.orderlists, real)
+    ]
+    runs = [sum(1 + (e.repeat > 0) for e in r if e.pattern_id != MA.SILENCE_PATTERN) for r in real]
+    return {
+        "instruments": objects,
+        "ctrl": objects,
+        "pw": len(chosen),
+        "phrases": sum(2 * n for n in runs) + 2 * sum(parked),
+        "song": tuple(4 * n + 2 * p for n, p in zip(runs, parked)),
+    }
+
+
+def document_bytes(core: Core) -> int:
+    """The bytes of the song's data in the player's form: orderlists, patterns, instruments and
+    inner programs."""
+    song = core.song
+    parts = [*song.orderlists, *song.patterns, *song.instruments, *song.inner_programs]
+    return sum(len(p.to_bytes()) for p in parts if p is not None)
+
+
+def measure(raw: bytes, subtune: int, text: str) -> dict:
+    """The lifted and native object counts of a SID's document ``text`` and its bytes against the
+    song data's."""
+    core = core_of_sid(raw, subtune)
+    return {
+        "lifted": invariants.lifted(text),
+        "native": native_counts(core),
+        "bytes": len(text.encode()),
+        "native_bytes": document_bytes(core),
+    }
+
+
 def document_text(core: Core) -> str:
-    """The document of ``core``, printed."""
-    return printed(Lift(core).document())
+    """The document of ``core``, printed, with its objects counted against the song's."""
+    text = printed(Lift(core).document())
+    invariants.check(text, native_counts(core))
+    return text
 
 
 # ---- the reference --------------------------------------------------------------------------
