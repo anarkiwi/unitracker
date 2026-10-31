@@ -320,6 +320,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             raise Refusal("program jump", f"row {target} past the {n} rows")
         return 1 + target
 
+    def stop(self, k: int, prog) -> Call:
+        """The binding of the frequency sweep that follows the last row of ``prog``."""
+        note = prog.rows[-1].note
+        fixed = self.skip and note >= 0x80
+        return self.call(
+            "arpz", m=self.arp_args(k)["m"], p=note & (0x7F if fixed else 0xFF), b=int(fixed)
+        )
+
     def trigger(self, k: int, x: int, mask: bool = True) -> str:
         """The name of the control program a note of instrument ``k`` on voice ``x`` runs: the
         trigger's row, then the instrument's inner program; with ``mask`` false the trigger
@@ -336,7 +344,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             elif prog.terminator == MA.PROGRAM_JUMP:
                 loop = self.jump(prog)
             elif self.arpeggio(rec.porta) == "after":
-                rows.append(Row({"freq": self.call("arps", m=self.arp_args(k)["m"])}))
+                rows.append(Row({"freq": self.stop(k, prog)}))
         if not mask:
             masked = ("m.ctrl", _expr("v & 254"))
             if len(rows) > 1:
