@@ -23,7 +23,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e ".[dev]"
-      - uses: anarkiwi/pysidtracker/.github/actions/cache@v0.30.0
+      - uses: anarkiwi/pysidtracker/.github/actions/cache@v0.38.0
         with:
           key: ${{ hashFiles('tests/*.py', 'tools/shared.py') }}
           sidtrace: "true"
