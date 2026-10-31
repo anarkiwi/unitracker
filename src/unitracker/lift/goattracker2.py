@@ -276,6 +276,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             for r in self.song.wavetable
         )
         used = {r.instrument for r in rows if r.instrument} | {1}
+        self.used = used
+        self.keyoffs = any(isinstance(r.note, T.KeyOff) for r in rows)
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
         self.vib = self.insvib or any(isinstance(r.command, T.Vibrato) for r in rows)
         waved = any(
@@ -472,6 +474,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             if lay["hrinstr"] and not (gated and not ins.hard_restart):
                 fetch["ad"], fetch["sr"] = lay["adparam"], lay["srparam"]
         wave, gate = self.first_wave(ins)
+        if gate is None and ("gate" in fetch or self.keyoffs):
+            raise Refusal("first waveform", "a note that keeps the gate as it is")
         init = {"ad": ins.attack_decay, "sr": ins.sustain_release, "run": self.wave(0)}
         if wave is not None:
             init["ctrl"] = wave
