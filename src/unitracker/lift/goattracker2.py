@@ -32,6 +32,7 @@ from unitracker_grammar.document import (
     Signed,
     Slot,
     Voice,
+    base,
     printed,
     signature,
 )
@@ -119,7 +120,7 @@ def _refuse(core: Core):
         raise Refusal("multi-SID", f"{lay['nchan']} channels")
     if re.search(r"\bnative\b", gt2spec.spec().source or ""):
         raise Refusal("native", "the spec has native blocks")
-    for flag in ("simplepulse", "noeffects", "directwave", "livegate", "nonormalspeed"):
+    for flag in ("noeffects", "directwave", "livegate", "nonormalspeed"):
         if lay[flag]:
             raise Refusal(f"build {flag}")
     if build.pulse_step not in (1, 2) and not lay["pulse2x"]:
@@ -141,6 +142,12 @@ def _calls(node):
     elif hasattr(node, "__dataclass_fields__"):
         for name in node.__dataclass_fields__:
             yield from _calls(getattr(node, name))
+
+
+def _late(key: str, value) -> bool:
+    return base(key) in ("res", "route", "mode", "vol", "cut") or (
+        base(key) == "run" and str(value).startswith("f")
+    )
 
 
 def _jumps(core: Core) -> None:
@@ -227,12 +234,20 @@ class Lift:
         used = {r.instrument for r in rows if r.instrument} | {1}
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
         self.vib = self.insvib or any(isinstance(r.command, T.Vibrato) for r in rows)
-        self.effects = self.vib or any(isinstance(r.command, FREQ) for r in rows)
+        waved = any(
+            isinstance(r, T.WaveCommand) and isinstance(r.command, FREQ[:2])
+            for r in self.song.wavetable
+        )
+        self.effects = self.vib or waved or any(isinstance(r.command, FREQ) for r in rows)
         self.calls = {}
+        state = core.state
+        self.funk = tuple(v + 1 for v in state.funk) if state else (8, 5)
+        funks = {self.funk_of(r.command.speed) for r in rows if isinstance(r.command, T.FunkTempo)}
+        self.pairs = funks | {self.funk}
         silent = any(not self.sounds(i.wave_ptr) for n in used for i in [self.song.instrument(n)])
         self.slotted = self.effects or silent
-        if self.lay["fixedparams"] or self.rowlen < 3:
-            raise Refusal("build", "fixed parameters" if self.lay["fixedparams"] else "tempo")
+        if self.rowlen < 3:
+            raise Refusal("build", "tempo")
 
     # ---- tables -----------------------------------------------------------------------------
 
@@ -273,8 +288,8 @@ class Lift:
 
     def wave_row(self, rows, p):
         row = rows[p - 1]
-        if not isinstance(row, T.WaveStep):
-            raise Refusal("wavetable command", type(row.command).__name__)
+        if isinstance(row, T.WaveCommand):
+            return self.wave_command(row.command), p + 1
         keys = {}
         match row.wave:
             case T.SetWave(w):
@@ -288,9 +303,44 @@ class Lift:
                 keys[WAVE_FREQ] = Once(self.call("note") if self.vib else Expr("F(N)"))
         return keys, p + 1
 
+    def wave_command(self, cmd) -> dict:
+        """The row keys of a wavetable command."""
+        match cmd:
+            case T.PortamentoUp(y) | T.PortamentoDown(y) if not self.vib:
+                step = self.step(y) * (1 if isinstance(cmd, T.PortamentoUp) else -1)
+                return {WAVE_FREQ: Once(_plus(step))}
+            case (
+                T.SetAD()
+                | T.SetSR()
+                | T.SetWave()
+                | T.SetPulsePtr()
+                | T.SetFilterPtr()
+                | T.SetFilterCtrl()
+                | T.SetCutoff()
+                | T.SetMasterVolume()
+            ):
+                return self.command(cmd, False, 0)
+        raise Refusal("wavetable command", type(cmd).__name__)
+
+    @staticmethod
+    def late(rows: list, loop) -> tuple:
+        """``rows`` with each row's filter and volume keys moved to a row of no hold a tick
+        on, where the next call's filter routine writes them."""
+        out, at = [], []
+        for row in rows:
+            at.append(len(out))
+            later = [(k, v) for k, v in row.keys if _late(k, v)]
+            if later:
+                out.append(Row([kv for kv in row.keys if kv not in later]))
+                out.append(Row(later + [("hold", 0)]))
+            else:
+                out.append(row)
+        return out, None if loop is None else at[loop]
+
     def wave(self, ptr: int) -> str:
         """The ``ctrl`` program name of the wavetable from ``ptr``."""
         out, loop = _program(self.song.wavetable, ptr, self.wave_row) if ptr else ([], None)
+        out, loop = self.late(out, loop)
         return self.names.name("ctrl", "c", Program(out, loop))
 
     def sounds(self, ptr: int) -> bool:
@@ -302,6 +352,13 @@ class Lift:
     def pulse_row(self, rows, p):
         row = rows[p - 1]
         step = 2 if self.lay["pulse2x"] else 1
+        if isinstance(row, T.SimplePulseSet):
+            return {"pw": (row.value & 15) << 8 | row.value}, p + 1
+        if isinstance(row, T.SimplePulseMod):
+            add = f"lo(v) + {row.step}"
+            e = f"(({add}) & 255) + (({add}) >> 8)"
+            text = f"((({e}) & 15) << 8) | ({e})"
+            return {"hold": row.time or 256, "pw": Expr(canonical(text))}, p + 1
         if isinstance(row, T.PulseSet):
             return {"pw": row.width & 0xFFF}, p + 1
         return {"hold": row.time or 256, "pw": _plus(row.speed * step)}, p + 1
@@ -340,6 +397,8 @@ class Lift:
     def first_wave(self, ins) -> tuple:
         """``(wave or None, gate or None)`` a note of ``ins`` sets on its tick 0."""
         lay, raw = self.lay, ins.raw().first_wave
+        if lay["fixedparams"]:
+            return lay["firstwave"], 1
         if (lay["zeroskip"] or not lay["nofirstwavecmd"]) and raw == 0:
             return None, None
         if not lay["nofirstwavecmd"] and raw >= 0xFE:
@@ -349,18 +408,13 @@ class Lift:
     def restart(self, ins) -> str:
         """The name of the restart program of ``ins``: the fetch, then the note's tick 0."""
         lay = self.lay
-        legato = ins.legato
-        nohr = not ins.hard_restart and not legato
-        fetch = {"hold": ins.gate_timer}
+        timer = lay["gateparam"] if lay["fixedparams"] else ins.gate_timer
+        fetch = {"hold": timer} if timer != 1 else {}
         gated = (lay["hrinstr"] and lay["nohrinstr"]) or lay["legato"]
-        if not (gated and (nohr or legato)) or nohr:
+        if not (gated and ins.legato):
             fetch["gate"] = 0
-        if lay["hrinstr"] and not (gated and (nohr or legato)):
-            fetch["ad"], fetch["sr"] = lay["adparam"], lay["srparam"]
-        if legato and gated:
-            fetch = {"hold": ins.gate_timer}
-        if fetch.get("hold") == 1:
-            del fetch["hold"]
+            if lay["hrinstr"] and not (gated and not ins.hard_restart):
+                fetch["ad"], fetch["sr"] = lay["adparam"], lay["srparam"]
         wave, gate = self.first_wave(ins)
         init = {"ad": ins.attack_decay, "sr": ins.sustain_release, "run": self.wave(0)}
         if wave is not None:
@@ -434,11 +488,24 @@ class Lift:
                     raise Refusal("timing mark in a build without author info")
                 return {}
             case T.SetTempo(t, chan):
-                if t < 2:
-                    raise Refusal("funk tempo recall")
                 key = "vtempo" if self.lay["noglobaltempo"] or chan else "tempo"
-                return {key: max(t, 3)}
+                if t == 1 and self.lay["nofunktempo"]:
+                    return {key: 2}
+                if t < 2 and (self.lay["nofunktempo"] or len(self.pairs) > 1):
+                    raise Refusal("funk tempo recall", "several tables" if t < 2 else "")
+                return {key: (self.funk[t], self.funk[1 - t]) if t < 2 else max(t, 3)}
+            case T.FunkTempo(y):
+                if self.lay["nofunktempo"]:
+                    raise Refusal("funk tempo", "build without it")
+                return {"vtempo" if self.lay["noglobaltempo"] else "tempo": self.funk_of(y)}
         raise Refusal("pattern command", type(cmd).__name__)
+
+    def funk_of(self, y: int) -> tuple:
+        """The two row lengths of speedtable entry ``y``."""
+        row = self.song.speed(y)
+        if not isinstance(row, T.FixedSpeed):
+            raise Refusal("funk tempo", "calculated speed row")
+        return row.value >> 8, row.value & 0xFF
 
     def step(self, y: int) -> int:
         """The 16-bit step of speedtable entry ``y``."""
@@ -547,7 +614,7 @@ class Lift:
         slots = {"pw": (Slot("pulse", hold=events),)}
         if self.slotted:
             real = "step-1" if lay["realtimeopt"] else "note-1"
-            tick = Slot("tick", hold=(real, "row.note"))
+            tick = Slot("tick", hold=(real, "row.freq"))
             slots["freq"] = ((Slot("load"),) if self.insvib else ()) + (Slot("wave"), tick)
         if self.cut_set:
             slots["cut"] = (Slot("set"), Slot("filter"))
