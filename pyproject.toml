@@ -14,7 +14,7 @@ classifiers = ["Operating System :: POSIX :: Linux", "Programming Language :: Py
 dependencies = [
     "numpy>=1.23",
     "tqdm>=4.70.1",
-    "pysidtracker>=0.50.1",
+    "pysidtracker>=0.51.0",
     "pygoattracker>=0.10.1",
     "unitracker-grammar>=0.18.0",
     "unitracker-player>=0.26.0",
@@ -26,7 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 tokenize = ["tokenizers>=0.23.3", "huggingface_hub>=2.2.0"]
 learn = ["torch>=2.14", "transformers>=5.19", "zstandard>=0.25", "peft>=0.21", "llguidance>=1.9.1"]
-dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "zstandard>=0.25.0", "pytest-timeout>=2.2", "import-linter>=2.15", "tokenizers>=0.23.3", "huggingface_hub>=2.2.0"]
+dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pyyaml", "pytest-cov>=4", "zstandard>=0.25.0", "pytest-timeout>=2.2", "import-linter>=2.15", "tokenizers>=0.23.3", "huggingface_hub>=2.2.0"]
 
 [project.urls]
 Homepage = "https://github.com/anarkiwi/unitracker"
