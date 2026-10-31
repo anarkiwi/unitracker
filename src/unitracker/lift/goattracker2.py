@@ -204,26 +204,33 @@ def _speeds(core: Core, rows: list, used: set) -> None:
 
 
 def _jumps(core: Core, rows: list, used: set) -> None:
-    """Refuse a table jump onto a jump row and a pointer set onto one, which the executors play
-    as an ordinary row."""
+    """Refuse a table pointer or jump, reached from an instrument or a command, that lands on a
+    jump row, which the executors play as an ordinary row."""
     song = core.song
+    waves = [r.command for r in song.wavetable if isinstance(r, T.WaveCommand)]
     tables = {
         "wave": (song.wavetable, T.SetWavePtr, "wave_ptr"),
         "pulse": (song.pulsetable, T.SetPulsePtr, "pulse_ptr"),
         "filter": (song.filtertable, T.SetFilterPtr, "filter_ptr"),
     }
     for kind, (table, command, field) in tables.items():
-        points = [getattr(song.instrument(n), field) for n in used]
-        points += [r.command.row for r in rows if type(r.command) is command]
-        points += [r.row for r in table if isinstance(r, T.Jump)]
-        for ptr in points:
-            if (
-                ptr
-                and ptr <= len(table)
-                and isinstance(table[ptr - 1], T.Jump)
-                and table[ptr - 1].row
-            ):
-                raise Refusal("pointer onto a jump row", kind)
+        starts = [getattr(song.instrument(n), field) for n in used]
+        starts += [c.row for c in [*(r.command for r in rows), *waves] if type(c) is command]
+        if any(p and p <= len(table) and isinstance(table[p - 1], T.Jump) for p in starts):
+            raise Refusal("pointer onto a jump row", kind)
+        seen = set()
+        while starts:
+            ptr = starts.pop()
+            if not ptr or ptr > len(table) or ptr in seen:
+                continue
+            seen.add(ptr)
+            row = table[ptr - 1]
+            if isinstance(row, T.Jump):
+                if row.row and row.row <= len(table) and isinstance(table[row.row - 1], T.Jump):
+                    raise Refusal("pointer onto a jump row", kind)
+                starts.append(row.row)
+            elif not isinstance(row, T.Stop):
+                starts.append(ptr + 1)
 
 
 class Names:
