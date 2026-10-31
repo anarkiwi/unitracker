@@ -5,7 +5,6 @@ commonest value sequences (a gate or test bit toggled within the call is invisib
 ``python tools/samecall.py TUNES.csv|TUNE.sid ... [--player RE] [--frames N] [--out F.json]``
 """
 
-import argparse
 import json
 import os
 import sys
@@ -102,10 +101,7 @@ def summary(recs: list) -> str:
 
 def main(argv=None) -> int:
     """Parse the command line, measure the tunes in parallel and print the summary."""
-    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("sources", nargs="+", help="tunes, directories or .csv tune lists")
-    ap.add_argument("--hvsc", type=Path, help="HVSC root the lists' paths are under")
-    ap.add_argument("--player", default="", help="regex of the lists' players to keep")
+    ap = shared.corpus_parser(__doc__)
     ap.add_argument("--frames", type=int, default=3000)
     ap.add_argument("--timeout", type=float, default=300, help="seconds per tune")
     ap.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) - 2))

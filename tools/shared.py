@@ -1,5 +1,6 @@
 """What the tools share: tunes by path, HVSC name or tune list."""
 
+import argparse
 import csv
 import hashlib
 import re
@@ -96,3 +97,13 @@ def rows(sources, player: str = "", subtunes: int | None = None) -> list:
                 and (subtunes is None or int(r.get("songs") or 1) <= subtunes)
             ]
     return out
+
+
+def corpus_parser(doc: str):
+    """An argument parser described by ``doc``'s first line, taking tune ``sources`` (tunes,
+    directories or .csv tune lists), ``--hvsc`` and a ``--player`` regex."""
+    ap = argparse.ArgumentParser(description=doc.split("\n", 1)[0])
+    ap.add_argument("sources", nargs="+", help="tunes, directories or .csv tune lists")
+    ap.add_argument("--hvsc", type=Path, help="HVSC root the lists' paths are under")
+    ap.add_argument("--player", default="", help="regex of the lists' players to keep")
+    return ap

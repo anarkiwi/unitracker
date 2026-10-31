@@ -1,6 +1,8 @@
 """tools/writeorder.py: candidate write orders, their frames and the envelope writes they keep."""
 
 import numpy as np
+import pytest
+from pylibresidfp import SID
 
 import writeorder as W
 
@@ -32,17 +34,54 @@ def test_candidates_are_fixed_distinct_and_complete():
         assert all(order.index((r, 2)) < order.index((r, 1)) for r, k in order if k == 2)
 
 
-def test_reorders_follow_each_candidate_in_the_frame_slots():
+def reference(writes: np.ndarray, order: tuple) -> np.ndarray:
+    """One candidate's frame written out directly: its kept writes in its order, in the slots."""
+    at = {}
+    for i, reg in enumerate(writes[:, 1].tolist()):
+        at.setdefault(reg, []).append(i)
+    keep = [at[r][-k] for r, k in order if len(at.get(r, [])) >= k]
+    new = writes[keep].copy()
+    new[:, 0] = np.sort(new[:, 0])
+    return new
+
+
+def frames(seed: int, count: int) -> list:
+    """Random frames: every register written, some twice or three times, in random order."""
+    rng = np.random.default_rng(seed)
+    out = []
+    for _ in range(count):
+        regs = list(range(25)) + list(rng.choice(25, rng.integers(0, 6)))
+        regs = rng.permutation(regs)
+        cycles = np.sort(rng.choice(np.arange(60, 900), len(regs), replace=False))
+        values = rng.integers(0, 256, len(regs))
+        values[np.isin(regs, (4, 11, 18))] &= (
+            rng.integers(0, 2, (np.isin(regs, (4, 11, 18))).sum()) | 0xFE
+        )
+        out.append(np.column_stack([cycles, regs, values]).astype(np.int64))
+    return out
+
+
+def test_vectorised_candidates_match_writing_each_out():
     cands = W.candidates()
-    count = {r: int((FRAME[:, 1] == r).sum()) for r in range(25)}
-    for (text, order), new in zip(cands, W.reorders(FRAME, W.positions(cands))):
-        expect = [r for r, k in order if count[r] >= k]
-        assert new[:, 1].tolist() == expect
-        dropped = set() if "ctrl:2" in text else {320}
-        assert new[:, 0].tolist() == sorted(set(FRAME[:, 0].tolist()) - dropped)
-        values = {(r, v) for _, r, v in new.tolist()}
-        assert ((4, 0x08) in values) == ("ctrl:2" in text)
-        assert {(r, v) for _, r, v in FRAME.tolist() if r != 4} <= values
+    pos = W.positions(cands)
+    at = {item: i for i, item in enumerate(W.UNIVERSE)}
+    for w in [FRAME, *frames(1, 40)]:
+        cycles, idx = W.slot_cycles(w, pos)
+        for c, (_, order) in enumerate(cands):
+            new = reference(w, order)
+            assert sorted(cycles[c][cycles[c] >= 0].tolist()) == new[:, 0].tolist()
+            assert all(
+                cycles[c, at[item]] == cyc
+                for item, (cyc, _, _) in zip(
+                    [i for i in order if cycles[c, at[i]] >= 0], new.tolist()
+                )
+            )
+        for v in range(3):
+            regs = (1, 0x0A, 0x88)
+            rows = W.envelope_rows(cycles, idx, w, v, regs, 4)
+            for c, (_, order) in enumerate(cands):
+                mine, _ = W.effective(W.envelope_writes(reference(w, order), v), v, regs)
+                assert rows[c][rows[c, :, 0] >= 0].tolist() == mine.tolist()
 
 
 def test_effective_drops_envelope_no_ops():
@@ -62,5 +101,61 @@ def test_envelope_writes_and_displacement():
     assert W.displacement(env, env[1:]) == 0
 
 
-def test_lfsr_cycle_of_rate_zero():
-    assert W.lfsr_cycle(0x7F).tolist() == [0x7FFF >> i for i in range(9)]
+def phases_verdict(release: int, ad: int, sr: int, order: list) -> str:
+    """The verdict on voice 1's AD, SR and gate-on writes at cycles 100, 109 and 118 put in
+    ``order`` (registers), after two frames of release at the SR ``release``."""
+    sid = SID()
+    sid.run([(0, 5, 0), (1, 6, release), (2, 4, 0x40)], 2 * 19656)
+    value = {5: ad, 6: sr, 4: 0x41}
+    native = np.array([(100, 5, ad), (109, 6, sr), (118, 4, 0x41)], np.int64)
+    new = np.array([(c, r, value[r]) for c, r in zip((100, 109, 118), order)], np.int64)
+    at, until = np.array([sid.cycle, 0, 0]), sid.cycle + 3 * 19656
+    a, b = (sid.envelope_phases(0, w + at, until) for w in (native, new))
+    return W.verdict(a, b, W.displacement(native, new))
+
+
+@pytest.mark.parametrize(
+    "release,ad,sr,order,expect",
+    [
+        (0x00, 0x5F, 0xAD, [6, 4, 5], "noise"),
+        (0x0F, 0x54, 0xCC, [6, 5, 4], "drift"),
+        (0xF8, 0xCE, 0x05, [4, 5, 6], "shape"),
+        (0xF8, 0x32, 0xAC, [6, 5, 4], "timing"),
+    ],
+)
+def test_verdicts_over_every_rate_counter_phase(release, ad, sr, order, expect):
+    assert phases_verdict(release, ad, sr, order) == expect
+
+
+def test_moving_a_hard_restart_gate_on_only_drifts():
+    sid = SID()
+    sid.run([(0, 5, 0), (1, 6, 0), (2, 4, 0x40)], 2 * 19656)
+    at, until = np.array([sid.cycle, 0, 0]), sid.cycle + 3 * 19656
+    native = np.array([(100, 5, 0x0A), (110, 6, 0x88), (120, 4, 0x41)], np.int64)
+    moved = native + [2, 0, 0]
+    a, b = (sid.envelope_phases(0, w + at, until) for w in (native, moved))
+    assert W.verdict(a, a, 0) == "noise"
+    assert W.verdict(a, b, W.displacement(native, moved)) == "drift"
+
+
+def test_no_op_envelope_writes_leave_every_candidate_alike():
+    cands = W.candidates()
+    for w in frames(2, 20):
+        cycles, idx = W.slot_cycles(w, W.positions(cands))
+        for v in range(3):
+            env = W.envelope_writes(w, v)
+            last = {int(r): int(x) for _, r, x in env.tolist()}
+            regs = (last.get(7 * v + 4, 0) & 1, last.get(7 * v + 5, 0), last.get(7 * v + 6, 0))
+            held = env.copy()
+            held[:, 2] = [last[int(r)] for r in held[:, 1]]
+            native, _ = W.effective(held, v, regs)
+            assert len(native) == 0
+            rows = W.envelope_rows(cycles, idx, held_frame(w, held), v, regs, 4)
+            assert (rows[:, :, 0] < 0).all()
+
+
+def held_frame(w: np.ndarray, env: np.ndarray) -> np.ndarray:
+    """``w`` with its envelope writes replaced by ``env`` (same cycles and registers)."""
+    out = w.copy()
+    out[np.isin(out[:, 0], env[:, 0])] = env
+    return out

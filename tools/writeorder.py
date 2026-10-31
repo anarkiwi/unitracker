@@ -5,7 +5,6 @@ order scored on how many (frame, voice) envelopes it changes audibly against the
 docs/writeorder.md.
 """
 
-import argparse
 import json
 import os
 import sys
@@ -71,6 +70,9 @@ def candidates() -> list:
 
 
 UNIVERSE = sorted({i for _, order in candidates() for i in order})
+ITEM_REG = np.array([r for r, _ in UNIVERSE], np.int64)
+ENV_ITEMS = [np.flatnonzero((ITEM_REG >= 7 * v + 4) & (ITEM_REG <= 7 * v + 6)) for v in range(3)]
+BIG = np.iinfo(np.int64).max
 
 
 def positions(cands: list) -> np.ndarray:
@@ -91,18 +93,41 @@ def native_index(writes: np.ndarray) -> np.ndarray:
     return np.array([at[r][-k] if len(at[r]) >= k else -1 for r, k in UNIVERSE], np.int64)
 
 
-def reorders(writes: np.ndarray, pos: np.ndarray) -> list:
-    """Each candidate's version of one frame's ``writes``: the writes it keeps, in its order, at
-    the cycles the kept writes had."""
+def slot_cycles(writes: np.ndarray, pos: np.ndarray) -> tuple:
+    """``(cycles, index)``: per candidate and :data:`UNIVERSE` item, the cycle the candidate
+    writes the item's write at (the frame's slots, in the candidate's order; -1 where it writes
+    none), and :func:`native_index` of ``writes``."""
     idx = native_index(writes)
-    present = idx >= 0
-    out = []
-    for row in pos:
-        kept = present & (row < len(UNIVERSE))
-        order = np.flatnonzero(kept)[np.argsort(row[kept])]
-        new = writes[idx[order]].copy()
-        new[:, 0] = np.sort(new[:, 0])
-        out.append(new)
+    kept = (idx >= 0) & (pos < len(UNIVERSE))
+    order = np.argsort(np.where(kept, pos, BIG), axis=1, kind="stable")
+    rank = np.argsort(order, axis=1, kind="stable")
+    own = np.where(idx >= 0, writes[np.maximum(idx, 0), 0], BIG)
+    slots = np.sort(np.where(kept, own, BIG), axis=1)
+    return np.where(kept, np.take_along_axis(slots, rank, axis=1), -1), idx
+
+
+def envelope_rows(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    cycles: np.ndarray, idx: np.ndarray, writes: np.ndarray, voice: int, regs: tuple, width: int
+) -> np.ndarray:
+    """``(candidates, width, 3)``: each candidate's :func:`effective` envelope writes of
+    ``voice`` from ``regs``, in cycle order, padded with -1."""
+    items = ENV_ITEMS[voice]
+    cyc = cycles[:, items]
+    order = np.argsort(np.where(cyc >= 0, cyc, BIG), axis=1, kind="stable")
+    cyc, it = np.take_along_axis(cyc, order, axis=1), items[order]
+    reg, val = ITEM_REG[it], writes[np.maximum(idx[it], 0), 2]
+    held = [np.full(len(cyc), r, np.int64) for r in regs]
+    out = np.full((len(cyc), width, 3), -1, np.int64)
+    fill = np.zeros(len(cyc), np.int64)
+    for p in range(cyc.shape[1]):
+        r, v = reg[:, p] - 7 * voice - 4, val[:, p]
+        now = np.choose(r, [held[0], held[1], held[2]])
+        eff = (cyc[:, p] >= 0) & np.where(r == 0, (v & 1) != now, v != now)
+        rows = np.flatnonzero(eff)
+        out[rows, fill[rows]] = np.column_stack([cyc[rows, p], reg[rows, p], v[rows]])
+        fill[rows] += 1
+        for k in range(3):
+            held[k] = np.where(eff & (r == k), v & 1 if k == 0 else v, held[k])
     return out
 
 
@@ -140,38 +165,42 @@ def displacement(native: np.ndarray, new: np.ndarray) -> int:
     return most
 
 
-def lfsr_cycle(rate: int) -> np.ndarray:
-    """The states the envelope rate counter's LFSR takes at ``rate``: from its reset state to
-    ``rate``, where it resets."""
-    out = [0x7FFF]
-    while out[-1] != rate:
-        lfsr = out[-1]
-        out.append((lfsr >> 1) | (((lfsr << 14) ^ (lfsr << 13)) & 0x4000))
-    return np.array(out, np.int64)
+def expand(phases, table: dict) -> tuple:
+    """``(ids, times)`` of :class:`pylibresidfp.Phases`: per phase, the id in ``table`` of its
+    envelope levels and states, and the cycles of its events (-1 past its last)."""
+    pieces, events = phases.pieces, phases.events
+    width = int(pieces[:, 3].max())
+    ids = np.empty(phases.count, np.int64)
+    times = np.full((phases.count, width), -1, np.int64)
+    for k0, k1, first, count in pieces.tolist():
+        ev = events[first : first + count]
+        ids[k0:k1] = table.setdefault(ev[:, 2:].tobytes(), len(table))
+        times[k0:k1, :count] = ev[:, 0] + ev[:, 1] * np.arange(k1 - k0)[:, None]
+    return ids, times
 
 
-def outcome(t: np.recarray) -> tuple:
-    """A trace's envelope levels and states, and the cycles it takes them at."""
-    return np.column_stack([t.envelope, t.state]).tobytes(), t.cycle
-
-
-def verdict(native: list, new: list, moved: int) -> str:
-    """The verdict on a voice's envelope traced from every phase of its rate counter, ``native``
-    and ``new`` each a list of :func:`outcome` per phase: ``noise`` where each phase takes the
-    same levels and states with every step within ``moved`` cycles; ``drift`` where the two only
-    pair up across phases that way (a reorder no write can command: the rate counter's phase is
-    not the player's); else ``shape`` where the levels and states differ, ``timing`` where a step
-    moves further (the ADSR delay)."""
+def verdict(native, new, moved: int) -> str:
+    """The verdict on a voice's envelope from every phase of its rate counter, ``native`` and
+    ``new`` its :class:`pylibresidfp.Phases`: ``noise`` where each phase takes the same levels
+    and states with every step within ``moved`` cycles; ``drift`` where the two only pair up
+    across phases that way (a reorder no write can command: the rate counter's phase is not the
+    player's); else ``shape`` where the levels and states differ, ``timing`` where a step moves
+    further (the ADSR delay)."""
+    table = {}
+    (ia, ta), (ib, tb) = expand(native, table), expand(new, table)
+    width = max(ta.shape[1], tb.shape[1])
+    ta, tb = (np.pad(t, ((0, 0), (0, width - t.shape[1])), constant_values=-1) for t in (ta, tb))
 
     def close(a, b):
-        return a[0] == b[0] and np.abs(a[1] - b[1]).max() <= moved
+        return (ia[a] == ib[b]) & (np.abs(ta[a] - tb[b]) <= moved).all(axis=1)
 
-    if all(close(a, b) for a, b in zip(native, new)):
+    every = np.arange(len(ia))
+    if close(every, every).all():
         return "noise"
-    pairs = list(zip(*(sorted(x, key=lambda o: (o[0], tuple(o[1]))) for x in (native, new))))
-    if all(close(a, b) for a, b in pairs):
+    sa, sb = (np.lexsort([*t.T[::-1], i]) for i, t in ((ia, ta), (ib, tb)))
+    if close(sa, sb).all():
         return "drift"
-    return "shape" if any(a[0] != b[0] for a, b in pairs) else "timing"
+    return "shape" if (ia[sa] != ib[sb]).any() else "timing"
 
 
 def jennings_writes(image: SidImage, subtune: int, frames: int, cpf: int) -> tuple:
@@ -243,35 +272,30 @@ def capture(row: dict, hvsc, args) -> tuple:
     return sid_model_for_flags(head.flags), clock, init - base, frames
 
 
-class Judge:
+class Judge:  # pylint: disable=too-few-public-methods
     """Verdicts on one voice's envelope through a frame and the :data:`TRACED` - 1 after it, from
     every phase of its rate counter, cached on the rest of its envelope state and the writes that
     reach it."""
 
     def __init__(self):
-        self.cache, self.cycles, self.traced = {}, {}, 0
+        self.cache, self.native, self.traced = {}, {}, 0
 
     def __call__(self, sid: SID, state: tuple, native: np.ndarray, new: np.ndarray, until: int):
         """The verdict on ``new`` against ``native`` (writes relative to the chip's cycle) for the
         voice ``state[0]`` with the :data:`CONTROLLED` state ``state[1:]``, to ``until``."""
         key = (state, native.tobytes(), new.tobytes(), until)
         if key not in self.cache:
-            voice, rate = state[0], state[1 + CONTROLLED.index("rate")]
-            phases = self.cycles.setdefault(rate, lfsr_cycle(rate))
             at = np.array([sid.cycle, 0, 0], np.int64)
-            a, b = (
-                [
-                    outcome(sid.envelope_trace(voice, w + at, sid.cycle + until, int(p)))
-                    for p in phases
-                ]
-                for w in (native, new)
-            )
+            mine = key[:2] + (sid.cycle,)
+            if mine not in self.native:
+                self.native = {mine: sid.envelope_phases(state[0], native + at, sid.cycle + until)}
+            a, b = self.native[mine], sid.envelope_phases(state[0], new + at, sid.cycle + until)
             self.cache[key] = verdict(a, b, displacement(native, new))
-            self.traced += 2 * len(phases)
+            self.traced += a.count
         return self.cache[key]
 
 
-def measure(row: dict, hvsc, args) -> dict:
+def measure(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
     """One tune's verdict counts per candidate: each frame's (frame, voice) envelopes under the
     candidate's order against the native writes."""
     model, clock, init, frames = capture(row, hvsc, args)
@@ -285,7 +309,8 @@ def measure(row: dict, hvsc, args) -> dict:
     for f in range(len(frames) - TRACED):
         start, w = frames[f]
         if len(w):
-            fields, news = sid.voices(), reorders(w - [start, 0, 0], pos)
+            w = w - [start, 0, 0]
+            fields, (cycles, idx) = sid.voices(), slot_cycles(w, pos)
             ahead = np.concatenate([frames[f + j][1] for j in range(1, TRACED)]) - [start, 0, 0]
             until = frames[f + TRACED][0] - start
             for v in range(3):
@@ -294,19 +319,32 @@ def measure(row: dict, hvsc, args) -> dict:
                     int(fields["attack"][v]) << 4 | int(fields["decay"][v]),
                     (int(fields["sustain"][v]) & 0xF) << 4 | int(fields["release"][v]),
                 )
-                native, after = effective(envelope_writes(w - [start, 0, 0], v), v, regs)
+                native, after = effective(envelope_writes(w, v), v, regs)
+                if not native.size:
+                    counts[:, 0] += 1
+                    continue
+                width = max(len(ENV_ITEMS[v]), len(native))
+                rows = envelope_rows(cycles, idx, w, v, regs, width)
+                padded = np.full((width, 3), -1, np.int64)
+                padded[: len(native)] = native
+                same = (rows == padded).all(axis=(1, 2))
+                counts[same, 0] += 1
+                if same.all():
+                    continue
                 tail, _ = effective(envelope_writes(ahead, v), v, after)
                 state = (v, *(int(fields[k][v]) for k in CONTROLLED))
-                full, seen = np.concatenate([native, tail]), {}
-                for c, new in enumerate(news):
-                    mine, _ = effective(envelope_writes(new, v), v, regs)
-                    if np.array_equal(mine, native):
-                        counts[c, 0] += 1
-                        continue
-                    sig = mine.tobytes()
-                    if sig not in seen:
-                        seen[sig] = judge(sid, state, full, np.concatenate([mine, tail]), until)
-                    counts[c, VERDICTS.index(seen[sig])] += 1
+                full = np.concatenate([native, tail])
+                distinct, inverse = np.unique(
+                    rows[~same].reshape(-1, 3 * width), axis=0, return_inverse=True
+                )
+                found = [
+                    VERDICTS.index(
+                        judge(sid, state, full, np.concatenate([m[m[:, 0] >= 0], tail]), until)
+                    )
+                    for m in distinct.reshape(-1, width, 3)
+                ]
+                np.add.at(counts, (np.flatnonzero(~same), np.array(found)[inverse.ravel()]), 1)
+            w = w + [start, 0, 0]
         sid.run(w, max([frames[f + 1][0], *w[-1:, 0]]))
     return {"frames": len(frames) - TRACED, "traced": judge.traced, "counts": counts.tolist()}
 
@@ -348,10 +386,7 @@ def summary(recs: list, top: int) -> str:
 
 def main(argv=None) -> int:
     """Parse the command line, score the candidates on the tunes in parallel, print the ranking."""
-    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("sources", nargs="+", help="tunes, directories or .csv tune lists")
-    ap.add_argument("--hvsc", type=Path, help="HVSC root the lists' paths are under")
-    ap.add_argument("--player", default="", help="regex of the lists' players to keep")
+    ap = shared.corpus_parser(__doc__)
     ap.add_argument("--backend", choices=("auto", "jennings", "sidtrace"), default="auto")
     ap.add_argument("--frames", type=int, default=3000)
     ap.add_argument("--top", type=int, default=20, help="candidates printed")
