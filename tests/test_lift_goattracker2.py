@@ -2,6 +2,8 @@
 
 # pylint: disable=protected-access,too-few-public-methods
 
+import re
+
 import numpy as np
 import pytest
 from pygoattracker import PlayerState
@@ -343,10 +345,19 @@ def test_a_funk_table_whose_rows_do_not_alternate_from_the_start_is_refused():
         g.Lift.cadence((131, 6), 1)
 
 
-def test_a_funk_row_of_zero_calls_never_reaches_the_next_row():
+def test_a_funk_row_that_never_ends_is_a_final_row_lasting_the_check():
     core = gt_tune(WAVE, rows=[(24, 1, 0xE, 1)] + [REST] * 15, speed=[(0, 0)])
-    with pytest.raises(g.Refusal, match="never ends"):
-        g.document_text(core)
+    cells, text = g.compare(core, g.CHECK)
+    assert not cells.size
+    assert max(int(n) for n in re.findall(r"tempo:(\d+)", text)) >= g.CHECK
+
+
+@pytest.mark.parametrize(
+    "pair, start, ends",
+    [((0, 0), 0, False), ((1, 6), 0, True), ((130, 3), 0, True), ((255, 255), 0, False)],
+)
+def test_a_funk_row_never_ends_exactly_when_its_counter_state_comes_round(pair, start, ends):
+    assert (g.Lift.cadence(pair, start) is not None) == ends
 
 
 @pytest.mark.parametrize(

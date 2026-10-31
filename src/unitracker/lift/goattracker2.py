@@ -437,6 +437,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         pairs = [self.cadence(p, 0) for p in funks]
         if recalls and self.recall and not self.lay["nofunktempo"]:
             pairs += [self.cadence(self.recall, t) for t in (0, 1)]
+        pairs = [p for p in pairs if p]
         silent = any(not self.sounds(i.wave_ptr) for n in used for i in [self.song.instrument(n)])
         self.slotted = self.effects or silent
         if self.rowlen < 3:
@@ -709,12 +710,12 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                     return {key: 2}
                 if t < 2 and (self.lay["nofunktempo"] or self.recall is None):
                     raise Refusal("funk tempo recall", "the table in force is not known")
-                return {key: self.cadence(self.recall, t) if t < 2 else max(t, 3)}
+                return {key: self.lengths(self.recall, t) if t < 2 else max(t, 3)}
             case T.FunkTempo(y):
                 if self.lay["nofunktempo"]:
                     raise Refusal("funk tempo", "build without it")
                 return {
-                    "vtempo" if self.lay["noglobaltempo"] else "tempo": self.cadence(
+                    "vtempo" if self.lay["noglobaltempo"] else "tempo": self.lengths(
                         self.funk_of(y), 0
                     )
                 }
@@ -747,15 +748,17 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         return word >> 8, word & 0xFF
 
     @staticmethod
-    def cadence(pair: tuple, start: int) -> tuple:
-        """The two row lengths in calls the funk table ``pair`` gives from its entry ``start``.
-        The player reloads its counter at one less than the entry's byte when the counter has
-        gone negative, which a counter of 128 or more already is, and moves to the other entry
-        on each reload, so a byte above 129 or of 1 spends reloads before the row counts; the
-        lengths are the document's when the entry is the same again after two rows."""
+    def cadence(pair: tuple, start: int):
+        """The two row lengths in calls the funk table ``pair`` gives from its entry ``start``, None
+        where a row never ends. The player reloads its counter at one less than the entry's byte
+        when the counter has gone negative, which a counter of 128 or more already is, and moves to
+        the other entry on each reload, so a byte above 129 or of 1 spends reloads before the row
+        counts. The counter and the entry are the whole state of a row: it never ends exactly when
+        a state comes twice before the counter reaches zero. The lengths are the document's when
+        the entry is the same again after two rows."""
         t, out, states = start, [], []
         for _ in range(2):
-            calls, counter = 0, 0
+            calls, counter, seen = 0, 0, set()
             while True:
                 calls += 1
                 counter = (counter - 1) & 255
@@ -763,13 +766,24 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                     break
                 if counter >= 128:
                     counter, t = (pair[t] - 1) & 255, t ^ 1
-                if calls > 1024:
-                    raise Refusal("funk tempo", "a funk table whose row never ends")
+                if (counter, t) in seen:
+                    return None
+                seen.add((counter, t))
             out.append(calls)
             states.append(t)
         if states[1] != start:
             raise Refusal("funk tempo", "a funk table whose rows do not alternate from the start")
         return out[0], out[1]
+
+    @property
+    def forever(self) -> int:
+        """The calls a row that never ends is stated to last: the calls of the check, which
+        plays at least :data:`CHECK` frames and the song's span."""
+        return CHECK * max(self.core.build.calls * self.core.entries, 1) + self.span()
+
+    def lengths(self, pair: tuple, start: int) -> tuple:
+        """The row lengths of :meth:`cadence`, both :attr:`forever` where a row never ends."""
+        return self.cadence(pair, start) or (self.forever, self.forever)
 
     def recalled(self, funks: set):
         """The funk pair a tempo recall reads, None where it is not one pair: the start state's

@@ -31,6 +31,7 @@ python tools/lift_corpus.py NAMES.txt
 | filter table | `filter` program on `cut`, `res`, `route`, `mode`; a filter-set row stops the modulation; `global` cells |
 | commands 5-D | `ad`, `sr`, `ctrl`, `run`, `res`/`route`, `set.cut`, `vol` |
 | commands E, F | `tempo:a/b`, `tempo:n`, `vtempo:n`; a funk table's two bytes as the row lengths the player's counter reload gives (`cadence`) |
+| a funk row that never ends | its counter and entry are its whole state: it never ends exactly when a state comes twice before the counter reaches zero (a byte of 0, or reloads that keep it negative). The row is the song's final event and lasts the calls of the check (`CHECK` frames and the song's span), which the verification plays |
 | funk recall (F00, F01) | the table in force: the start state's where no table is loaded, else the one table every load names where a voice loads it in its first row and no voice ahead of it recalls in a first row |
 | note that keeps the gate (legato instrument, no first waveform) | the gate is followed through the voice's rows (key off, key on, notes); where it is off, the note's event runs the instrument's wavetable with a first row `{gate:0,hold:0}` (`run:`), and an instrument whose fetch turns the gate off but sets none has that row in its own program |
 | gate timers read from the live instrument (`livegate`) | the instrument's `restart`, as the live instrument is the one the last row fetch loaded; refused where a row change to a shorter timer fetches again |
@@ -61,7 +62,7 @@ Typed `Refusal(kind)`, raised before lifting; `detail` names the construct.
 | `first waveform` | a gate-keeping note off, whose event also sets a table (`run` is taken) |
 | `noeffects vibrato` | instrument vibrato in a `noeffects` build: the player runs effect 0 each tick with the vibrato parameter of the live `instr`, which the row fetch loads before the note starts, including for a voice's first note and an instrument-only row, which have no restart row to rebind at the fetch |
 | `pointer onto a jump row` | a pointer or jump an instrument or command reaches that lands on a wavetable or filter table jump row (the tempo command F, a filter set of every mode bit: no typed row), on the last row of a table, or in a table that runs on past its last row beside such a landing |
-| `funk tempo` | a funk table whose row never ends (a byte of 0, or a pair whose reloads keep a negative counter), or whose rows do not alternate from the entry |
+| `funk tempo` | a funk table whose rows do not alternate from the entry |
 | `funk tempo recall` | tempo recall where the table in force is not one: several tables loaded, or none loaded in a first row |
 | `pattern command`, `gate note`, `timing mark in a build without author info` | rows the document cannot state |
 
