@@ -45,13 +45,14 @@ from unitracker.lift.shared import meta_text, note_name, rests
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
 VOICE = 0x31
 CHECK = 4000
+WINDOW = 64
 LIMIT = 1 << 15
 LOW = -24
 ORDER = tuple("events read pulse ctrl filter freq pw cut ctl ad sr res route mode vol".split())
 summary = cli.summary
 CELL_OF = {
     "freq": "up dn up7 dn7 clr seed",
-    "pw": "cup cdn cup7 cdn7 pclr pseed psw pwset psset pwps",
+    "pw": "cup cdn cup7 cdn7 pclr pseed psw pwinit pwset psset pwps",
 }
 CELL_OF = {t: c for c, names in CELL_OF.items() for t in names.split()}
 CELL_OF |= {t: "cut" for t in ("cp", "acc", "add", "sub", "step", "stepx")}
@@ -91,6 +92,7 @@ class Core:  # pylint: disable=too-many-instance-attributes
     clock: int
     head: tuple
     cp_extra: bool = True
+    calls: tuple = (1,)
 
 
 def _cause(exc: Exception) -> Refusal:
@@ -133,7 +135,9 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     except SidFormatError as exc:
         raise Refusal("multi-SID", str(exc)) from exc
     mem = player.memory
-    facts = build_facts(mem, player_bases(mem)[0], player.entry)
+    base = player_bases(mem)[0]
+    facts = build_facts(mem, base)
+    calls = _schedule(player, mem, base)
     head = SidImage.from_bytes(raw).header
     rates = tuple(
         mem[facts.binding["rate_lo"] + r] | mem[facts.binding["rate_hi"] + r] << 8
@@ -147,15 +151,37 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
         NTSC_CLOCK_HZ if head.is_ntsc else PAL_CLOCK_HZ,
         (head.name, head.author, head.released),
         facts.binding["cp"] == facts.binding["extra"],
+        calls,
     )
+
+
+def _schedule(player, mem, base: int) -> tuple:
+    """The repeating pattern of full (1) and sub-tick (0) calls the tune's interrupt makes: the
+    entry each of its first calls enters, as the spec player runs them."""
+    entered = []
+    run = player._run  # pylint: disable=protected-access
+
+    def trace(entry):
+        entered.append(entry)
+        return run(entry)
+
+    player._run = trace  # pylint: disable=protected-access
+    for _ in range(WINDOW):
+        player.play_frame()
+    full = {e: int(not build_facts(mem, base, e).flags["reduced"]) for e in set(entered)}
+    calls = [full[e] for e in entered]
+    period = next((p for p in range(1, WINDOW // 4 + 1) if calls == calls[:p] * (WINDOW // p)), 0)
+    if len(calls) != WINDOW or not period:
+        raise Refusal("multispeed", "the calls are not periodic")
+    return tuple(calls[:period])
 
 
 def _refuse(core: Core) -> None:
     st, flags = core.init, core.flags
     if re.search(r"\bnative\b", spec().source or ""):
         raise Refusal("native", "the spec has native blocks")
-    if flags["reduced"]:
-        raise Refusal("multispeed", "the first call is the sub-tick entry")
+    if not core.calls[0]:
+        raise Refusal("multispeed", "the first call is a sub-tick call")
     if not st["trigger"] & 0x80:
         raise Refusal("init", "the arranger is not armed")
     if st["vbit"] != (1, 2, 4) or st["vmask"] != (254, 253, 251):
@@ -177,6 +203,24 @@ def _chain(rows: dict, y: int) -> tuple:
         order.append(y)
         y = rows[y].next
     return order, at.get(y)
+
+
+def _cutoff(lo: int, hi: int, sub: bool, bottom: int, shift: bool, step: tuple = (0, 0)) -> tuple:
+    """``(low, high, output)`` of the accumulator ``lo, hi`` after one cutoff step by ``step``."""
+    slo, shi = step
+    if sub:
+        carry = lo > slo
+        lo, borrow = (lo - slo - 1) & 255, hi - shi - (not carry)
+        carry = borrow >= 0
+        hi = borrow & 255
+    else:
+        lo, carry = (lo + slo) & 255, lo + slo > 255
+        total = hi + shi + carry
+        hi, carry = total & 255, total > 255
+    hi = bottom if hi & 128 else hi
+    out = (hi + carry) & 255
+    out = bottom if out & 128 or out < bottom else out
+    return lo, hi, (out << 1 & 255 if shift else out)
 
 
 class Names:
@@ -436,12 +480,12 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def voices(self) -> tuple:
         """The orderlist of each voice."""
         steps, loop = self.walk()
-        items = [[Play("p0")] for _ in range(3)]
+        items = [[] for _ in range(3)]
         for patterns, delay in steps:
             last = self.length(patterns)[0]
             for v, p in enumerate(patterns):
                 items[v].append(Play(self.phrase(p, v, delay, last)))
-        return tuple(Voice(tuple(i), loop + 1) for i in items)
+        return tuple(Voice(tuple(i), loop) for i in items)
 
     # ---- the document -----------------------------------------------------------------------
 
@@ -459,32 +503,56 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def start(self, voice: int) -> Event:
         """The init event of ``voice``: the note base, the seeds, then the first tick's program."""
         st = self.st
-        row = {"wait": 1, "note": note_name(LOW), "gate": 1, "p.freq": self.pitch(voice, 0)}
+        row = {"note": note_name(LOW), "gate": 1, "p.freq": self.pitch(voice, 0)}
         if self.ps:
             row["m.pw"] = self.carry(voice, 0)
         prog = self.names.name("ctrl", "c", Program((Row(row),), None))
-        cmds = {"legato": True, "p.freq": Expr("v"), "run": prog}
+        cmds = {"legato": True, "run": prog}
         acc = st["slide_lo"][voice] | st["slide_hi"][voice] << 8
         if self.slides and acc:
             cmds["n.freq"] = Once(self.call("seed", p=acc & 255, q=acc >> 8))
             if self.ps:
                 cmds["n.pw"] = Once(self.call("pseed", p=acc & 255, q=acc >> 8))
+        if self.ps:
+            cmds["i.pw"] = Once(self.call("pwinit", p=st["pw_lo"][voice], q=st["pw_hi"][voice]))
         if voice == 0:
             cmds["tempo"] = 1
+            if self.seeded:
+                cmds["i.cut"] = Once(self.call("acc", p=self.cut0[0], q=self.cut0[1]))
         return Event(note_name(st["note_base"][voice] + LOW), f"i{voice + 1}", cmds)
 
-    def cutoff(self) -> tuple:
-        """``(initial output, cutoff step call or None)``: the step runs where a row sets the
-        slide or the build subtracts from the start."""
-        st, flags = self.st, self.flags
-        bottom = st["floor"] if flags["floored"] else 0
-        shift = flags["shifts"] and st["shift"] == 0x0A
-        sub = st["op_lo"] == 0xE9
-        if not (self.acid or sub):
-            out = bottom
-            return (out << 1 & 255 if shift else out), None
-        step = self.call("stepx" if shift else "step", i=2 if sub else 1, b=bottom)
-        return 0, step
+    @property
+    def bottom(self) -> int:
+        """The cutoff's lowest output."""
+        return self.st["floor"] if self.flags["floored"] else 0
+
+    @property
+    def shift(self) -> bool:
+        """Whether the cutoff output doubles."""
+        return bool(self.flags["shifts"]) and self.st["shift"] == 0x0A
+
+    @property
+    def cut0(self) -> tuple:
+        """``(accumulator low, high, output)`` after the first call's cutoff step."""
+        lo, hi, out = _cutoff(0, 0, self.st["op_lo"] == 0xE9, self.bottom, self.shift)
+        return lo, hi, out
+
+    @property
+    def seeded(self) -> bool:
+        """Whether the accumulator after the first step is not zero."""
+        return self.stepping and self.cut0[:2] != (0, 0)
+
+    @property
+    def stepping(self) -> bool:
+        """Whether the cutoff moves: a row sets it or the build subtracts from the start."""
+        return self.acid or self.st["op_lo"] == 0xE9
+
+    def step_call(self) -> Call | None:
+        """The cutoff step's call, None where the output stays at the first step's."""
+        if not self.stepping:
+            return None
+        sub = self.st["op_lo"] == 0xE9
+        return self.call("stepx" if self.shift else "step", i=2 if sub else 1, b=self.bottom)
 
     def regs(self) -> list:
         """The registers before tick 0."""
@@ -496,7 +564,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 st["pw_lo"][v],
                 st["pw_hi"][v] & 15,
             ]
-        regs[22] = self.cutoff()[0]
+        regs[22] = self.cut0[2]
         regs[23] = st["res"]
         regs[24] = st["fv"] | 15
         return regs
@@ -513,15 +581,13 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if self.ps:
             setters = [Slot(f"w{l}") for l in "ab" if (f"w{l}", "pw") in bound]
             seed = [Slot("n")] * self.slides
-            slots["pw"] = setters + seed + [Slot("m"), Slot("s", self.call("psw"))]
+            slots["pw"] = [Slot("i")] + setters + seed + [Slot("m"), Slot("s", self.call("psw"))]
         if keys := sorted((k for k, cell in bound if cell == "route"), key=_order):
             slots["route"] = [Slot(k) for k in keys]
-        step = self.cutoff()[1]
-        if step:
-            keys = sorted(
-                (k for k, cell in bound if cell == "cut"), key=lambda k: (k[2], k[1], k[0])
-            )
-            slots["cut"] = [Slot(k) for k in keys] + [Slot("step", step)]
+        if step := self.step_call():
+            keys = sorted((k for k, cell in bound if cell == "cut"), key=_order)
+            slots["cut"] = [Slot("i")] * self.seeded + [Slot(k) for k in keys]
+            slots["cut"] += [Slot("step", step)]
         return slots
 
     def header(self) -> Header:
@@ -539,6 +605,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             order=ORDER if self.ps and "AF" in self.used else None,
             state=state or None,
             regs=tuple(regs) if any(regs) else None,
+            lag=1,
+            calls=(1, core.calls) if 0 in core.calls else None,
         )
 
     def document(self) -> Document:
@@ -547,7 +615,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         init = tuple(self.start(v) for v in range(3))
         ins = tuple((f"i{v + 1}", self.instrument(v)) for v in range(3))
         defs = [Section("ins", ins), Section("ctrl", tuple(self.names.section("ctrl")))]
-        defs += [Section("phrase", (("p0", (Event("-"),)), *self.names.section("phrase")))]
+        defs += [Section("phrase", tuple(self.names.section("phrase")))]
         head = self.header()
         mods = tuple((signature(n, asm.params(ROUTINES[n])), Code(ROUTINES[n])) for n in self.calls)
         return Document(head, (), mods, defs, init, voices, None)

@@ -1,7 +1,7 @@
 """defMON's stateful units as 6502 modulators, each the matching statements of ``defmon.play``.
 
-State: ``freq`` ``s`` the pitch slide; ``pw`` ``l h`` the pulse bytes, ``d`` the sweep depth, ``k``
-set once read, ``m`` the slide mirror; ``cut`` ``w z`` the accumulator, ``t u`` its step, ``o`` its
+State: ``freq`` ``s`` the pitch slide; ``pw`` ``l h`` the pulse bytes, ``d`` the sweep depth, ``m`` the slide
+mirror; ``cut`` ``w z`` the accumulator, ``t u`` its step, ``o`` its
 operation (0 until set, then 1 add or 2 subtract), ``e`` the extra a CP column sets.
 """
 
@@ -9,7 +9,7 @@ from unitracker_grammar import code
 
 STATE = {
     "freq": (("s", 2),),
-    "pw": (("l", 1), ("h", 1), ("d", 1), ("k", 1), ("m", 2)),
+    "pw": (("l", 1), ("h", 1), ("d", 1), ("m", 2)),
     "cut": (("w", 1), ("z", 1), ("t", 1), ("u", 1), ("o", 1), ("e", 1)),
 }
 
@@ -30,7 +30,6 @@ def _carry(mask: str) -> str:
 
 
 _PSW = (
-    "lda k\nbne go\nlda v\nsta l\nlda v+1\nsta h\nlda #1\nsta k\ngo:\n"
     "lda d\nbeq out\nbmi up\nlda v\nlsr\nlda l\nsbc d\nsta l\nbcs out\n"
     "lda h\nbne dec\nlda #1\nsta l\njmp flip\ndec:\ndec h\njmp out\n"
     "up:\nand #127\nclc\nadc l\nsta l\nbcc out\nlda h\ncmp #15\nbeq top\ninc h\njmp out\n"
@@ -65,6 +64,7 @@ CODE = {
     "cup7": _UP.format("m") + _carry(_MASK),
     "cdn7": _DN.format("m") + _carry(_MASK),
     "psw": _PSW,
+    "pwinit": "lda #p\nsta l\nlda #q\nsta h\nrts\n",
     "pwset": "lda #p\nsta h\nand #240\nsta l\nrts\n",
     "psset": "lda #q\nsta d\nrts\n",
     "pwps": "lda #p\nsta h\nand #240\nsta l\nlda #q\nsta d\nrts\n",
