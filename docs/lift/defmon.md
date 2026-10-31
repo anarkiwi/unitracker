@@ -56,11 +56,29 @@ applies in the pulse phase, so `order` runs it before `ctrl`.
 ## Refusals
 
 Typed `Refusal(kind)`, raised before the document is built: `format` (not a defMON replay),
-`multi-SID` (stereo), `digi` (a play source other than the video or CIA 1 timer), `native` (a spec
-with native blocks), `jp onto jp`, `pattern past 32 steps`, `pattern past $7f`, `no ending
-pattern` (the replay reads what the editor never wrote), `multispeed` (an irregular schedule, or a
-first call that is a sub-tick call), `init` (state init leaves that the document cannot start
-from), `note` (a note past the absolute build's 7-bit wrap), `arranger` (a walk with no loop).
+`multi-SID` (stereo: `defmon.play` is the single-SID routine), `digi` (a play source other than
+the video or CIA 1 timer), `native` (a spec with native blocks), `jp onto jp` (a row read from
+the cells the row interpreter writes), `no ending pattern` (a stream with no ALT step in the
+64 KiB after its pointer), `multispeed` (a schedule that is not periodic), `init` (state init
+leaves that the document cannot start from), `note` (a note past the absolute build's 7-bit wrap),
+`arranger` (a walk with no loop).
+
+The replay reads what its memory holds, and the lift reads the same bytes. A pattern is the
+stream at the pointer of its table entry, step after step to its first ALT step, so a pattern of
+more than 32 steps continues into whatever follows it; an arranger byte of $80 or more indexes the
+pointer tables past their end; a JP row whose target is a JP row (`rows_hi` 0 twice) is read from
+page zero, an empty row in the snapshot init leaves. None of these is a limit of the format.
+
+## Size
+
+`native_counts` is the most of each kind a document may hold, from the song data the replay can
+reach: instruments 3, one a voice; ctrl programs one a `(voice, layer, row)` the played events arm
+and one a voice for the init event's first-tick program; restart, pw and filter programs 0; phrases
+one a `(voice, pattern, ALT step, delay after)` of a played arranger row, times the full calls in a
+period where the document has a full call of its own, and three for the first step; song entries
+one an arranger row reached, a jump row once. `verify` and `lift` check the document against it
+(`unitracker.lift.invariants`); `tools/lift_corpus.py` prints each tune's counts of both and its
+document bytes against the song data's.
 
 ## Verification
 

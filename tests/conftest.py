@@ -69,19 +69,27 @@ DEFMON = {
     "timewarp": ("MUSICIANS/F/F7sus4/Timewarp_Spheres_2SID.sid", "a stereo defMON tune"),
     "rent_a_cop": (
         "MUSICIANS/G/Goto80/Rent-A-Cop.sid",
-        "a defMON tune whose pattern plays past its 32 steps",
+        "a defMON tune whose pattern streams run past 32 steps",
     ),
     "in_memory_of": (
         "MUSICIANS/G/Goto80/In_Memory_of.sid",
-        "a defMON tune whose arranger plays patterns past $7f",
+        "a defMON tune whose arranger plays patterns past $7f and a row from JP rows",
     ),
     "techno_aha": (
         "MUSICIANS/G/Goto80/Techno_Aha.sid",
-        "a defMON tune whose arranger row plays no pattern that ends",
+        "a defMON tune whose patterns end only in the memory after them",
     ),
     "triangle": (
         "MUSICIANS/F/F7sus4/Triangle_My_Amelie.sid",
-        "a defMON tune whose first call is a sub-tick call",
+        "a defMON tune whose first seven calls are sub-tick calls",
+    ),
+    "svenska": (
+        "MUSICIANS/G/Goto80/Svenska_Narkotika_3.sid",
+        "a defMON tune of three full calls in four, the first a sub-tick call",
+    ),
+    "anticitizen": (
+        "MUSICIANS/N/NecroPolo/Anticitizen_64.sid",
+        "a defMON tune that alternates a sub-tick call and a full call",
     ),
 }
 for _name, (_tune, _doc) in DEFMON.items():
