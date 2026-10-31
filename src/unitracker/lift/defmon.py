@@ -13,6 +13,7 @@ from pydefmon.defmon import DefmonError
 from pydefmon.spec import build_facts, player_bases, spec
 from pydefmon.tune import Jump
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, gridcmp
+from pysidtracker.cadence import cadence_info
 from pysidtracker.errors import SidParseError
 from pysidtracker.formats import SidFormatError
 from unitracker_grammar import code as asm
@@ -46,6 +47,7 @@ CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
 VOICE = 0x31
 CHECK = 4000
 WINDOW = 64
+TRIGGERS = ("pal_video", "ntsc_video", "cia_timer")
 LIMIT = 1 << 15
 LOW = -24
 ORDER = tuple("events read pulse ctrl filter freq pw cut ctl ad sr res route mode vol".split())
@@ -125,15 +127,18 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     song = DefmonSong.from_sid_bytes(raw)
     song.subtune = subtune
     try:
+        fmt.spec(song)
+    except SidFormatError as exc:
+        raise Refusal("multi-SID", str(exc)) from exc
+    if (trigger := cadence_info(raw, subtune + 1)["trigger"]) not in TRIGGERS:
+        raise Refusal("digi", f"the play source is {trigger}")
+    try:
         tune = Tune.from_song(song)
     except DefmonError as exc:
         raise _cause(exc) from exc
     if len(tune.chips) > 1:
         raise Refusal("multi-SID", "stereo")
-    try:
-        player = fmt.spec_player(song, notes=True)
-    except SidFormatError as exc:
-        raise Refusal("multi-SID", str(exc)) from exc
+    player = fmt.spec_player(song, notes=True)
     mem = player.memory
     base = player_bases(mem)[0]
     facts = build_facts(mem, base)
@@ -177,7 +182,7 @@ def _schedule(player, mem, base: int) -> tuple:
 
 
 def _refuse(core: Core) -> None:
-    st, flags = core.init, core.flags
+    st = core.init
     if re.search(r"\bnative\b", spec().source or ""):
         raise Refusal("native", "the spec has native blocks")
     if not core.calls[0]:
@@ -205,22 +210,11 @@ def _chain(rows: dict, y: int) -> tuple:
     return order, at.get(y)
 
 
-def _cutoff(lo: int, hi: int, sub: bool, bottom: int, shift: bool, step: tuple = (0, 0)) -> tuple:
-    """``(low, high, output)`` of the accumulator ``lo, hi`` after one cutoff step by ``step``."""
-    slo, shi = step
-    if sub:
-        carry = lo > slo
-        lo, borrow = (lo - slo - 1) & 255, hi - shi - (not carry)
-        carry = borrow >= 0
-        hi = borrow & 255
-    else:
-        lo, carry = (lo + slo) & 255, lo + slo > 255
-        total = hi + shi + carry
-        hi, carry = total & 255, total > 255
-    hi = bottom if hi & 128 else hi
-    out = (hi + carry) & 255
-    out = bottom if out & 128 or out < bottom else out
-    return lo, hi, (out << 1 & 255 if shift else out)
+def _first_cutoff(sub: bool, bottom: int, shift: bool) -> tuple:
+    """``(accumulator low, high, output)`` after the first cutoff step from the cleared state: the
+    accumulator stays, or a subtraction borrows through it and its high byte falls to the floor."""
+    lo, hi = (255, bottom) if sub else (0, 0)
+    return lo, hi, bottom << 1 & 255 if shift else bottom
 
 
 class Names:
@@ -269,13 +263,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.ps = "PS" in self.used
         self.acid = "ACID" in self.used or ("CP" in self.used and core.cp_extra)
         self.two = {"WGh", "WGl"} <= self.used
-        self.layers = {
-            l
-            for evs in self.tune.patterns.values()
-            for e in evs
-            for l in "ab"
-            if getattr(e, l) is not None
-        }
         self.mask7 = self.rel and not self.plain
         notes = [e.note for evs in self.tune.patterns.values() for e in evs if e.note is not None]
         if self.mask7 and max(notes + list(self.st["note_base"]), default=0) >= 128:
@@ -534,8 +521,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     @property
     def cut0(self) -> tuple:
         """``(accumulator low, high, output)`` after the first call's cutoff step."""
-        lo, hi, out = _cutoff(0, 0, self.st["op_lo"] == 0xE9, self.bottom, self.shift)
-        return lo, hi, out
+        return _first_cutoff(self.st["op_lo"] == 0xE9, self.bottom, self.shift)
 
     @property
     def seeded(self) -> bool:
