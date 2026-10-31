@@ -47,6 +47,7 @@ VOICE = 0x31
 CHECK = 4000
 LIMIT = 1 << 15
 LOW = -24
+ORDER = tuple("events read pulse ctrl filter freq pw cut ctl ad sr res route mode vol".split())
 summary = cli.summary
 CELL_OF = {
     "freq": "up dn up7 dn7 clr seed",
@@ -532,6 +533,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             clock=(CYCLES[core.clock], core.clock),
             slots=self.slots(),
             layers={"ctrl": ("a", "b")},
+            order=ORDER if self.ps and "AF" in self.used else None,
             state=state or None,
             regs=tuple(regs) if any(regs) else None,
         )
