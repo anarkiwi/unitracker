@@ -509,9 +509,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             ctx, ins=ins, trig=trig, rest=rest or ctx.rest, boot=False
         )
 
-    def silence(self, ctx: Ctx, x: int) -> Event:
-        """The event of a voice parked on the silence pattern: the gate off on each row call."""
-        cmds = {"vtempo": self.rowlen}
+    def silence(self, ctx: Ctx, x: int, length: int) -> Event:
+        """The event of ``length`` calls of a voice on the silence pattern: the gate off at its
+        row call."""
+        cmds = {"vtempo": length}
         prog = self.program_of(self.record(ctx.trig).porta) if ctx.trig is not None else None
         if ctx.boot:
             cmds |= self.image(x)
@@ -594,8 +595,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         at = self.settle(order, real, 0)
         while len(items) < MAX_ITEMS:
             if at is None:
-                items.append(Play(self.names.name("phrase", "p", (self.silence(ctx, x),))))
-                return Voice(tuple(items), len(items) - 1)
+                return self.parked(items, ctx, x)
             if (at, ctx) in seen:
                 return Voice(tuple(items), seen[at, ctx])
             seen[at, ctx] = len(items)
@@ -606,6 +606,18 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             items += self.compressed(plays, entry.transpose)
             at = self.settle(order, real, at + 1)
         raise Refusal("orderlist", "does not settle")
+
+    def parked(self, items: list, ctx: Ctx, x: int) -> Voice:
+        """The voice ``x`` whose orderlist reaches the silence pattern after ``items``: its row
+        counter, negative at the first parse and counting down, parses 128 row calls, then
+        plays 128 and parses again."""
+        found = self.found
+        if found["dur_short"] != found["dur"] or found["dur_long"] != found["dur"]:
+            raise Refusal("silence", "a build whose rows leave the row counter")
+        one = self.names.name("phrase", "p", (self.silence(ctx, x, self.rowlen),))
+        last = self.names.name("phrase", "p", (self.silence(ctx, x, 129 * self.rowlen),))
+        items += [Group((Play(one),), 127), Play(last)]
+        return Voice(tuple(items), len(items) - 2)
 
     @staticmethod
     def compressed(names: list, transpose: int) -> list:
