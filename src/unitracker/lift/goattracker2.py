@@ -71,7 +71,7 @@ class Divergence(LiftError):
 
 
 @dataclass(frozen=True)
-class Core:
+class Core:  # pylint: disable=too-many-instance-attributes
     """What a lift needs of a tune: the typed song, the bound spec layout, the build and start
     state, the clock and the title lines."""
 
@@ -165,7 +165,7 @@ def _jumps(core: Core) -> None:
     used = {r.instrument for r in rows if r.instrument} | {1}
     for kind, (table, command, field) in tables.items():
         points = [getattr(song.instrument(n), field) for n in used]
-        points += [r.command.row for r in rows if isinstance(r.command, command)]
+        points += [r.command.row for r in rows if type(r.command) is command]
         points += [r.row for r in table if isinstance(r, T.Jump)]
         for ptr in points:
             if (
@@ -218,7 +218,7 @@ def _plus(step: int) -> Expr:
     return Expr(canonical(f"v + {step}"))
 
 
-class Lift:
+class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """One core's document."""
 
     def __init__(self, core: Core):
@@ -287,6 +287,7 @@ class Lift:
         return {LOAD: Once(Code.of(f"lda #{vib[2]}\nsta d\nrts"))}
 
     def wave_row(self, rows, p):
+        """``(keys, next pointer)`` of wavetable row ``p``."""
         row = rows[p - 1]
         if isinstance(row, T.WaveCommand):
             return self.wave_command(row.command), p + 1
@@ -319,7 +320,7 @@ class Lift:
                 | T.SetCutoff()
                 | T.SetMasterVolume()
             ):
-                return self.command(cmd, False, 0)
+                return self.command(cmd, 0)
         raise Refusal("wavetable command", type(cmd).__name__)
 
     @staticmethod
@@ -350,6 +351,7 @@ class Lift:
         return bool(rows) and dict(first).get("note") is not None and "wait" not in dict(first)
 
     def pulse_row(self, rows, p):
+        """``(keys, next pointer)`` of pulse table row ``p``."""
         row = rows[p - 1]
         step = 2 if self.lay["pulse2x"] else 1
         if isinstance(row, T.SimplePulseSet):
@@ -371,6 +373,7 @@ class Lift:
         return self.names.name("pw", "pw", Program(rows, loop))
 
     def filter_row(self, rows, p):
+        """``(keys, next pointer)`` of filter table row ``p``."""
         row = rows[p - 1]
         cut = "filter.cut" if self.cut_set else "cut"
         if isinstance(row, T.FilterSet):
@@ -440,7 +443,9 @@ class Lift:
 
     # ---- rows -------------------------------------------------------------------------------
 
-    def command(self, cmd, noted: bool, instr: int) -> dict:
+    def command(  # pylint: disable=too-many-return-statements,too-many-branches,too-many-locals
+        self, cmd, instr: int
+    ) -> dict:
         """The event commands of a pattern command."""
         match cmd:
             case T.DoNothing():
@@ -531,7 +536,7 @@ class Lift:
             case _:
                 raise Refusal("gate note", str(row.note))
         name = self.instrument(row.instrument) if row.instrument else None
-        cmds = self.command(row.command, noted, instr)
+        cmds = self.command(row.command, instr)
         tone = isinstance(row.command, T.TonePortamento)
         if tone and noted:
             cmds["legato"] = True
@@ -626,6 +631,7 @@ class Lift:
         return {k: v for k, (v, have) in want.items() if v != have}
 
     def header(self, voices: int) -> Header:
+        """The header lines."""
         core, lay = self.core, self.lay
         regs = self.start()
         pulseopt = lay["pulseopt"]
@@ -673,7 +679,7 @@ class Lift:
         init = [Event("-", "i1", first if v == 0 else {}) for v in range(len(voices))]
         intro = {"tempo": self.rowlen} | ({TICK: self.fx0(1)} if self.insvib else {})
         phrases = [("p0", (Event("-"), Event("-", commands=intro)))]
-        phrases += [(n, e) for n, e in self.names.section("phrase")]
+        phrases += self.names.section("phrase")
         defs = [Section(k, tuple(self.names.section(k))) for k in ("restart", "ins", "ctrl", "pw")]
         defs += [Section("filter", tuple(self.names.section("filter")))]
         defs = [d for d in defs if d.records] + [Section("phrase", tuple(phrases))]
@@ -753,7 +759,7 @@ def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
 
 def main(argv=None) -> int:
     """Lift a SID, or verify SIDs against the spec player."""
-    return cli.main(argv, __doc__.split("\n", 1)[0], lambda r, s: lift(r, s), verify)
+    return cli.main(argv, __doc__.split("\n", 1)[0], lift, verify)
 
 
 if __name__ == "__main__":

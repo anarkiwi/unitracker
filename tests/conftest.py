@@ -40,6 +40,27 @@ metal_warrior = hvsc_tune(
     "Path to the Metal Warrior Title Remix .sid.",
 )
 
+penumbra = hvsc_tune(
+    "penumbra",
+    "DEMOS/M-R/Penumbra.sid",
+    "Path to Penumbra, a full-ghosting altplayer build with fixed parameters.",
+)
+orbyte = hvsc_tune(
+    "orbyte",
+    "DEMOS/0-9/10_Orbyte.sid",
+    "Path to 10 Orbyte, a fixed-parameter, simple-pulse build without funk tempo.",
+)
+heavy_industrial = hvsc_tune(
+    "heavy_industrial",
+    "MUSICIANS/J/Joeli_Jani/Heavy_Industrial_Machinery.sid",
+    "Path to Heavy Industrial Machinery, a build with legato instruments.",
+)
+lester = hvsc_tune(
+    "lester",
+    "GAMES/G-L/Lester.sid",
+    "Path to Lester, a buffered-writes build.",
+)
+
 
 def table(*rows) -> Table:
     """A GoatTracker 2 table of ``(left, right)`` ``rows``."""

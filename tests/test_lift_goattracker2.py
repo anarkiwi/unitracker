@@ -1,5 +1,6 @@
 """The GoatTracker 2 lift plays the spec player's registers exactly."""
 
+import numpy as np
 import pytest
 from pygoattracker import constants as GT
 
@@ -223,3 +224,35 @@ def test_synthetic_tunes_play_exactly(case):
     except g.Refusal as refusal:
         pytest.skip(str(refusal))
     assert not cells.size, g.summary(cells, 3)
+
+
+def test_a_refusal_names_its_class():
+    core = gt_tune([(0x41, 0), (0xFF, 0)], rows=[(24, 1, 3, 1)] + [REST] * 15, speed=[(0x81, 1)])
+    with pytest.raises(g.Refusal) as caught:
+        g.document_text(core)
+    assert caught.value.kind == "calculated speed"
+
+
+def test_a_divergence_names_its_first_cell():
+    with pytest.raises(g.Divergence, match="frame 3 register 5"):
+        g.checked((np.array([[3, 5, 0, 1]]), ""), 10)
+
+
+def test_metal_warrior(metal_warrior):
+    raw = metal_warrior.read_bytes()
+    cells, text = g.verify(raw, 0, 4000)
+    assert not cells.size
+    assert text.startswith("unitracker:2.5\n") and "|loop:" in text
+    assert g.lift(raw, 0, 400) == g.lift(raw, 0, 400)
+
+
+@pytest.mark.parametrize("tune", ["penumbra", "orbyte", "heavy_industrial", "lester"])
+def test_corpus_tunes_lift_exactly(tune, request):
+    raw = request.getfixturevalue(tune).read_bytes()
+    cells, _ = g.verify(raw, 0, 3000)
+    assert not cells.size, g.summary(cells, 3)
+
+
+def test_cli(metal_warrior, capsys):
+    assert g.main(["--verify", "--frames", "300", str(metal_warrior)]) == 0
+    assert ": exact" in capsys.readouterr().out
