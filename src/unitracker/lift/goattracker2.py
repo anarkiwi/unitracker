@@ -292,6 +292,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.slotted = self.effects or silent
         if self.rowlen < 3:
             raise Refusal("build", "tempo")
+        tempos = [max(r.command.tempo, 3) for r in rows if isinstance(r.command, T.SetTempo)]
+        self.rowmin = min([self.rowlen, *(min(p) for p in self.pairs), *tempos])
 
     # ---- tables -----------------------------------------------------------------------------
 
@@ -632,9 +634,23 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                     count = 0
         raise Refusal("orderlist", "does not loop")
 
+    def overlap(self, plays: list) -> None:
+        """Refuse a note whose restart reads the note before it back to that note's own tick, where
+        the document applies the earlier note's gate after the later note's rows."""
+        instr, since = 1, None
+        for num, _ in plays:
+            for row in self.song.patterns[num]:
+                noted = isinstance(row.note, T.Note) and not isinstance(row.command, T.TonePortamento)
+                if noted and since is not None and self.song.instrument(instr).gate_timer + 1 >= since:
+                    raise Refusal("restart overlap", "a restart reaches the previous note's tick")
+                since = 0 if noted else since
+                instr = row.instrument or instr
+                since = None if since is None else since + self.rowmin * row.length
+
     def voice(self, order) -> Voice:
         """A voice's orderlist."""
         plays, loop = self.plays(order)
+        self.overlap(plays + plays[loop : loop + 1])
         items, instr = [Play("p0")], 1
         for num, trans in plays:
             name, instr = self.phrase(self.song.patterns[num], instr)
