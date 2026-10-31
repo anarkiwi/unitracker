@@ -1,4 +1,4 @@
-"""``unitracker-lift``: a GoatTracker 2 tune's generic document, optionally optimised."""
+"""``unitracker-lift``: a tracker tune's generic document, optionally optimised."""
 
 import argparse
 import importlib
@@ -12,7 +12,10 @@ from unitracker.optimiser import lossy, optimise
 from unitracker.optimiser.inline import MODES
 
 # format name: its lifter module
-LIFTERS = {"goattracker2": "unitracker.lift.goattracker2"}
+LIFTERS = {
+    "goattracker2": "unitracker.lift.goattracker2",
+    "musicassembler": "unitracker.lift.musicassembler",
+}
 
 
 class FormatError(ValueError):
