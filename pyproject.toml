@@ -17,6 +17,7 @@ dependencies = [
     "pysidtracker>=0.52.0",
     "pydefmon>=0.17.0",
     "pygoattracker>=0.10.2",
+    "pymusicassembler>=0.15.0",
     "unitracker-grammar>=0.18.0",
     "unitracker-player>=0.26.0",
     "tiktoken>=0.14.0",
