@@ -618,7 +618,7 @@ def test_a_tied_note_with_a_filter_command_is_refused():
 def test_a_pattern_the_song_lacks_is_refused(plain):
     song = dataclasses.replace(plain, orderlists=[Orderlist([OrderEntry(200, 0, 0)])] * 3)
     with pytest.raises(lift.Refusal, match="pattern"):
-        lift.document_text(lift.core_of_song(rebuilt(song)))
+        lift.document_text(lift.core_of_song(song))
 
 
 def test_an_orderlist_that_never_settles_is_refused(plain, monkeypatch):
@@ -627,16 +627,11 @@ def test_an_orderlist_that_never_settles_is_refused(plain, monkeypatch):
         lift.document_text(lift.core_of_song(plain))
 
 
-def test_an_empty_pattern_with_nothing_after_it_is_refused(plain, monkeypatch):
-    song = dataclasses.replace(plain, patterns=[Pattern()] + plain.patterns[1:])
-    core = lift.core_of_song(rebuilt(song))
-
-    def fail(*_):
-        raise lift.MusicAssemblerError("no pattern")
-
-    monkeypatch.setattr(lift.GRAMMAR, "parse_prefix", fail)
-    with pytest.raises(lift.Refusal, match="no pattern follows"):
-        lift.Lift(core).events(0)
+def test_an_instrument_the_song_lacks_is_refused(plain):
+    one = lift.Lift(lift.core_of_song(plain))
+    assert one.record(0) is plain.instruments[0]
+    with pytest.raises(lift.Refusal, match="not a record"):
+        one.record(len(plain.instruments))
 
 
 def test_a_core_the_document_cannot_state_is_refused(plain, monkeypatch):

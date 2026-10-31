@@ -10,9 +10,7 @@ import numpy as np
 from pymusicassembler import constants as MA
 from pymusicassembler import playspec
 from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
-from pymusicassembler.errors import MusicAssemblerError
-from pymusicassembler.grammar import GRAMMAR, PATTERN
-from pymusicassembler.model import ArpeggioRow, DurationEvent
+from pymusicassembler.model import ArpeggioRow
 from pymusicassembler.model import Instrument as ModelInstrument
 from pymusicassembler.model import InstrumentEvent, NoteEvent
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp, parse_sid_header
@@ -180,13 +178,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     # ---- instruments and programs -----------------------------------------------------------
 
     def record(self, k: int) -> ModelInstrument:
-        """Instrument ``k``'s record: the model's, or the memory's where the record lies past the
-        file's end (the model reads zero there, the player the RAM the machine holds)."""
-        song, size = self.song, MA.INSTR_RECORD_SIZE
-        at = self.found["instr"] + k * size
-        if k < len(song.instruments) and at + size <= song.load_addr + len(song.image):
-            return song.instruments[k]
-        return ModelInstrument.from_bytes(self.core.state.window(at, size))
+        """Instrument ``k``'s record: the bytes the player reads for it."""
+        if k >= len(self.song.instruments):
+            raise Refusal("instrument", f"{k} is not a record of the song")
+        return self.song.instruments[k]
 
     @staticmethod
     def call(name: str, **params) -> Call:
@@ -531,20 +526,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         return Event("-", None, cmds, steps=steps)
 
     def events(self, pid: int) -> list:
-        """The rows of pattern ``pid``; an empty one plays its lone ``$FF`` as a hold and reads on
-        into the bytes after it."""
+        """The rows of pattern ``pid``."""
         if pid >= len(self.song.patterns) or self.song.patterns[pid] is None:
             raise Refusal("pattern", f"{pid} is not a pattern")
-        events = self.song.patterns[pid].events()
-        if events:
-            return events
-        state = self.core.state
-        at = state.cell("pattern_lo", pid) | state.cell("pattern_hi", pid) << 8
-        try:
-            rest = GRAMMAR.parse_prefix(state.window(at + 1, 256), PATTERN).model
-        except MusicAssemblerError as exc:
-            raise Refusal("pattern", f"{pid} is empty and no pattern follows") from exc
-        return [DurationEvent(MA.CTL_DUR_MASK, long=True)] + rest
+        return self.song.patterns[pid].events()
 
     def rows(self, pid: int) -> list:
         """The rows of pattern ``pid`` as ``(select, event)`` pairs."""

@@ -110,10 +110,6 @@ CORPUS = {
         "MUSICIANS/R/Roly/Yeti_Mountain.sid",
         "a pulse table jump onto a jump row",
     ),
-    "datatanten": (
-        "DEMOS/A-F/Datatanten_Theme.sid",
-        "a funk row of table bytes 0 that never ends",
-    ),
     "hammurabi": (
         "GAMES/G-L/Hammurabi.sid",
         "a noeffects build whose instruments share a gate timer, with a pulse jump onto a jump row",
@@ -146,6 +142,11 @@ REFUSED = {
         "MUSICIANS/G/Groepaz/I_Dont_Know_What_I_Am_Doing.sid",
         "wrapper",
         "a play routine adding a cutoff sweep and a volume xor of its own",
+    ),
+    "datatanten": (
+        "DEMOS/A-F/Datatanten_Theme.sid",
+        "funk tempo",
+        "a funk row of table bytes 0 that never ends",
     ),
     "two_hours": (
         "DEMOS/0-9/2_Hours_NOT_Enough.sid",

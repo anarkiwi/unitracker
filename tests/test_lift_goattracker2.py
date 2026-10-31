@@ -4,7 +4,6 @@
 
 # pylint: disable=protected-access,too-few-public-methods
 
-import re
 
 import numpy as np
 import pytest
@@ -347,11 +346,18 @@ def test_a_funk_table_whose_rows_do_not_alternate_from_the_start_is_refused():
         g.Lift.cadence((131, 6), 1)
 
 
-def test_a_funk_row_that_never_ends_is_a_final_row_lasting_the_check():
+def test_a_funk_row_that_never_ends_is_refused_whatever_the_frames():
     core = gt_tune(WAVE, rows=[(24, 1, 0xE, 1)] + [REST] * 15, speed=[(0, 0)])
-    cells, text = g.compare(core, g.CHECK)
+    with pytest.raises(g.Refusal, match="never ends") as caught:
+        g.document_text(core)
+    assert caught.value.kind == "funk tempo"
+
+
+def test_a_funk_tune_is_exact_over_more_than_the_default_frames():
+    core = gt_tune(WAVE, rows=[(24, 1, 0xE, 1)] + [REST] * 15, speed=[(1, 6)])
+    cells, text = g.compare(core, 2 * g.CHECK)
     assert not cells.size
-    assert max(int(n) for n in re.findall(r"tempo:(\d+)", text)) >= g.CHECK
+    assert str(g.CHECK) not in text
 
 
 @pytest.mark.parametrize(
@@ -359,7 +365,11 @@ def test_a_funk_row_that_never_ends_is_a_final_row_lasting_the_check():
     [((0, 0), 0, False), ((1, 6), 0, True), ((130, 3), 0, True), ((255, 255), 0, False)],
 )
 def test_a_funk_row_never_ends_exactly_when_its_counter_state_comes_round(pair, start, ends):
-    assert (g.Lift.cadence(pair, start) is not None) == ends
+    if ends:
+        assert g.Lift.cadence(pair, start)
+    else:
+        with pytest.raises(g.Refusal, match="never ends"):
+            g.Lift.cadence(pair, start)
 
 
 @pytest.mark.parametrize(
