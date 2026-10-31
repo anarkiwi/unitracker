@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "unitracker"
-version = "0.1.0"
-description = "GoatTracker 2 lifter to the generic unitracker document, and its optimiser"
+version = "0.2.0"
+description = "Grammar-backed GoatTracker 2, defMON and Music Assembler lifters to the generic unitracker document, and its optimiser"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
