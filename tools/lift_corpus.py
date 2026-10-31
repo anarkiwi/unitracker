@@ -88,7 +88,7 @@ def main(argv=None) -> int:
     """Run the corpus and print the verdict counts, refusal classes and the divergent tunes."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("names", type=Path)
-    parser.add_argument("--frames", type=int, default=6000)
+    parser.add_argument("--frames", type=int, default=goattracker2.CHECK)
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--out", type=Path)

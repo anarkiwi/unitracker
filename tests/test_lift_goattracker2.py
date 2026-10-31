@@ -1,5 +1,10 @@
 """The GoatTracker 2 lift plays the spec player's registers exactly."""
+
 # pylint: disable=protected-access,too-few-public-methods
+
+# pylint: disable=protected-access,too-few-public-methods
+
+import re
 
 import numpy as np
 import pytest
@@ -84,6 +89,18 @@ CASES = {
         "wave": WAVE,
         "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
         "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
+        "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
+    },
+    "a pulse jump onto a jump row sets its bytes and goes on from the next row": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
+        "pulse": [(0x88, 0), (0xFF, 3), (0x89, 0x20), (0xFF, 2)],
+        "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
+    },
+    "a pulse pointer set onto a jump row runs it as a set": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 2, "gateoff_timer": 2}],
+        "pulse": [(0x88, 0), (0xFF, 3), (0x89, 0x20), (0xFF, 1)],
         "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
     },
     "a pulse step of 2 doubles the modulation": {
@@ -243,18 +260,26 @@ CASES = {
 
 @pytest.mark.parametrize("case", CASES)
 def test_synthetic_tunes_play_exactly(case):
-    core = gt_tune(**CASES[case])
     try:
-        cells, _ = g.compare(core, TICKS)
+        cells, _ = g.compare(gt_tune(**CASES[case]), TICKS)
     except g.Refusal as refusal:
         pytest.skip(str(refusal))
     assert not cells.size, g.summary(cells, 3)
 
 
-def test_a_refusal_names_its_class():
-    core = gt_tune([(0x41, 0), (0xFF, 4), (0x41, 7), (0xFF, 3), (0xFF, 1)])
-    with pytest.raises(g.Refusal) as caught:
-        g.document_text(core)
+@pytest.mark.parametrize(
+    "ins, tables, reason",
+    [
+        ({"filter_ptr": 1}, {"filt": [(0x90, 0xF1), (0, 0x10), (0xFF, 4), (0xFF, 3)]}, "filter"),
+        ({}, {"wave": [(0x41, 0), (0xFF, 4), (0x41, 7), (0xFF, 3), (0xFF, 1)]}, "tempo command"),
+        ({"pulse_ptr": 2}, {"pulse": [(0x88, 0), (0xFF, 2)]}, "last row"),
+    ],
+)
+def test_a_landing_the_typed_row_cannot_state_is_refused_with_its_reason(ins, tables, reason):
+    args = {"wave": WAVE} | tables
+    args["instruments"] = [{"wave_ptr": 1, "gateoff_timer": 2} | ins]
+    with pytest.raises(g.Refusal, match=reason) as caught:
+        g.document_text(gt_tune(**args))
     assert caught.value.kind == "pointer onto a jump row"
 
 
@@ -279,7 +304,7 @@ def test_a_divergence_names_its_first_cell():
 
 def test_metal_warrior(metal_warrior):
     raw = metal_warrior.read_bytes()
-    cells, text = g.verify(raw, 0, 4000)
+    cells, text = g.verify(raw)
     assert not cells.size
     assert text.startswith("unitracker:2.5\n") and "|loop:" in text
     assert g.lift(raw, 0, 400) == g.lift(raw, 0, 400)
@@ -288,7 +313,7 @@ def test_metal_warrior(metal_warrior):
 @pytest.mark.parametrize("tune", list(CORPUS))
 def test_corpus_tunes_lift_exactly(tune, request):
     raw = request.getfixturevalue(tune).read_bytes()
-    cells, _ = g.verify(raw, 0, 3000)
+    cells, _ = g.verify(raw)
     assert not cells.size, g.summary(cells, 3)
 
 
@@ -322,10 +347,19 @@ def test_a_funk_table_whose_rows_do_not_alternate_from_the_start_is_refused():
         g.Lift.cadence((131, 6), 1)
 
 
-def test_a_funk_row_of_zero_calls_never_reaches_the_next_row():
+def test_a_funk_row_that_never_ends_is_a_final_row_lasting_the_check():
     core = gt_tune(WAVE, rows=[(24, 1, 0xE, 1)] + [REST] * 15, speed=[(0, 0)])
-    with pytest.raises(g.Refusal, match="never ends"):
-        g.document_text(core)
+    cells, text = g.compare(core, g.CHECK)
+    assert not cells.size
+    assert max(int(n) for n in re.findall(r"tempo:(\d+)", text)) >= g.CHECK
+
+
+@pytest.mark.parametrize(
+    "pair, start, ends",
+    [((0, 0), 0, False), ((1, 6), 0, True), ((130, 3), 0, True), ((255, 255), 0, False)],
+)
+def test_a_funk_row_never_ends_exactly_when_its_counter_state_comes_round(pair, start, ends):
+    assert (g.Lift.cadence(pair, start) is not None) == ends
 
 
 @pytest.mark.parametrize(
@@ -378,3 +412,33 @@ def test_every_corpus_tune_holds_one_object_per_origin(request):
         text, objects = g.checked_text(g.core_of_sid(raw))
         assert invariants.provenance(text, g.lifted(g.core_of_sid(raw))[1]) == objects
         assert all(a >= b for a, b in objects.values())
+
+
+def test_a_check_runs_until_every_voice_has_looped_once_at_the_slowest_tempo():
+    rows = [(24, 1, 0xF, 15)] + [REST] * 15
+    core = gt_tune(WAVE, rows=rows, default_tempo=5)
+    slowest = 16 * 15
+    assert g.check_frames(core, 10) == slowest
+    assert g.check_frames(core, 4000) == 4000
+
+
+def test_a_check_counts_the_frames_of_a_routine_calling_the_player_twice():
+    assert g.check_frames(gt_tune(WAVE, default_tempo=5, calls=1), 10) == 16 * 6
+    assert g.check_frames(gt_tune(WAVE, default_tempo=5, calls=2), 10) == 16 * 6 // 2
+
+
+def test_a_vibrato_state_the_song_start_leaves_is_loaded_before_the_first_effect():
+    regs = [0] * 25
+    channels = (("vibdelay", (7, 7, 7)), ("vibtime", (3, 3, 3)))
+    state = PlayerState(tuple(regs), 0, 0, 15, (8, 5), False, ((4, 0), (11, 0), (18, 0)), channels)
+    args = {
+        "wave": WAVE,
+        "instruments": [
+            {"wave_ptr": 1, "gateoff_timer": 2, "vibrato_param": 1, "vibrato_delay": 1}
+        ],
+        "speed": [(3, 48)],
+        "state": state,
+    }
+    cells, text = g.compare(gt_tune(**args), TICKS)
+    assert not cells.size
+    assert "sta d" in text and "sta t" in text

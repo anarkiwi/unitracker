@@ -14,8 +14,8 @@ from pygoattracker import typed as T
 from pygoattracker.canonical import canonical_song
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp
-from pysidtracker.emu import PLAY_CYCLES, SidWriteLog
-from pysidtracker.wrap import boot, count_entries, enter
+from pysidtracker.wrap import count_entries
+from pysidtracker.playspec.tv import TVError
 from pysidtracker.playspec.player import SpecPlayer
 from unitracker_grammar.document import (
     HOLD,
@@ -46,6 +46,7 @@ from unitracker_player.player import play
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.gt2code import ROUTINES, STATE
+from unitracker.lift import gt2tables, gt2wrap
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -55,7 +56,7 @@ FREQ = (T.PortamentoUp, T.PortamentoDown, T.TonePortamento, T.Vibrato)
 LOAD = "load.freq"
 WAVE_FREQ = "wave.freq"
 TICK = "tick.freq"
-CHECK = 4000
+CHECK = 20000
 summary = cli.summary
 
 
@@ -109,28 +110,24 @@ def _entries(model) -> int:
     return count_entries(model.image, wrap.song, wrap.play, wrap.entries)
 
 
-WRAP_CALLS = 16
+def _own_writes(model) -> tuple:
+    """The SID registers the tune's play routine writes other than as the ghost byte of the
+    register (:mod:`unitracker.lift.gt2wrap`); a Refusal where that cannot be decided."""
+    wrap = model.info.wrap
+    if wrap is None or wrap.sink is None:
+        return ()
+    try:
+        return gt2wrap.own_writes(model.memory, wrap)
+    except TVError as exc:
+        raise Refusal("wrapper", f"the play routine is outside what is checked: {exc}") from exc
 
 
-def _own_writes(image, wrap) -> tuple:
-    """The SID registers a play routine writes other than as a copy of its ghost block ``sink``
-    over its first :data:`WRAP_CALLS` calls: a write whose source is not the ghost byte of its
-    register, or whose value is not that byte's."""
-    _, mpu, mem, _ = boot(image, wrap.song)
-    log = SidWriteLog(mpu, mirrors=False)
-    own = set()
-    for _ in range(WRAP_CALLS):
-        writes, seen = log.start(), 0
-        depth, start = enter(mpu, mem, wrap.play), mpu.processorCycles
-        while mpu.sp < depth and mpu.processorCycles - start <= PLAY_CYCLES:
-            mpu.step()
-            own |= {
-                reg
-                for reg, read, _, value in writes[seen:]
-                if read != wrap.sink + reg or mem[read] != value
-            }
-            seen = len(writes)
-    return tuple(sorted(own))
+def _landed(song: TypedSong, subtune: int = 0) -> TypedSong:
+    """``song`` with the landings on jump rows stated, a Refusal where they cannot be."""
+    try:
+        return gt2tables.landings(song, subtune)
+    except gt2tables.Landing as exc:
+        raise Refusal("pointer onto a jump row", str(exc)) from exc
 
 
 def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
@@ -142,7 +139,7 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     info = model.info
     names = (head.name, head.author, head.released)
     return Core(
-        model.typed,
+        _landed(model.typed, model.subtune),
         lay,
         info.playback,
         info.state,
@@ -153,7 +150,7 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
         memory=model.memory,
         wrap=info.wrap,
         entries=_entries(model),
-        own=_own_writes(model.image, info.wrap) if info.wrap and info.wrap.sink is not None else (),
+        own=_own_writes(model),
     )
 
 
@@ -161,7 +158,25 @@ def core_of_song(song: TypedSong, build=None, state=None, clock: int = PAL_CLOCK
     """The core of a typed song packed as the relocator would, played by the spec."""
     build = build or Build()
     img = songimage.song_image(song, build, state, None)
-    return Core(song, img.layout, build, state, clock, (song.name, song.author, ""), image=img)
+    return Core(
+        _landed(song), img.layout, build, state, clock, (song.name, song.author, ""), image=img
+    )
+
+
+PENDING = ("newnote", "newfx", "newparam", "waveptr", "pulseptr")
+UNUSED = {"noeffects": ("newfx", "newparam")}
+
+
+def _pending(core: Core) -> None:
+    """Refuse a channel whose song start leaves a note, a command or a table program running: the
+    variables it does not zero keep what the init left."""
+    unused = {n for flag, names in UNUSED.items() if core.lay[flag] for n in names}
+    for name in [n for n in PENDING if n not in unused]:
+        for c in core.voices:
+            if value := _started(core, name, c):
+                raise Refusal(
+                    "start state", f"{name} of channel {c} is {value} after the song start"
+                )
 
 
 def _refuse(core: Core):
@@ -170,6 +185,7 @@ def _refuse(core: Core):
         raise Refusal("interrupt", "play address 0")
     if lay["stereo"] or lay["nchan"] > C.MAX_CHN:
         raise Refusal("multi-SID", f"{lay['nchan']} channels")
+    _pending(core)
     if core.own:
         raise Refusal("wrapper", f"the play routine writes registers {list(core.own)} of its own")
     if lay["sid"] != 0xD400:
@@ -207,11 +223,8 @@ def _late(key: str, value) -> bool:
 
 def _played(core: Core) -> tuple:
     """``(rows, instruments)`` of the patterns the subtune's orderlists play."""
-    song = core.song
-    orders = song.subtunes[core.subtune].channels
-    played = {e.num for o in orders for e in o.entries if isinstance(e, PlayPattern)}
-    rows = [r for n in played if n < len(song.patterns) for r in song.patterns[n]]
-    return rows, {r.instrument for r in rows if r.instrument} | {1}
+    _, rows, used = gt2tables.played(core.song, core.subtune)
+    return rows, used
 
 
 def _speeds(core: Core, rows: list, used: set) -> None:
@@ -230,36 +243,6 @@ def _speeds(core: Core, rows: list, used: set) -> None:
         read = mem[lay["speedleft"] + y] << 8 | mem[lay["speedright"] + y]
         if read != word and (y in plain or (read | word) & 255):
             raise Refusal("layout", f"speedtable row {y} is not what the player reads")
-
-
-def _jumps(core: Core, rows: list, used: set) -> None:
-    """Refuse a table pointer or jump, reached from an instrument or a command, that lands on a
-    jump row, which the executors play as an ordinary row."""
-    song = core.song
-    waves = [r.command for r in song.wavetable if isinstance(r, T.WaveCommand)]
-    tables = {
-        "wave": (song.wavetable, T.SetWavePtr, "wave_ptr"),
-        "pulse": (song.pulsetable, T.SetPulsePtr, "pulse_ptr"),
-        "filter": (song.filtertable, T.SetFilterPtr, "filter_ptr"),
-    }
-    for kind, (table, command, field) in tables.items():
-        starts = [getattr(song.instrument(n), field) for n in used]
-        starts += [c.row for c in [*(r.command for r in rows), *waves] if c.__class__ is command]
-        if any(p and p <= len(table) and isinstance(table[p - 1], T.Jump) for p in starts):
-            raise Refusal("pointer onto a jump row", kind)
-        seen = set()
-        while starts:
-            ptr = starts.pop()
-            if not ptr or ptr > len(table) or ptr in seen:
-                continue
-            seen.add(ptr)
-            row = table[ptr - 1]
-            if isinstance(row, T.Jump):
-                if row.row and row.row <= len(table) and isinstance(table[row.row - 1], T.Jump):
-                    raise Refusal("pointer onto a jump row", kind)
-                starts.append(row.row)
-            elif not isinstance(row, T.Stop):
-                starts.append(ptr + 1)
 
 
 def _first_wave(lay, ins) -> tuple:
@@ -311,13 +294,23 @@ def _context_after(lay, song, rows, context: tuple, track: bool) -> tuple:
     return instr, gate
 
 
+def _var(core: Core, name: str, c: int) -> int:
+    """The byte of channel variable ``name`` of channel ``c`` in the image the tune's init
+    leaves."""
+    at = core.lay[name] + 7 * c
+    return core.memory[at] if core.memory is not None else core.image.data[at - songimage.BASE]
+
+
+def _started(core: Core, name: str, c: int) -> int:
+    """The channel variable ``name`` of channel ``c`` after the song start, which zeroes the bytes
+    from ``songptr`` on (``resetlen`` + 1 of them) and leaves the others as the init left them."""
+    first, at = core.lay["songptr"], core.lay[name] + 7 * c
+    return 0 if first <= at <= first + core.lay["resetlen"] else _var(core, name, c)
+
+
 def _gates(core) -> tuple:
     """The gate of each played channel before the first call."""
-    lay, mem = core.lay, core.memory
-    if mem is None:
-        mem = core.image.data
-        return tuple(mem[lay["gate"] + 7 * c - songimage.BASE] & 1 for c in core.voices)
-    return tuple(mem[lay["gate"] + 7 * c] & 1 for c in core.voices)
+    return tuple(_var(core, "gate", c) & 1 for c in core.voices)
 
 
 def native_counts(core: Core) -> dict:
@@ -394,9 +387,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         rows, used = _played(core)
         if core.memory is not None:
             _speeds(core, rows, used)
-            if any(core.memory[core.lay["newnote"] + 7 * c] for c in core.voices):
-                raise Refusal("start state", "a note pending in the channel variables")
-        _jumps(core, rows, used)
         self.core, self.lay, self.names = core, core.lay, Names()
         self.entered = {}
         self.song = canonical_song(core.song, core.subtune)
@@ -412,12 +402,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.used = used
         self.track = any(_keeps_gate(self.lay, self.song.instrument(n)) for n in used)
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
-        if self.lay["noeffects"] and self.insvib:
-            raise Refusal(
-                "noeffects vibrato",
-                "the vibrato reads the live instrument from the row fetch, which a first note "
-                "and an instrument-only row have no restart row for",
-            )
         cmds = [r.command for r in rows]
         cmds += [r.command for r in self.song.wavetable if isinstance(r, T.WaveCommand)]
         rates = {c.speed for c in cmds if hasattr(c, "speed")} | {
@@ -435,12 +419,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         pairs = [self.cadence(p, 0) for p in funks]
         if recalls and self.recall and not self.lay["nofunktempo"]:
             pairs += [self.cadence(self.recall, t) for t in (0, 1)]
+        pairs = [p for p in pairs if p]
         silent = any(not self.sounds(i.wave_ptr) for n in used for i in [self.song.instrument(n)])
         self.slotted = self.effects or silent
         if self.rowlen < 3:
             raise Refusal("build", "tempo")
         tempos = [max(r.command.tempo, 3) for r in rows if isinstance(r.command, T.SetTempo)]
         self.rowmin = min([self.rowlen, *(min(p) for p in pairs), *tempos])
+        self.tempo_rows = [*(max(p) for p in pairs), *tempos]
 
     # ---- tables -----------------------------------------------------------------------------
 
@@ -641,7 +627,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             init["ctrl"] = wave
         if gate is not None:
             init["gate"] = gate
-        program = Program([Row(fetch), Row(init), Row()])
+        rows = [Row(fetch), Row(init), Row()]
+        if lay["noeffects"] and self.insvib and timer > 1:
+            rows[0:1] = [Row({**fetch, "hold": 1}), Row({"hold": timer - 1, TICK: self.fx0(n)})]
+        program = Program(rows)
         return self.names.name("restart", "r", program, invariants.Origin(("ins", n)))
 
     def instrument(self, n: int) -> str:
@@ -706,12 +695,12 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                     return {key: 2}
                 if t < 2 and (self.lay["nofunktempo"] or self.recall is None):
                     raise Refusal("funk tempo recall", "the table in force is not known")
-                return {key: self.cadence(self.recall, t) if t < 2 else max(t, 3)}
+                return {key: self.lengths(self.recall, t) if t < 2 else max(t, 3)}
             case T.FunkTempo(y):
                 if self.lay["nofunktempo"]:
                     raise Refusal("funk tempo", "build without it")
                 return {
-                    "vtempo" if self.lay["noglobaltempo"] else "tempo": self.cadence(
+                    "vtempo" if self.lay["noglobaltempo"] else "tempo": self.lengths(
                         self.funk_of(y), 0
                     )
                 }
@@ -744,15 +733,17 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         return word >> 8, word & 0xFF
 
     @staticmethod
-    def cadence(pair: tuple, start: int) -> tuple:
-        """The two row lengths in calls the funk table ``pair`` gives from its entry ``start``.
-        The player reloads its counter at one less than the entry's byte when the counter has
-        gone negative, which a counter of 128 or more already is, and moves to the other entry
-        on each reload, so a byte above 129 or of 1 spends reloads before the row counts; the
-        lengths are the document's when the entry is the same again after two rows."""
+    def cadence(pair: tuple, start: int):
+        """The two row lengths in calls the funk table ``pair`` gives from its entry ``start``, None
+        where a row never ends. The player reloads its counter at one less than the entry's byte
+        when the counter has gone negative, which a counter of 128 or more already is, and moves to
+        the other entry on each reload, so a byte above 129 or of 1 spends reloads before the row
+        counts. The counter and the entry are the whole state of a row: it never ends exactly when
+        a state comes twice before the counter reaches zero. The lengths are the document's when
+        the entry is the same again after two rows."""
         t, out, states = start, [], []
         for _ in range(2):
-            calls, counter = 0, 0
+            calls, counter, seen = 0, 0, set()
             while True:
                 calls += 1
                 counter = (counter - 1) & 255
@@ -760,13 +751,24 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                     break
                 if counter >= 128:
                     counter, t = (pair[t] - 1) & 255, t ^ 1
-                if calls > 1024:
-                    raise Refusal("funk tempo", "a funk table whose row never ends")
+                if (counter, t) in seen:
+                    return None
+                seen.add((counter, t))
             out.append(calls)
             states.append(t)
         if states[1] != start:
             raise Refusal("funk tempo", "a funk table whose rows do not alternate from the start")
         return out[0], out[1]
+
+    @property
+    def forever(self) -> int:
+        """The calls a row that never ends is stated to last: the calls of the check, which
+        plays at least :data:`CHECK` frames and the song's span."""
+        return CHECK * max(self.core.build.calls * self.core.entries, 1) + self.span()
+
+    def lengths(self, pair: tuple, start: int) -> tuple:
+        """The row lengths of :meth:`cadence`, both :attr:`forever` where a row never ends."""
+        return self.cadence(pair, start) or (self.forever, self.forever)
 
     def recalled(self, funks: set):
         """The funk pair a tempo recall reads, None where it is not one pair: the start state's
@@ -888,9 +890,27 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 ):
                     raise Refusal("restart overlap", "a restart reaches before the previous note")
                 since = 0 if noted else since
+                self.vibrato_fetch(instr, row, noted)
                 self.refetch(instr, row.instrument or instr)
                 instr = row.instrument or instr
                 since = None if since is None else since + self.rowmin * row.length
+
+    def vibrato_fetch(self, before: int, row, noted: bool) -> None:
+        """Refuse an instrument change a noeffects build's vibrato cannot follow. Command 0 reads
+        the vibrato parameter of the live instrument, which the row fetch loads; the fetch falls
+        a gate timer of the instrument playing before the row's tick, and the restart program
+        binds the vibrato at its own instrument's timer, so the two agree only where the timers
+        do. An instrument-only row has no restart program to bind it in. An instrument of the
+        vibrato the live one has changes nothing."""
+        after = row.instrument
+        if not (self.lay["noeffects"] and self.insvib and after and after != before):
+            return
+        if self.fx0(after) == self.fx0(before):
+            return
+        if not noted:
+            raise Refusal("noeffects vibrato", "an instrument-only row changes the live instrument")
+        if self.song.instrument(after).gate_timer != self.song.instrument(before).gate_timer:
+            raise Refusal("noeffects vibrato", "a row changes the instrument to another gate timer")
 
     def refetch(self, before: int, after: int) -> None:
         """Refuse a row change to an instrument of a shorter gate timer in a build that reads the
@@ -935,6 +955,19 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             out.append((segs, entered))
         return out, context
 
+    def span(self) -> int:
+        """The calls of the player after which every voice's orderlist has looped once, at the
+        slowest row length any tempo gives."""
+        rows = 0
+        for c in self.core.voices:
+            units, _ = self.plays(self.song.subtunes[0].channels[c])
+            steps = sum(
+                r.length for n, _, t in units for r in self.song.patterns[n] for _ in range(t)
+            )
+            rows = max(rows, steps)
+        slowest = max([self.rowlen, *self.tempo_rows])
+        return rows * slowest
+
     # ---- the document -----------------------------------------------------------------------
 
     def state(self):
@@ -956,9 +989,9 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if state and state.ghost:
             return self.masked(state.registers)
         regs = [0] * 25
+        regs[24] = 15
         for reg, value in (*self.core.build.init_regs, *(state.init if state else ())):
             regs[reg] = value
-        regs[24] = state.volume if state else 15
         return self.masked(regs)
 
     @staticmethod
@@ -1045,9 +1078,25 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         )
 
     @property
+    def started(self) -> dict:
+        """``{voice: ctrl}`` of the voices whose control register the song start changes in a
+        full-ghosting build: ``initchn`` loads it as ``wave & gate`` from the zeroed wave, so the
+        frame after the start differs from the ghost the init left."""
+        if not self.lay["fullghost"]:
+            return {}
+        regs, out = self.start(), {}
+        for v, c in enumerate(self.core.voices):
+            ctrl = _started(self.core, "wave", c) & _var(self.core, "gate", c)
+            if ctrl != regs[7 * v + 4]:
+                out[v] = ctrl
+        return out
+
+    @property
     def lead(self) -> int:
         """The GoatTracker calls before the document's first tick: its first filter step
         writes the start state."""
+        if self.started:
+            return int(any(self.first(v) for v in range(len(self.core.voices))))
         return (
             1
             if self.lay["fullghost"] or any(self.first(v) for v in range(len(self.core.voices)))
@@ -1056,8 +1105,29 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     @property
     def lag(self) -> int:
-        """The calls the registers lag the cells."""
+        """The calls the registers lag the cells: a full ghost is output a call after it is
+        written, and the document begins with the song-start call where that changes it."""
+        if self.started:
+            return 1
         return self.lead + int(self.lay["fullghost"])
+
+    def seed(self, v: int) -> dict:
+        """The once binding loading the channel variables the song start leaves (``vibtime``,
+        ``vibdelay``, ``lastnote``) where the vibrato command 0 runs from the start with them:
+        the document holds the first instrument's delay and zeroes."""
+        fx = self.fx0(1)
+        if not isinstance(fx, Call):
+            return {}
+        c, names = self.core.voices[v], asm.symbols(ROUTINES[fx.name])
+        vib = self.vib_of(1)
+        have = {"t": 0, "d": vib[2] if vib else 0, "ln": 0}
+        want = {
+            "t": _started(self.core, "vibtime", c) if not self.lay["novib"] else 0,
+            "d": _started(self.core, "vibdelay", c),
+            "ln": _started(self.core, "lastnote", c) if not self.lay["nocalcspeed"] else 0,
+        }
+        lines = [f"lda #{v}\nsta {k}\n" for k, v in want.items() if k in names and v != have[k]]
+        return {WAVE_FREQ: Once(Code.of("".join(lines) + "rts"))} if lines else {}
 
     def origins(self) -> dict:
         """Each named object's :class:`~unitracker.lift.invariants.Origin`: the phrases' native
@@ -1080,12 +1150,24 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         gates = _gates(self.core)
         voices = [self.voice(channels[c], g) for c, g in zip(self.core.voices, gates)]
         self.instrument(1)
+        started = self.started
+        firsts = [self.first(v) for v in range(len(voices))]
         init = [
-            Event("-", "i1", ({"tempo": PRE - self.lead} if v == 0 else {}) | self.first(v))
+            Event(
+                "-",
+                "i1",
+                ({"tempo": PRE - self.lead} if v == 0 else {})
+                | ({"ctrl": started[v]} if v in started else {})
+                | ({} if started else firsts[v])
+                | self.seed(v),
+            )
             for v in range(len(voices))
         ]
         intro = {"tempo": self.rowlen} | ({TICK: self.fx0(1)} if self.insvib else {})
-        phrases = [("p0", (Event("-"), Event("-", commands=intro)))]
+        rows = (Event("-"), Event("-", commands=intro))
+        if started and firsts[0]:
+            rows = (rows[0], Event("-", commands={"tempo": 1} | firsts[0]), rows[1])
+        phrases = [("p0", rows)]
         phrases += self.names.section("phrase")
         defs = [Section(k, tuple(self.names.section(k))) for k in ("restart", "ins", "ctrl", "pw")]
         defs += [Section("filter", tuple(self.names.section("filter")))]
@@ -1106,6 +1188,13 @@ def lifted(core: Core) -> tuple:
 def document_text(core: Core) -> str:
     """The document of ``core``, printed."""
     return lifted(core)[0]
+
+
+def check_frames(core: Core, frames: int = CHECK) -> int:
+    """The frames a check of ``core`` plays: at least ``frames``, and until every voice's
+    orderlist has looped once at the slowest tempo."""
+    lifter = Lift(core)
+    return max(frames, -(-lifter.span() // max(core.build.calls * core.entries, 1)))
 
 
 def checked_text(core: Core) -> tuple:
@@ -1138,7 +1227,7 @@ def player_of(core: Core, notes: bool = True):
     )
 
 
-def reference(raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = True):
+def reference(raw: bytes, subtune: int = 0, frames: int = CHECK, notes: bool = True):
     """The register grid of the spec player over ``frames`` frames."""
     fmt = find_format(raw)
     model = decompile_sid(raw, subtune)
@@ -1166,18 +1255,20 @@ def checked(text_cells: tuple, frames: int) -> str:
     return text
 
 
-def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
-    """``(cells, text)`` of a SID: the cells where its document differs from the reference."""
+def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
+    """``(cells, text)`` of a SID: the cells where its document differs from the reference over
+    :func:`check_frames` frames, ``frames`` at least."""
     core = core_of_sid(raw, subtune)
     text, _ = checked_text(core)
+    frames = check_frames(core, frames)
     ours = np.asarray(play(text, frames), dtype=np.uint8)
     theirs = reference(raw, subtune, len(ours))
     return gridcmp.cell_diff(ours, theirs), text
 
 
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
-    """The document of a SID's subtune, checked against the reference over ``frames`` frames
-    (default :data:`CHECK`); a LiftError otherwise."""
+    """The document of a SID's subtune, checked against the reference over the whole song
+    (:func:`check_frames`, ``frames`` at least, default :data:`CHECK`); a LiftError otherwise."""
     frames = frames or CHECK
     return checked(verify(raw, subtune, frames), frames)
 

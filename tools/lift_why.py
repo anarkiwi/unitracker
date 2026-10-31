@@ -68,7 +68,7 @@ def main(argv=None) -> int:
     parser.add_argument("tune")
     parser.add_argument("--subtune", type=int, default=0)
     parser.add_argument("--frame", type=int)
-    parser.add_argument("--frames", type=int, default=6000)
+    parser.add_argument("--frames", type=int, default=lift.CHECK)
     parser.add_argument("--before", type=int, default=3)
     parser.add_argument("--after", type=int, default=2)
     parser.add_argument("--vars", nargs="*", default=[])
