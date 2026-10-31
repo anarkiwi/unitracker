@@ -309,7 +309,7 @@ def propose(
     to calls of expression templates (or the prelude's, where ``prelude``), and per group of
     code templates sharing state whose calls all fit a plan (:mod:`coupled`), its other plans
     its alternatives; ``unfit`` the report line of each group no plan fits."""
-    clock = (doc.header.clock or (None, PAL_HZ))[1] or PAL_HZ
+    clock = clock_of(doc)
     codes = {_code.signature(k)[0] for k, v in doc.mods if isinstance(v, Code)}
     by_template, cells = defaultdict(dict), Counter(call for call, _ in tr.firings)
     for (call, cell), rec in tr.firings.items():
@@ -338,7 +338,7 @@ def _groups(doc: Document, tr: Trace, groups: list, tolerances: dict, names, fla
     the rest its alternatives, and why each group no plan fits is unfit; ``flags``
     ``(progress, prelude)``."""
     progress, prelude = flags
-    clock = (doc.header.clock or (None, PAL_HZ))[1] or PAL_HZ
+    clock = clock_of(doc)
     out, unfit = {}, []
     for group in tqdm(groups, desc="lossy fit groups", unit="group", disable=not progress):
         tol = tolerances[group.cell]
@@ -437,6 +437,11 @@ def _body_reads(body) -> set:
     if isinstance(body, Code):
         return {s.split(".")[0] for s in _code.symbols(body.statements)}
     return {n.value.id for n in ast.walk(tree(body.text)) if isinstance(n, ast.Subscript)}
+
+
+def clock_of(doc: Document) -> int:
+    """The clock in Hz the document's notes are tabulated at."""
+    return (doc.header.clock or (None, PAL_HZ))[1] or PAL_HZ
 
 
 def pruned(doc: Document, names: set) -> Document:

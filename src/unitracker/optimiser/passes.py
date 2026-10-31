@@ -114,11 +114,6 @@ def _header(changes: dict, doc: Document) -> Document:
     return replace(doc, header=replace(doc.header, **changes))
 
 
-def _expr(value):
-    """A binding as a slot's default spells it: an integer as its expression."""
-    return Expr(str(value)) if isinstance(value, int) else value
-
-
 def _label(path: tuple, what: str) -> str:
     return f"{'/'.join(map(str, path))}: {what}"
 
@@ -266,7 +261,7 @@ def _binding_defaults(doc: Document) -> list:
     ``none`` (it ends a binding only where one lasts to its note) and its binding equal to its
     slot's default."""
     bindings = list(_bindings(doc))
-    bound = {(c, s) for _, _, _, c, s, v in bindings if v not in _STOPS}
+    bound = {(c, s) for _, _, _, c, s, v in bindings if v not in _STOPS and not isinstance(v, int)}
     held = any(c == "freq" and v == HOLD for _, _, _, c, _, v in bindings)
     default = {(c, s.name): s.mod for c, slots in doc.header.slots or () for s in slots}
     edits = []
@@ -275,7 +270,7 @@ def _binding_defaults(doc: Document) -> list:
             continue
         dead = value == NONE and (cell, slot) not in bound and not (cell == "freq" and held)
         mod = default.get((cell, slot))
-        if dead or attr == "fields" and (value == NONE or mod is not None and _expr(value) == mod):
+        if dead or attr == "fields" and (value == NONE or mod is not None and value == mod):
             drop = partial(_drop, path, attr, (key, value))
             edits.append(Edit(_label(path, f"{key}:{value}"), drop))
     return edits
@@ -436,7 +431,7 @@ def _hoist(cell: str, name: str, value, doc: Document) -> Document:
     phi = _reads_phi(doc, value)
     slots[cell] = tuple(
         (
-            replace(s, mod=_expr(value), reset=_with_note(s.reset) if phi else s.reset)
+            replace(s, mod=value, reset=_with_note(s.reset) if phi else s.reset)
             if s.name == name
             else s
         )
@@ -473,7 +468,7 @@ def hoist(doc: Document) -> list:
             if slot.mod is not None or len(values) != 1:
                 continue
             (found,) = values
-            if len(found) == 1 and found[0] not in _STOPS:
+            if len(found) == 1 and found[0] not in _STOPS and not isinstance(found[0], int):
                 hoisted = partial(_hoist, cell, slot.name, found[0])
                 edits.append(Edit(f"{slot.name}.{cell}:{found[0]}", hoisted))
     return edits
@@ -525,7 +520,8 @@ def _stopped_at(events: tuple, i: int, key: str, cell: str) -> int | None:
 
 def once(doc: Document) -> list:
     """A command binding a slot that a later event of its phrase stops with ``none``, no command
-    of the cell between, becomes a binding that fires once (``b!``), the ``none`` dropped."""
+    of the cell between, becomes a binding that fires once (``b!``), the ``none`` dropped; a plain
+    integer is a write already and is left alone."""
     edits = []
     for path, node in walk(doc):
         if not isinstance(node, tuple) or not node or not all(isinstance(e, Event) for e in node):
@@ -533,7 +529,7 @@ def once(doc: Document) -> list:
         for i, event in enumerate(node):
             for key, value in event.commands:
                 slot = _slot_key(doc, key)
-                if slot is None or value in (NONE, HOLD, "reset") or isinstance(value, Once):
+                if slot is None or value in (NONE, HOLD, "reset") or isinstance(value, (int, Once)):
                     continue
                 j = _stopped_at(node, i, key, slot[0])
                 if j is not None:

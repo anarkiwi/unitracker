@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pygoattracker import decompile_sid
 from pysidtracker import find_format
+from pysidtracker.header import parse_sid_header
 from pysidtracker.errors import SidError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,16 +34,16 @@ def tune(source, hvsc=None) -> Path:
 
 
 def multi_sid(raw: bytes) -> bool:
-    """Whether the tune ``raw`` plays more than one SID: its header's 2nd SID address ($7A,
-    PSID v3 on) or 3rd ($7B, v4 on), or a GoatTracker 2 build with a channel past the first
-    SID's three voices."""
-    version = int.from_bytes(raw[4:6], "big")
-    if any(version >= v and len(raw) > at and raw[at] for v, at in ((3, 0x7A), (4, 0x7B))):
-        return True
+    """Whether the tune ``raw`` plays more than one SID: its header's 2nd SID address (PSID v3
+    on) or 3rd (v4 on), or a GoatTracker 2 build with a channel past the first SID's three
+    voices."""
     try:
+        head = parse_sid_header(raw)
+        if head.version >= 3 and head.second_sid or head.version >= 4 and head.third_sid:
+            return True
         if find_format(raw).name != "goattracker2":
             return False
-        voices = decompile_sid(raw).player()._voices  # pylint: disable=protected-access
+        voices = decompile_sid(raw).info.playback.voices or ()
     except SidError:
         return False
     return len(voices) > 3 or any(off is not None and off >= 0x20 for off in voices)

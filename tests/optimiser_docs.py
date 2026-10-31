@@ -69,7 +69,7 @@ MERGE_PHI = doc(
 
 HOIST = doc(
     "      ins:\n"
-    + "".join(f"        i{k}:{{ad:{k},ctrl:c1,pw:2048}}\n" for k in range(1, 6))
+    + "".join(f"        i{k}:{{ad:{k},ctrl:c1,pw:2048 + 0}}\n" for k in range(1, 6))
     + "      ctrl:\n"
     "        c1:[{ctrl:65},end]\n"
     "      phrase:\n"
@@ -276,7 +276,7 @@ ONCE = doc(
     "      ins:\n"
     "        i1:{ad:9,sr:240}\n"
     "      phrase:\n"
-    "        p1:[C4.i1 pw:800,-*3,- pw:none,D pw:'v + 8',-*2,- pw:none]\n"
+    "        p1:[C4.i1 pw:'800 + 0',-*3,- pw:none,D pw:'v + 8',-*2,- pw:none]\n"
 )
 
 # templates of the document's own that play as prelude calls (code and expressions), and one

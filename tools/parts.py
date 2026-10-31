@@ -5,6 +5,7 @@ and how much each part repeats where a voice interleaves them.
 """
 
 import argparse
+import ast
 import json
 import os
 import sys
@@ -21,10 +22,17 @@ FOCUS = 0.9
 MIN_NOTES = 8
 
 
+def _plain(item):
+    """``item`` with each compiled expression it holds as its source text."""
+    if isinstance(item, tuple):
+        return tuple(map(_plain, item))
+    return ast.unparse(item.node) if hasattr(item, "node") else item
+
+
 def sound(ins) -> str:
     """An instrument's sound: its control program (waveform and modulation rows), so that a
     template's instances with other envelopes or arguments are one sound."""
-    return repr(ins.ctrl) if ins is not None else "none"
+    return repr(_plain(ins.ctrl.rows) if ins is not None and ins.ctrl else None)
 
 
 def segments(text: str, ticks: int) -> dict:

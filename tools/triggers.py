@@ -5,6 +5,7 @@ starts replaced unplayed, modulator bindings and phase resets, and programs that
 """
 
 import argparse
+import ast
 import json
 import os
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from pysidtracker.jobs import deadline, imap
 from tqdm import tqdm
+from unitracker_grammar.cells import VOICE_CELLS
 from unitracker_player.compiler import CONTROL, FILTER, PULSE, RESET
 from unitracker_player.player import Player, load
 
@@ -31,92 +33,97 @@ KEYS = (
 )
 
 
-class Tracer(Player):  # pylint: disable=too-many-instance-attributes
-    """A player recording each program start's trigger and whether it played a row, each
-    modulator binding's outcome and, per slot and tick, what zeroed its phase."""
+class Tracer:  # pylint: disable=too-many-instance-attributes
+    """An observer of a play recording each program start's trigger and whether it played a
+    row, each modulator binding's outcome and, per slot and tick, what zeroed its phase."""
 
-    def __init__(self, song):
-        self.via, self.starts, self.live = [], Counter(), {}
+    def __init__(self):
+        self.player, self.via, self.starts, self.live = None, [], Counter(), {}
         self.replaced, self.ins_starts, self.rel0 = Counter(), defaultdict(Counter), {}
         self.noted, self.cur_ins, self.restart_ctrl, self.moved = {}, {}, Counter(), set()
         self.binds, self.zeroed = Counter(), defaultdict(list)
-        super().__init__(song)
 
-    def _event(self, t, v, event, *rest):
-        if isinstance(event.note, int) and not event.legato:
-            self.noted[v] = t
-        self.cur_ins[v] = rest[1]
-        super()._event(t, v, event, *rest)
+    def __call__(self, kind: str, *args):
+        getattr(self, kind, lambda *_: None)(*args)
 
     def _trigger(self) -> str:
         return self.via[-1][0] if self.via else "init"
 
-    def _zero(self, v, name: str, t: int, how: str):
-        self.zeroed["cut" if name.endswith(".cut") else v, name, t].append(how)
+    def _mods(self, v: int, cell: str) -> list:
+        return (
+            self.player.voices[v].mods[cell] if cell in VOICE_CELLS else self.player.song_mods[cell]
+        )
+
+    def _zero(self, v, name: str, how: str):
+        self.zeroed["cut" if name.endswith(".cut") else v, name, self.player.tick].append(how)
+
+    def event(self, v, event, ins):
+        """Notes the voice's instrument and the call a note sounds at."""
+        if isinstance(event.note, int) and not event.legato:
+            self.noted[v] = self.player.call
+        self.cur_ins[v] = ins
+
+    def enter(self, scope, _v, *args):
+        """Pushes what the keys about to apply are triggered by."""
+        if scope == "instrument":
+            ins = args[0]
+            self.via.append(("note", id(ins) if ins.ctrl is not None else None))
+        else:
+            first, command = args
+            self.via.append(("event" if command else "restart" if first else "program", None))
+
+    def leave(self, _scope):
+        """Pops the trigger."""
+        self.via.pop()
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
-    def _set(self, v, cell, slot, fn, once, command, fresh=False):
+    def bind(self, v, cell, slot, _command, fn, once, fresh):
+        """Counts a binding's outcome and zeroes the phase it restarts; a plain integer's write
+        is no binding."""
+        if once and isinstance(getattr(fn, "node", None), ast.Constant):
+            return
         mod, trigger = self._mods(v, cell)[slot], self._trigger()
         if not (fresh or once) and mod is not None and mod[0] is fn and not mod[5]:
             self.binds[cell, trigger, "same modulator, phase kept"] += 1
-        else:
-            new = mod is None or mod[0] is not fn
-            how = "fresh" if fresh else "once" if once else "new" if new else "rebound"
-            self.binds[cell, trigger, how] += 1
-            name = f"{self.song.slots[cell][slot]}.{cell}"
-            self._zero(v, name, self.tick, f"bind {trigger} {how}")
-        super()._set(v, cell, slot, fn, once, command, fresh)
+            return
+        new = mod is None or mod[0] is not fn
+        how = "fresh" if fresh else "once" if once else "new" if new else "rebound"
+        self.binds[cell, trigger, how] += 1
+        self._zero(v, f"{self.player.song.slots[cell][slot]}.{cell}", f"bind {trigger} {how}")
 
-    def _stop(self, v, cell, value, ends):
-        if value == RESET:
-            trigger = self._trigger()
-            for k in ends:
-                mod = self._mods(v, cell)[k]
-                self.binds[cell, trigger, "reset command" if mod else "reset of nothing"] += 1
-                if mod is not None:
-                    self._zero(v, mod[3], self.tick, f"reset {trigger}")
-        super()._stop(v, cell, value, ends)
+    def stop(self, v, cell, value, ends):
+        """Counts the resets and zeroes the phases they reset."""
+        if value != RESET:
+            return
+        trigger, mods = self._trigger(), self._mods(v, cell)
+        for k in ends:
+            self.binds[cell, trigger, "reset command" if mods[k] else "reset of nothing"] += 1
+            if mods[k] is not None:
+                self._zero(v, mods[k][3], f"reset {trigger}")
 
-    def _marked(self, v, mark, t):
-        hit = super()._marked(v, mark, t)
-        if hit and mark.startswith("reset "):
-            self._zero(v, mark[6:], t, "slot reset event")
-        return hit
+    def rewind(self, v, name):
+        """Zeroes the phase of a slot on its reset event."""
+        self._zero(v, name, "slot reset event")
 
-    def _via(self, how, method, *args):
-        self.via.append(how)
-        try:
-            method(*args)
-        finally:
-            self.via.pop()
+    def row(self, v, slot):
+        """Marks the program in the slot as having played a row."""
+        if (v, slot) in self.live:
+            self.live[v, slot][2] = True
 
-    def _instrument(self, v, ins, event, t):
-        how = ("note", id(ins) if ins.ctrl is not None else None)
-        self._via(how, super()._instrument, v, ins, event, t)
-
-    def _command(self, v, key, value, t):
-        self._via(("event", None), super()._command, v, key, value, t)
-
-    def _row(self, v, row, t, first=False):
-        self._via(("restart", None), super()._row, v, row, t, first)
-
-    def _run_slot(self, v, kind, t):
-        slot = self.voices[v].slots[kind]
-        if slot[0] is not None and slot[2] <= t and (v, kind) in self.live:
-            self.live[v, kind][2] = True
-        self._via(("program", None), super()._run_slot, v, kind, t)
-
-    def _start(self, v, kind, prog, t):
+    def start(self, v, slot, prog):
+        """Counts a program start, whether it replaced one unplayed, and what a restart's
+        control program was."""
+        kind, t = self.player.song.kinds[slot], self.player.call
         trigger, ins = self.via[-1] if self.via else ("init", None)
         self.starts[KINDS[kind], trigger] += 1
-        old = self.live.get((v, kind))
+        old = self.live.get((v, slot))
         if old and old[1] == t and not old[2] and old[0][0] != "init":
             self.replaced[KINDS[kind], old[0][0], trigger] += 1
             if old[0][1] is not None and kind == CONTROL:
                 self.ins_starts[old[0][1]]["replaced"] += 1
         if ins is not None and kind == CONTROL:
             self.ins_starts[ins]["starts"] += 1
-        self.live[v, kind] = [(trigger, ins), t, False]
+        self.live[v, slot] = [(trigger, ins), t, False]
         at = self.noted.get(v) == t
         if trigger == "restart" and kind == CONTROL:
             cur = self.cur_ins.get(v)
@@ -130,7 +137,6 @@ class Tracer(Player):  # pylint: disable=too-many-instance-attributes
                 self.moved.add((id(cur), id(prog)))
         if kind == CONTROL and prog is not None and prog.rows and REL0 in prog.rows[0][2]:
             self.rel0.setdefault(id(prog), Counter())[trigger, at] += 1
-        super()._start(v, kind, prog, t)
 
 
 def programs(song) -> dict:
@@ -191,16 +197,17 @@ def measure(path: Path, ticks: int) -> dict:
         min(ticks, json.loads(meta.read_text()).get("ticks") or ticks) if meta.exists() else ticks
     )
     song = load(path.read_text(encoding="utf-8"))
-    player = Tracer(song)
+    tracer = Tracer()
+    player = tracer.player = Player(song, tracer)
     while player.tick < limit and player.step() is not None:
         pass
     ins = Counter()
-    for c in player.ins_starts.values():
+    for c in tracer.ins_starts.values():
         ins["instruments with ctrl started at notes"] += 1
         ins["… every start replaced"] += c["replaced"] == c["starts"]
         ins["… some starts replaced"] += 0 < c["replaced"] < c["starts"]
     rel0 = Counter()
-    for c in player.rel0.values():
+    for c in tracer.rel0.values():
         rel0["started"] += 1
         rel0["only at notes (note:+0 does nothing)"] += all(at for _, at in c)
         rel0.update(
@@ -208,18 +215,18 @@ def measure(path: Path, ticks: int) -> dict:
         )
     combos = Counter(
         (name.rsplit(".", 1)[1], " + ".join(sorted(how)))
-        for (_, name, _), how in player.zeroed.items()
+        for (_, name, _), how in tracer.zeroed.items()
     )
     return {
         "doc": path.stem,
-        "restart_ctrl": flat(player.restart_ctrl),
-        "restart_movable": {"instrument and program pairs": len(player.moved)},
-        "binds": flat(player.binds),
+        "restart_ctrl": flat(tracer.restart_ctrl),
+        "restart_movable": {"instrument and program pairs": len(tracer.moved)},
+        "binds": flat(tracer.binds),
         "zeroed": flat(combos),
         "ticks": player.tick,
         "static": dict(static(song)),
-        "starts": flat(player.starts),
-        "replaced": flat(player.replaced),
+        "starts": flat(tracer.starts),
+        "replaced": flat(tracer.replaced),
         "instruments": dict(ins),
         "rel0": dict(rel0),
     }

@@ -6,7 +6,7 @@ from functools import partial
 
 from unitracker_grammar.document import Call, Document, Play, Signed
 from unitracker_grammar.expand import flat
-from unitracker_player.document import note_number
+from unitracker_player.compiler import note_number
 
 from unitracker.optimiser.passes import NO_NOTE, Edit, _dropped
 from unitracker.optimiser.tree import transform

@@ -16,8 +16,6 @@ from unitracker_player.player import Player
 from unitracker.optimiser.passes import Edit, _label
 from unitracker.optimiser.tree import at, update
 
-_SITE = 6  # a binding site, after the player's ``[fn, phi, voice, name, command, once]``
-
 
 class _Site:  # pylint: disable=too-few-public-methods
     """What a binding site did over a play: the slots bound as it applied, and whether the
@@ -28,58 +26,59 @@ class _Site:  # pylint: disable=too-few-public-methods
         self.bound, self.exact, self.ticks = set(), True, 0
 
 
-class _Tracer(Player):
-    """A player that keeps, by phrase event and frequency slot, each binding command's
-    :class:`_Site`; ``pending`` holds per voice each site's slots its ``none`` would leave
-    unbound that nothing has bound or stopped since."""
+class _Observer:
+    """Keeps, by phrase event and frequency slot, each binding command's :class:`_Site`;
+    ``pending`` holds per voice each site's slots its ``none`` would leave unbound that nothing
+    has bound or stopped since, ``tags`` the site of each modulator a command bound."""
 
-    def __init__(self, song, where: dict):
-        self.where, self.site, self.sites = where, None, defaultdict(_Site)
-        self.pending = defaultdict(dict)
-        super().__init__(song)
+    def __init__(self, where: dict):
+        self.where, self.player, self.site, self.sites = where, None, None, defaultdict(_Site)
+        self.pending, self.tags, self.new = defaultdict(dict), {}, {}
 
-    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
-    def _event(self, t, v, event, transpose, ins, last, part):
+    def __call__(self, kind: str, *args):
+        getattr(self, kind, lambda *_: None)(*args)
+
+    def event(self, _voice, event, _ins):
+        """Notes the phrase event applying."""
         self.site = self.where.get(id(event))
-        try:
-            super()._event(t, v, event, transpose, ins, last, part)
-        finally:
-            self.site = None
 
     def _settle(self, v: int, slots):
         for left in self.pending[v].values():
             left.difference_update(slots)
 
-    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
-    def _set(self, v: int, cell: str, slot: int, fn, once: bool, command: bool, fresh=False):
-        super()._set(v, cell, slot, fn, once, command, fresh)
-        if cell == "freq":
-            self._settle(v, (slot,))
+    def bind(self, v: int, cell: str, slot: int, command: bool, *_):
+        """Notes a frequency binding about to be set: the slots bound as it applies."""
+        if cell != "freq":
+            return
+        self._settle(v, (slot,))
+        if command and self.site is not None:
+            voice, key = self.player.voices[v], self.site + (slot,)
+            bound = {k for k, mod in enumerate(voice.mods["freq"]) if mod is not None}
+            self.sites[key].bound |= bound | ({slot} if voice.freq_hold else set())
+            self.pending[v][key] = bound - {slot}
+            self.new[v, slot] = key
 
-    def _stop(self, v: int, cell: str, value, ends: tuple):
-        super()._stop(v, cell, value, ends)
+    def stop(self, v: int, cell: str, _value, ends: tuple):
+        """Notes frequency slots stopped."""
         if cell == "freq":
             self._settle(v, ends)
 
-    def _command(self, v: int, key: str, value, t: int):
-        binds = key == "freq" and isinstance(value[0], int) and self.site is not None
-        if binds:
-            mods, key_ = self.voices[v].freq_mods, self.site + (value[0],)
-            bound = {k for k, mod in enumerate(mods) if mod is not None}
-            self.sites[key_].bound |= bound | ({value[0]} if self.voices[v].freq_hold else set())
-        super()._command(v, key, value, t)
-        if binds:
-            self.voices[v].freq_mods[value[0]][_SITE:] = [key_]
-            self.pending[v][key_] = bound - {value[0]}
-
-    def _fire_freq(self, t: int, vix: int):
-        super()._fire_freq(t, vix)
-        voice, pending = self.voices[vix], self.pending[vix]
-        active = {mod[_SITE] for mod in voice.freq_mods if mod is not None and len(mod) > _SITE}
-        for key in active | {k for k, left in pending.items() if left}:
-            site, note = self.sites[key], voice.sounding
+    def cell(self, cell: str, v: int):
+        """Scores the frequency each site's binding left once the voice's frequency settles."""
+        if cell != "freq":
+            return
+        voice, mods = self.player.voices[v], self.player.voices[v].mods["freq"]
+        for (u, slot), key in list(self.new.items()):
+            if u == v:
+                del self.new[u, slot]
+                if mods[slot] is not None:
+                    self.tags[id(mods[slot])] = (mods[slot], key)
+        active = {self.tags[id(mod)][1] for mod in mods if mod is not None and id(mod) in self.tags}
+        note = voice.sounding
+        for key in active | {k for k, left in self.pending[v].items() if left}:
+            site = self.sites[key]
             site.ticks += 1
-            site.exact &= note is not None and voice.freq == self.song.table(note)
+            site.exact &= note is not None and voice.freq == self.player.song.table(note)
 
 
 def printed_phrases(text: str) -> dict:
@@ -117,10 +116,11 @@ def sites(text: str, ticks: int) -> dict:
                 where.update({id(e): (name, path) for path, e in zip(paths, out)})
             return out
 
-    player = _Tracer(compiler.compile_document(read(text), _Compiler), where)
+    seen = _Observer(where)
+    player = seen.player = Player(compiler.compile_document(read(text), _Compiler), seen)
     while player.tick < ticks and player.step() is not None:
         pass
-    return dict(player.sites)
+    return dict(seen.sites)
 
 
 def _snapped(phrase: str, index: tuple, pair: tuple, nones: tuple, doc: Document) -> Document:
