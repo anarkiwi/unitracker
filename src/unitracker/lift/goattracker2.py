@@ -13,7 +13,8 @@ from pygoattracker import typed as T
 from pygoattracker.canonical import canonical_song
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp
-from pysidtracker.wrap import count_entries
+from pysidtracker.emu import PLAY_CYCLES, SidWriteLog
+from pysidtracker.wrap import boot, count_entries, enter
 from pysidtracker.playspec.player import SpecPlayer
 from unitracker_grammar.document import (
     HOLD,
@@ -48,6 +49,7 @@ from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
 PRE = 2
+ORDER = ("events", "ctrl", "read", "pulse", "filter", "freq", "pw", "cut")
 FREQ = (T.PortamentoUp, T.PortamentoDown, T.TonePortamento, T.Vibrato)
 LOAD = "load.freq"
 WAVE_FREQ = "wave.freq"
@@ -89,6 +91,7 @@ class Core:  # pylint: disable=too-many-instance-attributes
     memory: bytes | None = None
     wrap: object = None
     entries: int = 1
+    own: tuple = ()
 
     @property
     def voices(self) -> tuple:
@@ -103,6 +106,30 @@ def _entries(model) -> int:
     if wrap is None:
         return 1
     return count_entries(model.image, wrap.song, wrap.play, wrap.entries)
+
+
+WRAP_CALLS = 16
+
+
+def _own_writes(image, wrap) -> tuple:
+    """The SID registers a play routine writes other than as a copy of its ghost block ``sink``
+    over its first :data:`WRAP_CALLS` calls: a write whose source is not the ghost byte of its
+    register, or whose value is not that byte's."""
+    _, mpu, mem, _ = boot(image, wrap.song)
+    log = SidWriteLog(mpu, mirrors=False)
+    own = set()
+    for _ in range(WRAP_CALLS):
+        writes, seen = log.start(), 0
+        depth, start = enter(mpu, mem, wrap.play), mpu.processorCycles
+        while mpu.sp < depth and mpu.processorCycles - start <= PLAY_CYCLES:
+            mpu.step()
+            own |= {
+                reg
+                for reg, read, _, value in writes[seen:]
+                if read != wrap.sink + reg or mem[read] != value
+            }
+            seen = len(writes)
+    return tuple(sorted(own))
 
 
 def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
@@ -125,6 +152,7 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
         memory=model.memory,
         wrap=info.wrap,
         entries=_entries(model),
+        own=_own_writes(model.image, info.wrap) if info.wrap and info.wrap.sink is not None else (),
     )
 
 
@@ -141,15 +169,16 @@ def _refuse(core: Core):
         raise Refusal("interrupt", "play address 0")
     if lay["stereo"] or lay["nchan"] > C.MAX_CHN:
         raise Refusal("multi-SID", f"{lay['nchan']} channels")
-    if core.wrap is not None and core.wrap.sink is not None:
-        raise Refusal("wrapper", "the play routine flushes a ghost block itself")
+    if core.own:
+        raise Refusal("wrapper", f"the play routine writes registers {list(core.own)} of its own")
+    if core.memory is not None and any(core.memory[lay["newnote"] + 7 * c] for c in core.voices):
+        raise Refusal("start state", "a note pending in the channel variables")
     if lay["sid"] != 0xD400:
         raise Refusal("SID address", f"${lay['sid']:04X}")
     if re.search(r"\bnative\b", gt2spec.spec().source or ""):
         raise Refusal("native", "the spec has native blocks")
-    for flag in ("directwave", "livegate"):
-        if lay[flag]:
-            raise Refusal(f"build {flag}")
+    if lay["directwave"]:
+        raise Refusal("build directwave")
     if build.pulse_step not in (1, 2) and not lay["pulse2x"]:
         raise Refusal("pulse step", str(build.pulse_step))
     offsets = build.voices or tuple(7 * c for c in range(lay["nchan"]))
@@ -234,19 +263,76 @@ def _jumps(core: Core, rows: list, used: set) -> None:
                 starts.append(ptr + 1)
 
 
-def _contexts(song, order) -> set:
-    """The ``(pattern, instrument entered with)`` pairs a voice's orderlist plays: its walk and
-    the loop body once more, a repeated pattern entered again with the instrument its first pass
-    leaves."""
+def _first_wave(lay, ins) -> tuple:
+    """``(wave or None, gate or None)`` a note of ``ins`` sets on its tick 0."""
+    raw = ins.raw().first_wave
+    if lay["fixedparams"]:
+        return lay["firstwave"], 1
+    if (lay["zeroskip"] or not lay["nofirstwavecmd"]) and raw == 0:
+        return None, None
+    if not lay["nofirstwavecmd"] and raw >= 0xFE:
+        return None, raw & 1
+    return raw, 1
+
+
+def _drops_gate(lay, ins) -> bool:
+    """Whether the row fetch before a note of ``ins`` turns the gate off."""
+    gated = (lay["hrinstr"] and lay["nohrinstr"]) or lay["legato"]
+    return not (gated and ins.legato)
+
+
+def _keeps_gate(lay, ins) -> bool:
+    """Whether a note of ``ins`` leaves the gate as it was: neither its fetch nor its first
+    waveform sets it."""
+    return _first_wave(lay, ins)[1] is None and not _drops_gate(lay, ins)
+
+
+def _gate_after(lay, ins, gate: int) -> int:
+    """The gate after a note of ``ins`` that leaves it ``gate`` before."""
+    first = _first_wave(lay, ins)[1]
+    if first is not None:
+        return first
+    return gate if _keeps_gate(lay, ins) else 0
+
+
+def _context_after(lay, song, rows, context: tuple, track: bool) -> tuple:
+    """``(instrument, gate)`` at the end of pattern ``rows`` entered with ``context``; the gate is
+    followed only where ``track`` (an instrument keeps it) and is 1 otherwise."""
+    instr, gate = context
+    for row in rows:
+        instr = row.instrument or instr
+        if not track:
+            continue
+        if isinstance(row.note, T.KeyOff):
+            gate = 0
+        elif isinstance(row.note, T.KeyOn):
+            gate = 1
+        elif isinstance(row.note, T.Note) and not isinstance(row.command, T.TonePortamento):
+            gate = _gate_after(lay, song.instrument(instr), gate)
+    return instr, gate
+
+
+def _contexts(core, song, order, start: tuple, track: bool) -> set:
+    """The ``(pattern, (instrument, gate) entered with)`` pairs a voice's orderlist plays: its
+    walk and the loop body once more, a repeated pattern entered again with the context its
+    first pass leaves."""
     units, loop = Lift.plays(order)
-    pairs, instr = set(), 1
+    pairs, context = set(), start
     for num, _, times in units + units[loop:]:
-        pairs.add((num, instr))
-        for row in song.patterns[num]:
-            instr = row.instrument or instr
+        pairs.add((num, context))
+        context = _context_after(core.lay, song, song.patterns[num], context, track)
         if times > 1:
-            pairs.add((num, instr))
+            pairs.add((num, context))
     return pairs
+
+
+def _gates(core) -> tuple:
+    """The gate of each played channel before the first call."""
+    lay, mem = core.lay, core.memory
+    if mem is None:
+        mem = core.image.data
+        return tuple(mem[lay["gate"] + 7 * c - songimage.BASE] & 1 for c in core.voices)
+    return tuple(mem[lay["gate"] + 7 * c] & 1 for c in core.voices)
 
 
 def native_counts(core: Core) -> dict:
@@ -257,9 +343,11 @@ def native_counts(core: Core) -> dict:
       voice starts with; ``restart``: one program each;
     - ``ctrl``, ``pw``, ``filter``: the distinct nonzero table entry points those instruments and
       the pattern and wavetable commands set, one program each (``ctrl`` adds the empty program
-      every restart runs);
-    - ``phrases``: the ``(pattern, instrument entered with)`` pairs the voices play, as a phrase
-      is the same events for the instruments that do not change them, and the introductory phrase;
+      every restart runs, and one program with the gate off first for each wavetable of an
+      instrument whose first waveform sets no gate);
+    - ``phrases``: the ``(pattern, instrument and gate entered with)`` pairs the voices play, as a
+      phrase is the same events for the contexts that do not change them (the gate is followed
+      only where an instrument keeps it), and the introductory phrase;
     - ``song``: per played channel its orderlist entries, a repeat entry counted once, the entry
       that starts the voice, and the entries of its loop body once more, which the lift plays a
       second time when the instrument the loop is re-entered with changes its phrases."""
@@ -276,11 +364,15 @@ def native_counts(core: Core) -> dict:
         starts = {getattr(song.instrument(n), field) for n in used}
         return len((starts | {c.row for c in cmds if c.__class__ is command}) - {0})
 
-    contexts = set().union(*(_contexts(song, o) for o in orders))
+    lay = core.lay
+    track = any(_keeps_gate(lay, song.instrument(n)) for n in used)
+    starts = [(1, g if track else 1) for g in _gates(core)]
+    contexts = set().union(*(_contexts(core, song, o, c, track) for o, c in zip(orders, starts)))
+    quiet = {song.instrument(n).wave_ptr for n in used if _first_wave(lay, song.instrument(n))[1] is None}
     return {
         "instruments": len(used),
         "restart": len(used),
-        "ctrl": entries("wave_ptr", T.SetWavePtr) + 1,
+        "ctrl": entries("wave_ptr", T.SetWavePtr) + 1 + len(quiet),
         "pw": entries("pulse_ptr", T.SetPulsePtr),
         "filter": entries("filter_ptr", T.SetFilterPtr),
         "phrases": len(contexts) + 1,
@@ -361,10 +453,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         )
         used = {r.instrument for r in rows if r.instrument} | {1}
         self.used = used
-        self.keyoffs = any(isinstance(r.note, T.KeyOff) for r in rows)
+        self.track = any(_keeps_gate(self.lay, self.song.instrument(n)) for n in used)
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
         if self.lay["noeffects"] and self.insvib:
-            raise Refusal("noeffects vibrato", "the instrument vibrato follows the instrument read")
+            raise Refusal(
+                "noeffects vibrato",
+                "the vibrato reads the live instrument from the row fetch, which a first note "
+                "and an instrument-only row have no restart row for",
+            )
         cmds = [r.command for r in rows]
         cmds += [r.command for r in self.song.wavetable if isinstance(r, T.WaveCommand)]
         rates = {c.speed for c in cmds if hasattr(c, "speed")} | {
@@ -378,6 +474,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.funk = tuple(v + 1 for v in state.funk) if state else (8, 5)
         funks = {self.funk_of(r.command.speed) for r in rows if isinstance(r.command, T.FunkTempo)}
         self.pairs = funks | {self.funk}
+        self.recall = self.recalled(funks)
         silent = any(not self.sounds(i.wave_ptr) for n in used for i in [self.song.instrument(n)])
         self.slotted = self.effects or silent
         if self.rowlen < 3:
@@ -503,10 +600,13 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 out.append(row)
         return out, None if loop is None else at[loop]
 
-    def wave(self, ptr: int) -> str:
-        """The ``ctrl`` program name of the wavetable from ``ptr``."""
+    def wave(self, ptr: int, quiet: bool = False) -> str:
+        """The ``ctrl`` program name of the wavetable from ``ptr``, ``quiet`` with the gate
+        turned off in the tick it starts."""
         out, loop = _program(self.song.wavetable, ptr, self.wave_row) if ptr else ([], None)
         out, loop = self.late(out, loop)
+        if quiet:
+            out, loop = [Row({"gate": 0, "hold": 0}), *out], None if loop is None else loop + 1
         return self.names.name("ctrl", "c", Program(out, loop))
 
     def sounds(self, ptr: int) -> bool:
@@ -562,30 +662,17 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     # ---- instruments ------------------------------------------------------------------------
 
-    def first_wave(self, ins) -> tuple:
-        """``(wave or None, gate or None)`` a note of ``ins`` sets on its tick 0."""
-        lay, raw = self.lay, ins.raw().first_wave
-        if lay["fixedparams"]:
-            return lay["firstwave"], 1
-        if (lay["zeroskip"] or not lay["nofirstwavecmd"]) and raw == 0:
-            return None, None
-        if not lay["nofirstwavecmd"] and raw >= 0xFE:
-            return None, raw & 1
-        return raw, 1
-
     def restart(self, ins) -> str:
         """The name of the restart program of ``ins``: the fetch, then the note's tick 0."""
         lay = self.lay
         timer = lay["gateparam"] if lay["fixedparams"] else ins.gate_timer
         fetch = {"hold": timer} if timer != 1 else {}
         gated = (lay["hrinstr"] and lay["nohrinstr"]) or lay["legato"]
-        if not (gated and ins.legato):
+        if _drops_gate(lay, ins):
             fetch["gate"] = 0
             if lay["hrinstr"] and not (gated and not ins.hard_restart):
                 fetch["ad"], fetch["sr"] = lay["adparam"], lay["srparam"]
-        wave, gate = self.first_wave(ins)
-        if gate is None and ("gate" in fetch or self.keyoffs):
-            raise Refusal("first waveform", "a note that keeps the gate as it is")
+        wave, gate = _first_wave(lay, ins)
         init = {"ad": ins.attack_decay, "sr": ins.sustain_release, "run": self.wave(0)}
         if wave is not None:
             init["ctrl"] = wave
@@ -596,7 +683,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def instrument(self, n: int) -> str:
         """The name of instrument ``n``."""
         ins = self.song.instrument(n)
-        fields = {"ctrl": self.wave(ins.wave_ptr)} if ins.wave_ptr else {}
+        off = _first_wave(self.lay, ins)[1] is None and not _keeps_gate(self.lay, ins)
+        fields = {"ctrl": self.wave(ins.wave_ptr, off)} if ins.wave_ptr or off else {}
         if ins.pulse_ptr:
             fields["pw"] = self.pulse(ins.pulse_ptr)
         if ins.filter_ptr:
@@ -651,9 +739,9 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 key = "vtempo" if self.lay["noglobaltempo"] or chan else "tempo"
                 if t == 1 and self.lay["nofunktempo"]:
                     return {key: 2}
-                if t < 2 and (self.lay["nofunktempo"] or len(self.pairs) > 1):
-                    raise Refusal("funk tempo recall", "several tables" if t < 2 else "")
-                return {key: (self.funk[t], self.funk[1 - t]) if t < 2 else max(t, 3)}
+                if t < 2 and (self.lay["nofunktempo"] or self.recall is None):
+                    raise Refusal("funk tempo recall", "the table in force is not known")
+                return {key: (self.recall[t], self.recall[1 - t]) if t < 2 else max(t, 3)}
             case T.FunkTempo(y):
                 if self.lay["nofunktempo"]:
                     raise Refusal("funk tempo", "build without it")
@@ -680,14 +768,52 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         return Expr(canonical(f"ite(v >= F(n), {down}, {up})"))
 
     def funk_of(self, y: int) -> tuple:
-        """The two row lengths of speedtable entry ``y``."""
-        row = self.song.speed(y)
-        if not isinstance(row, T.FixedSpeed):
-            raise Refusal("funk tempo", "calculated speed row")
-        return row.value >> 8, row.value & 0xFF
+        """The two row lengths in calls of speedtable entry ``y``: its bytes, whatever the row
+        is, each loaded as the tempo counter less one."""
+        word = self.read_word(y)
+        return tuple(self.length(b) for b in (word >> 8, word & 0xFF))
 
-    def event(self, row, instr: int) -> Event:
-        """The event of a pattern row played by instrument ``instr``."""
+    def read_word(self, y: int) -> int:
+        """The 16-bit word the player reads at speedtable entry ``y``."""
+        row = self.song.speed(y) if y <= len(self.song.speedtable) else None
+        return 0 if row is None else self.word(row)
+
+    @staticmethod
+    def length(byte: int) -> int:
+        """The calls of a row whose tempo byte is ``byte``: the counter starts at one less and
+        wraps."""
+        if byte == 1:
+            raise Refusal("funk tempo", "a row length of 1 never reaches the next row")
+        return byte or 256
+
+    def recalled(self, funks: set):
+        """The funk pair a tempo recall reads, None where it is not one pair: the start state's
+        before any table is loaded; else the one table every load names, where a voice loads it
+        in its first row, which is call 0, and no voice ahead of it recalls in a first row."""
+        if not funks:
+            return self.funk
+        if len(funks) > 1:
+            return None
+        channels = self.song.subtunes[0].channels
+        heads = []
+        for c in self.core.voices:
+            firsts = [
+                self.song.patterns[e.num][0].command
+                for e in channels[c].entries
+                if isinstance(e, PlayPattern)
+            ]
+            heads.append(firsts)
+        loads = [i for i, h in enumerate(heads) if h and isinstance(h[0], T.FunkTempo)]
+        if not loads:
+            return None
+        recalls = (
+            isinstance(c, T.SetTempo) and c.tempo < 2 for h in heads[: loads[0]] for c in h
+        )
+        return None if any(recalls) else next(iter(funks))
+
+    def event(self, row, instr: int, gate: int = 1) -> Event:
+        """The event of a pattern row played by instrument ``instr`` with the voice's gate
+        ``gate``."""
         noted = isinstance(row.note, T.Note)
         match row.note:
             case T.Note(p):
@@ -708,22 +834,29 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             cmds.update(self.load(instr))
         elif noted and self.effects and not isinstance(row.command, FREQ):
             cmds[TICK] = self.fx0(instr)
+        ins = self.song.instrument(instr)
+        if noted and not tone and not gate and _keeps_gate(self.lay, ins):
+            if "run" in cmds:
+                raise Refusal("first waveform", "a note that keeps the gate off and sets a table")
+            cmds["run"] = self.wave(ins.wave_ptr, True)
         return Event(atom, name, cmds)
 
-    def events(self, rows, instr: int) -> tuple:
-        """``(events, instrument at the end)`` of pattern ``rows`` entered playing ``instr``."""
-        events, here = [], instr
+    def events(self, rows, context: tuple) -> tuple:
+        """``(events, context at the end)`` of pattern ``rows`` entered with ``context``, the
+        instrument and gate."""
+        events = []
         for row in rows:
-            here = row.instrument or here
-            events += [self.event(row, here)] + [Event("-")] * (row.length - 1)
-        return tuple(rests(events)), here
+            after = _context_after(self.lay, self.song, [row], context, self.track)
+            events += [self.event(row, after[0], context[1])] + [Event("-")] * (row.length - 1)
+            context = after
+        return tuple(rests(events)), context
 
-    def segments(self, rows, instr: int, times: int) -> tuple:
-        """``([(events, times)], instrument at the end)`` of a pattern played ``times`` in a row
-        from ``instr``: its first pass, then the repeats, which start from the instrument the
+    def segments(self, rows, context: tuple, times: int) -> tuple:
+        """``([(events, times)], context at the end)`` of a pattern played ``times`` in a row
+        from ``context``: its first pass, then the repeats, which start from the context the
         first pass leaves."""
-        first, end = self.events(rows, instr)
-        if times > 1 and end != instr:
+        first, end = self.events(rows, context)
+        if times > 1 and end != context:
             rest, end = self.events(rows, end)
             if rest != first:
                 return [(first, 1), (rest, times - 1)], end
@@ -760,8 +893,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         raise Refusal("orderlist", "does not loop")
 
     def overlap(self, units: list) -> None:
-        """Refuse a note whose restart reads the note before it back to that note's own tick, where
-        the document applies the earlier note's gate after the later note's rows."""
+        """Refuse a note whose restart reads the note before it back past that note's own tick,
+        which the player never fetches."""
         instr, since = 1, None
         for num, _, times in units:
             for row in [r for _ in range(times) for r in self.song.patterns[num]]:
@@ -771,26 +904,36 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 if (
                     noted
                     and since is not None
-                    and self.song.instrument(instr).gate_timer + 1 >= since
+                    and self.song.instrument(instr).gate_timer + 1 > since
                 ):
-                    raise Refusal("restart overlap", "a restart reaches the previous note's tick")
+                    raise Refusal("restart overlap", "a restart reaches before the previous note")
                 since = 0 if noted else since
+                self.refetch(instr, row.instrument or instr)
                 instr = row.instrument or instr
                 since = None if since is None else since + self.rowmin * row.length
 
-    def voice(self, order) -> Voice:
+    def refetch(self, before: int, after: int) -> None:
+        """Refuse a row change to an instrument of a shorter gate timer in a build that reads the
+        timer from the live instrument: the row fetch has loaded the later instrument by the time
+        the counter reaches its timer, and fetches again."""
+        if self.lay["livegate"] and (
+            self.song.instrument(after).gate_timer < self.song.instrument(before).gate_timer
+        ):
+            raise Refusal("build livegate", "a row fetches again at a shorter gate timer")
+
+    def voice(self, order, gate: int) -> Voice:
         """A voice's orderlist, a repeat entry a group. The loop body is played a second time
         when entered with another instrument changes what it plays, and the loop re-enters that
         copy."""
         units, loop = self.plays(order)
         self.overlap(units + units[loop : loop + 1])
-        walks, instr = [], 1
+        walks, context = [], (1, gate if self.track else 1)
         for num, _, times in units:
-            segs, instr = self.segments(self.song.patterns[num], instr, times)
+            segs, context = self.segments(self.song.patterns[num], context, times)
             walks.append(segs)
         again = []
         for num, _, times in units[loop:]:
-            segs, instr = self.segments(self.song.patterns[num], instr, times)
+            segs, context = self.segments(self.song.patterns[num], context, times)
             again.append(segs)
         copy = again != walks[loop:]
         items, starts = [Play("p0")], []
@@ -821,12 +964,22 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         """The registers before tick 0: a ghost image, else the init call's writes."""
         state = self.core.state
         if state and state.ghost:
-            return list(state.registers)
+            return self.masked(state.registers)
         regs = [0] * 25
         for reg, value in (*self.core.build.init_regs, *(state.init if state else ())):
             regs[reg] = value
         regs[24] = state.volume if state else 15
-        return regs
+        return self.masked(regs)
+
+    @staticmethod
+    def masked(regs) -> list:
+        """``regs`` without the bits the SID lacks: the pulse width's high nibbles' upper bits
+        and the cutoff's."""
+        out = list(regs)
+        for reg in (3, 10, 17):
+            out[reg] &= 15
+        out[21] &= 7
+        return out
 
     def opening(self, voice: int) -> dict:
         """``{cell: (value the first call writes, value before it)}`` of the voice cells that
@@ -889,6 +1042,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             voices=voices if voices != C.MAX_CHN else None,
             slots=slots,
             holds={"pw": events},
+            order=ORDER,
             state=self.state(),
             regs=tuple(regs) if any(regs) else None,
             lag=self.lag or None,
@@ -918,7 +1072,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def document(self) -> Document:
         """The document of the subtune."""
         channels = self.song.subtunes[0].channels
-        voices = [self.voice(channels[c]) for c in self.core.voices]
+        gates = _gates(self.core)
+        voices = [self.voice(channels[c], g) for c, g in zip(self.core.voices, gates)]
         self.instrument(1)
         init = [
             Event("-", "i1", ({"tempo": PRE - self.lead} if v == 0 else {}) | self.first(v))
