@@ -745,7 +745,9 @@ def reference(raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = T
     """The register grid of the spec player over ``frames`` frames."""
     fmt = find_format(raw)
     tune = fmt.parser.parse(raw, subtune)
-    return np.asarray(fmt.spec_player(tune, notes=notes).render_grid(frames), dtype=np.uint8)
+    return np.asarray(
+        fmt.spec_player(tune, notes=True if notes else None).render_grid(frames), dtype=np.uint8
+    )
 
 
 def compare(core: Core, frames: int, grid=None) -> tuple:
