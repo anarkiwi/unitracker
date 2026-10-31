@@ -1,9 +1,13 @@
 # Music Assembler lift
 
-`unitracker.lift.musicassembler` builds a format 2.5 document from pymusicassembler's song model and
-the layout its playspec binding resolves for the tune's player. No player is run to build it: the
-tables the player reads come from the song, the instruments, patterns and work cells the tune's
-init left from the memory the binding names, and every behaviour from `specs/musicassembler.play`.
+`unitracker.lift.musicassembler` builds a format 2.5 document from pymusicassembler's song model
+(`pymusicassembler.parse`: each subtune's orderlists, patterns, instruments and inner programs as
+its init leaves them) and `Song.init_state`, which carries the memory init left, the playspec
+binding (`found`, `spec`) and the work cells the spec reads (`cell`, `voices`). No player is run to
+build it: every behaviour comes from `specs/musicassembler.play`.
+
+`unitracker.lift.macore` holds the typed refusals, `Core` and the refusals a tune's layout shows;
+`macode` the 6502 modulators.
 
 ```sh
 python -m unitracker.lift.musicassembler TUNE.sid > tune.yaml
@@ -13,27 +17,43 @@ python tools/lift_corpus.py NAMES.txt --format musicassembler
 
 ## Time
 
-A play call is a tick. Every pattern row is one event of one step, `vtempo:(d+1)(n+1)` ticks, so
-a step starts exactly where the voice parses its row. A parse call writes nothing to the voice's
-registers, so every slot of the voice's cells holds on `step` and the control programs pause on
-it (`holds:{ctrl:[step]}`); what a note triggers happens on the next call, the first call the
-slots and programs run. A row that stores its duration to a cell other than the voice's counter
-(a build whose `dur_long`, `dur_short` or `dur_note` is apart from `dur`) lasts one row.
+A play call is a tick. `machine clock` gives every voice one row clock: a row call every
+`tempo_reload + 1` calls, so the document states a global `tempo:R+1` and a step is a row call. A
+pattern row of duration `d` lasts `d + 1` row calls, an event of `*(d+1)` steps. A voice's `parse`
+call, the first call of its row, writes nothing to the voice's registers, so every slot of the
+voice's cells holds on the hold event `event` (the first tick of each event, not of the later
+steps of a `*k`) and the control programs pause on it (`holds:{ctrl:[event]}`); what a note triggers
+happens on the next call, the first call the slots and programs run. A row that stores its duration
+to a cell other than the voice's counter (a build whose `dur_long`, `dur_short` or `dur_note` is
+apart from `dur`) lasts one step.
 
 ## Subtunes
 
-A subtune's init may point the voices at other orderlists and patterns than the file's, so the lift
-reads both from the memory init left, through the pointer tables the binding names.
+A subtune's init may point the voices at other orderlists and patterns than the file's; the model
+of `pymusicassembler.parse(raw, subtune)` holds the ones init left, and `core_of_sid(raw, subtune)`
+lifts that model.
+
+## Model gaps
+
+The lift reads the memory (`init_state.window`) only where the spec reads bytes the model does not
+carry:
+
+| read | model gap |
+|---|---|
+| `Lift.record(k)` past the file's end | the model reads zero where the file stores no record; the player reads the RAM the machine holds |
+| `Lift.walk` beyond a program's bytes | the cursor walks past an inner program's rows (a jump to a row after its marker, a slot with no program) |
+| `Lift.events` of an empty pattern | the model ends a pattern at its first `$FF`; the player reads on past an empty pattern's |
+| `_entered`, `Lift.header` registers | the play routine's code and the SID registers are not song data |
 
 ## Mapping
 
 | Music Assembler | document |
 |---|---|
 | orderlist entry, transpose, repeat | `voice:[...]`, `+t`, `xN`; `$FF` and `$FD n` as `loop:k` |
-| `$FC t` | skipped where `t` is the tempo; any other is refused |
+| `$FC t` | `tempo:t+1` on the last row of the preceding entry's last run; none where every `$FC` keeps the tempo |
 | `$FE` silence | 127 one-row events then one of 129 rows (the row counter parses 128 row calls, plays 128), looped; the gate off by `m.ctrl`: once, or, under a program that stops and is still writing `ctrl`, `ite(phi >= T, v & 254, v)` |
 | pattern row | phrase event, one per row |
-| note | the note, its instrument, `vtempo` |
+| note | the note, its instrument, `*(d+1)` |
 | tied note (`$40`) | `legato`, the frequency and mask rebound, no trigger |
 | rest | `-`, `m.ctrl:'v & 254'` for the gate mask |
 | hold, select | `-`; `.iK` and the sweeps' new steps for a select |
@@ -41,7 +61,7 @@ reads both from the memory init left, through the pointer tables the binding nam
 | inner program row | read from the bytes the program pointer leads to; `ctrl:wave`, `freq:'F((n + p) & 127)'` (`F(p & 127)` absolute); `end`, `{loop:k}` |
 | pulse flag `$40` or always | `pw:'ite(phi == 0, init, v + 257 * s)'`, rebound `'v + 257 * s'` on a select |
 | pulse flag `$20` | code template `pong(p,s,k)`, `pongs(s,k)` after a select |
-| instrument `$10` sweep | code template `arp(w,m)`, `arpl(m)` on a tied note, `arpz(m,p,b)` after a stopping program; `arpc(s,k,b)` sets its step, steps a phase and vibrato flag |
+| instrument `$10` sweep | code template `arp(w,m)`, `arpl(m)` on a tied note, `arpz(m,p,b)` after a stopping program; `arpc(s,k,b)` sets its step, steps a phase and vibrato flag (on the instrument with `b` 0, on a vibrato or tied note with `b` its flag), `arpk(s,k)` its step and steps a phase on an instrument select |
 | note `$20` | slot `b` of `freq`: `F(n) + (phi + 1) * word`, or with an odd low step `ite(phi % 2 == 0, ..., v)` |
 | note `$80` | `res`, `route`, `s<x>.cut:fset(...)!`, `c<x>.cut:fsweep(x)` |
 | program row filter byte | `q<x>.cut:poke(u)!` |
@@ -67,10 +87,9 @@ Typed `Refusal(kind)`, raised before lifting where the tune's binding shows it:
 | `SID mirror`, `voice dispatch`, `layout` | cells the model does not keep apart, or apart from where the spec has them |
 | `arpeggio code`, `relocated arpeggio operands` | a comparing variant of the sweep, operands off the cells the spec names |
 | `init` | a first play call that reads no row; a pulse sweep or an arpeggio trigger running from the image |
-| `orderlist` | a restart inside an entry, a list that does not reach a pattern or settle |
-| `tempo change` | an orderlist `$FC` that changes the tempo (see [Tempo changes](#tempo-changes)) |
+| `orderlist` | a restart inside an entry or onto a `$FC`, a leading `$FC` the init does not pass, a list that does not reach a pattern or settle |
 | `legato filter command` | a tied note carrying a filter command |
-| `silence` | a silence in a build whose rows leave the row counter |
+| `silence` | a silence in a build whose rows leave the row counter; a silence under a stopping program in a tune whose `$FC` changes the tempo |
 | `program jump`, `pattern`, `instrument` | a row jump bound apart from the cursor, a pattern the song lacks |
 
 ## Verification
@@ -99,19 +118,33 @@ follows the program's last row. The gate is cleared by `m.ctrl` bound `ite(phi >
 `T` the calls (parse calls aside) before that parse (`Lift.gate_start`), counted from the calls
 since the trigger the lift carries through the voice's phrases.
 
-## Object counts
+## Provenance and size
 
-`native_counts` bounds the objects of each kind a document may hold by the song alone, and
-`invariants.check` raises where a lift exceeds it. A pattern changes the state a voice carries
-(instrument, last trigger, vibrato, rest mask) to what its last row sets, so a voice's list is
-lifted at most twice: from the state init left and from the state the list leaves. An entry with a
-repeat plays its first run from the entering state and the rest from the state the first left. Per
-voice, `phrases` are at most 2 passes x (1 + 1 if the entry repeats) for each real entry, plus 2
-for a parked voice; `song` entries at most 4 per real entry (2 passes x 2 runs) plus 2 for a parked
-voice; instruments and `ctrl` programs at most one per instrument reached (3 where its program
-pokes the filter, the slot being the voice's) plus one per voice for a trigger of the image; `pw`
-bindings one per instrument. `tools/lift_corpus.py` prints each tune's lifted and native counts
-and the document bytes against the song data bytes.
+`invariants.provenance` holds the document to the origins `Lift.names.origins()` declares: every
+named instrument, `ctrl` program and phrase has an `Origin(native, context)`, `native` the model
+object (`("instrument", k)`, `("pattern", pid)`), none repeats another's origin or value and none
+is written unnamed. `context` is set only for a native object that lifts to more than one record:
+the voice and the entry state the walk reached it in (instrument, last trigger, rest mask, image)
+and the tempo command that follows it. `invariants.check` bounds each voice's song entries by its
+orderlist: each real entry once, its repeats counted once, and the two a parked voice loops.
+
+The walk of a voice follows its orderlist from the state init left until it returns to an entry in
+a state it has been in; the visits are then reduced to the shortest cycle (`Lift.reduced`), so a
+state the player carries and the document needs not at all does not lengthen the song.
+
+State the player carries stays out of the phrases: an instrument sets its sweep configuration
+(`c.freq: arpc` in the instrument), the voice's image and mask go to the init event, and the vibrato slot is stopped
+on the first note of a phrase of a tune that has vibrato. What remains in a phrase is state the
+document cannot carry across phrases: the pulse binding after an instrument select that triggers
+nothing (`rebinds`) and the sweep step after one (`stepped`), both of the instrument last
+triggered.
+
+`invariants.sizes` splits a document's bytes into the format's (header, tables, templates) and the
+song's; `tests/lift_sizes_musicassembler.json` holds the song bytes of every committed fixture and
+`invariants.grown` fails the test when one passes its baseline.
+`python tools/lift_corpus.py NAMES.txt --format musicassembler [--all-subtunes]` prints per tune the
+objects over native objects per kind, the song entries a voice over the orderlist's bound, the
+fixed and song bytes and the native song data bytes.
 
 ## Wrappers
 
@@ -132,14 +165,15 @@ out the output-only calls cannot be held still, and the refusal stays.
 ## Tempo changes
 
 An orderlist `$FC t` runs `mem[c] := t` for both `order_tempo` cells (`tempo_reload` and the
-`tempo` counter) at the parse of the last row of the entry before it, so the interval to the
-next row call is `t + 1` and every later one `t + 1` (`machine clock`), for every voice at once.
-A voice's row of `d + 1` row calls then lasts the sum of the intervals of its row calls, which a
-change by another voice splits. The document states a tempo per step, fixed when the step
-begins, so the exact statement is a step per row call (`tempo`, `*(d+1)`). But the spec's
-`voice.step` skips `output()` only on the parse call, while the `hold` events of a slot or a
-program (`step`, `read`) fire on every step of a `*k` event and no event names the first step of
-an event that carries no note (a rest, a hold, an instrument select); a program would pause on
-every row call. The other exact statement gives each event the length its row calls add up to,
-which depends on where the other voices' lists are; it needs a phrase per tempo regime and a pass
-per joint period of the lists, past the object counts above. The refusal stays.
+`tempo` counter) at the `order_step` of the parse of the last row of the entry before it, so the
+interval to the next row call is `t + 1`, and every later one, for every voice at once. The
+document states it as the command `tempo:t+1` on the event of that row (the last row of the
+entry's last repeat), a step beginning at that call taking the new length. Consecutive `$FC`
+entries leave the last one's tempo. A phrase followed by a `$FC` is a phrase of its own (its
+origin's context names the tempo); where every `$FC` keeps the tempo no command is stated.
+
+The init does not pass a `$FC` at the start of a list (the voice's pattern cell holds `$FC`), and
+the restart after the end marker reads its entry as a pattern without the tempo loop; both are
+refused. The calls a silence under a stopping program counts (`gate_start`) depend on the tempo
+in force, which other voices' lists change, so that combination is refused in a tune that
+changes it.
