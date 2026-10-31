@@ -2,9 +2,10 @@
 
 import numpy as np
 import pytest
+from pygoattracker import PlayerState
 from pygoattracker import constants as GT
 
-from conftest import gt_tune
+from conftest import CORPUS, REFUSED, gt_tune
 from unitracker.lift import goattracker2 as g
 
 TICKS = 600
@@ -227,10 +228,24 @@ def test_synthetic_tunes_play_exactly(case):
 
 
 def test_a_refusal_names_its_class():
-    core = gt_tune([(0x41, 0), (0xFF, 0)], rows=[(24, 1, 3, 1)] + [REST] * 15, speed=[(0x81, 1)])
+    core = gt_tune([(0x41, 0), (0xFF, 4), (0x41, 7), (0xFF, 3), (0xFF, 1)])
     with pytest.raises(g.Refusal) as caught:
         g.document_text(core)
-    assert caught.value.kind == "calculated speed"
+    assert caught.value.kind == "pointer onto a jump row"
+
+
+def test_a_jump_onto_a_jump_row_nothing_reaches_is_lifted():
+    core = gt_tune([(0x41, 0), (0xFF, 0), (0xFF, 4), (0xFF, 3), (0xFF, 1)])
+    cells, _ = g.compare(core, TICKS)
+    assert not cells.size
+
+
+def test_each_voice_starts_from_the_channel_variables_the_song_init_left():
+    regs = [188, 2, 244, 8, 0, 15, 0] + [0] * 15 + [115, 0, 63]
+    state = PlayerState(tuple(regs), 115, 48, 15, (8, 5), False, ((4, 0), (11, 0), (18, 0)))
+    cells, text = g.compare(gt_tune(WAVE, state=state), TICKS)
+    assert not cells.size
+    assert "boot" in text and "lag:1" in text
 
 
 def test_a_divergence_names_its_first_cell():
@@ -246,11 +261,19 @@ def test_metal_warrior(metal_warrior):
     assert g.lift(raw, 0, 400) == g.lift(raw, 0, 400)
 
 
-@pytest.mark.parametrize("tune", ["penumbra", "orbyte", "heavy_industrial", "lester"])
+@pytest.mark.parametrize("tune", list(CORPUS))
 def test_corpus_tunes_lift_exactly(tune, request):
     raw = request.getfixturevalue(tune).read_bytes()
     cells, _ = g.verify(raw, 0, 3000)
     assert not cells.size, g.summary(cells, 3)
+
+
+@pytest.mark.parametrize("tune", list(REFUSED))
+def test_corpus_tunes_are_refused_by_class(tune, request):
+    raw = request.getfixturevalue(tune).read_bytes()
+    with pytest.raises(g.Refusal) as caught:
+        g.document_text(g.core_of_sid(raw))
+    assert caught.value.kind == REFUSED[tune][1]
 
 
 def test_cli(metal_warrior, capsys):

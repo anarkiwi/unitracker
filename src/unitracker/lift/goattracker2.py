@@ -215,7 +215,7 @@ def _jumps(core: Core, rows: list, used: set) -> None:
     }
     for kind, (table, command, field) in tables.items():
         starts = [getattr(song.instrument(n), field) for n in used]
-        starts += [c.row for c in [*(r.command for r in rows), *waves] if type(c) is command]
+        starts += [c.row for c in [*(r.command for r in rows), *waves] if c.__class__ is command]
         if any(p and p <= len(table) and isinstance(table[p - 1], T.Jump) for p in starts):
             raise Refusal("pointer onto a jump row", kind)
         seen = set()
@@ -363,7 +363,9 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def effect(self, name: str, rate: tuple, **params) -> Call:
         """The call of template ``name`` stepping by ``rate``."""
         calc, value = rate
-        return self.call(name + "c", k=value, **params) if calc else self.call(name, s=value, **params)
+        return (
+            self.call(name + "c", k=value, **params) if calc else self.call(name, s=value, **params)
+        )
 
     def fx0(self, instr: int):
         """The tick binding command 0 latches: the instrument's vibrato, or none."""
@@ -685,8 +687,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         instr, since = 1, None
         for num, _ in plays:
             for row in self.song.patterns[num]:
-                noted = isinstance(row.note, T.Note) and not isinstance(row.command, T.TonePortamento)
-                if noted and since is not None and self.song.instrument(instr).gate_timer + 1 >= since:
+                noted = isinstance(row.note, T.Note) and not isinstance(
+                    row.command, T.TonePortamento
+                )
+                if (
+                    noted
+                    and since is not None
+                    and self.song.instrument(instr).gate_timer + 1 >= since
+                ):
                     raise Refusal("restart overlap", "a restart reaches the previous note's tick")
                 since = 0 if noted else since
                 instr = row.instrument or instr
@@ -799,14 +807,22 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             regs=tuple(regs) if any(regs) else None,
             lag=self.lag or None,
             global_cells=glob or None,
-            calls=(core.build.calls * core.entries, None) if core.build.calls * core.entries > 1 else None,
+            calls=(
+                (core.build.calls * core.entries, None)
+                if core.build.calls * core.entries > 1
+                else None
+            ),
         )
 
     @property
     def lead(self) -> int:
         """The GoatTracker calls before the document's first tick: its first filter step
         writes the start state."""
-        return 1 if self.lay["fullghost"] or any(self.first(v) for v in range(len(self.core.voices))) else 0
+        return (
+            1
+            if self.lay["fullghost"] or any(self.first(v) for v in range(len(self.core.voices)))
+            else 0
+        )
 
     @property
     def lag(self) -> int:

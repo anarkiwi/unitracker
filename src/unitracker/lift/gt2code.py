@@ -44,7 +44,8 @@ def _toward(calc: bool) -> str:
         "bne dn\ntxa\nbeq done\ndn:\nsec\n"
         + _sub(lo, hi)
         + "lda v\ncmp F.lo,y\nlda v+1\nsbc F.hi,y\nbcs done\n"
-        "snap:\nlda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nlda #0\nsta t\ntya\nsta ln\ndone:\nrts\nup:\nclc\n"
+        "snap:\nlda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nlda #0\nsta t\ntya\nsta ln\n"
+        "done:\nrts\nup:\nclc\n"
         + _add(lo, hi)
         + "lda F.lo,y\ncmp v\nlda F.hi,y\nsbc v+1\nbcc snap\nrts"
     )
@@ -64,10 +65,12 @@ def _routines(calc: bool) -> dict:
 
 CODE = {
     "note": (
-        "lda #0\nsta t\nlda nn\nand #127\nsta ln\ntay\nlda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nrts"
+        "lda #0\nsta t\nlda nn\nand #127\nsta ln\ntay\n"
+        "lda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nrts"
     ),
     "tsnap": (
-        "lda #0\nsta t\nlda ne\nand #127\nsta ln\ntay\nlda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nrts"
+        "lda #0\nsta t\nlda ne\nand #127\nsta ln\ntay\n"
+        "lda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\nrts"
     ),
     **_routines(False),
     **{name + "c": text for name, text in _routines(True).items()},

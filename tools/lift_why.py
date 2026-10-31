@@ -52,6 +52,16 @@ def spec_trace(raw: bytes, subtune: int, frames: int, names: list) -> list:
     return out
 
 
+def window(ours: dict, theirs: list, lo: int, hi: int) -> None:
+    """Print both players' steps for the calls ``lo`` to ``hi``."""
+    for call in range(lo, hi):
+        print(f"-- call {call}")
+        for kind, items in ours.get(call, []):
+            print(f"   doc  {kind} {items[:4]}")
+        _, writes, variables = theirs[call]
+        print(f"   spec writes {writes} {variables or ''}")
+
+
 def main(argv=None) -> int:
     """Print the window around the first differing cell (or ``--frame``)."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
@@ -70,14 +80,7 @@ def main(argv=None) -> int:
     if frame < 0:
         return 0
     lo, hi = max(frame - args.before, 0), frame + args.after + 1
-    ours = document_trace(text, hi)
-    theirs = spec_trace(raw, args.subtune, hi, args.vars)
-    for call in range(lo, hi):
-        print(f"-- call {call}")
-        for kind, items in ours.get(call, []):
-            print(f"   doc  {kind} {items[:4]}")
-        _, writes, variables = theirs[call]
-        print(f"   spec writes {writes} {variables or ''}")
+    window(document_trace(text, hi), spec_trace(raw, args.subtune, hi, args.vars), lo, hi)
     return 0
 
 

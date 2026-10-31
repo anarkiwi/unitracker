@@ -40,26 +40,89 @@ metal_warrior = hvsc_tune(
     "Path to the Metal Warrior Title Remix .sid.",
 )
 
-penumbra = hvsc_tune(
-    "penumbra",
-    "DEMOS/M-R/Penumbra.sid",
-    "Path to Penumbra, a full-ghosting altplayer build with fixed parameters.",
-)
-orbyte = hvsc_tune(
-    "orbyte",
-    "DEMOS/0-9/10_Orbyte.sid",
-    "Path to 10 Orbyte, a fixed-parameter, simple-pulse build without funk tempo.",
-)
-heavy_industrial = hvsc_tune(
-    "heavy_industrial",
-    "MUSICIANS/J/Joeli_Jani/Heavy_Industrial_Machinery.sid",
-    "Path to Heavy Industrial Machinery, a build with legato instruments.",
-)
-lester = hvsc_tune(
-    "lester",
-    "GAMES/G-L/Lester.sid",
-    "Path to Lester, a buffered-writes build.",
-)
+CORPUS = {
+    "penumbra": ("DEMOS/M-R/Penumbra.sid", "a full-ghosting altplayer build with fixed parameters"),
+    "orbyte": (
+        "DEMOS/0-9/10_Orbyte.sid",
+        "a fixed-parameter, simple-pulse build without funk tempo",
+    ),
+    "heavy_industrial": (
+        "MUSICIANS/J/Joeli_Jani/Heavy_Industrial_Machinery.sid",
+        "a build with legato instruments",
+    ),
+    "lester": ("GAMES/G-L/Lester.sid", "a buffered-writes build"),
+    "captain_future": ("GAMES/A-F/Captain_Future_Preview.sid", "a noeffects build"),
+    "marble_boy": (
+        "GAMES/M-R/Marble_Boy.sid",
+        "a noeffects build whose play routine calls the player twice a frame",
+    ),
+    "squarish": (
+        "MUSICIANS/P/Psych858o/Squarish.sid",
+        "a nonormalspeed build with calculated speeds",
+    ),
+    "blast_em_all": ("MUSICIANS/J/Jammer/Blast_em_All.sid", "calculated portamento and vibrato"),
+    "robots_can_dance": (
+        "DEMOS/M-R/Robots_Can_Dance.sid",
+        "wavetable portamento in a build with vibrato",
+    ),
+    "darkness": (
+        "MUSICIANS/L/Linus/Darkness.sid",
+        "instrument vibrato across wavetable commands, with calculated speeds",
+    ),
+    "joelbitar": ("DEMOS/UNKNOWN/Joelbitar.sid", "a loop re-entered with another instrument"),
+    "opin_joskus": ("DEMOS/M-R/Opin_Joskus.sid", "a filter table modulating across a jump"),
+    "z303r": ("MUSICIANS/X/Xiny6581/Z303R.sid", "filter pointers set beside cutoff commands"),
+    "soiled_iron": (
+        "MUSICIANS/C/Crisps/Soiled_Iron.sid",
+        "a play wrapper and loaded channel state",
+    ),
+    "dirty_cheater": (
+        "MUSICIANS/S/Spider_Jerusalem/Dirty_Cheater.sid",
+        "the tune's own init writes",
+    ),
+}
+for _name, (_tune, _doc) in CORPUS.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_tune}, {_doc}.")
+
+REFUSED = {
+    "a_crack_in_the_facade": (
+        "DEMOS/A-F/A_Crack_in_the_Facade.sid",
+        "SID address",
+        "a player writing a SID at $D420",
+    ),
+    "cruiser_x_79": (
+        "MUSICIANS/B/Bayliss_Richard/Cruiser-X_79.sid",
+        "layout",
+        "a player reading its speedtable elsewhere than its other code",
+    ),
+    "hz_jazz": (
+        "MUSICIANS/B/Booker/Hz_Jazz.sid",
+        "restart overlap",
+        "a restart reaching back to the previous note's tick",
+    ),
+    "an_ufo_attack": (
+        "MUSICIANS/M/Mutetus/An_UFO_Attack_from_Space.sid",
+        "first waveform",
+        "a note of no first waveform after a key off",
+    ),
+    "first_night_together": (
+        "MUSICIANS/O/Onebitman/Zerozillion/First_Night_Together.sid",
+        "noeffects vibrato",
+        "instrument vibrato in a noeffects build",
+    ),
+    "i_dont_know": (
+        "MUSICIANS/G/Groepaz/I_Dont_Know_What_I_Am_Doing.sid",
+        "wrapper",
+        "a play routine flushing a ghost block itself",
+    ),
+    "hammurabi": (
+        "GAMES/G-L/Hammurabi.sid",
+        "pointer onto a jump row",
+        "a pointer onto a jump row",
+    ),
+}
+for _name, (_tune, _kind, _doc) in REFUSED.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_tune}, {_doc}.")
 
 
 def table(*rows) -> Table:
