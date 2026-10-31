@@ -5,10 +5,11 @@ import hashlib
 import re
 from pathlib import Path
 
-from pygoattracker import decompile_sid
 from pysidtracker import find_format
 from pysidtracker.header import parse_sid_header
 from pysidtracker.errors import SidError
+
+from unitracker.lift.goattracker2 import core_of_sid
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCES = (
@@ -43,7 +44,7 @@ def multi_sid(raw: bytes) -> bool:
             return True
         if find_format(raw).name != "goattracker2":
             return False
-        voices = decompile_sid(raw).info.playback.voices or ()
+        voices = core_of_sid(raw).build.voices or ()
     except SidError:
         return False
     return len(voices) > 3 or any(off is not None and off >= 0x20 for off in voices)

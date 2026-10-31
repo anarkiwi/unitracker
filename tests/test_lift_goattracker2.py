@@ -1,4 +1,5 @@
 """The GoatTracker 2 lift plays the spec player's registers exactly."""
+# pylint: disable=protected-access,too-few-public-methods
 
 import numpy as np
 import pytest
@@ -7,6 +8,7 @@ from pygoattracker import constants as GT
 
 from conftest import CORPUS, REFUSED, gt_tune
 from unitracker.lift import goattracker2 as g
+from unitracker.lift import invariants
 
 TICKS = 600
 REST = (None, 0, 0, 0)
@@ -371,8 +373,6 @@ def test_only_a_note_with_no_first_waveform_and_no_gate_fetch_keeps_the_gate():
 
 
 def test_every_corpus_tune_holds_one_object_per_origin(request):
-    from unitracker.lift import invariants
-
     for tune in CORPUS:
         raw = request.getfixturevalue(tune).read_bytes()
         text, objects = g.checked_text(g.core_of_sid(raw))

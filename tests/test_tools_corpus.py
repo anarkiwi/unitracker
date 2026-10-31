@@ -28,8 +28,8 @@ def test_a_tune_is_multi_sid_by_its_header_sid_addresses(metal_warrior, version,
 def test_a_goattracker_build_past_three_voices_is_multi_sid(
     metal_warrior, monkeypatch, voices, multi
 ):
-    dec = gt_tune([(0x41, 0)], voices=voices)[0]
-    monkeypatch.setattr(shared, "decompile_sid", lambda raw: dec)
+    core = gt_tune([(0x41, 0)], voices=voices)
+    monkeypatch.setattr(shared, "core_of_sid", lambda raw: core)
     assert shared.multi_sid(metal_warrior.read_bytes()) == multi
 
 

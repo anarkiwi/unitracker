@@ -6,8 +6,8 @@ from collections import defaultdict
 from dataclasses import replace
 from functools import partial
 
+from unitracker_grammar.cells import CELLS, LATER_CELLS
 from unitracker_grammar.document import (
-    CELLS,
     KINDS,
     Call,
     Document,
@@ -125,7 +125,12 @@ def _template(program: Program, names: dict) -> Program:
             elif base(key) == "note":
                 keys.append((key, f"+{name}"))
             else:
-                keys.append((key, Expr(name) if base(key) in CELLS else name))
+                keys.append(
+                    (
+                        key,
+                        Expr(name) if base(key) in CELLS and base(key) not in LATER_CELLS else name,
+                    )
+                )
         rows.append(Row(tuple(keys)))
     return Program(tuple(rows), program.loop)
 
