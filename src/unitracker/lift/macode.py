@@ -43,7 +43,10 @@ CODE = {
     "pong": "lda phi\nora phi+1\nbne step\nlda #p\nsta v\nsta v+1\nlda #0\nsta d\nsta q\nrts\n"
     + _PONG,
     "pongs": _PONG,
-    "fset": "lda #u\nsta uu\nlda #s\nsta st\nlda #o\nsta own\nlda #c\nbeq done\nsta cc\ndone:\nrts\n",
+    "fset": (
+        "lda #u\nsta uu\nlda #s\nsta st\nlda #o\nsta own\nlda #0\nsta ini\nlda #c\nbeq done\nsta cc\n"
+        "done:\nrts\n"
+    ),
     "fseti": (
         "lda #u\nsta uu\nlda #s\nsta st\nlda #o\nsta own\nlda #c\nsta cc\nlda #a\nsta acc\n"
         "lda #r\nsta ctr\nlda #i\nsta ini\nrts\n"

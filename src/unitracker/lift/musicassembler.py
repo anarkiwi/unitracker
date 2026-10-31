@@ -46,6 +46,7 @@ CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
 CHECK = 4000
 VOICES = MA.VOICES
 SID = 0xD400
+JMP_ABS = 0x4C
 MAX_ITEMS = 512
 HELD = ("step",)
 summary = cli.summary
@@ -138,11 +139,22 @@ def _arp_cells(found: dict) -> dict:
     }
 
 
+def _entered(core: Core) -> bool:
+    """Whether the play address reaches the play entry through nothing but ``JMP abs``."""
+    view, at, seen = core.view, core.song.play_addr, set()
+    while view[at] == JMP_ABS and at not in seen:
+        seen.add(at)
+        at = view[at + 1] | view[at + 2] << 8
+    return at == core.found["entry"]
+
+
 def _refuse(core: Core) -> None:
     """Refuse what the document cannot state, before lifting."""
     found = core.found
     if core.song.play_addr == 0:
         raise Refusal("interrupt", "play address 0")
+    if not _entered(core):
+        raise Refusal("play routine", "the play address is not the play entry")
     if playspec.has_native(core.spec):
         raise Refusal("native", "the spec has native blocks")
     if len(playspec.entries(core.view)) > 1:
@@ -232,6 +244,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.skip = bool(self.found["pitch_skip"])
         self.always = bool(self.found["pulse_always"])
         self.first = {}
+        self.ctl0 = [core.cell("note_ctl", x) for x in range(VOICES)]
 
     # ---- instruments and programs -----------------------------------------------------------
 
@@ -307,12 +320,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             raise Refusal("program jump", f"row {target} past the {n} rows")
         return 1 + target
 
-    def trigger(self, k: int, x: int) -> str:
+    def trigger(self, k: int, x: int, mask: bool = True) -> str:
         """The name of the control program a note of instrument ``k`` on voice ``x`` runs: the
-        trigger's row, then the instrument's inner program."""
+        trigger's row, then the instrument's inner program; with ``mask`` false the trigger
+        keeps the rest's gate mask, which binds from the inner program's first row on."""
         rec = self.record(k)
         keys = [("ad", rec.attack_decay), ("sr", rec.sustain_release)]
-        rows, loop = [Row(keys + [("m.ctrl", NONE), ("ctrl", rec.waveform)])], None
+        keys += [("m.ctrl", NONE)] * mask + [("ctrl", rec.waveform)]
+        rows, loop = [Row(keys)], None
         prog = self.program_of(rec.porta)
         if prog is not None:
             rows += [self.program_row(r, x) for r in prog.rows]
@@ -322,11 +337,13 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 loop = self.jump(prog)
             elif self.arpeggio(rec.porta) == "after":
                 rows.append(Row({"freq": self.call("arps", m=self.arp_args(k)["m"])}))
+        if not mask:
+            masked = ("m.ctrl", _expr("v & 254"))
+            if len(rows) > 1:
+                rows[1] = Row(rows[1].keys + (masked,))
+            else:
+                rows.append(Row([masked]))
         return self.names.name("ctrl", "c", Program(rows, loop))
-
-    def _args(self, k: int, *keys) -> dict:
-        args = self.arp_args(k)
-        return {key: args[key] for key in keys}
 
     def pulse(self, k: int):
         """The pulse binding a note of instrument ``k`` starts."""
@@ -441,21 +458,43 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         nxt = replace(ctx, ins=ins, vib=ev.vibrato, steps=steps, rest=False, boot=False)
         return Event(atom, self.instrument(ins, x) if sel is not None else None, cmds), nxt
 
+    def primed(self, ins: int, x: int, rest: bool) -> dict:
+        """The commands of a first row that plays no note on a voice whose note control init
+        left without the trigger latch: the first output call triggers instrument ``ins`` at the
+        note index and frequency init left."""
+        flags = self.record(ins).porta
+        if self.arpeggio(flags) or self.always:
+            raise Refusal("init", "a trigger of the image with a sweep")
+        return {
+            "legato": True,
+            "run": self.trigger(ins, x, not rest),
+            "pw": self.pulse(ins),
+        }
+
     def other(self, ev, sel, ctx: Ctx, x: int) -> tuple:
         """``(event, ctx)`` of a rest or a hold row under instrument select ``sel``."""
         rest = not ev.long
         ins = ctx.ins if sel is None else sel
         cmds = {"vtempo": self.length(ev.duration, "rest" if rest else "hold")}
+        atom, trig = "-", ctx.trig
         if ctx.boot:
-            image, ctrl = self.image(x), self.core.cell("ctrl", x)
-            cmds |= image
-            cmds["m.ctrl"] = _const(ctrl & (0xFE if rest else 0xFF))
+            if self.ctl0[x] & MA.CTL_VIBARP or self.always:
+                raise Refusal("init", "a sweep running from the image")
+            cmds |= self.image(x)
+            cmds["m.ctrl"] = _const(self.core.cell("ctrl", x) & (0xFE if rest else 0xFF))
+            if not self.ctl0[x] & MA.CTL_TRIGGERED:
+                atom, trig = note_name(self.core.cell("note_index", x)), ins
+                cmds |= self.primed(ins, x, rest)
+                if rest:
+                    del cmds["m.ctrl"]
         elif rest:
             cmds["m.ctrl"] = _expr("v & 254")
         if sel is not None and not ctx.boot:
             cmds |= self.rebinds(ctx, ins) | self.configure(ctx, ins, ctx.trig, ctx.vib)
-        name = self.instrument(ins, x) if sel is not None else None
-        return Event("-", name, cmds), replace(ctx, ins=ins, rest=rest or ctx.rest, boot=False)
+        name = self.instrument(ins, x) if sel is not None or atom != "-" else None
+        return Event(atom, name, cmds), replace(
+            ctx, ins=ins, trig=trig, rest=rest or ctx.rest, boot=False
+        )
 
     def silence(self, ctx: Ctx, x: int) -> Event:
         """The event of a voice parked on the silence pattern: the gate off on each row call."""
@@ -563,7 +602,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         owner, acc = core.cell("filter_owner"), core.cell("fc_acc")
         ctr, count = core.cell("fc_ctr"), core.cell("trigger_ctr")
         if owner == x and (ctr or count or self.pokes):
-            cmds["set.cut"] = Once(
+            cmds["boot.cut"] = Once(
                 self.call(
                     "fseti",
                     u=core.cell("trigger_acc"),
@@ -587,13 +626,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             for cell, names in STATE.items()
             if (keep := tuple((k, n) for k, n in names if k in named))
         )
-        cut = [Slot("set")] if "fset" in used or "fseti" in used else []
+        cut = [Slot("boot")] if "fseti" in used else []
+        cut += [Slot("set")] if "fset" in used else []
         cut += [Slot(f"p{x}") for x in sorted(self.pokes)]
         cut += [Slot("cut", hold=HELD, reset=("note",))] if "fsweep" in used else []
         cut += [Slot(f"q{x}") for x in sorted(self.pokes)]
         slots = {
             "freq": [
-                Slot("a", hold=HELD),
+                Slot("a", hold=HELD, reset=("legato",)),
                 Slot("b", hold=HELD, reset=("note", "legato")),
                 Slot("c"),
             ],
