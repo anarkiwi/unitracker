@@ -105,8 +105,8 @@ REFUSED = {
     ),
     "cruiser_x_79": (
         "MUSICIANS/B/Bayliss_Richard/Cruiser-X_79.sid",
-        "layout",
-        "a player reading its speedtable elsewhere than its other code",
+        "start state",
+        "a note pending in the channel variables",
     ),
     "first_night_together": (
         "MUSICIANS/O/Onebitman/Zerozillion/First_Night_Together.sid",
