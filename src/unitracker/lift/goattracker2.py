@@ -20,6 +20,7 @@ from unitracker_grammar.document import (
     NONE,
     Document,
     Event,
+    Group,
     Expr,
     Call,
     Code,
@@ -41,7 +42,7 @@ from unitracker_grammar import code as asm
 from unitracker_grammar.expr import canonical
 from unitracker_player.player import play
 
-from unitracker.lift import cli
+from unitracker.lift import cli, invariants
 from unitracker.lift.gt2code import ROUTINES, STATE
 from unitracker.lift.shared import meta_text, note_name, rests
 
@@ -233,6 +234,60 @@ def _jumps(core: Core, rows: list, used: set) -> None:
                 starts.append(ptr + 1)
 
 
+def _contexts(song, order) -> set:
+    """The ``(pattern, instrument entered with)`` pairs a voice's orderlist plays: its walk and
+    the loop body once more, a repeated pattern entered again with the instrument its first pass
+    leaves."""
+    units, loop = Lift.plays(order)
+    pairs, instr = set(), 1
+    for num, _, times in units + units[loop:]:
+        pairs.add((num, instr))
+        for row in song.patterns[num]:
+            instr = row.instrument or instr
+        if times > 1:
+            pairs.add((num, instr))
+    return pairs
+
+
+def native_counts(core: Core) -> dict:
+    """The object counts a lift of ``core`` may hold (:mod:`unitracker.lift.invariants`), from the
+    canonical song and its played orderlists:
+
+    - ``instruments``: the instruments the played patterns use and instrument 1, which every
+      voice starts with; ``restart``: one program each;
+    - ``ctrl``, ``pw``, ``filter``: the distinct nonzero table entry points those instruments and
+      the pattern and wavetable commands set, one program each (``ctrl`` adds the empty program
+      every restart runs);
+    - ``phrases``: the ``(pattern, instrument entered with)`` pairs the voices play, as a phrase
+      is the same events for the instruments that do not change them, and the introductory phrase;
+    - ``song``: per played channel its orderlist entries, a repeat entry counted once, the entry
+      that starts the voice, and the entries of its loop body once more, which the lift plays a
+      second time when the instrument the loop is re-entered with changes its phrases."""
+    song = canonical_song(core.song, core.subtune)
+    channels = song.subtunes[0].channels
+    orders = [channels[c] for c in core.voices]
+    played = {e.num for o in orders for e in o.entries if isinstance(e, PlayPattern)}
+    rows = [r for n in played for r in song.patterns[n]]
+    used = {r.instrument for r in rows if r.instrument} | {1}
+    cmds = [r.command for r in rows]
+    cmds += [r.command for r in song.wavetable if isinstance(r, T.WaveCommand)]
+
+    def entries(field: str, command) -> int:
+        starts = {getattr(song.instrument(n), field) for n in used}
+        return len((starts | {c.row for c in cmds if c.__class__ is command}) - {0})
+
+    contexts = set().union(*(_contexts(song, o) for o in orders))
+    return {
+        "instruments": len(used),
+        "restart": len(used),
+        "ctrl": entries("wave_ptr", T.SetWavePtr) + 1,
+        "pw": entries("pulse_ptr", T.SetPulsePtr),
+        "filter": entries("filter_ptr", T.SetFilterPtr),
+        "phrases": len(contexts) + 1,
+        "song": tuple(2 * len(o.entries) - min(o.restart, len(o.entries)) + 1 for o in orders),
+    }
+
+
 class Names:
     """Definitions by kind, numbered in first-use order."""
 
@@ -268,6 +323,17 @@ def _program(rows, ptr: int, keys) -> tuple:
             keys_, p = keys(rows, p)
             out.append(Row(keys_))
     return out, at.get(p)
+
+
+def _carried(entries, pos: int, trans: int):
+    """The transpose in force at orderlist ``pos`` that the next pattern played can read: None where
+    a transpose entry sets it first."""
+    for entry in entries[pos:]:
+        if isinstance(entry, PlayPattern):
+            break
+        if isinstance(entry, Transpose):
+            return None
+    return trans
 
 
 def _plus(step: int) -> Expr:
@@ -644,29 +710,41 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             cmds[TICK] = self.fx0(instr)
         return Event(atom, name, cmds)
 
-    def phrase(self, rows, instr: int) -> tuple:
-        """``(name, instrument at the end)`` of the phrase of pattern ``rows`` entered playing
-        ``instr``."""
+    def events(self, rows, instr: int) -> tuple:
+        """``(events, instrument at the end)`` of pattern ``rows`` entered playing ``instr``."""
         events, here = [], instr
         for row in rows:
             here = row.instrument or here
             events += [self.event(row, here)] + [Event("-")] * (row.length - 1)
-        return self.names.name("phrase", "p", tuple(rests(events))), here
+        return tuple(rests(events)), here
+
+    def segments(self, rows, instr: int, times: int) -> tuple:
+        """``([(events, times)], instrument at the end)`` of a pattern played ``times`` in a row
+        from ``instr``: its first pass, then the repeats, which start from the instrument the
+        first pass leaves."""
+        first, end = self.events(rows, instr)
+        if times > 1 and end != instr:
+            rest, end = self.events(rows, end)
+            if rest != first:
+                return [(first, 1), (rest, times - 1)], end
+        return [(first, times)], end
 
     # ---- orderlists -------------------------------------------------------------------------
 
-    def plays(self, order) -> tuple:
-        """``(plays, loop)``: the ``(pattern, transpose)`` each sequencer step starts and the
-        index the orderlist loops to."""
+    @staticmethod
+    def plays(order) -> tuple:
+        """``(units, loop)``: the ``(pattern, transpose, times)`` each sequencer step starts, a
+        repeat entry's pattern once with its count, and the index the orderlist loops to."""
         entries, pos, trans, count = order.entries, 0, 0, 0
         seen, out = {}, []
         while len(out) < 4096:
             if pos >= len(entries):
                 pos = order.restart
-            if (pos, trans) in seen and pos < len(entries):
-                return out, seen[(pos, trans)]
+            state = (pos, _carried(entries, pos, trans))
+            if state in seen and pos < len(entries):
+                return out, seen[state]
             if pos < len(entries):
-                seen[(pos, trans)] = len(out)
+                seen[state] = len(out)
             if pos >= len(entries):
                 raise Refusal("orderlist", "restarts past its end")
             entry = entries[pos]
@@ -677,16 +755,16 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 case Repeat(c):
                     count = c
                 case PlayPattern(num):
-                    out += [(num, trans)] * (count + 1)
+                    out.append((num, trans, count + 1))
                     count = 0
         raise Refusal("orderlist", "does not loop")
 
-    def overlap(self, plays: list) -> None:
+    def overlap(self, units: list) -> None:
         """Refuse a note whose restart reads the note before it back to that note's own tick, where
         the document applies the earlier note's gate after the later note's rows."""
         instr, since = 1, None
-        for num, _ in plays:
-            for row in self.song.patterns[num]:
+        for num, _, times in units:
+            for row in [r for _ in range(times) for r in self.song.patterns[num]]:
                 noted = isinstance(row.note, T.Note) and not isinstance(
                     row.command, T.TonePortamento
                 )
@@ -701,19 +779,28 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 since = None if since is None else since + self.rowmin * row.length
 
     def voice(self, order) -> Voice:
-        """A voice's orderlist. The loop body is played a second time when the instrument it is
-        entered with then differs from the first pass, and the loop re-enters that copy."""
-        plays, loop = self.plays(order)
-        self.overlap(plays + plays[loop : loop + 1])
-        items, instr, entry = [Play("p0")], 1, {}
-        for at, (num, trans) in enumerate(plays + plays[loop:]):
-            entry[at] = instr
-            if at == len(plays) and instr == entry[loop]:
-                break
-            name, instr = self.phrase(self.song.patterns[num], instr)
-            items.append(Play(name, Signed(trans) if trans else None))
-        again = len(items) > len(plays) + 1
-        return Voice(tuple(items), (len(plays) if again else loop) + 1)
+        """A voice's orderlist, a repeat entry a group. The loop body is played a second time
+        when entered with another instrument changes what it plays, and the loop re-enters that
+        copy."""
+        units, loop = self.plays(order)
+        self.overlap(units + units[loop : loop + 1])
+        walks, instr = [], 1
+        for num, _, times in units:
+            segs, instr = self.segments(self.song.patterns[num], instr, times)
+            walks.append(segs)
+        again = []
+        for num, _, times in units[loop:]:
+            segs, instr = self.segments(self.song.patterns[num], instr, times)
+            again.append(segs)
+        copy = again != walks[loop:]
+        items, starts = [Play("p0")], []
+        for (_, trans, _), segs in zip(units + units[loop:] * copy, walks + again * copy):
+            starts.append(len(items))
+            move = Signed(trans) if trans else None
+            for events, times in segs:
+                play = Play(self.names.name("phrase", "p", events), move)
+                items.append(Group((play,), times) if times > 1 else play)
+        return Voice(tuple(items), starts[len(units) if copy else loop])
 
     # ---- the document -----------------------------------------------------------------------
 
@@ -832,8 +919,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         """The document of the subtune."""
         channels = self.song.subtunes[0].channels
         voices = [self.voice(channels[c]) for c in self.core.voices]
-        for n in range(1, len(self.song.instruments) + 1):
-            self.instrument(n)
+        self.instrument(1)
         init = [
             Event("-", "i1", ({"tempo": PRE - self.lead} if v == 0 else {}) | self.first(v))
             for v in range(len(voices))
@@ -887,6 +973,7 @@ def compare(core: Core, frames: int, grid=None) -> tuple:
     """``(cells, text)``: the cells where the document of ``core`` differs from ``grid`` (the
     reference over ``frames`` frames; for a core of a song, its player's)."""
     text = document_text(core)
+    invariants.check(text, native_counts(core))
     ours = np.asarray(play(text, frames), dtype=np.uint8)
     if grid is None:
         grid = np.asarray(player_of(core).render_grid(len(ours)), dtype=np.uint8)
@@ -906,6 +993,7 @@ def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
     """``(cells, text)`` of a SID: the cells where its document differs from the reference."""
     core = core_of_sid(raw, subtune)
     text = document_text(core)
+    invariants.check(text, native_counts(core))
     ours = np.asarray(play(text, frames), dtype=np.uint8)
     theirs = reference(raw, subtune, len(ours))
     return gridcmp.cell_diff(ours, theirs), text

@@ -13,15 +13,28 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-from pysidtracker import find_format
+from pysidtracker import SidImage, find_format
 from pysidtracker.testing import resolve_tune
 from tqdm import tqdm
 
-from unitracker.lift import goattracker2
+from unitracker.lift import goattracker2, invariants
 
 
 def _expired(*_):
     raise TimeoutError("over the time limit")
+
+
+def sizes(raw: bytes, text: str) -> dict:
+    """``{counts, native, bytes, native_bytes}`` of a lifted document: its objects of each kind
+    against the tune's native counts, and its bytes against the tune's data bytes."""
+    have = invariants.lifted(text)
+    native = goattracker2.native_counts(goattracker2.core_of_sid(raw))
+    return {
+        "counts": {k: have[k] for k in native},
+        "native": native,
+        "bytes": len(text.encode()),
+        "native_bytes": len(SidImage.from_sid(raw).image),
+    }
 
 
 def classify(name: str, frames: int, limit: int) -> dict:
@@ -36,17 +49,33 @@ def classify(name: str, frames: int, limit: int) -> dict:
         raw = Path(path).read_bytes()
         if find_format(raw).name != "goattracker2":
             return {"name": name, "verdict": "other", "detail": find_format(raw).name}
-        cells, _ = goattracker2.verify(raw, 0, frames)
+        cells, text = goattracker2.verify(raw, 0, frames)
         if not cells.size:
-            return {"name": name, "verdict": "exact", "detail": ""}
+            return {"name": name, "verdict": "exact", "detail": ""} | sizes(raw, text)
         first = tuple(int(c) for c in cells[0][:2])
         return {"name": name, "verdict": "diverged", "detail": f"{len(cells)} cells, first {first}"}
+    except invariants.ModelError as exc:
+        return {"name": name, "verdict": "exceeded", "detail": str(exc)}
     except goattracker2.Refusal as exc:
         return {"name": name, "verdict": "refused", "detail": exc.kind}
     except Exception as exc:  # pylint: disable=broad-exception-caught
         return {"name": name, "verdict": "error", "detail": f"{type(exc).__name__}: {exc}"[:200]}
     finally:
         signal.alarm(0)
+
+
+def print_sizes(results: list) -> None:
+    """Each exact tune's lifted/native object counts that are not equal, and its document bytes
+    per native data byte."""
+    for r in results:
+        if r["verdict"] != "exact":
+            continue
+        kinds = {k: f"{r['counts'][k]}/{r['native'][k]}" for k in r["native"] if k != "song"}
+        song = "/".join(f"{a}/{b}" for a, b in zip(r["counts"]["song"], r["native"]["song"]))
+        ratio = r["bytes"] / max(1, r["native_bytes"])
+        print(
+            f"{r['name']}: {kinds} song {song} bytes {r['bytes']}/{r['native_bytes']} x{ratio:.1f}"
+        )
 
 
 def main(argv=None) -> int:
@@ -70,8 +99,9 @@ def main(argv=None) -> int:
     refused = Counter(r["detail"] for r in results if r["verdict"] == "refused")
     print("refusal classes:", dict(refused.most_common()))
     for r in results:
-        if r["verdict"] in ("diverged", "error"):
+        if r["verdict"] in ("diverged", "error", "exceeded"):
             print(f"{r['verdict']:9} {r['name']}: {r['detail']}")
+    print_sizes(results)
     if args.out:
         args.out.write_text(json.dumps(results, indent=1))
     return 0
