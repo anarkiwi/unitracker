@@ -13,7 +13,7 @@ from pygoattracker import constants as C
 from pygoattracker import typed as T
 from pygoattracker.canonical import canonical_song
 from pygoattracker.model import PlayPattern, Repeat, Transpose
-from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp
+from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, gridcmp
 from pysidtracker.wrap import count_entries
 from pysidtracker.playspec.tv import TVError
 from pysidtracker.playspec.player import SpecPlayer
@@ -1264,6 +1264,17 @@ def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
     ours = np.asarray(play(text, frames), dtype=np.uint8)
     theirs = reference(raw, subtune, len(ours))
     return gridcmp.cell_diff(ours, theirs), text
+
+
+def report(raw: bytes, subtune: int = 0) -> dict:
+    """The size of a SID's document: per kind the ``(objects, native objects)`` it lifts, its
+    ``fixed`` and ``song`` bytes, and the ``native_bytes`` of the tune's data."""
+    text, objects = checked_text(core_of_sid(raw, subtune))
+    return {
+        "counts": objects,
+        **invariants.sizes(text),
+        "native_bytes": len(SidImage.from_sid(raw).image),
+    }
 
 
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:

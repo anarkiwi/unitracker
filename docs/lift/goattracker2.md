@@ -7,7 +7,7 @@ bound playroutine spec. No player is run to build it.
 ```sh
 python -m unitracker.lift.goattracker2 TUNE.sid > tune.yaml
 python -m unitracker.lift.goattracker2 --verify [--frames N] [--jobs J] TUNE.sid ...
-python tools/lift_corpus.py NAMES.txt
+python tools/lift_corpus.py NAMES.txt --format goattracker2
 ```
 
 ## Mapping

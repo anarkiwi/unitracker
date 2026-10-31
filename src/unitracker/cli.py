@@ -12,7 +12,7 @@ from unitracker.optimiser import lossy, optimise
 from unitracker.optimiser.inline import MODES
 
 # format name: its lifter module
-LIFTERS = {"goattracker2": "unitracker.lift.goattracker2"}
+LIFTERS = {"defmon": "unitracker.lift.defmon", "goattracker2": "unitracker.lift.goattracker2"}
 
 
 class FormatError(ValueError):
