@@ -131,6 +131,8 @@ def _refuse(core: Core):
         raise Refusal("multi-SID", f"{lay['nchan']} channels")
     if core.wrap is not None and core.wrap.sink is not None:
         raise Refusal("wrapper", "the play routine flushes a ghost block itself")
+    if lay["sid"] != 0xD400:
+        raise Refusal("SID address", f"${lay['sid']:04X}")
     if re.search(r"\bnative\b", gt2spec.spec().source or ""):
         raise Refusal("native", "the spec has native blocks")
     for flag in ("noeffects", "directwave", "livegate", "nonormalspeed"):
@@ -266,10 +268,13 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.core, self.lay, self.names = core, core.lay, Names()
         self.song = canonical_song(core.song, core.subtune)
         self.rowlen = self.lay["deftempo"] + 1
-        self.cut_set = False
         self.global_cells = set()
         self.slotted = False
         rows = [r for p in self.song.patterns for r in p]
+        self.cut_set = any(isinstance(r.command, T.SetCutoff) for r in rows) or any(
+            isinstance(r, T.WaveCommand) and isinstance(r.command, T.SetCutoff)
+            for r in self.song.wavetable
+        )
         used = {r.instrument for r in rows if r.instrument} | {1}
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
         self.vib = self.insvib or any(isinstance(r.command, T.Vibrato) for r in rows)
@@ -427,7 +432,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             nxt = rows[p] if p < len(rows) else None
             if isinstance(nxt, T.CutoffSet):
                 return keys | {cut: nxt.cutoff << 3}, p + 2
-            return keys, p + 1
+            return keys | {cut: NONE}, p + 1
         if isinstance(row, T.CutoffSet):
             return {cut: row.cutoff << 3}, p + 1
         return {"hold": row.time, cut: _plus(row.speed << 3)}, p + 1
@@ -530,7 +535,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 keys = {"res": res, "route": chans}
                 return keys | ({} if res or chans else {"cut": HOLD})
             case T.SetCutoff(c):
-                self.cut_set = True
                 return {"set.cut": c << 3}
             case T.SetMasterVolume(v):
                 return {"vol": v}
