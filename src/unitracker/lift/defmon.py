@@ -98,6 +98,7 @@ class Core:  # pylint: disable=too-many-instance-attributes
 
 
 def cause(exc: Exception) -> Refusal:
+    """The Refusal of the class a song error from pydefmon names."""
     for pattern, kind in CAUSES:
         if re.search(pattern, str(exc)):
             return Refusal(kind, str(exc))
