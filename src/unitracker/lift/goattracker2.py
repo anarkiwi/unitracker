@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """A GoatTracker 2 tune as a format 2.5 document, from pygoattracker's typed song and the flags
 of its bound playroutine spec; ``verify`` plays the document against the spec player with the
 standard note table (docs/lift/goattracker2.md)."""
@@ -1095,7 +1096,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         return Document(head, (), self.mods(order), defs, tuple(init), voices, None)
 
 
-def build(core: Core) -> tuple:
+def lifted(core: Core) -> tuple:
     """``(document text, origins)`` of ``core``: the document printed, and the native object each
     of its named objects transliterates (:func:`unitracker.lift.invariants.provenance`)."""
     lifter = Lift(core)
@@ -1104,13 +1105,13 @@ def build(core: Core) -> tuple:
 
 def document_text(core: Core) -> str:
     """The document of ``core``, printed."""
-    return build(core)[0]
+    return lifted(core)[0]
 
 
 def checked_text(core: Core) -> tuple:
     """``(text, objects per kind)`` of ``core``'s document, a ModelError where it holds an object
     without its native one or more song entries than the orderlists have."""
-    text, origins = build(core)
+    text, origins = lifted(core)
     objects = invariants.provenance(text, origins)
     invariants.check(text, native_counts(core))
     return text, objects

@@ -376,5 +376,5 @@ def test_every_corpus_tune_holds_one_object_per_origin(request):
     for tune in CORPUS:
         raw = request.getfixturevalue(tune).read_bytes()
         text, objects = g.checked_text(g.core_of_sid(raw))
-        assert invariants.provenance(text, g.build(g.core_of_sid(raw))[1]) == objects
+        assert invariants.provenance(text, g.lifted(g.core_of_sid(raw))[1]) == objects
         assert all(a >= b for a, b in objects.values())

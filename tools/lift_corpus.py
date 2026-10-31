@@ -53,7 +53,7 @@ def classify(name: str, frames: int, limit: int) -> dict:
         cells, text = goattracker2.verify(raw, 0, frames)
         if not cells.size:
             objects = invariants.provenance(
-                text, goattracker2.build(goattracker2.core_of_sid(raw))[1]
+                text, goattracker2.lifted(goattracker2.core_of_sid(raw))[1]
             )
             return {"name": name, "verdict": "exact", "detail": ""} | sizes(raw, text, objects)
         first = tuple(int(c) for c in cells[0][:2])
