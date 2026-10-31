@@ -243,7 +243,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def __init__(self, core: Core):
         _refuse(core)
         self.core, self.found, self.song = core, core.found, core.song
-        self.names, self.pokes, self.cache = Names(), set(), {}
+        self.names, self.cache = Names(), {}
+        self.pokes, self.setters, self.sweepers = set(), set(), set()
         self.rowlen = core.cell("tempo_reload") + 1
         self.skip = bool(self.found["pitch_skip"])
         self.always = bool(self.found["pulse_always"])
@@ -306,8 +307,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if row.filter:
             self.pokes.add(x)
             keys += [
-                (f"p{x}.cut", Once(self.call("pokea", t=x, u=row.filter))),
-                (f"q{x}.cut", Once(self.call("pokeb", t=x, u=row.filter))),
+                (f"q{x}.cut", Once(self.call("poke", u=row.filter))),
             ]
         return Row(keys)
 
@@ -416,13 +416,15 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def sweep_commands(self, ev: NoteEvent, x: int) -> dict:
         """The commands of a note's filter command on voice ``x``."""
         cutoff, length = ev.args
+        self.setters.add(x)
+        self.sweepers.add(x)
         step = (((cutoff & 0x0F) << 1) - 0x10) & 0xFF
         preset = self.core.cell("res_presets", x) if length else 0xF0
         return {
             "res": preset >> 4,
             "route": preset & 0x0F,
-            "set.cut": Once(self.call("fset", u=cutoff, c=length, s=step, o=x)),
-            "cut.cut": self.call("fsweep"),
+            f"s{x}.cut": Once(self.call("fset", u=cutoff, c=length, s=step, o=x)),
+            f"c{x}.cut": self.call("fsweep", t=x),
         }
 
     def image(self, x: int) -> dict:
@@ -637,7 +639,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                     i=int(not self.first.get(x, False)),
                 )
             )
-            cmds["cut.cut"] = self.call("fsweep")
+            self.sweepers.add(x)
+            cmds[f"c{x}.cut"] = self.call("fsweep", t=x)
         return Event("on", None, cmds)
 
     def header(self, used: list) -> Header:
@@ -650,10 +653,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             if (keep := tuple((k, n) for k, n in names if k in named))
         )
         cut = [Slot("boot")] if "fseti" in used else []
-        cut += [Slot("set")] if "fset" in used else []
-        cut += [Slot(f"p{x}") for x in sorted(self.pokes)]
-        cut += [Slot("cut", hold=HELD, reset=("note",))] if "fsweep" in used else []
-        cut += [Slot(f"q{x}") for x in sorted(self.pokes)]
+        for x in range(VOICES):
+            cut += [Slot(f"s{x}")] if x in self.setters else []
+            cut += [Slot(f"c{x}", hold=HELD, reset=("note",))] if x in self.sweepers else []
+            cut += [Slot(f"q{x}")] if x in self.pokes else []
         slots = {
             "freq": [
                 Slot("a", hold=HELD, reset=("legato",)),

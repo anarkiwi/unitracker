@@ -65,11 +65,10 @@ CODE = {
         "lda #r\nsta ctr\nlda #i\nsta ini\nrts\n"
     ),
     "fsweep": (
-        "lda ini\nbne first\nlda phi\nora phi+1\nbne step\n"
+        "lda #t\ncmp own\nbne done\nlda ini\nbne first\nlda phi\nora phi+1\nbne step\n"
         "lda uu\nsta acc\nlda cc\nsta ctr\nrts\n"
         "first:\nlda #0\nsta ini\nstep:\n" + _STEP
     ),
-    "pokea": "lda #t\ncmp own\nbcs done\nlda #u\nsta acc\ndone:\nrts\n",
-    "pokeb": "lda #t\ncmp own\nbcc done\nlda #u\nsta acc\ndone:\nrts\n",
+    "poke": "lda #u\nsta acc\nrts\n",
 }
 ROUTINES = {name: code.read(text) for name, text in CODE.items()}
