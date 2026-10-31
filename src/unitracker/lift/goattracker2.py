@@ -13,6 +13,7 @@ from pygoattracker import typed as T
 from pygoattracker.canonical import canonical_song
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp
+from pysidtracker.wrap import count_entries
 from pysidtracker.playspec.player import SpecPlayer
 from unitracker_grammar.document import (
     HOLD,
@@ -86,12 +87,21 @@ class Core:  # pylint: disable=too-many-instance-attributes
     image: object = None
     memory: bytes | None = None
     wrap: object = None
+    entries: int = 1
 
     @property
     def voices(self) -> tuple:
         """The played channels in voice order."""
         offsets = self.build.voices or tuple(7 * c for c in range(self.lay["nchan"]))
         return tuple(c for c in self.lay["exec"] if offsets[c] is not None)
+
+
+def _entries(model) -> int:
+    """The calls of the player one frame of the tune's play routine makes."""
+    wrap = model.info.wrap
+    if wrap is None:
+        return 1
+    return count_entries(model.image, wrap.song, wrap.play, wrap.entries)
 
 
 def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
@@ -113,6 +123,7 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
         head.play_address,
         memory=model.memory,
         wrap=info.wrap,
+        entries=_entries(model),
     )
 
 
@@ -135,7 +146,7 @@ def _refuse(core: Core):
         raise Refusal("SID address", f"${lay['sid']:04X}")
     if re.search(r"\bnative\b", gt2spec.spec().source or ""):
         raise Refusal("native", "the spec has native blocks")
-    for flag in ("noeffects", "directwave", "livegate", "nonormalspeed"):
+    for flag in ("directwave", "livegate"):
         if lay[flag]:
             raise Refusal(f"build {flag}")
     if build.pulse_step not in (1, 2) and not lay["pulse2x"]:
@@ -758,7 +769,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             regs=tuple(regs) if any(regs) else None,
             lag=self.lag or None,
             global_cells=glob or None,
-            calls=(core.build.calls, None) if core.build.calls > 1 else None,
+            calls=(core.build.calls * core.entries, None) if core.build.calls * core.entries > 1 else None,
         )
 
     @property
