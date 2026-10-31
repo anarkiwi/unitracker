@@ -163,29 +163,14 @@ def displacement(native: np.ndarray, new: np.ndarray) -> int:
     return most
 
 
-def expand(phases, table: dict) -> tuple:
-    """``(ids, times)`` of :class:`pylibresidfp.Phases`: per phase, the id in ``table`` of its
-    envelope levels and states, and the cycles of its events (-1 past its last)."""
-    pieces, events = phases.pieces, phases.events
-    width = int(pieces[:, 3].max())
-    ids = np.empty(phases.count, np.int64)
-    times = np.full((phases.count, width), -1, np.int64)
-    for k0, k1, first, count in pieces.tolist():
-        ev = events[first : first + count]
-        ids[k0:k1] = table.setdefault(ev[:, 2:].tobytes(), len(table))
-        times[k0:k1, :count] = ev[:, 0] + ev[:, 1] * np.arange(k1 - k0)[:, None]
-    return ids, times
-
-
-def verdict(native, new, moved: int) -> str:
+def verdict(native: tuple, new: tuple, moved: int) -> str:
     """The verdict on a voice's envelope from every phase of its rate counter, ``native`` and
-    ``new`` its :class:`pylibresidfp.Phases`: ``noise`` where each phase takes the same levels
+    ``new`` its :meth:`pylibresidfp.Phases.expand` over one table: ``noise`` where each phase takes the same levels
     and states with every step within ``moved`` cycles; ``drift`` where the two only pair up
     across phases that way (a reorder no write can command: the rate counter's phase is not the
     player's); else ``shape`` where the levels and states differ, ``timing`` where a step moves
     further (the ADSR delay)."""
-    table = {}
-    (ia, ta), (ib, tb) = expand(native, table), expand(new, table)
+    (ia, ta), (ib, tb) = native, new
     width = max(ta.shape[1], tb.shape[1])
     ta, tb = (np.pad(t, ((0, 0), (0, width - t.shape[1])), constant_values=-1) for t in (ta, tb))
 
@@ -286,10 +271,12 @@ class Judge:  # pylint: disable=too-few-public-methods
             at = np.array([sid.cycle, 0, 0], np.int64)
             mine = key[:2] + (sid.cycle,)
             if mine not in self.native:
-                self.native = {mine: sid.envelope_phases(state[0], native + at, sid.cycle + until)}
-            a, b = self.native[mine], sid.envelope_phases(state[0], new + at, sid.cycle + until)
-            self.cache[key] = verdict(a, b, displacement(native, new))
-            self.traced += a.count
+                phases, table = sid.envelope_phases(state[0], native + at, sid.cycle + until), {}
+                self.native = {mine: (phases.expand(table), table)}
+            expanded, table = self.native[mine]
+            other = sid.envelope_phases(state[0], new + at, sid.cycle + until).expand(table)
+            self.cache[key] = verdict(expanded, other, displacement(native, new))
+            self.traced += len(expanded[0])
         return self.cache[key]
 
 

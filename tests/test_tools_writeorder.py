@@ -110,7 +110,8 @@ def phases_verdict(release: int, ad: int, sr: int, order: list) -> str:
     native = np.array([(100, 5, ad), (109, 6, sr), (118, 4, 0x41)], np.int64)
     new = np.array([(c, r, value[r]) for c, r in zip((100, 109, 118), order)], np.int64)
     at, until = np.array([sid.cycle, 0, 0]), sid.cycle + 3 * 19656
-    a, b = (sid.envelope_phases(0, w + at, until) for w in (native, new))
+    table = {}
+    a, b = (sid.envelope_phases(0, w + at, until).expand(table) for w in (native, new))
     return W.verdict(a, b, W.displacement(native, new))
 
 
@@ -133,7 +134,8 @@ def test_moving_a_hard_restart_gate_on_only_drifts():
     at, until = np.array([sid.cycle, 0, 0]), sid.cycle + 3 * 19656
     native = np.array([(100, 5, 0x0A), (110, 6, 0x88), (120, 4, 0x41)], np.int64)
     moved = native + [2, 0, 0]
-    a, b = (sid.envelope_phases(0, w + at, until) for w in (native, moved))
+    table = {}
+    a, b = (sid.envelope_phases(0, w + at, until).expand(table) for w in (native, moved))
     assert W.verdict(a, a, 0) == "noise"
     assert W.verdict(a, b, W.displacement(native, moved)) == "drift"
 
