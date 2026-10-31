@@ -40,7 +40,9 @@ python tools/lift_corpus.py NAMES.txt
 | calculated speed | code templates with state `sl`, `sh`: `F(N + 1) - F(N)` shifted by the row's count, `N` the last note loaded (`ln`) |
 | `noeffects`, `nonormalspeed` builds | no tick effects; the speedtable rows as the build reads them |
 | wavetable note rows | `wave.freq` once binding |
-| full ghosting, start state | `regs`, `lag`, first-tick cells |
+| full ghosting, start state | `regs`, `lag`, first-tick cells. The song-start call loads each control register as `wave & gate` from the wave the reset zeroes, so the second frame differs from the ghost the init left where a control register is not already that; the document then lags by one call (`lag:1`), the init events carry the control cells, and the first-tick cells move to a middle row of `p0` one call on |
+| channel variables the song start leaves | the song start zeroes `resetlen` + 1 bytes from `songptr` and `initchn` sets `instr`, `counter` and the tempo; `vibtime`, `vibdelay` and `lastnote` keep what the init left. A once binding on the init event loads those that command 0's vibrato reads where they differ from the document's (`t` 0, `d` the first instrument's delay, `ln` 0) |
+| pointer or jump onto a jump row | the executor runs the landed row as an ordinary row of its bytes `$FF,n` and goes on from the row after it; a pulse table's is a pulse set of the width `$F00` + `n` (`gt2tables`), stated as an appended row followed by a jump onward |
 
 ## Refusals
 
@@ -53,12 +55,12 @@ Typed `Refusal(kind)`, raised before lifting; `detail` names the construct.
 | `SID address` | a player writing a SID elsewhere than `$D400` |
 | `wrapper` | a play routine that writes SID registers other than as copies of its ghost block (probed over its first calls; the one in the corpus adds a cutoff sweep, a 16-bit sum stepped each call, and a volume xor with a self-modified operand) |
 | `build` | `directwave`, a pulse step other than 1 and 2, a voice layout or control overlay, a tempo under 2; `livegate` where a row change to a shorter gate timer fetches again |
-| `start state` | a note pending in the channel variables (`newnote` nonzero), which the first call starts with the stale instrument before any row |
-| `layout` | a speedtable row the song uses that the player reads as other bytes than the typed song holds |
+| `start state` | a note, command or table program the song start leaves running: `newnote`, `newfx`, `newparam`, `waveptr` or `pulseptr` outside the zeroed bytes and nonzero |
+| `layout` | a speedtable row the song uses that the player reads as other bytes than the typed song holds (none in the corpus since pygoattracker 0.10.2 binds the speedtable) |
 | `restart overlap` | a note whose restart reaches back before the previous note's tick, which the player never fetches |
 | `first waveform` | a gate-keeping note off, whose event also sets a table (`run` is taken) |
 | `noeffects vibrato` | instrument vibrato in a `noeffects` build: the player runs effect 0 each tick with the vibrato parameter of the live `instr`, which the row fetch loads before the note starts, including for a voice's first note and an instrument-only row, which have no restart row to rebind at the fetch |
-| `pointer onto a jump row` | a pointer or jump an instrument or command reaches that lands on a table jump row, which the executors play as an ordinary row |
+| `pointer onto a jump row` | a pointer or jump an instrument or command reaches that lands on a wavetable or filter table jump row (the tempo command F, a filter set of every mode bit: no typed row), on the last row of a table, or in a table that runs on past its last row beside such a landing |
 | `funk tempo` | a funk table whose row never ends (a byte of 0, or a pair whose reloads keep a negative counter), or whose rows do not alternate from the entry |
 | `funk tempo recall` | tempo recall where the table in force is not one: several tables loaded, or none loaded in a first row |
 | `pattern command`, `gate note`, `timing mark in a build without author info` | rows the document cannot state |

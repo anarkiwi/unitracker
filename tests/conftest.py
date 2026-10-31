@@ -89,6 +89,27 @@ CORPUS = {
         "MUSICIANS/M/Mueller_Manuel/Lazy_Day.sid",
         "gate timers read from the live instrument",
     ),
+    "commando": (
+        "MUSICIANS/L/Linus/Commando_Take_Me_to_the_Bridge_short.sid",
+        "a full ghost whose song start clears the control registers, and instrument vibrato "
+        "reading the channel variables the start keeps",
+    ),
+    "petal_panic": (
+        "MUSICIANS/C/Chiummo_Aldo/Petal_Panic_preview.sid",
+        "instrument vibrato reading the vibrato delay the song start keeps",
+    ),
+    "cruiser_x_79": (
+        "MUSICIANS/B/Bayliss_Richard/Cruiser-X_79.sid",
+        "a speedtable the spec binds elsewhere than the player's other code",
+    ),
+    "deathflood": (
+        "GAMES/A-F/Deathflood.sid",
+        "pulse table jumps onto jump rows, which play as pulse sets",
+    ),
+    "yeti_mountain": (
+        "MUSICIANS/R/Roly/Yeti_Mountain.sid",
+        "a pulse table jump onto a jump row",
+    ),
     "dirty_cheater": (
         "MUSICIANS/S/Spider_Jerusalem/Dirty_Cheater.sid",
         "the tune's own init writes",
@@ -103,11 +124,6 @@ REFUSED = {
         "SID address",
         "a player writing a SID at $D420",
     ),
-    "cruiser_x_79": (
-        "MUSICIANS/B/Bayliss_Richard/Cruiser-X_79.sid",
-        "start state",
-        "a note pending in the channel variables",
-    ),
     "first_night_together": (
         "MUSICIANS/O/Onebitman/Zerozillion/First_Night_Together.sid",
         "noeffects vibrato",
@@ -118,20 +134,15 @@ REFUSED = {
         "wrapper",
         "a play routine adding a cutoff sweep and a volume xor of its own",
     ),
-    "commando": (
-        "MUSICIANS/L/Linus/Commando_Take_Me_to_the_Bridge_short.sid",
-        "start state",
-        "a note pending in the channel variables",
-    ),
     "datatanten": (
         "DEMOS/A-F/Datatanten_Theme.sid",
         "funk tempo",
         "a funk table whose row never ends",
     ),
-    "hammurabi": (
-        "GAMES/G-L/Hammurabi.sid",
+    "two_hours": (
+        "DEMOS/0-9/2_Hours_NOT_Enough.sid",
         "pointer onto a jump row",
-        "a pointer onto a jump row",
+        "a filter table jump onto a jump row, which plays as a filter set of mode $F0",
     ),
 }
 for _name, (_tune, _kind, _doc) in REFUSED.items():

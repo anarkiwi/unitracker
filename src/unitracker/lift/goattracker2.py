@@ -46,6 +46,7 @@ from unitracker_player.player import play
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.gt2code import ROUTINES, STATE
+from unitracker.lift import gt2tables
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -133,6 +134,14 @@ def _own_writes(image, wrap) -> tuple:
     return tuple(sorted(own))
 
 
+def _landed(song: TypedSong, subtune: int = 0) -> TypedSong:
+    """``song`` with the landings on jump rows stated, a Refusal where they cannot be."""
+    try:
+        return gt2tables.landings(song, subtune)
+    except gt2tables.Landing as exc:
+        raise Refusal("pointer onto a jump row", str(exc)) from exc
+
+
 def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     """The core of a SID's subtune."""
     model = decompile_sid(raw, subtune)
@@ -142,7 +151,7 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     info = model.info
     names = (head.name, head.author, head.released)
     return Core(
-        model.typed,
+        _landed(model.typed, model.subtune),
         lay,
         info.playback,
         info.state,
@@ -161,7 +170,25 @@ def core_of_song(song: TypedSong, build=None, state=None, clock: int = PAL_CLOCK
     """The core of a typed song packed as the relocator would, played by the spec."""
     build = build or Build()
     img = songimage.song_image(song, build, state, None)
-    return Core(song, img.layout, build, state, clock, (song.name, song.author, ""), image=img)
+    return Core(
+        _landed(song), img.layout, build, state, clock, (song.name, song.author, ""), image=img
+    )
+
+
+PENDING = ("newnote", "newfx", "newparam", "waveptr", "pulseptr")
+UNUSED = {"noeffects": ("newfx", "newparam")}
+
+
+def _pending(core: Core) -> None:
+    """Refuse a channel whose song start leaves a note, a command or a table program running: the
+    variables it does not zero keep what the init left."""
+    unused = {n for flag, names in UNUSED.items() if core.lay[flag] for n in names}
+    for name in [n for n in PENDING if n not in unused]:
+        for c in core.voices:
+            if value := _started(core, name, c):
+                raise Refusal(
+                    "start state", f"{name} of channel {c} is {value} after the song start"
+                )
 
 
 def _refuse(core: Core):
@@ -170,6 +197,7 @@ def _refuse(core: Core):
         raise Refusal("interrupt", "play address 0")
     if lay["stereo"] or lay["nchan"] > C.MAX_CHN:
         raise Refusal("multi-SID", f"{lay['nchan']} channels")
+    _pending(core)
     if core.own:
         raise Refusal("wrapper", f"the play routine writes registers {list(core.own)} of its own")
     if lay["sid"] != 0xD400:
@@ -207,11 +235,8 @@ def _late(key: str, value) -> bool:
 
 def _played(core: Core) -> tuple:
     """``(rows, instruments)`` of the patterns the subtune's orderlists play."""
-    song = core.song
-    orders = song.subtunes[core.subtune].channels
-    played = {e.num for o in orders for e in o.entries if isinstance(e, PlayPattern)}
-    rows = [r for n in played if n < len(song.patterns) for r in song.patterns[n]]
-    return rows, {r.instrument for r in rows if r.instrument} | {1}
+    _, rows, used = gt2tables.played(core.song, core.subtune)
+    return rows, used
 
 
 def _speeds(core: Core, rows: list, used: set) -> None:
@@ -230,36 +255,6 @@ def _speeds(core: Core, rows: list, used: set) -> None:
         read = mem[lay["speedleft"] + y] << 8 | mem[lay["speedright"] + y]
         if read != word and (y in plain or (read | word) & 255):
             raise Refusal("layout", f"speedtable row {y} is not what the player reads")
-
-
-def _jumps(core: Core, rows: list, used: set) -> None:
-    """Refuse a table pointer or jump, reached from an instrument or a command, that lands on a
-    jump row, which the executors play as an ordinary row."""
-    song = core.song
-    waves = [r.command for r in song.wavetable if isinstance(r, T.WaveCommand)]
-    tables = {
-        "wave": (song.wavetable, T.SetWavePtr, "wave_ptr"),
-        "pulse": (song.pulsetable, T.SetPulsePtr, "pulse_ptr"),
-        "filter": (song.filtertable, T.SetFilterPtr, "filter_ptr"),
-    }
-    for kind, (table, command, field) in tables.items():
-        starts = [getattr(song.instrument(n), field) for n in used]
-        starts += [c.row for c in [*(r.command for r in rows), *waves] if c.__class__ is command]
-        if any(p and p <= len(table) and isinstance(table[p - 1], T.Jump) for p in starts):
-            raise Refusal("pointer onto a jump row", kind)
-        seen = set()
-        while starts:
-            ptr = starts.pop()
-            if not ptr or ptr > len(table) or ptr in seen:
-                continue
-            seen.add(ptr)
-            row = table[ptr - 1]
-            if isinstance(row, T.Jump):
-                if row.row and row.row <= len(table) and isinstance(table[row.row - 1], T.Jump):
-                    raise Refusal("pointer onto a jump row", kind)
-                starts.append(row.row)
-            elif not isinstance(row, T.Stop):
-                starts.append(ptr + 1)
 
 
 def _first_wave(lay, ins) -> tuple:
@@ -311,13 +306,23 @@ def _context_after(lay, song, rows, context: tuple, track: bool) -> tuple:
     return instr, gate
 
 
+def _var(core: Core, name: str, c: int) -> int:
+    """The byte of channel variable ``name`` of channel ``c`` in the image the tune's init
+    leaves."""
+    at = core.lay[name] + 7 * c
+    return core.memory[at] if core.memory is not None else core.image.data[at - songimage.BASE]
+
+
+def _started(core: Core, name: str, c: int) -> int:
+    """The channel variable ``name`` of channel ``c`` after the song start, which zeroes the bytes
+    from ``songptr`` on (``resetlen`` + 1 of them) and leaves the others as the init left them."""
+    first, at = core.lay["songptr"], core.lay[name] + 7 * c
+    return 0 if first <= at <= first + core.lay["resetlen"] else _var(core, name, c)
+
+
 def _gates(core) -> tuple:
     """The gate of each played channel before the first call."""
-    lay, mem = core.lay, core.memory
-    if mem is None:
-        mem = core.image.data
-        return tuple(mem[lay["gate"] + 7 * c - songimage.BASE] & 1 for c in core.voices)
-    return tuple(mem[lay["gate"] + 7 * c] & 1 for c in core.voices)
+    return tuple(_var(core, "gate", c) & 1 for c in core.voices)
 
 
 def native_counts(core: Core) -> dict:
@@ -394,9 +399,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         rows, used = _played(core)
         if core.memory is not None:
             _speeds(core, rows, used)
-            if any(core.memory[core.lay["newnote"] + 7 * c] for c in core.voices):
-                raise Refusal("start state", "a note pending in the channel variables")
-        _jumps(core, rows, used)
         self.core, self.lay, self.names = core, core.lay, Names()
         self.entered = {}
         self.song = canonical_song(core.song, core.subtune)
@@ -970,9 +972,9 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if state and state.ghost:
             return self.masked(state.registers)
         regs = [0] * 25
+        regs[24] = 15
         for reg, value in (*self.core.build.init_regs, *(state.init if state else ())):
             regs[reg] = value
-        regs[24] = state.volume if state else 15
         return self.masked(regs)
 
     @staticmethod
@@ -1059,9 +1061,25 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         )
 
     @property
+    def started(self) -> dict:
+        """``{voice: ctrl}`` of the voices whose control register the song start changes in a
+        full-ghosting build: ``initchn`` loads it as ``wave & gate`` from the zeroed wave, so the
+        frame after the start differs from the ghost the init left."""
+        if not self.lay["fullghost"]:
+            return {}
+        regs, out = self.start(), {}
+        for v, c in enumerate(self.core.voices):
+            ctrl = _started(self.core, "wave", c) & _var(self.core, "gate", c)
+            if ctrl != regs[7 * v + 4]:
+                out[v] = ctrl
+        return out
+
+    @property
     def lead(self) -> int:
         """The GoatTracker calls before the document's first tick: its first filter step
         writes the start state."""
+        if self.started:
+            return int(any(self.first(v) for v in range(len(self.core.voices))))
         return (
             1
             if self.lay["fullghost"] or any(self.first(v) for v in range(len(self.core.voices)))
@@ -1070,8 +1088,29 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     @property
     def lag(self) -> int:
-        """The calls the registers lag the cells."""
+        """The calls the registers lag the cells: a full ghost is output a call after it is
+        written, and the document begins with the song-start call where that changes it."""
+        if self.started:
+            return 1
         return self.lead + int(self.lay["fullghost"])
+
+    def seed(self, v: int) -> dict:
+        """The once binding loading the channel variables the song start leaves (``vibtime``,
+        ``vibdelay``, ``lastnote``) where the vibrato command 0 runs from the start with them:
+        the document holds the first instrument's delay and zeroes."""
+        fx = self.fx0(1)
+        if not isinstance(fx, Call):
+            return {}
+        c, names = self.core.voices[v], asm.symbols(ROUTINES[fx.name])
+        vib = self.vib_of(1)
+        have = {"t": 0, "d": vib[2] if vib else 0, "ln": 0}
+        want = {
+            "t": _started(self.core, "vibtime", c) if not self.lay["novib"] else 0,
+            "d": _started(self.core, "vibdelay", c),
+            "ln": _started(self.core, "lastnote", c) if not self.lay["nocalcspeed"] else 0,
+        }
+        lines = [f"lda #{v}\nsta {k}\n" for k, v in want.items() if k in names and v != have[k]]
+        return {WAVE_FREQ: Once(Code.of("".join(lines) + "rts"))} if lines else {}
 
     def origins(self) -> dict:
         """Each named object's :class:`~unitracker.lift.invariants.Origin`: the phrases' native
@@ -1094,12 +1133,24 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         gates = _gates(self.core)
         voices = [self.voice(channels[c], g) for c, g in zip(self.core.voices, gates)]
         self.instrument(1)
+        started = self.started
+        firsts = [self.first(v) for v in range(len(voices))]
         init = [
-            Event("-", "i1", ({"tempo": PRE - self.lead} if v == 0 else {}) | self.first(v))
+            Event(
+                "-",
+                "i1",
+                ({"tempo": PRE - self.lead} if v == 0 else {})
+                | ({"ctrl": started[v]} if v in started else {})
+                | ({} if started else firsts[v])
+                | self.seed(v),
+            )
             for v in range(len(voices))
         ]
         intro = {"tempo": self.rowlen} | ({TICK: self.fx0(1)} if self.insvib else {})
-        phrases = [("p0", (Event("-"), Event("-", commands=intro)))]
+        rows = (Event("-"), Event("-", commands=intro))
+        if started and firsts[0]:
+            rows = (rows[0], Event("-", commands={"tempo": 1} | firsts[0]), rows[1])
+        phrases = [("p0", rows)]
         phrases += self.names.section("phrase")
         defs = [Section(k, tuple(self.names.section(k))) for k in ("restart", "ins", "ctrl", "pw")]
         defs += [Section("filter", tuple(self.names.section("filter")))]

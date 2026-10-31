@@ -87,6 +87,18 @@ CASES = {
         "pulse": [(136, 0), (32, 16), (16, 240), (255, 2)],
         "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
     },
+    "a pulse jump onto a jump row sets its bytes and goes on from the next row": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
+        "pulse": [(0x88, 0), (0xFF, 3), (0x89, 0x20), (0xFF, 2)],
+        "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
+    },
+    "a pulse pointer set onto a jump row runs it as a set": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "pulse_ptr": 2, "gateoff_timer": 2}],
+        "pulse": [(0x88, 0), (0xFF, 3), (0x89, 0x20), (0xFF, 1)],
+        "rows": [(24, 1, 0, 0), REST, REST, (26, 0, 0, 0)] + [REST] * 12,
+    },
     "a pulse step of 2 doubles the modulation": {
         "wave": WAVE,
         "instruments": [{"wave_ptr": 1, "pulse_ptr": 1, "gateoff_timer": 2}],
@@ -244,18 +256,26 @@ CASES = {
 
 @pytest.mark.parametrize("case", CASES)
 def test_synthetic_tunes_play_exactly(case):
-    core = gt_tune(**CASES[case])
     try:
-        cells, _ = g.compare(core, TICKS)
+        cells, _ = g.compare(gt_tune(**CASES[case]), TICKS)
     except g.Refusal as refusal:
         pytest.skip(str(refusal))
     assert not cells.size, g.summary(cells, 3)
 
 
-def test_a_refusal_names_its_class():
-    core = gt_tune([(0x41, 0), (0xFF, 4), (0x41, 7), (0xFF, 3), (0xFF, 1)])
-    with pytest.raises(g.Refusal) as caught:
-        g.document_text(core)
+@pytest.mark.parametrize(
+    "ins, tables, reason",
+    [
+        ({"filter_ptr": 1}, {"filt": [(0x90, 0xF1), (0, 0x10), (0xFF, 4), (0xFF, 3)]}, "filter"),
+        ({}, {"wave": [(0x41, 0), (0xFF, 4), (0x41, 7), (0xFF, 3), (0xFF, 1)]}, "tempo command"),
+        ({"pulse_ptr": 2}, {"pulse": [(0x88, 0), (0xFF, 2)]}, "last row"),
+    ],
+)
+def test_a_landing_the_typed_row_cannot_state_is_refused_with_its_reason(ins, tables, reason):
+    args = {"wave": WAVE} | tables
+    args["instruments"] = [{"wave_ptr": 1, "gateoff_timer": 2} | ins]
+    with pytest.raises(g.Refusal, match=reason) as caught:
+        g.document_text(gt_tune(**args))
     assert caught.value.kind == "pointer onto a jump row"
 
 
@@ -392,3 +412,20 @@ def test_a_check_runs_until_every_voice_has_looped_once_at_the_slowest_tempo():
 def test_a_check_counts_the_frames_of_a_routine_calling_the_player_twice():
     assert g.check_frames(gt_tune(WAVE, default_tempo=5, calls=1), 10) == 16 * 6
     assert g.check_frames(gt_tune(WAVE, default_tempo=5, calls=2), 10) == 16 * 6 // 2
+
+
+def test_a_vibrato_state_the_song_start_leaves_is_loaded_before_the_first_effect():
+    regs = [0] * 25
+    channels = (("vibdelay", (7, 7, 7)), ("vibtime", (3, 3, 3)))
+    state = PlayerState(tuple(regs), 0, 0, 15, (8, 5), False, ((4, 0), (11, 0), (18, 0)), channels)
+    args = {
+        "wave": WAVE,
+        "instruments": [
+            {"wave_ptr": 1, "gateoff_timer": 2, "vibrato_param": 1, "vibrato_delay": 1}
+        ],
+        "speed": [(3, 48)],
+        "state": state,
+    }
+    cells, text = g.compare(gt_tune(**args), TICKS)
+    assert not cells.size
+    assert "sta d" in text and "sta t" in text
