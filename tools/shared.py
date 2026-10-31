@@ -2,14 +2,17 @@
 
 import argparse
 import csv
+import json
 import hashlib
 import re
 from pathlib import Path
 
 from pysidtracker import find_format
 from pysidtracker.header import parse_sid_header
+from pysidtracker.jobs import imap
 from pysidtracker.errors import SidError
 
+from tqdm import tqdm
 from unitracker.lift.goattracker2 import core_of_sid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,3 +110,17 @@ def corpus_parser(doc: str):
     ap.add_argument("--hvsc", type=Path, help="HVSC root the lists' paths are under")
     ap.add_argument("--player", default="", help="regex of the lists' players to keep")
     return ap
+
+
+def run_corpus(fn, tunes: list, tasks: list, jobs: int, out: Path | None = None) -> list:
+    """Each of ``tunes``' record: ``fn`` of its task run in parallel over ``jobs`` processes with
+    progress, headed by the row's path and player (``error`` where it raised), written to ``out``
+    as JSON if given."""
+    recs = []
+    for i, rec, err in tqdm(imap(fn, tasks, jobs), total=len(tasks), unit="tune"):
+        head = {"path": tunes[i]["path"], "player": tunes[i].get("player", "")}
+        recs.append(head | (rec if rec is not None else {"error": repr(err)}))
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(recs, indent=1), encoding="utf-8")
+    return recs

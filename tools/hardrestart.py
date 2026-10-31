@@ -5,7 +5,6 @@ test bit, AD and SR against the onset's) classified, and per format the classes,
 """
 
 import argparse
-import json
 import math
 import os
 import sys
@@ -13,9 +12,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
-from pysidtracker.jobs import deadline, imap
+from pysidtracker.jobs import deadline
 from pysidtracker.oracle import register_grid
-from tqdm import tqdm
 
 import shared
 
@@ -243,13 +241,7 @@ def main(argv=None) -> int:
         shared.songs(shared.rows(args.sources, args.player), args.subtune), args.sample, args.seed
     )
     tasks = [(r, args.hvsc, args.frames, args.lead, args.timeout) for r in rows]
-    recs = []
-    for i, rec, err in tqdm(imap(timed, tasks, args.jobs), total=len(tasks), unit="tune"):
-        head = {"path": rows[i]["path"], "player": rows[i].get("player", "")}
-        recs.append(head | (rec if rec is not None else {"error": repr(err)}))
-    print(summary(recs))
-    if args.out:
-        args.out.write_text(json.dumps(recs, indent=1), encoding="utf-8")
+    print(summary(shared.run_corpus(timed, rows, tasks, args.jobs, args.out)))
     return 0
 
 

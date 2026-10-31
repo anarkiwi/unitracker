@@ -5,7 +5,6 @@ commonest value sequences (a gate or test bit toggled within the call is invisib
 ``python tools/samecall.py TUNES.csv|TUNE.sid ... [--player RE] [--frames N] [--out F.json]``
 """
 
-import json
 import os
 import sys
 from collections import Counter, defaultdict
@@ -13,9 +12,8 @@ from pathlib import Path
 
 from pysidtracker import SidImage
 from pysidtracker.emu import call_play, observe_data_access
-from pysidtracker.jobs import deadline, imap
+from pysidtracker.jobs import deadline
 from pysidtracker.oracle import boot_flat
-from tqdm import tqdm
 
 import shared
 
@@ -109,13 +107,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     rows = shared.rows(args.sources, args.player)
     tasks = [(r, args.hvsc, args.frames, args.timeout) for r in rows]
-    recs = []
-    for i, rec, err in tqdm(imap(timed, tasks, args.jobs), total=len(tasks), unit="tune"):
-        head = {"path": rows[i]["path"], "player": rows[i].get("player", "")}
-        recs.append(head | (rec if rec is not None else {"error": repr(err)}))
-    print(summary(recs))
-    if args.out:
-        args.out.write_text(json.dumps(recs, indent=1), encoding="utf-8")
+    print(summary(shared.run_corpus(timed, rows, tasks, args.jobs, args.out)))
     return 0
 
 
