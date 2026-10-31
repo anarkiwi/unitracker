@@ -106,7 +106,7 @@ def core_of_song(song: Song, subtune: int = 0, bind=playspec.bind, clock: int | 
 
 def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     """The core of a SID's subtune."""
-    return core_of_song(MUSIC_ASSEMBLER.parser.parse(raw, subtune).song, subtune)
+    return core_of_song(MUSIC_ASSEMBLER.parser.parse(raw, subtune=subtune).song, subtune)
 
 
 ALIASES = (
@@ -152,6 +152,22 @@ def _entered(core: Core) -> bool:
     return at == core.found["entry"]
 
 
+def _layout(core: Core) -> None:
+    """Refuse the layouts whose cells the document's model does not keep apart or where the
+    spec puts them."""
+    found = core.found
+    for one, other in ALIASES:
+        if found[one] != found[other]:
+            raise Refusal("layout", f"{one} apart from {other}")
+    if found["arp_down_cmp"] or found["pulse_cmp_adc"]:
+        raise Refusal("arpeggio code", "a comparing variant")
+    for names, cell in _arp_cells(found).items():
+        if any(core.view[found[n]] | core.view[found[n] + 1] << 8 != cell for n in names):
+            raise Refusal("relocated arpeggio operands", names[0])
+    if found["order_restart"] % 2:
+        raise Refusal("orderlist", "restart inside an entry")
+
+
 def _refuse(core: Core) -> None:
     """Refuse what the document cannot state, before lifting."""
     found = core.found
@@ -169,18 +185,9 @@ def _refuse(core: Core) -> None:
         raise Refusal("voice dispatch", str(found["output_voices"]))
     if tuple(core.cell("voice_reg", v) for v in range(VOICES)) != (0, 7, 14):
         raise Refusal("voice dispatch", "voice registers")
-    for one, other in ALIASES:
-        if found[one] != found[other]:
-            raise Refusal("layout", f"{one} apart from {other}")
-    if found["arp_down_cmp"] or found["pulse_cmp_adc"]:
-        raise Refusal("arpeggio code", "a comparing variant")
-    for names, cell in _arp_cells(found).items():
-        if any(core.view[found[n]] | core.view[found[n] + 1] << 8 != cell for n in names):
-            raise Refusal("relocated arpeggio operands", names[0])
+    _layout(core)
     if core.cell("tempo") or any(core.cell("dur", v) for v in range(VOICES)):
         raise Refusal("init", "a first play call that reads no row")
-    if found["order_restart"] % 2:
-        raise Refusal("orderlist", "restart inside an entry")
 
 
 class Names:

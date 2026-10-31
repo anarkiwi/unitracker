@@ -27,7 +27,8 @@ _ARP = (
     "run:\nlda wl\nsta v\nlda wh\nsta v+1\nlda vb\nbne done\ndec dl\nbpl done\ninc dl\n"
     "lda ph\nand #3\ntax\nlda #m\nshift:\ndex\nbmi got\nlsr\njmp shift\ngot:\nand #1\nbne up\n"
     "sec\nlda v\nsbc as\nsta v\nbcs count\ndec v+1\nbne count\nup:\nclc\nlda v\nadc as\n"
-    "sta v\nbcc count\ninc v+1\ncount:\nlda v\nsta wl\nlda v+1\nsta wh\ninc sc\nlda sc\ncmp ak\nbne done\nlda #0\nsta sc\n"
+    "sta v\nbcc count\ninc v+1\ncount:\nlda v\nsta wl\nlda v+1\nsta wh\n"
+    "inc sc\nlda sc\ncmp ak\nbne done\nlda #0\nsta sc\n"
     "inc ph\ndone:\nrts\n"
 )
 _PONG = (
@@ -49,7 +50,8 @@ CODE = {
     "arpl": "lda phi\nora phi+1\nbne run\n" + _NOTE + "lda #0\nsta sc\nsta ph\n" + _ARP,
     "arps": _ARP,
     "arpz": (
-        "lda phi\nora phi+1\nbne run\nlda #b\nbne fixed\nlda ne\nclc\nadc #p\nand #127\ntay\njmp load\nfixed:\nldy #p\n"
+        "lda phi\nora phi+1\nbne run\nlda #b\nbne fixed\nlda ne\nclc\nadc #p\nand #127\n"
+        "tay\njmp load\nfixed:\nldy #p\n"
         "load:\n" + _NOTE.replace("ldy ne\n", "") + _ARP
     ),
     "arpc": "lda #s\nsta as\nlda #k\nsta ak\nlda #b\nsta vb\nrts\n",
@@ -57,8 +59,8 @@ CODE = {
     + _PONG,
     "pongs": _PONG,
     "fset": (
-        "lda #u\nsta uu\nlda #s\nsta st\nlda #o\nsta own\nlda #0\nsta ini\nlda #c\nbeq done\nsta cc\n"
-        "done:\nrts\n"
+        "lda #u\nsta uu\nlda #s\nsta st\nlda #o\nsta own\nlda #0\nsta ini\n"
+        "lda #c\nbeq done\nsta cc\ndone:\nrts\n"
     ),
     "fseti": (
         "lda #u\nsta uu\nlda #s\nsta st\nlda #o\nsta own\nlda #c\nsta cc\nlda #a\nsta acc\n"
