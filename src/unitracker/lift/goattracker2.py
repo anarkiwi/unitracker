@@ -299,12 +299,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
         if self.lay["noeffects"] and self.insvib:
             raise Refusal("noeffects vibrato", "the instrument vibrato follows the instrument read")
-        self.vib = self.insvib or any(isinstance(r.command, T.Vibrato) for r in rows)
-        waved = any(
-            isinstance(r, T.WaveCommand) and isinstance(r.command, FREQ[:2])
-            for r in self.song.wavetable
-        )
-        self.effects = self.vib or waved or any(isinstance(r.command, FREQ) for r in rows)
+        cmds = [r.command for r in rows]
+        cmds += [r.command for r in self.song.wavetable if isinstance(r, T.WaveCommand)]
+        rates = {c.speed for c in cmds if hasattr(c, "speed")} | {
+            self.song.instrument(n).vibrato_speed for n in used if self.vib_speed(n)
+        }
+        calc = any(self.rate(self.song.speed(y))[0] for y in rates if y)
+        self.vib = self.insvib or calc or any(isinstance(c, T.Vibrato) for c in cmds)
+        self.effects = self.vib or any(isinstance(c, FREQ) for c in cmds)
         self.calls = {}
         state = core.state
         self.funk = tuple(v + 1 for v in state.funk) if state else (8, 5)
@@ -331,28 +333,42 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.calls[name] = None
         return Call(name, tuple(params[k] for k in asm.params(ROUTINES[name])))
 
+    def vib_speed(self, n: int) -> bool:
+        """Whether instrument ``n`` has a vibrato at all."""
+        return bool(self.song.instrument(n).vibrato_delay) and not self.lay["noinstrvib"]
+
     def vib_of(self, n: int):
-        """``(depth, step, delay)`` of instrument ``n``'s vibrato, None without one."""
+        """``(depth, rate, delay)`` of instrument ``n``'s vibrato, None without one."""
         ins = self.song.instrument(n)
         if not ins.vibrato_delay or self.lay["noinstrvib"]:
             return None
-        row = self.song.speed(ins.vibrato_speed)
-        c, s = self.depth_step(row)
-        return None if not s else (c, s, max(ins.vibrato_delay - 1, 0))
+        c, rate = self.depth_step(self.song.speed(ins.vibrato_speed))
+        return None if rate == (False, 0) else (c, rate, max(ins.vibrato_delay - 1, 0))
+
+    def rate(self, row) -> tuple:
+        """``(calculated, value)`` of speedtable ``row``: the shift of a calculated step, else the
+        16-bit step."""
+        if isinstance(row, T.CalculatedSpeed) and not self.lay["nocalcspeed"]:
+            return True, row.shift
+        return False, 0 if row is None else self.word(row)
 
     def depth_step(self, row) -> tuple:
-        """``(depth, step)`` of a vibrato's speedtable ``row``."""
-        if row is None:
-            return 0, 0
-        if isinstance(row, T.CalculatedSpeed):
-            raise Refusal("calculated speed")
-        c = row.value >> 8
-        return (c if self.lay["nocalcspeed"] else c & 0x7F), row.value & 0xFF
+        """``(depth, rate)`` of a vibrato's speedtable ``row``: the step is a byte."""
+        if isinstance(row, T.CalculatedSpeed) and not self.lay["nocalcspeed"]:
+            return row.rate, (True, row.shift)
+        word = 0 if row is None else self.word(row)
+        c = word >> 8
+        return (c if self.lay["nocalcspeed"] else c & 0x7F), (False, word & 0xFF)
+
+    def effect(self, name: str, rate: tuple, **params) -> Call:
+        """The call of template ``name`` stepping by ``rate``."""
+        calc, value = rate
+        return self.call(name + "c", k=value, **params) if calc else self.call(name, s=value, **params)
 
     def fx0(self, instr: int):
         """The tick binding command 0 latches: the instrument's vibrato, or none."""
         vib = self.vib_of(instr) if self.insvib else None
-        return self.call("vibi", c=vib[0], s=vib[1]) if vib else Expr("v")
+        return self.effect("vibi", vib[1], c=vib[0]) if vib else Expr("v")
 
     def load(self, instr: int) -> dict:
         """The commands loading instrument ``instr``'s vibrato delay."""
@@ -384,10 +400,12 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         match cmd:
             case T.PortamentoUp(y) | T.PortamentoDown(y):
                 up = isinstance(cmd, T.PortamentoUp)
-                step = self.step(y)
-                if self.vib:
-                    return {WAVE_FREQ: Once(self.call("portau" if up else "portad", s=step))}
-                return {WAVE_FREQ: Once(_plus(step * (1 if up else -1)))}
+                return {WAVE_FREQ: Once(self.porta(up, y))}
+            case T.TonePortamento(y):
+                return {WAVE_FREQ: Once(self.toneporta(y))}
+            case T.Vibrato(y):
+                c, rate = self.depth_step(self.song.speed(y))
+                return {WAVE_FREQ: Once(self.effect("vib", rate, c=c))}
             case (
                 T.SetAD()
                 | T.SetSR()
@@ -531,23 +549,12 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             case T.DoNothing():
                 return {TICK: self.fx0(instr)} if self.effects else {}
             case T.Vibrato(y):
-                c, s = self.depth_step(self.song.speed(y))
-                return {TICK: self.call("vib", c=c, s=s)}
+                c, rate = self.depth_step(self.song.speed(y))
+                return {TICK: self.effect("vib", rate, c=c)}
             case T.TonePortamento(y):
-                step = self.step(y)
-                if self.vib:
-                    return {TICK: self.call("tporta", s=step) if step else self.call("tsnap")}
-                if not step:
-                    return {TICK: Expr("F(n)")}
-                down = f"ite(u16(u16(v - F(n)) - {step}) >= 32768, F(n), u16(v - {step}))"
-                up = f"ite(u16(u16(v - F(n)) + {step}) < 32768, F(n), u16(v + {step}))"
-                return {TICK: Expr(canonical(f"ite(v >= F(n), {down}, {up})"))}
+                return {TICK: self.toneporta(y)}
             case T.PortamentoUp(y) | T.PortamentoDown(y):
-                up = isinstance(cmd, T.PortamentoUp)
-                step = self.step(y)
-                if self.vib:
-                    return {TICK: self.call("portau" if up else "portad", s=step)}
-                return {TICK: _plus(step if up else -step)}
+                return {TICK: self.porta(isinstance(cmd, T.PortamentoUp), y)}
             case T.SetAD(v):
                 return {"ad": v}
             case T.SetSR(v):
@@ -584,21 +591,31 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 return {"vtempo" if self.lay["noglobaltempo"] else "tempo": self.funk_of(y)}
         raise Refusal("pattern command", type(cmd).__name__)
 
+    def porta(self, up: bool, y: int):
+        """The binding moving the frequency up or down by speedtable entry ``y``."""
+        rate = self.rate(self.song.speed(y))
+        if self.vib:
+            return self.effect("portau" if up else "portad", rate)
+        return _plus(rate[1] if up else -rate[1])
+
+    def toneporta(self, y: int):
+        """The binding moving the frequency toward the event note by speedtable entry ``y``."""
+        rate = self.rate(self.song.speed(y))
+        if self.vib:
+            return self.effect("tporta", rate) if rate[0] or rate[1] else self.call("tsnap")
+        if rate == (False, 0):
+            return Expr("F(n)")
+        step = rate[1]
+        down = f"ite(u16(u16(v - F(n)) - {step}) >= 32768, F(n), u16(v - {step}))"
+        up = f"ite(u16(u16(v - F(n)) + {step}) < 32768, F(n), u16(v + {step}))"
+        return Expr(canonical(f"ite(v >= F(n), {down}, {up})"))
+
     def funk_of(self, y: int) -> tuple:
         """The two row lengths of speedtable entry ``y``."""
         row = self.song.speed(y)
         if not isinstance(row, T.FixedSpeed):
             raise Refusal("funk tempo", "calculated speed row")
         return row.value >> 8, row.value & 0xFF
-
-    def step(self, y: int) -> int:
-        """The 16-bit step of speedtable entry ``y``."""
-        row = self.song.speed(y)
-        if row is None:
-            return 0
-        if isinstance(row, T.CalculatedSpeed) and not self.lay["nocalcspeed"]:
-            raise Refusal("calculated speed")
-        return self.word(row)
 
     def event(self, row, instr: int) -> Event:
         """The event of a pattern row played by instrument ``instr``."""
