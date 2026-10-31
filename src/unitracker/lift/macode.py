@@ -54,6 +54,7 @@ CODE = {
         "tay\njmp load\nfixed:\nldy #p\n"
         "load:\n" + _NOTE.replace("ldy ne\n", "") + _ARP
     ),
+    "arpk": "lda #s\nsta as\nlda #k\nsta ak\nrts\n",
     "arpc": "lda #s\nsta as\nlda #k\nsta ak\nlda #b\nsta vb\nrts\n",
     "pong": "lda phi\nora phi+1\nbne step\nlda #p\nsta v\nsta v+1\nlda #0\nsta d\nsta q\nrts\n"
     + _PONG,
