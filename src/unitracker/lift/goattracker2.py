@@ -602,13 +602,14 @@ class Lift:
         )
 
     def start(self) -> list:
-        """The registers before tick 0: the start image with the init call's writes."""
+        """The registers before tick 0: a ghost image, else the init call's writes."""
         state = self.core.state
-        regs = list(state.registers) if state else [0] * 25
-        for reg, value in state.init if state else ():
+        if state and state.ghost:
+            return list(state.registers)
+        regs = [0] * 25
+        for reg, value in (*(state.init if state else ()), *self.core.build.init_regs):
             regs[reg] = value
-        if not state:
-            regs[24] = 0x0F
+        regs[24] = state.volume if state else 15
         return regs
 
     def first(self) -> dict:
@@ -646,10 +647,21 @@ class Lift:
             holds={"pw": events},
             state=self.state(),
             regs=tuple(regs) if any(regs) else None,
-            lag=2 if lay["fullghost"] else None,
+            lag=self.lag or None,
             global_cells=glob or None,
             calls=(core.build.calls, None) if core.build.calls > 1 else None,
         )
+
+    @property
+    def lead(self) -> int:
+        """The GoatTracker calls before the document's first tick: its first filter step
+        writes the start state."""
+        return 1 if self.lay["fullghost"] or self.first() else 0
+
+    @property
+    def lag(self) -> int:
+        """The calls the registers lag the cells."""
+        return self.lead + int(self.lay["fullghost"])
 
     def document(self) -> Document:
         """The document of the subtune."""
@@ -657,8 +669,7 @@ class Lift:
         voices = [self.voice(channels[c]) for c in self.core.voices]
         for n in range(1, len(self.song.instruments) + 1):
             self.instrument(n)
-        lead = 1 if self.lay["fullghost"] else 0
-        first = {"tempo": PRE - lead} | (self.first() if lead else {})
+        first = {"tempo": PRE - self.lead} | (self.first() if self.lead else {})
         init = [Event("-", "i1", first if v == 0 else {}) for v in range(len(voices))]
         intro = {"tempo": self.rowlen} | ({TICK: self.fx0(1)} if self.insvib else {})
         phrases = [("p0", (Event("-"), Event("-", commands=intro)))]
