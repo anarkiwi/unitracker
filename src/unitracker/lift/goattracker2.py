@@ -416,7 +416,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 | T.SetCutoff()
                 | T.SetMasterVolume()
             ):
-                return self.command(cmd, 0)
+                keys = self.command(cmd, 0)
+                return keys | ({WAVE_FREQ: Once(Expr("v"))} if self.slotted else {})
         raise Refusal("wavetable command", type(cmd).__name__)
 
     @staticmethod
