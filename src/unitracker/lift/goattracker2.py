@@ -14,8 +14,8 @@ from pygoattracker import typed as T
 from pygoattracker.canonical import canonical_song
 from pygoattracker.model import PlayPattern, Repeat, Transpose
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp
-from pysidtracker.emu import PLAY_CYCLES, SidWriteLog
-from pysidtracker.wrap import boot, count_entries, enter
+from pysidtracker.wrap import count_entries
+from pysidtracker.playspec.tv import TVError
 from pysidtracker.playspec.player import SpecPlayer
 from unitracker_grammar.document import (
     HOLD,
@@ -46,7 +46,7 @@ from unitracker_player.player import play
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.gt2code import ROUTINES, STATE
-from unitracker.lift import gt2tables
+from unitracker.lift import gt2tables, gt2wrap
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -110,28 +110,16 @@ def _entries(model) -> int:
     return count_entries(model.image, wrap.song, wrap.play, wrap.entries)
 
 
-WRAP_CALLS = 16
-
-
-def _own_writes(image, wrap) -> tuple:
-    """The SID registers a play routine writes other than as a copy of its ghost block ``sink``
-    over its first :data:`WRAP_CALLS` calls: a write whose source is not the ghost byte of its
-    register, or whose value is not that byte's."""
-    _, mpu, mem, _ = boot(image, wrap.song)
-    log = SidWriteLog(mpu, mirrors=False)
-    own = set()
-    for _ in range(WRAP_CALLS):
-        writes, seen = log.start(), 0
-        depth, start = enter(mpu, mem, wrap.play), mpu.processorCycles
-        while mpu.sp < depth and mpu.processorCycles - start <= PLAY_CYCLES:
-            mpu.step()
-            own |= {
-                reg
-                for reg, read, _, value in writes[seen:]
-                if read != wrap.sink + reg or mem[read] != value
-            }
-            seen = len(writes)
-    return tuple(sorted(own))
+def _own_writes(model) -> tuple:
+    """The SID registers the tune's play routine writes other than as the ghost byte of the
+    register (:mod:`unitracker.lift.gt2wrap`); a Refusal where that cannot be decided."""
+    wrap = model.info.wrap
+    if wrap is None or wrap.sink is None:
+        return ()
+    try:
+        return gt2wrap.own_writes(model.memory, wrap)
+    except TVError as exc:
+        raise Refusal("wrapper", f"the play routine is outside what is checked: {exc}") from exc
 
 
 def _landed(song: TypedSong, subtune: int = 0) -> TypedSong:
@@ -162,7 +150,7 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
         memory=model.memory,
         wrap=info.wrap,
         entries=_entries(model),
-        own=_own_writes(model.image, info.wrap) if info.wrap and info.wrap.sink is not None else (),
+        own=_own_writes(model),
     )
 
 

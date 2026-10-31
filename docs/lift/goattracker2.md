@@ -54,7 +54,7 @@ Typed `Refusal(kind)`, raised before lifting; `detail` names the construct.
 | `interrupt` | play address 0 |
 | `multi-SID` | stereo, or more than three channels |
 | `SID address` | a player writing a SID elsewhere than `$D400` |
-| `wrapper` | a play routine that writes SID registers other than as copies of its ghost block (probed over its first calls; the one in the corpus adds a cutoff sweep, a 16-bit sum stepped each call, and a volume xor with a self-modified operand) |
+| `wrapper` | a play routine that is not a plain ghost flush: one call of it is run symbolically over all memory (`gt2wrap`, pysidtracker's `Machine6502` over z3; a call into the player rewrites memory freely and the cells the routine stores to are free operands), and the registers it stores other than as their ghost byte are named; the one in the corpus adds a cutoff sweep (registers 21 and 22) and a volume xor with a self-modified operand (24). Code the executor does not model is refused as such |
 | `build` | `directwave`, a pulse step other than 1 and 2, a voice layout or control overlay, a tempo under 2; `livegate` where a row change to a shorter gate timer fetches again |
 | `start state` | a note, command or table program the song start leaves running: `newnote`, `newfx`, `newparam`, `waveptr` or `pulseptr` outside the zeroed bytes and nonzero |
 | `layout` | a speedtable row the song uses that the player reads as other bytes than the typed song holds (none in the corpus since pygoattracker 0.10.2 binds the speedtable) |
