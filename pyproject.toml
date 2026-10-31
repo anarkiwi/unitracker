@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "unitracker"
-version = "0.1.0"
-description = "GoatTracker 2, defMON, SID-Wizard and Music Assembler lifters to the generic unitracker document, and its optimiser"
+version = "0.2.0"
+description = "Grammar-backed GoatTracker 2, defMON and Music Assembler lifters to the generic unitracker document, and its optimiser"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
@@ -14,22 +14,19 @@ classifiers = ["Operating System :: POSIX :: Linux", "Programming Language :: Py
 dependencies = [
     "numpy>=1.23",
     "tqdm>=4.70.1",
-    "pysidtracker>=0.36.0",
-    "pygoattracker>=0.8.1",
-    "pydefmon==0.11.0",
-    "pysidwizard==0.4.1",
-    "pymusicassembler==0.9.0",
-    "unitracker-grammar>=0.15.0",
-    "unitracker-player>=0.22.0",
+    "pysidtracker>=0.52.0",
+    "pydefmon>=0.17.0",
+    "pygoattracker>=0.10.2",
+    "pymusicassembler>=0.15.0",
+    "unitracker-grammar>=0.18.0",
+    "unitracker-player>=0.26.0",
     "tiktoken>=0.14.0",
     "lark>=1.1",
     "music21>=9",
 ]
 
 [project.optional-dependencies]
-tokenize = ["tokenizers>=0.23.3", "huggingface_hub>=2.2.0"]
-learn = ["torch>=2.14", "transformers>=5.19", "zstandard>=0.25", "peft>=0.21", "llguidance>=1.9.1"]
-dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "zstandard>=0.25.0", "pytest-timeout>=2.2", "import-linter>=2.15", "tokenizers>=0.23.3", "huggingface_hub>=2.2.0"]
+dev = ["black>=24", "pylint>=3", "pytest>=7", "pytest-xdist>=3", "pytest-cov>=4", "pytest-timeout>=2.2", "import-linter>=2.15", "pyyaml>=6"]
 
 [project.urls]
 Homepage = "https://github.com/anarkiwi/unitracker"
@@ -64,7 +61,7 @@ type = "layers"
 containers = ["unitracker"]
 layers = [
     "cli",
-    "direct | optimiser",
+    "lift | optimiser",
 ]
 
 [[tool.importlinter.contracts]]

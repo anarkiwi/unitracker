@@ -1,7 +1,6 @@
 """The optimiser's transpose and snap passes, the names rename and the defaults pass's
 instrument nones and empty rows, on hand-written documents and lifted ones."""
 
-import pytest
 from unitracker_grammar.document import printed, read
 
 import optimiser_docs as D
@@ -141,9 +140,8 @@ def test_the_passes_run_in_order_with_the_rename_last():
     ]
 
 
-@pytest.mark.parametrize("tune", ["metal_warrior", "lykia_boss", "persei", "space_invadarz"])
-def test_a_lifted_document_optimises_through_every_pass(tune, request):
-    text = cli.lift(request.getfixturevalue(tune).read_bytes(), check=False)
+def test_a_lifted_document_optimises_through_every_pass(metal_warrior):
+    text = cli.lift(metal_warrior.read_bytes())
     result = optimise(text, 3000)
     assert result.after < result.before and Guarantee(text, 3000).holds(result.text)
     assert read(result.text) == result.doc

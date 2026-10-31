@@ -16,7 +16,7 @@ from unitracker.optimiser.__main__ import main
 from unitracker.optimiser.guarantee import grid, same
 
 read, printed = document.read, document.printed
-LIFTED = Path(os.environ.get("UNITRACKER_DIRECT_DOCS", ".tunecache/direct"))
+LIFTED = Path(os.environ.get("UNITRACKER_LIFTED_DOCS", ".tunecache/lifted"))
 
 
 def labels(edits) -> list:
@@ -61,9 +61,9 @@ def test_defaults_keep_a_clock_whose_tick_is_not_pal():
 
 
 def test_defaults_drop_an_instrument_binding_equal_to_its_slot_s_default():
-    text = D.HOIST.replace("voices:1\n", "voices:1\nslots:{pw:{pw:{mod:'2048'}}}\n")
+    text = D.HOIST.replace("voices:1\n", "voices:1\nslots:{pw:{pw:{mod:'2048 + 0'}}}\n")
     found = labels(passes.defaults(read(text)))
-    assert sum(label.endswith("pw:2048") for label in found) == 5
+    assert sum(label.endswith("pw:2048 + 0") for label in found) == 5
 
 
 def test_merge_makes_identical_definitions_one_and_renames_their_references():
@@ -104,17 +104,17 @@ def test_merge_names_program_templates_and_their_calls_by_position():
 
 def test_hoist_moves_a_binding_every_instrument_carries_into_its_slot_s_default():
     result = optimise(D.HOIST, order=(("hoist", passes.hoist),))
-    assert result.kept == [("hoist", "pw.pw:2048")]
-    assert "slots:{pw:{pw:{mod:'2048'}}}\n" in result.text and "pw:2048" not in result.text
+    assert result.kept == [("hoist", "pw.pw:2048 + 0")]
+    assert "slots:{pw:{pw:{mod:'2048 + 0'}}}\n" in result.text and "pw:2048 + 0" not in result.text
 
 
 def test_hoist_is_refused_where_the_default_plays_before_the_first_note():
     result = optimise(D.HOIST_LATE, order=(("hoist", passes.hoist),))
-    assert result.refused == ["pw.pw:2048"] and not result.kept
+    assert result.refused == ["pw.pw:2048 + 0"] and not result.kept
 
 
 def test_hoist_resets_on_note_a_binding_that_reads_phi():
-    text = D.HOIST.replace("pw:2048", "pw:vib(2)")
+    text = D.HOIST.replace("pw:2048 + 0", "pw:vib(2)")
     text = text.replace("voices:1\n", "voices:1\n" + D.MODS.split(" wob", maxsplit=1)[0])
     (edit,) = passes.hoist(read(text))
     assert "slots:{pw:{pw:{mod:vib(2),reset:[note]}}}" in printed(edit.apply(read(text)))
@@ -217,9 +217,9 @@ def test_template_proposes_nothing_without_two_programs_differing_in_integers():
 
 def test_once_fires_a_binding_its_none_ends_once_where_it_plays_the_same():
     found = labels(passes.once(read(D.ONCE)))
-    assert len(found) == 2 and any(label.endswith("pw:800!") for label in found)
+    assert len(found) == 2 and any(label.endswith("pw:800 + 0!") for label in found)
     result = optimise(D.ONCE, order=(("defaults", passes.defaults), ("once", passes.once)))
-    assert "C4.i1 pw:800!,-*4,D" in result.text and result.text.count("pw:none") == 1
+    assert "C4.i1 pw:'800 + 0'!,-*4,D" in result.text and result.text.count("pw:none") == 1
     assert "pw:'v + 8'!" not in result.text and Guarantee(D.ONCE).holds(result.text)
 
 
@@ -228,3 +228,12 @@ def test_defaults_make_a_run_of_bare_rests_one_rest():
     assert labels(passes.defaults(read(text))) == ["defs/1/records/0/1: rests"]
     result = optimise(text, order=(("defaults", passes.defaults),))
     assert "-*5" in result.text and Guarantee(text).holds(result.text)
+
+
+def test_an_integer_write_is_neither_hoisted_nor_onced_nor_dropped_as_a_default():
+    ints = D.HOIST.replace("pw:2048 + 0", "pw:2048")
+    assert not labels(passes.hoist(read(ints)))
+    slotted = ints.replace("voices:1\n", "voices:1\nslots:{pw:{pw:{mod:'2048'}}}\n")
+    assert not [x for x in labels(passes.defaults(read(slotted))) if x.endswith("pw:2048")]
+    written = D.ONCE.replace("pw:'800 + 0'", "pw:800")
+    assert not [x for x in labels(passes.once(read(written))) if "800" in x]

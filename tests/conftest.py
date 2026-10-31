@@ -1,7 +1,6 @@
 """Shared fixtures: HVSC tunes by path, and synthetic GoatTracker 2 tunes."""
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from pygoattracker import (
@@ -9,7 +8,6 @@ from pygoattracker import (
     Instrument,
     Orderlist,
     Pattern,
-    Player,
     PlayPattern,
     Row,
     Song,
@@ -19,6 +17,8 @@ from pygoattracker import (
 )
 from pygoattracker import constants as GT
 from pysidtracker.testing import resolve_tune
+
+from unitracker.lift import goattracker2
 
 
 def hvsc_tune(name: str, tune: str, doc: str):
@@ -39,167 +39,178 @@ metal_warrior = hvsc_tune(
     "MUSICIANS/C/Cadaver/Metal_Warrior_Title_Remix.sid",
     "Path to the Metal Warrior Title Remix .sid.",
 )
-crosseyed = hvsc_tune(
-    "crosseyed",
-    "MUSICIANS/I/Ilkke/Crosseyed.sid",
-    "Path to iLKke's Crosseyed .sid, a defMON replay.",
-)
-rent_a_cop = hvsc_tune(
-    "rent_a_cop",
-    "MUSICIANS/G/Goto80/Rent-A-Cop_Reloaded_title.sid",
-    "Path to Goto80's Rent-A-Cop Reloaded title, a defMON replay at $9000 of the plain-arranger,"
-    " relative-note build.",
-)
-tractorbeam = hvsc_tune(
-    "tractorbeam",
-    "MUSICIANS/V/Vincenzo/Broken_Tractorbeam.sid",
-    "Path to Vincenzo's Broken Tractorbeam, a defMON replay whose ANC is encoded $2B.",
-)
-persei = hvsc_tune(
-    "persei",
-    "MUSICIANS/F/F7sus4/Persei.sid",
-    "Path to F7sus4's Persei, a defMON replay whose play routine calls it twice a frame.",
-)
-ngc1277 = hvsc_tune(
-    "ngc1277",
-    "MUSICIANS/F/F7sus4/NGC1277_tune_1.sid",
-    "Path to F7sus4's NGC1277 tune 1, a defMON replay at $0400 with its pointer at $02.",
-)
-csillag = hvsc_tune(
-    "csillag",
-    "MUSICIANS/H/Hermit/Csillag_szazketto_kettoskereszt.sid",
-    "Path to Hermit's Csillag szazketto kettoskereszt, a SID-Wizard export.",
-)
-lykia_boss = hvsc_tune(
-    "lykia_boss",
-    "MUSICIANS/C/C0zmo/Lykia_Boss.sid",
-    "Path to C0zmo's Lykia Boss, a SID-Wizard bare-build export.",
-)
-mega_run = hvsc_tune(
-    "mega_run",
-    "MUSICIANS/A/Arturo_Dente/Mega-Run.sid",
-    "Path to Arturo Dente's Mega-Run, a SID-Wizard light-build export.",
-)
-border_odyssey = hvsc_tune(
-    "border_odyssey",
-    "MUSICIANS/H/Hermit/Border_Odyssey.sid",
-    "Path to Hermit's Border Odyssey, a SID-Wizard normal-build export with octave shifts.",
-)
-samwise = hvsc_tune(
-    "samwise",
-    "MUSICIANS/A/Ant1/Samwise.sid",
-    "Path to Ant1's Samwise, a SID-Wizard extra-build export of a pre-1.8 driver.",
-)
-flowing_slowly_extended = hvsc_tune(
-    "flowing_slowly_extended",
-    "MUSICIANS/T/Toggle/Flowing_Slowly_extended.sid",
-    "Path to Toggle's Flowing Slowly (extended), a SID-Wizard extra build with staccato.",
-)
-whammer = hvsc_tune(
-    "whammer",
-    "MUSICIANS/V/Vincenzo/Whammer.sid",
-    "Path to Vincenzo's Whammer, a SID-Wizard medium-build export with portamentos.",
-)
 
-turn_me_on = hvsc_tune(
-    "turn_me_on",
-    "MUSICIANS/E/Emarti/Turn_Me_On.sid",
-    "Path to Emarti's Turn Me On, a SID-Wizard tune that selects an instrument before any note.",
-)
-reflex = hvsc_tune(
-    "reflex",
-    "MUSICIANS/G/Garvalf/Reflex.sid",
-    "Path to Garvalf's Reflex, whose instrument selected before any note walks its header.",
-)
-axelf = hvsc_tune(
-    "axelf",
-    "MUSICIANS/G/Gregfeel/AxelF-Shots_out_of_Nowhere.sid",
-    "Path to Gregfeel's AxelF, a first note's HARDRST carry on a walk started before it.",
-)
-crapman = hvsc_tune(
-    "crapman",
-    "MUSICIANS/B/Batsman/Crapman.sid",
-    "Path to Batsman's Crapman, a SID-Wizard tune whose init leaves a tracked cutoff.",
-)
-twenty_first = hvsc_tune(
-    "twenty_first",
-    "MUSICIANS/V/Vincenzo/21st.sid",
-    "Path to Vincenzo's 21st, WF rows held over ticks with an untracked pulse table.",
-)
-jt_style = hvsc_tune(
-    "jt_style",
-    "MUSICIANS/H/Hermit/JT_Style.sid",
-    "Path to Hermit's JT Style, a multispeed SID-Wizard tune with orderlist transposes.",
-)
-lenore = hvsc_tune(
-    "lenore",
-    "MUSICIANS/H/Hermit/Lenore.sid",
-    "Path to Hermit's Lenore, multispeed, with big FX $08 and MULCNTP filter walks.",
-)
-stompbox = hvsc_tune(
-    "stompbox",
-    "MUSICIANS/V/Vincenzo/Stompbox.sid",
-    "Path to Vincenzo's Stompbox, multispeed, with orderlist raw bytes.",
-)
-csango_boogie = hvsc_tune(
-    "csango_boogie",
-    "MUSICIANS/V/Vincenzo/Csango_Boogie.sid",
-    "Path to Vincenzo's Csango Boogie, multispeed, with big FX $05 and a wrapped DPITCH.",
-)
-samar_is_20 = hvsc_tune(
-    "samar_is_20",
-    "MUSICIANS/H/Hermit/Samar_Is_20.sid",
-    "Path to Hermit's Samar Is 20, with big FX $09 and chord offset $FB.",
-)
-pantheon = hvsc_tune(
-    "pantheon",
-    "MUSICIANS/T/Toggle/Pantheon.sid",
-    "Path to Toggle's Pantheon, a first frame keeping the waveform with no hard restart.",
-)
-grumps = hvsc_tune(
-    "grumps",
-    "MUSICIANS/G/Goerp/Grumps.sid",
-    "Path to Goerp's Grumps, multispeed, with orderlist MainVolume.",
-)
-x_copy = hvsc_tune(
-    "x_copy",
-    "MUSICIANS/M/Moellpauk/X-Copy-The_Intro.sid",
-    "Path to Moellpauk's X-Copy intro, whose instrument 0 walks its pulse on MULPLY calls.",
-)
-emomyst = hvsc_tune(
-    "emomyst",
-    "MUSICIANS/H/Hermit/Emomyst.sid",
-    "Path to Hermit's Emomyst, a build whose STRTSND keeps ARPSCNT.",
-)
-pimp_my_commodore = hvsc_tune(
-    "pimp_my_commodore",
-    "MUSICIANS/H/Hermit/Pimp_My_Commodore.sid",
-    "Path to Hermit's Pimp My Commodore, a SID-Wizard export whose init routine writes the"
-    " voices.",
-)
+CORPUS = {
+    "penumbra": ("DEMOS/M-R/Penumbra.sid", "a full-ghosting altplayer build with fixed parameters"),
+    "orbyte": (
+        "DEMOS/0-9/10_Orbyte.sid",
+        "a fixed-parameter, simple-pulse build without funk tempo",
+    ),
+    "heavy_industrial": (
+        "MUSICIANS/J/Joeli_Jani/Heavy_Industrial_Machinery.sid",
+        "a build with legato instruments",
+    ),
+    "lester": ("GAMES/G-L/Lester.sid", "a buffered-writes build"),
+    "captain_future": ("GAMES/A-F/Captain_Future_Preview.sid", "a noeffects build"),
+    "marble_boy": (
+        "GAMES/M-R/Marble_Boy.sid",
+        "a noeffects build whose play routine calls the player twice a frame",
+    ),
+    "squarish": (
+        "MUSICIANS/P/Psych858o/Squarish.sid",
+        "a nonormalspeed build with calculated speeds",
+    ),
+    "blast_em_all": ("MUSICIANS/J/Jammer/Blast_em_All.sid", "calculated portamento and vibrato"),
+    "robots_can_dance": (
+        "DEMOS/M-R/Robots_Can_Dance.sid",
+        "wavetable portamento in a build with vibrato",
+    ),
+    "darkness": (
+        "MUSICIANS/L/Linus/Darkness.sid",
+        "instrument vibrato across wavetable commands, with calculated speeds",
+    ),
+    "joelbitar": ("DEMOS/UNKNOWN/Joelbitar.sid", "a loop re-entered with another instrument"),
+    "opin_joskus": ("DEMOS/M-R/Opin_Joskus.sid", "a filter table modulating across a jump"),
+    "z303r": ("MUSICIANS/X/Xiny6581/Z303R.sid", "filter pointers set beside cutoff commands"),
+    "soiled_iron": (
+        "MUSICIANS/C/Crisps/Soiled_Iron.sid",
+        "a play wrapper and loaded channel state",
+    ),
+    "hz_jazz": (
+        "MUSICIANS/B/Booker/Hz_Jazz.sid",
+        "restarts that fetch on the previous note's tick",
+    ),
+    "an_ufo_attack": (
+        "MUSICIANS/M/Mutetus/An_UFO_Attack_from_Space.sid",
+        "legato instruments that keep a gate left off by a key off",
+    ),
+    "lily_lander": ("GAMES/G-L/Lily_Lander.sid", "a play routine flushing a ghost block"),
+    "lazy_day": (
+        "MUSICIANS/M/Mueller_Manuel/Lazy_Day.sid",
+        "gate timers read from the live instrument",
+    ),
+    "commando": (
+        "MUSICIANS/L/Linus/Commando_Take_Me_to_the_Bridge_short.sid",
+        "a full ghost whose song start clears the control registers, and instrument vibrato "
+        "reading the channel variables the start keeps",
+    ),
+    "petal_panic": (
+        "MUSICIANS/C/Chiummo_Aldo/Petal_Panic_preview.sid",
+        "instrument vibrato reading the vibrato delay the song start keeps",
+    ),
+    "cruiser_x_79": (
+        "MUSICIANS/B/Bayliss_Richard/Cruiser-X_79.sid",
+        "a speedtable the spec binds elsewhere than the player's other code",
+    ),
+    "deathflood": (
+        "GAMES/A-F/Deathflood.sid",
+        "pulse table jumps onto jump rows, which play as pulse sets",
+    ),
+    "yeti_mountain": (
+        "MUSICIANS/R/Roly/Yeti_Mountain.sid",
+        "a pulse table jump onto a jump row",
+    ),
+    "hammurabi": (
+        "GAMES/G-L/Hammurabi.sid",
+        "a noeffects build whose instruments share a gate timer, with a pulse jump onto a jump row",
+    ),
+    "dirty_cheater": (
+        "MUSICIANS/S/Spider_Jerusalem/Dirty_Cheater.sid",
+        "the tune's own init writes",
+    ),
+}
+for _name, (_tune, _doc) in CORPUS.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_tune}, {_doc}.")
 
-space_invadarz = hvsc_tune(
-    "space_invadarz",
-    "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",
-    "Path to Richard Bayliss's Space Invadarz on Vacation, a Music Assembler tune with inner"
-    " programs, an arpeggio and pulse and filter sweeps.",
-)
-cannon_craze = hvsc_tune(
-    "cannon_craze",
-    "MUSICIANS/M/Mateus/Cannon_Craze.sid",
-    "Path to Mateus's Cannon Craze, a Music Assembler tune whose init sets each voice's test bit.",
-)
-eastern_promise = hvsc_tune(
-    "eastern_promise",
-    "MUSICIANS/M/Merman/Eastern_Promise.sid",
-    "Path to Merman's Eastern Promise, a Music Assembler native song with transposes.",
-)
-chodel = hvsc_tune(
-    "chodel",
-    "MUSICIANS/J/Joan/Chodel.sid",
-    "Path to Joan's Chodel, a Music Assembler tune whose first voice starts on a rest with no"
-    " trigger yet played.",
-)
+REFUSED = {
+    "a_crack_in_the_facade": (
+        "DEMOS/A-F/A_Crack_in_the_Facade.sid",
+        "SID address",
+        "a player writing a SID at $D420",
+    ),
+    "first_night_together": (
+        "MUSICIANS/O/Onebitman/Zerozillion/First_Night_Together.sid",
+        "noeffects vibrato",
+        "instrument vibrato in a noeffects build, set by an instrument-only row",
+    ),
+    "foot_in_the_mud": (
+        "MUSICIANS/P/Prestune/Foot_in_the_Mud.sid",
+        "noeffects vibrato",
+        "instrument vibrato in a noeffects build, changed to another gate timer",
+    ),
+    "i_dont_know": (
+        "MUSICIANS/G/Groepaz/I_Dont_Know_What_I_Am_Doing.sid",
+        "wrapper",
+        "a play routine adding a cutoff sweep and a volume xor of its own",
+    ),
+    "datatanten": (
+        "DEMOS/A-F/Datatanten_Theme.sid",
+        "funk tempo",
+        "a funk row of table bytes 0 that never ends",
+    ),
+    "two_hours": (
+        "DEMOS/0-9/2_Hours_NOT_Enough.sid",
+        "pointer onto a jump row",
+        "a filter table jump onto a jump row, which plays as a filter set of mode $F0",
+    ),
+}
+for _name, (_tune, _kind, _doc) in REFUSED.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_tune}, {_doc}.")
+
+DEFMON = {
+    "glow_worm": (
+        "MUSICIANS/I/Ilkke/Glow_Worm.sid",
+        "a defMON tune of the absolute-note build with counted arranger jumps",
+    ),
+    "tetrapapak": (
+        "MUSICIANS/I/Ilkke/Tetrapapak.sid",
+        "a defMON tune of the relative-note build with counted arranger jumps",
+    ),
+    "higher_scores": (
+        "MUSICIANS/F/Frantic/Higher_Scores.sid",
+        "a defMON tune of the relative-note build with uncounted jumps",
+    ),
+    "ponky": (
+        "MUSICIANS/G/Goto80/Ponky.sid",
+        "a defMON tune whose control byte combines its two wave columns with OR",
+    ),
+    "fading_lights": (
+        "DEMOS/A-F/Fading_Lights.sid",
+        "a defMON tune that alternates full and sub-tick calls",
+    ),
+    "automatas": (
+        "MUSICIANS/G/Goto80/Automatas.sid",
+        "a defMON tune with one full call in eight",
+    ),
+    "syrapaog": ("DEMOS/S-Z/Syrapaog.sid", "a defMON tune whose four calls a frame are all full"),
+    "timewarp": ("MUSICIANS/F/F7sus4/Timewarp_Spheres_2SID.sid", "a stereo defMON tune"),
+    "rent_a_cop": (
+        "MUSICIANS/G/Goto80/Rent-A-Cop.sid",
+        "a defMON tune whose pattern streams run past 32 steps",
+    ),
+    "in_memory_of": (
+        "MUSICIANS/G/Goto80/In_Memory_of.sid",
+        "a defMON tune whose arranger plays patterns past $7f and a row from JP rows",
+    ),
+    "techno_aha": (
+        "MUSICIANS/G/Goto80/Techno_Aha.sid",
+        "a defMON tune whose patterns end only in the memory after them",
+    ),
+    "triangle": (
+        "MUSICIANS/F/F7sus4/Triangle_My_Amelie.sid",
+        "a defMON tune whose first seven calls are sub-tick calls",
+    ),
+    "svenska": (
+        "MUSICIANS/G/Goto80/Svenska_Narkotika_3.sid",
+        "a defMON tune of three full calls in four, the first a sub-tick call",
+    ),
+    "anticitizen": (
+        "MUSICIANS/N/NecroPolo/Anticitizen_64.sid",
+        "a defMON tune that alternates a sub-tick call and a full call",
+    ),
+}
+for _name, (_tune, _doc) in DEFMON.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_doc}.")
 
 
 def table(*rows) -> Table:
@@ -208,18 +219,19 @@ def table(*rows) -> Table:
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voice2=None, **opts):
-    """A one-pattern GoatTracker 2 tune on voice 1 as ``(decompiled tune, native player)``.
+    """A one-pattern GoatTracker 2 tune on voice 1 as a lift core.
 
     ``wave``, ``speed``, ``pulse`` and ``filt`` are the tables' ``(left, right)`` rows;
     ``instruments`` keyword dicts of :class:`pygoattracker.Instrument` (default one instrument
-    on the wavetable's first row); ``rows`` the pattern's ``(note, instrument, command, data)``
-    rows, a note as an offset from ``FIRSTNOTE`` or None for a rest; ``voice2`` voice 2's, which
-    otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``)
-    and :class:`pygoattracker.Build` fields (``pulse_step``, ``optimize_realtime``, ``voices``,
-    ``idle``, ``calls`` and the like).
+    on the wavetable's first row, gate on); ``rows`` the pattern's ``(note, instrument, command,
+    data)`` rows, a note as an offset from ``FIRSTNOTE`` or None for a rest; ``voice2`` voice 2's,
+    which otherwise keys off; ``opts`` the build's ``state`` (a
+    ``pygoattracker.packed.PlayerState``) and :class:`pygoattracker.Build` fields
+    (``pulse_step``, ``optimize_realtime``, ``voices``, ``idle``, ``calls`` and the like).
     """
     # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
-    instruments = instruments or [{"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    base = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "first_wave": 0xFF}
+    instruments = [base | i for i in instruments or [{}]]
     rows = rows or [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 15
 
     def pattern(rows):
@@ -245,14 +257,4 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
         speedtable=table(*speed),
     )
     state = opts.pop("state", None)
-    build = Build(**opts)
-    info = SimpleNamespace(playback=build, state=state, note_read=GT.FREQ_TABLE)
-    header = SimpleNamespace(name="synthetic", author="", released="", flags=0)
-
-    def player():
-        return Player(song, build=build, state=state, freq_table=GT.FREQ_TABLE)
-
-    dec = SimpleNamespace(
-        info=info, typed=TypedSong.from_song(song), subtune=0, header=header, player=player
-    )
-    return dec, player()
+    return goattracker2.core_of_song(TypedSong.from_song(song), Build(**opts), state)

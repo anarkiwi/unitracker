@@ -22,8 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev,learn]"
+      - run: pip install -e ".[dev]"
       - uses: anarkiwi/pysidtracker/.github/actions/cache@v0.30.0
         with:
           key: ${{ hashFiles('tests/*.py', 'tools/shared.py') }}

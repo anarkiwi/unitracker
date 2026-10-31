@@ -12,7 +12,7 @@ def _leaf(node) -> bool:
 def _children(node):
     if is_dataclass(node):
         return [(f.name, getattr(node, f.name)) for f in fields(node) if f.compare]
-    return list(enumerate(node))
+    return list(enumerate(node)) if isinstance(node, tuple) else []
 
 
 def walk(node, path: tuple = ()):

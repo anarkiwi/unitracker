@@ -285,10 +285,10 @@ _LOW, _HIGH = -512, 768  # the notes F is tabulated for: any note and transpose 
 
 
 @functools.cache
-def words(clock_hz: int, rounding: str = "round") -> tuple:
-    """``(F, table)``: ``F(k)`` at ``clock_hz`` with ``rounding`` (cached), and its values for
-    the notes ``_LOW`` to ``_HIGH`` as an array."""
-    word = functools.cache(functools.partial(frequency, clock_hz=clock_hz, rounding=rounding))
+def words(clock_hz: int) -> tuple:
+    """``(F, table)``: ``F(k)`` at ``clock_hz`` (cached), and its values for the notes ``_LOW``
+    to ``_HIGH`` as an array."""
+    word = functools.cache(functools.partial(frequency, clock_hz=clock_hz))
     return word, np.array([word(k) for k in range(_LOW, _HIGH)], dtype=np.int64)
 
 
@@ -296,13 +296,13 @@ class Firings:  # pylint: disable=too-few-public-methods,too-many-instance-attri
     """A call's firings on one cell, with each base's value at each, and where each takes
     the value its voice's firing before left (a chain, along which errors carry)."""
 
-    def __init__(self, rec: np.ndarray, cell: str, clock_hz: int, rounding: str = "round"):
+    def __init__(self, rec: np.ndarray, cell: str, clock_hz: int):
         self.cell, self.bits = cell, BITS[cell]
         self.mask = (1 << self.bits) - 1
         order = np.lexsort((rec["t"], rec["voice"]))
         rec = rec[order]
         notes = np.array([frequency(k, clock_hz) for k in range(256)] + [0], dtype=np.int64)
-        self.word, self.table = words(clock_hz, rounding)
+        self.word, self.table = words(clock_hz)
         self.N = rec["N"].astype(np.int64)  # pylint: disable=invalid-name
         self.n = rec["n"].astype(np.int64)
         self.phi, self.out = rec["phi"].astype(np.int64), rec["out"].astype(np.int64)

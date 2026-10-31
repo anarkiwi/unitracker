@@ -4,6 +4,7 @@ the ``prelude`` pass)."""
 import numpy as np
 from unitracker_player import compiler
 from unitracker_player.code import Routine
+from unitracker_player.compiler import REGISTERS, compile_document
 from unitracker_player.document import read
 from unitracker_player.player import Player
 
@@ -34,41 +35,22 @@ CHAIN = np.dtype(
     ]
 )
 CELLS = ("freq", "pw", "cut")
-MASKS = {"freq": compiler.FREQ_MASK, "pw": compiler.PW_MASK, "cut": compiler.CUT_MASK}
 
 
-class _Tracer(Player):
-    """A player that logs each slot's firing, its call's ``(call, cell)`` by index where
-    ``routines`` holds the call's modulator."""
+class _Log:  # pylint: disable=too-few-public-methods
+    """The observer of a play that logs each slot's firing, its call's ``(call, cell)`` by
+    index where ``routines`` holds the call's modulator."""
 
-    def __init__(self, song, routines: dict):
-        self.routines, self.log, self.keys = routines, [], {}
-        super().__init__(song)
+    def __init__(self, routines: dict):
+        self.routines, self.rows, self.keys, self.player = routines, [], {}, None
 
-    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
-    def _chain(self, t: int, mods: list, value: int, mask: int, cell: str) -> int | None:
-        if not any(mods):
-            return None
-        c = CELLS.index(cell)
-        for slot, mod in enumerate(mods):
-            if mod is None:
-                continue
-            if self._marked(mod[2], "reset " + mod[3], t):
-                mod[1] = 0
-            if not self._marked(mod[2], "hold " + mod[3], t):
-                fn, notes = mod[0], self._notes(mod[2])
-                if type(fn) is Routine:  # pylint: disable=unidiomatic-typecheck
-                    state = self.cut_state if cell == "cut" else self.voices[mod[2]].state[cell]
-                    out = fn(value, mod[1], *notes, state) & mask
-                else:
-                    out = fn(value, mod[1], *notes) & mask
-                key = self.routines.get(fn)
-                key = -1 if key is None else self.keys.setdefault(key, len(self.keys))
-                owner = 0 if cell == "cut" else mod[2]
-                self.log.append((t, c, owner, mod[2], slot, key, mod[1], value, out, *notes))
-                value = out
-                mod[1] += 1
-        return value
+    def __call__(self, kind: str, *args):
+        if kind != "fire" or args[0] not in CELLS:
+            return
+        cell, owner, slot, by, fn, *rest = args
+        key = self.routines.get(fn)
+        key = -1 if key is None else self.keys.setdefault(key, len(self.keys))
+        self.rows.append((self.player.tick, CELLS.index(cell), owner, by, slot, key, *rest))
 
 
 class Trace:  # pylint: disable=too-few-public-methods
@@ -100,17 +82,17 @@ def record(text: str, ticks: int | None, every: bool = False) -> Trace:
                 routines[fn] = (value, cell)
             return fn
 
-    song = compiler.compile_document(read(text), _Compiler)
-    player = _Tracer(song, routines)
+    log = _Log(routines)
+    player = log.player = Player(compile_document(read(text), _Compiler), log)
     frames = []
     while ticks is None or len(frames) < ticks:
         regs = player.step()
         if regs is None:
             break
         frames.append(regs)
-    frames = np.array(frames, dtype=np.uint8).reshape(-1, compiler.REGISTERS)
-    chain = np.array(player.log, dtype=CHAIN)
-    return Trace(frames, chain, sorted(player.keys, key=player.keys.get))
+    frames = np.array(frames, dtype=np.uint8).reshape(-1, REGISTERS)
+    chain = np.array(log.rows, dtype=CHAIN)
+    return Trace(frames, chain, sorted(log.keys, key=log.keys.get))
 
 
 def trace(text: str, ticks: int | None) -> tuple:

@@ -1,7 +1,7 @@
 """Classify why a ``corpus.py check`` table's differing tunes diverge from their references.
 
-Each document's grid is compared with its verify reference and an alternative one (GoatTracker 2,
-Music Assembler: the standard note table; SID-Wizard, defMON: the native one). Usage:
+Each document's grid is compared with the spec player's, with the standard note table and with
+the tune's own. Usage:
 ``divergence.py out/check/results.csv`` writes ``classes.csv`` beside it and prints the tally.
 """
 
@@ -16,10 +16,10 @@ import numpy as np
 from pysidtracker import gridcmp
 from pysidtracker.jobs import deadline, imap
 from tqdm import tqdm
-from unitracker_grammar.notes import frequency
 from unitracker_player.player import play
 
 import shared
+from unitracker.lift import goattracker2 as gt2
 
 NREGS = gridcmp.NREGS
 GROUPS = {"freq": "pitch", "pw": "pulse", "ctrl": "ctrl", "ad": "adsr", "sr": "adsr"}
@@ -35,7 +35,6 @@ FIELDS = (
     "lag_cells",
     "init_cells",
     "late_cells",
-    "flags",
 )
 
 
@@ -91,92 +90,15 @@ def classify(ours, std, native) -> dict:
     return out | {"class": "/".join(head + ["+".join(groups)])}
 
 
-def _filter_voices(song, subtune: int) -> int:
-    """GoatTracker 2 channels of ``subtune`` that start a filter program (an instrument's filter
-    pointer or command A)."""
-    out = 0
-    for chan in song.subtunes[subtune].channels:
-        rows = [r for e in chan.entries if hasattr(e, "num") for r in song.patterns[e.num].rows]
-        filt = any(r.command == 0xA or song.instrument(r.instrument).filter_ptr for r in rows)
-        out += filt
-    return out
-
-
 def _gt2(raw: bytes, subtune: int, frames: int):
-    # pylint: disable=import-outside-toplevel
-    from pygoattracker.player import Player
-    from pygoattracker.sid import decompile_sid
-
-    from unitracker.direct import goattracker2 as gt2
-
-    model = decompile_sid(raw, subtune)
-    ours = play(gt2.Transcriber(model).document(), ticks=frames)
-    ref = model.player().render_grid(len(ours))
-    table = [frequency(k, gt2.CLOCK["clock_hz"]) for k in range(128)]
-    alt = Player(
-        model.typed,
-        subtune=model.subtune,
-        build=model.info.playback,
-        state=model.info.state,
-        freq_table=table,
-    ).render_grid(len(ours))
-    pb, state = model.info.playback, model.info.state
-    cmds = Counter(r.command for p in model.song.patterns for r in p.rows if r.command)
-    flags = {
-        "ghost": bool(state and getattr(state, "ghost", False)),
-        "simplepulse": pb.simplepulse,
-        "init_regs": len(pb.init_regs),
-        "overlay": pb.overlay is not None,
-        "voices": pb.voices is not None,
-        "calls": pb.calls,
-        "wrapper_flush": pb.wrapper_flush,
-        "cmd9": cmds[9],
-        "cmdA": cmds[0xA],
-        "filter_voices": _filter_voices(model.song, model.subtune),
-        "wavecmds": "".join(
-            sorted({f"{w & 15:X}" for w in model.song.wavetable.left if 0xF0 <= w < 0xFF})
-        ),
-    }
-    return ours, alt, ref, flags
+    """``(ours, standard, native)``: the lifted document's grid, the spec player's with the
+    standard note table and with the tune's own."""
+    ours = play(gt2.lift(raw, subtune, frames), ticks=frames)
+    standard = gt2.reference(raw, subtune, len(ours), notes=True)
+    return ours, standard, gt2.reference(raw, subtune, len(ours), notes=False)
 
 
-def _ma(raw: bytes, subtune: int, frames: int):
-    # pylint: disable=import-outside-toplevel
-    from pymusicassembler.player import Player
-
-    from unitracker.direct import musicassembler as ma
-
-    one = ma.transcriber(raw, subtune)
-    ours = play(one.document(), ticks=frames)
-    ref = Player(one.song, subtune).render_grid(len(ours))
-    return ours, ma.standard(one.song, subtune).render_grid(len(ours)), ref, {}
-
-
-def _sw(raw: bytes, subtune: int, frames: int):
-    # pylint: disable=import-outside-toplevel
-    from pysidwizard.player import SWMPlayer
-
-    from unitracker.direct import sidwizard as sw
-
-    one = sw.transcriber(raw, subtune, frames)
-    ours = play(one.document(), ticks=frames)
-    ref = sw.standard(one.swm).render_grid(len(ours))
-    native = SWMPlayer(one.swm)
-    return ours, ref, native.render_grid(len(ours)), {"driver": one.swm.driver_type}
-
-
-def _dm(raw: bytes, subtune: int, frames: int):
-    # pylint: disable=import-outside-toplevel
-    from pydefmon import DefmonPlayer
-
-    from unitracker.direct import defmon as dm
-
-    ours = play(dm.transcribe(raw, subtune), ticks=frames)
-    ref = dm.standard(raw, subtune).render_grid(len(ours))
-    return ours, ref, DefmonPlayer(raw, subtune=subtune).render_grid(len(ours)), {}
-
-
-GRIDS = {"goattracker2": _gt2, "musicassembler": _ma, "sidwizard": _sw, "defmon": _dm}
+GRIDS = {"goattracker2": _gt2}
 
 
 def classify_one(row: dict, opts: dict) -> dict:
@@ -185,9 +107,8 @@ def classify_one(row: dict, opts: dict) -> dict:
     try:
         with deadline(opts["timeout"]):
             raw = shared.tune(row["path"], opts["hvsc"]).read_bytes()
-            ours, std, native, flags = GRIDS[row["player"]](raw, opts["subtune"], opts["frames"])
+            ours, std, native = GRIDS[row["player"]](raw, opts["subtune"], opts["frames"])
             res |= classify(np.asarray(ours), np.asarray(std), np.asarray(native))
-            res["flags"] = " ".join(f"{k}={v}" for k, v in flags.items())
     except Exception as exc:  # pylint: disable=broad-exception-caught
         res["class"] = f"error: {type(exc).__name__}: {exc}"[:120]
     return res

@@ -1,8 +1,6 @@
 """tools/corpus.py: tune lists, corpus checks by cause and the survey renderer."""
 
 import csv
-import json
-import re
 from pathlib import Path
 
 import corpus
@@ -30,13 +28,13 @@ def test_a_tune_is_multi_sid_by_its_header_sid_addresses(metal_warrior, version,
 def test_a_goattracker_build_past_three_voices_is_multi_sid(
     metal_warrior, monkeypatch, voices, multi
 ):
-    dec = gt_tune([(0x41, 0)], voices=voices)[0]
-    monkeypatch.setattr(shared, "decompile_sid", lambda raw: dec)
+    core = gt_tune([(0x41, 0)], voices=voices)
+    monkeypatch.setattr(shared, "core_of_sid", lambda raw: core)
     assert shared.multi_sid(metal_warrior.read_bytes()) == multi
 
 
-def test_other_formats_and_unreadable_tunes_are_single_sid(mega_run):
-    assert not shared.multi_sid(mega_run.read_bytes()) and not shared.multi_sid(b"PSID" + bytes(9))
+def test_unreadable_tunes_are_single_sid():
+    assert not shared.multi_sid(b"PSID" + bytes(9))
 
 
 def _csv(path: Path, fields: list, rows: list) -> Path:
@@ -74,63 +72,6 @@ def test_a_tunes_songs_are_its_subtunes_but_those_too_short():
     assert len(shared.songs(rows)) == 3 and shared.songs(rows, "all", 31) == got[2:]
 
 
-def test_versions_fall_back_to_the_package_without_git(monkeypatch):
-    corpus.versions.cache_clear()
-    got = corpus.versions()
-    assert len(got["unitracker"]) == 40 and set(corpus.LIBRARIES) <= set(got)
-    corpus.versions.cache_clear()
-    monkeypatch.setattr(corpus.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError))
-    assert corpus.versions()["unitracker"] == corpus.metadata.version("unitracker")
-    corpus.versions.cache_clear()
-
-
-def test_versions_take_the_launchers_commit_else_none(monkeypatch):
-    monkeypatch.setenv("UNITRACKER_COMMIT", "abc\n")
-    corpus.versions.cache_clear()
-    assert corpus.versions()["unitracker"] == "abc"
-    monkeypatch.delenv("UNITRACKER_COMMIT")
-    monkeypatch.setattr(corpus.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError))
-
-    def missing(lib):
-        raise corpus.metadata.PackageNotFoundError(lib)
-
-    monkeypatch.setattr(corpus.metadata, "version", missing)
-    corpus.versions.cache_clear()
-    assert corpus.versions() == {"unitracker": None}
-    corpus.versions.cache_clear()
-
-
-def test_a_lifted_song_is_verified_and_its_versions_recorded(metal_warrior, tmp_path, monkeypatch):
-    opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 200, "retry": False}
-    opts |= {"forms": ["lifted"], "unchecked": True}
-    row = {"path": str(metal_warrior), "subtune": 1}
-    got = corpus.forms_one(row, opts)
-    assert got["lifted"] == "ok" and got["verified"] is True and got["bad_cells"] == 0
-    assert got["versions"] == corpus.versions() and got["ticks"] == 200
-    meta = json.loads((tmp_path / "meta" / f"{metal_warrior.stem}-s1.json").read_text())
-    assert meta == {k: got[k] for k in meta}
-
-    def fail(*_):
-        raise RuntimeError("no grid")
-
-    monkeypatch.setattr(corpus.cli, "verify", fail)
-    got = corpus.forms_one(row | {"subtune": 0}, opts)
-    assert got["lifted"] == "ok" and got["verified"] is False
-    assert got["verify_error"] == "RuntimeError: no grid" and "bad_cells" not in got
-
-
-def test_a_failed_forms_traceback_follows_its_line(tmp_path):
-    sid = tmp_path / "junk.sid"
-    sid.write_bytes(b"not a sid")
-    opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 10, "retry": False}
-    opts["forms"] = ["lifted", "named"]
-    got = corpus.forms_one({"path": str(sid)}, opts)
-    assert got["lifted"].startswith("FormatError") and got["named"] == "no lifted form"
-    text = (tmp_path / "lifted" / "junk.err").read_text()
-    assert text.startswith(got["lifted"] + "\nTraceback")
-    assert corpus.forms_one({"path": str(sid)}, opts)["lifted"] == got["lifted"]
-
-
 def test_rows_fall_into_categories():
     row = dict.fromkeys(corpus.FIELDS, "")
     assert corpus.category({**row, "verified": "yes"}) == "verified"
@@ -162,12 +103,9 @@ def test_tunes_are_checked_and_reported(metal_warrior, tmp_path, capsys):
     assert (out / f"00000000-{metal_warrior.stem}.yaml").read_text().startswith("unitracker:")
 
 
-def test_the_survey_renderer_plays_the_lifted_document(mega_run, monkeypatch):
-    with pytest.raises(corpus.cli.invariants.ModelError):
-        corpus.render(mega_run.read_bytes(), 1, 50)
-    monkeypatch.setattr(corpus.cli.invariants, "check", lambda *_: None)
-    played, info = corpus.render(mega_run.read_bytes(), 1, 50)
-    assert played.shape == (50, 25) and info["backend"] == "sidwizard" and info["chars"] > 0
+def test_the_survey_renderer_plays_the_lifted_document(metal_warrior):
+    played, info = corpus.render(metal_warrior.read_bytes(), 1, 50)
+    assert played.shape == (50, 25) and info["backend"] == "goattracker2" and info["chars"] > 0
 
 
 def test_multi_sid_tunes_are_excluded_unless_asked_for(metal_warrior, tmp_path, capsys):
@@ -178,14 +116,5 @@ def test_multi_sid_tunes_are_excluded_unless_asked_for(metal_warrior, tmp_path, 
     assert corpus.main(argv) == 0 and "1 multi-SID tunes excluded" in capsys.readouterr().out
     assert corpus.main([*argv, "--multi-sid"]) == 0
     assert "goattracker2: 1/1 verified" in capsys.readouterr().out
-    argv = ["forms", str(sid), "--out", str(out), "--jobs", "1", "--forms", "lifted"]
-    assert corpus.main(argv) == 0 and "1 multi-SID tunes excluded" in capsys.readouterr().out
-    assert not (out / "lifted" / "multi.err").exists()
     with pytest.raises(ValueError, match="multi-SID"):
         corpus.render(sid.read_bytes(), 1, 10)
-
-
-def test_a_lift_with_more_objects_than_its_tune_is_a_failure(metal_warrior, tmp_path):
-    opts = {"out": str(tmp_path), "hvsc": None, "timeout": 0, "limit": 200, "retry": False}
-    got = corpus.forms_one({"path": str(metal_warrior)}, opts | {"forms": ["lifted"]})
-    assert re.fullmatch(r"ModelError: \d+ lifted \w+( on voice \d)? > \d+ native", got["lifted"])

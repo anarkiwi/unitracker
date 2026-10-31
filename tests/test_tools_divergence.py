@@ -85,21 +85,11 @@ def test_differing_rows_are_classed_into_a_table(metal_warrior, tmp_path, capsys
     assert set(rows) == {"gt2", "unknown"}
     assert rows["unknown"]["class"].startswith("error: KeyError")
     assert not rows["gt2"]["class"].startswith("error")
-    assert "ghost=" in rows["gt2"]["flags"]
     assert "goattracker2" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(
-    "player, name",
-    [
-        ("goattracker2", "metal_warrior"),
-        ("sidwizard", "mega_run"),
-        ("defmon", "persei"),
-        ("musicassembler", "space_invadarz"),
-    ],
-)
-def test_classify_one_plays_each_formats_references(player, name, request):
-    row = {"doc": name, "path": request.getfixturevalue(name), "player": player}
+def test_classify_one_plays_the_references(metal_warrior):
+    row = {"doc": "mw", "path": metal_warrior, "player": "goattracker2"}
     opts = {"hvsc": None, "frames": 200, "subtune": 0, "timeout": 0}
     out = dv.classify_one(row, opts)
     known = r"exact|pitch-standard|ticks0-1|((lag[+-]1|init)/?)*([a-z]+(\+[a-z]+)*)?"

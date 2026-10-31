@@ -1,5 +1,4 @@
-"""``unitracker-lift``: a tune's generic document by its format's direct lifter, optionally
-optimised."""
+"""``unitracker-lift``: a tracker tune's generic document, optionally optimised."""
 
 import argparse
 import importlib
@@ -9,55 +8,46 @@ from pathlib import Path
 from pysidtracker import find_format
 from pysidtracker.errors import SidParseError
 
-from unitracker.direct import invariants
 from unitracker.optimiser import lossy, optimise
 from unitracker.optimiser.inline import MODES
 
-# format name: (direct lifter module, its verify function)
+# format name: its lifter module
 LIFTERS = {
-    "goattracker2": ("unitracker.direct.goattracker2", "verify"),
-    "sidwizard": ("unitracker.direct.sidwizard", "verify"),
-    "defmon": ("unitracker.direct.defmon", "verify"),
-    "musicassembler": ("unitracker.direct.musicassembler", "verify"),
+    "defmon": "unitracker.lift.defmon",
+    "goattracker2": "unitracker.lift.goattracker2",
+    "musicassembler": "unitracker.lift.musicassembler",
 }
 
 
 class FormatError(ValueError):
-    """A tune no direct lifter reads."""
+    """A tune no lifter reads."""
 
 
 def lifter(raw: bytes):
-    """``(format name, lifter module, its verify function)`` of the tune ``raw``."""
+    """``(format name, lifter module)`` of the tune ``raw``."""
     try:
         name = find_format(raw).name
     except SidParseError as exc:
         raise FormatError(f"no tracker format recognised: {exc}") from exc
     if name not in LIFTERS:
-        raise FormatError(f"no direct lifter for {name}")
-    module, check = LIFTERS[name]
-    module = importlib.import_module(module)
-    return name, module, getattr(module, check)
+        raise FormatError(f"no lifter for {name}")
+    return name, importlib.import_module(LIFTERS[name])
 
 
-def lift(raw: bytes, subtune: int = 0, check: bool = True) -> str:
-    """The generic document of 0-based ``subtune`` of the tune ``raw``; where ``check``, a
-    :class:`~unitracker.direct.invariants.ModelError` where it has more objects than the tune."""
-    module = lifter(raw)[1]
-    text = module.transcribe(raw, subtune)
-    text = text[0] if isinstance(text, tuple) else text
-    if check:
-        invariants.check(text, module.native_counts(raw, subtune))
-    return text
+def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
+    """The generic document of 0-based ``subtune`` of the tune ``raw``, over ``frames`` ticks
+    where given."""
+    return lifter(raw)[1].lift(raw, subtune, frames)
 
 
 def verify(raw: bytes, subtune: int = 0, frames: int = 20000):
     """The ``(tick, register, ours, theirs)`` cells where the lifted document's grid differs from
-    the native player's over ``frames`` ticks."""
-    return lifter(raw)[2](raw, subtune, frames)[0]
+    the reference player's over ``frames`` ticks."""
+    return lifter(raw)[1].verify(raw, subtune, frames)[0]
 
 
 def lift_main(argv=None) -> int:
-    """Lift a GoatTracker 2, defMON, SID-Wizard or Music Assembler .sid to its generic document."""
+    """Lift a GoatTracker 2 .sid to its generic document."""
     parser = argparse.ArgumentParser(prog="unitracker-lift", description=lift_main.__doc__)
     parser.add_argument("sid", type=Path)
     parser.add_argument("-o", "--output", type=Path)
@@ -67,16 +57,13 @@ def lift_main(argv=None) -> int:
     )
     parser.add_argument("--ticks", type=int, help="--optimise: the guarantee's horizon")
     parser.add_argument(
-        "--unchecked", action="store_true", help="lift a tune whose document breaks the invariants"
-    )
-    parser.add_argument(
         "--inline", choices=MODES, default="named", help="--optimise: the definitions inline"
     )
     lossy.add_arguments(parser)
     args = parser.parse_args(argv)
     try:
-        text = lift(args.sid.read_bytes(), args.subtune, not args.unchecked)
-    except (FormatError, invariants.ModelError) as exc:
+        text = lift(args.sid.read_bytes(), args.subtune)
+    except ValueError as exc:
         print(f"{args.sid}: {exc}", file=sys.stderr)
         return 1
     if args.optimise:

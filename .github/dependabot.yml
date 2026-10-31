@@ -8,11 +8,3 @@ updates:
     directory: /
     schedule:
       interval: weekly
-  - package-ecosystem: docker
-    directory: /docker/learn
-    schedule:
-      interval: weekly
-  - package-ecosystem: pip
-    directory: /docker/learn
-    schedule:
-      interval: weekly
