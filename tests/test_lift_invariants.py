@@ -3,6 +3,7 @@
 import pytest
 
 from unitracker.lift import invariants
+from unitracker.lift.invariants import Origin as O
 
 VOICES = """unitracker:2.4
 meta:{title:t}
@@ -61,3 +62,63 @@ def test_a_run_program_and_a_definition_at_first_use_count():
     )
     have = invariants.lifted(text)
     assert (have["ctrl"], have["phrases"], have["song"]) == (3, 3, (3, 1, 1))
+
+
+ORIGINS = {
+    "instruments": {"i1": O(("ins", 1))},
+    "ctrl": {"c1": O(("wave", 0))},
+    "phrases": {"p1": O(("pattern", 0)), "p2": O(("pattern", 1))},
+}
+NAMED = VOICES.replace("p2:[D4.{ad:1,ctrl:[{ctrl:17},end]},-]", "p2:[D4.i1,-]")
+
+
+def test_every_named_object_stands_for_one_native_object():
+    assert invariants.provenance(NAMED, ORIGINS)["phrases"] == (2, 2)
+
+
+@pytest.mark.parametrize(
+    "text, origins, why",
+    [
+        (VOICES, ORIGINS, "unnamed lifted"),
+        (NAMED, ORIGINS | {"ctrl": {}}, "ctrl c1 has no origin"),
+        (NAMED, ORIGINS | {"pw": {"pw1": O(("pulse", 0))}}, "no pw pw1"),
+        (
+            NAMED,
+            ORIGINS | {"phrases": {"p1": O(("pattern", 0)), "p2": O(("pattern", 0))}},
+            "one origin",
+        ),
+        (
+            NAMED.replace("p2:[D4.i1,-]", "p2:[C4.i1,-]"),
+            ORIGINS | {"phrases": {"p1": O(("pattern", 0)), "p2": O(("pattern", 0), ("entered",))}},
+            "two lifted phrases of one value",
+        ),
+    ],
+)
+def test_a_lift_without_provenance_is_refused(text, origins, why):
+    with pytest.raises(invariants.ModelError, match=why):
+        invariants.provenance(text, origins)
+
+
+def test_the_song_bytes_are_kept_apart_from_the_format_s_and_ratcheted():
+    have = invariants.sizes(NAMED)
+    assert have["fixed"] == len("unitracker:2.4\nmeta:{title:t}\n") and have["song"] > 0
+    assert invariants.grown({"a": 10, "b": 5, "c": 1}, {"a": 10, "b": 4}) == ["b", "c"]
+
+
+def test_a_definition_at_first_use_is_named_and_a_run_program_inline_is_not():
+    first = NAMED.replace("voice:[p1|end]", "voice:[p3=[E4.i1,-]|end]").replace(
+        "p2:[D4.i1,-]", "p2:[D4.i1,F4.{ad:2}]"
+    )
+    phrases = ORIGINS["phrases"] | {"p3": O(("pattern", 2))}
+    with pytest.raises(invariants.ModelError, match="unnamed lifted instruments"):
+        invariants.provenance(first, ORIGINS | {"phrases": phrases})
+    first = first.replace("F4.{ad:2}", "F4.i1")
+    assert invariants.provenance(first, ORIGINS | {"phrases": phrases})["phrases"] == (3, 3)
+    run = NAMED.replace("p1:[C4.i1,-]", "p1:[C4.i1 run:ctrl[{ctrl:33},end],-]")
+    with pytest.raises(invariants.ModelError, match="unnamed lifted ctrl"):
+        invariants.provenance(run, ORIGINS)
+
+
+def test_a_phrase_played_in_place_is_unnamed():
+    with pytest.raises(invariants.ModelError, match="unnamed lifted phrases"):
+        invariants.provenance(ROWS, {})
