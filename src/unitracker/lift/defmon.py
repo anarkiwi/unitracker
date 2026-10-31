@@ -199,6 +199,11 @@ class Names:
         return list(self.kinds.get(kind, {}).items())
 
 
+def _order(slot: str) -> tuple:
+    """The order the replay visits a voice-and-layer slot ``kNl`` in: layer, voice, kind."""
+    return slot[2], slot[1], slot[0]
+
+
 def _const(value: int) -> Expr:
     return Expr(canonical(f"(0 & v) + {value}"))
 
@@ -300,7 +305,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 out["m.pw"] = self.carry(voice, col["AF"])
         self.pulse(col, out, layer)
         if "RE" in col:
-            self.filt(col["RE"], out)
+            self.filt(col["RE"], out, layer, voice)
         if "FV" in col:
             out["mode"] = col["FV"] & 0xF0
         if "CP" in col and self.core.cp_extra:
@@ -338,16 +343,15 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             out[f"w{layer}.pw"] = Once(self.call("psset", q=s))
 
     @staticmethod
-    def filt(b: int, out: dict) -> None:
-        """The resonance and routing keys of the RE column."""
+    def filt(b: int, out: dict, layer: str, voice: int) -> None:
+        """The resonance and routing keys of the RE column: the routing is a once binding of the
+        voice's slot, so rows of one tick apply in the order the replay applies them."""
+        slot, bit = f"r{voice + 1}{layer}.route", 1 << voice
         if b == 0:
-            out["route_off"] = 0
-        elif b & 8:
-            out["res"] = b >> 4
-            out["route_on"] = b & 15
-        else:
-            out["res"] = b >> 4
-            out["route"] = b & 15
+            out[slot] = Once(Expr(canonical(f"v & {~bit & 15}")))
+            return
+        out["res"] = b >> 4
+        out[slot] = Once(Expr(canonical(f"v | {b & 15 | bit}")) if b & 8 else _const(b & 15))
 
     def acid_keys(self, value: int, out: dict, layer: str, voice: int) -> None:
         """The cutoff slide key of the ACID column."""
@@ -441,12 +445,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     # ---- the document -----------------------------------------------------------------------
 
-    def instrument(self, voice: int) -> Instrument | None:
+    def instrument(self, voice: int) -> Instrument:
         """The instrument of ``voice``: its notes restore the pitch mode and clear the slide."""
-        if "AF" not in self.used:
-            return None
         fields = {"p.freq": self.pitch(voice, 0)}
-        if self.ps:
+        if self.ps and "AF" in self.used:
             fields["m.pw"] = self.carry(voice, 0)
         if self.slides:
             fields["n.freq"] = Once(self.call("clr"))
@@ -469,8 +471,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 cmds["n.pw"] = Once(self.call("pseed", p=acc & 255, q=acc >> 8))
         if voice == 0:
             cmds["tempo"] = 1
-        name = f"i{voice + 1}" if self.instrument(voice) else None
-        return Event(note_name(st["note_base"][voice] + LOW), name, cmds)
+        return Event(note_name(st["note_base"][voice] + LOW), f"i{voice + 1}", cmds)
 
     def cutoff(self) -> tuple:
         """``(initial output, cutoff step call or None)``: the step runs where a row sets the
@@ -513,6 +514,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             setters = [Slot(f"w{l}") for l in "ab" if (f"w{l}", "pw") in bound]
             seed = [Slot("n")] * self.slides
             slots["pw"] = setters + seed + [Slot("m"), Slot("s", self.call("psw"))]
+        if keys := sorted((k for k, cell in bound if cell == "route"), key=_order):
+            slots["route"] = [Slot(k) for k in keys]
         step = self.cutoff()[1]
         if step:
             keys = sorted(
@@ -542,9 +545,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         """The document of the subtune."""
         voices = self.voices()
         init = tuple(self.start(v) for v in range(3))
-        ins = tuple((f"i{v + 1}", self.instrument(v)) for v in range(3) if self.instrument(v))
-        defs = [Section("ins", ins)] if ins else []
-        defs += [Section("ctrl", tuple(self.names.section("ctrl")))]
+        ins = tuple((f"i{v + 1}", self.instrument(v)) for v in range(3))
+        defs = [Section("ins", ins), Section("ctrl", tuple(self.names.section("ctrl")))]
         defs += [Section("phrase", (("p0", (Event("-"),)), *self.names.section("phrase")))]
         head = self.header()
         mods = tuple((signature(n, asm.params(ROUTINES[n])), Code(ROUTINES[n])) for n in self.calls)
