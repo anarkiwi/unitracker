@@ -15,6 +15,9 @@ python tools/lift_corpus.py NAMES.txt
 | GoatTracker 2 | document |
 |---|---|
 | row of `tempo + 1` calls | step, beginning one call after the row's tick 0 |
+| tick order of a call | `order:[events,ctrl,read,pulse,filter,freq,pw,cut]`: the row fetch (`read`, the restart's first row) runs after the note's events and the control program, as `done()` follows the tick-0 work and `waveexec`, so a fetch on the previous note's tick turns its gate off after that note gated on |
+| `repeat` entries | a group `[p]xN` of the pattern |
+| orderlist loop | `loop:k`; the loop body is written a second time only when the context it is re-entered in changes a phrase |
 | song start | `init` with `tempo:2`, phrase `p0:[-,- tempo:T]` |
 | registers before the first call | `regs`: the tune's own init writes, then the song-init call's writes over them, `$D418` at the host's volume |
 | channel variables the song-init call leaves | the first call's cells on the `init` events: `freq`, `ctrl`, `ad`, `sr`, the filter cells; `pw` through a `boot` slot after `pulse`, which the pulse hold events leave unvisited on that call |
@@ -27,7 +30,11 @@ python tools/lift_corpus.py NAMES.txt
 | pulse table | `pw` program, `{hold:n,pw:'v + s'}` modulation rows; `holds:{pw:[...]}` |
 | filter table | `filter` program on `cut`, `res`, `route`, `mode`; a filter-set row stops the modulation; `global` cells |
 | commands 5-D | `ad`, `sr`, `ctrl`, `run`, `res`/`route`, `set.cut`, `vol` |
-| commands E, F | `tempo:a/b`, `tempo:n`, `vtempo:n` |
+| commands E, F | `tempo:a/b`, `tempo:n`, `vtempo:n`; a funk table's two bytes as the row lengths the player's counter reload gives (`cadence`) |
+| funk recall (F00, F01) | the table in force: the start state's where no table is loaded, else the one table every load names where a voice loads it in its first row and no voice ahead of it recalls in a first row |
+| note that keeps the gate (legato instrument, no first waveform) | the gate is followed through the voice's rows (key off, key on, notes); where it is off, the note's event runs the instrument's wavetable with a first row `{gate:0,hold:0}` (`run:`), and an instrument whose fetch turns the gate off but sets none has that row in its own program |
+| gate timers read from the live instrument (`livegate`) | the instrument's `restart`, as the live instrument is the one the last row fetch loaded; refused where a row change to a shorter timer fetches again |
+| play routine flushing a ghost block | `lag` and `regs`, as a full ghost; refused where the routine writes registers of its own |
 | portamento, toneporta | `tick.freq` expressions |
 | vibrato, instrument vibrato | `tick.freq` code templates with state `t`, `d`, `ln` |
 | calculated speed | code templates with state `sl`, `sh`: `F(N + 1) - F(N)` shifted by the row's count, `N` the last note loaded (`ln`) |
@@ -44,15 +51,16 @@ Typed `Refusal(kind)`, raised before lifting; `detail` names the construct.
 | `interrupt` | play address 0 |
 | `multi-SID` | stereo, or more than three channels |
 | `SID address` | a player writing a SID elsewhere than `$D400` |
-| `wrapper` | a play routine that flushes a ghost block itself |
-| `build` | `directwave`, `livegate`, a pulse step other than 1 and 2, a voice layout or control overlay, a tempo under 2 |
+| `wrapper` | a play routine that writes SID registers other than as copies of its ghost block (probed over its first calls; the one in the corpus adds a cutoff sweep, a 16-bit sum stepped each call, and a volume xor with a self-modified operand) |
+| `build` | `directwave`, a pulse step other than 1 and 2, a voice layout or control overlay, a tempo under 2; `livegate` where a row change to a shorter gate timer fetches again |
+| `start state` | a note pending in the channel variables (`newnote` nonzero), which the first call starts with the stale instrument before any row |
 | `layout` | a speedtable row the song uses that the player reads as other bytes than the typed song holds |
-| `restart overlap` | a note whose restart reaches back to the previous note's tick, where the document applies the earlier note's gate after the later note's rows |
-| `first waveform` | a note with no first waveform after a gate-off, which keeps the gate off |
-| `noeffects vibrato` | instrument vibrato in a `noeffects` build, which follows the instrument read |
+| `restart overlap` | a note whose restart reaches back before the previous note's tick, which the player never fetches |
+| `first waveform` | a gate-keeping note off, whose event also sets a table (`run` is taken) |
+| `noeffects vibrato` | instrument vibrato in a `noeffects` build: the player runs effect 0 each tick with the vibrato parameter of the live `instr`, which the row fetch loads before the note starts, including for a voice's first note and an instrument-only row, which have no restart row to rebind at the fetch |
 | `pointer onto a jump row` | a pointer or jump an instrument or command reaches that lands on a table jump row, which the executors play as an ordinary row |
-| `funk tempo` | a funk row that is a calculated speed |
-| `funk tempo recall` | tempo recall with several funk tables |
+| `funk tempo` | a funk table whose row never ends (a byte of 0, or a pair whose reloads keep a negative counter), or whose rows do not alternate from the entry |
+| `funk tempo recall` | tempo recall where the table in force is not one: several tables loaded, or none loaded in a first row |
 | `pattern command`, `gate note`, `timing mark in a build without author info` | rows the document cannot state |
 
 ## Reference
@@ -64,3 +72,15 @@ the player; a tune whose player the song does not describe is refused rather tha
 
 `verify` plays the document with unitracker-player and compares its grid with the spec player's at
 the standard note table; `lift` raises `Divergence` naming the first differing frame and register.
+
+## Objects and sizes
+
+Every named object of a document has the native object it transliterates
+(`invariants.provenance`): an instrument, its restart program, a table entry point, a pattern; two
+objects never share an origin, a value or go unnamed. A phrase carries the entry context
+(instrument and, where an instrument keeps the gate, the gate) only where its pattern lifts to
+more than one phrase, which happens where the player behaves differently: a command-0 row latches
+the vibrato of the instrument carried in. A wavetable's gate-off variant is its own program with
+the context `quiet`. Orderlist entries are bounded per voice by `native_counts`: its entries, the
+entry starting the voice, and its loop body once more. `tests/lift_sizes.json` holds each
+fixture's song bytes; `grown` must be empty.

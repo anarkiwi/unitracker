@@ -76,6 +76,19 @@ CORPUS = {
         "MUSICIANS/C/Crisps/Soiled_Iron.sid",
         "a play wrapper and loaded channel state",
     ),
+    "hz_jazz": (
+        "MUSICIANS/B/Booker/Hz_Jazz.sid",
+        "restarts that fetch on the previous note's tick",
+    ),
+    "an_ufo_attack": (
+        "MUSICIANS/M/Mutetus/An_UFO_Attack_from_Space.sid",
+        "legato instruments that keep a gate left off by a key off",
+    ),
+    "lily_lander": ("GAMES/G-L/Lily_Lander.sid", "a play routine flushing a ghost block"),
+    "lazy_day": (
+        "MUSICIANS/M/Mueller_Manuel/Lazy_Day.sid",
+        "gate timers read from the live instrument",
+    ),
     "dirty_cheater": (
         "MUSICIANS/S/Spider_Jerusalem/Dirty_Cheater.sid",
         "the tune's own init writes",
@@ -95,16 +108,6 @@ REFUSED = {
         "layout",
         "a player reading its speedtable elsewhere than its other code",
     ),
-    "hz_jazz": (
-        "MUSICIANS/B/Booker/Hz_Jazz.sid",
-        "restart overlap",
-        "a restart reaching back to the previous note's tick",
-    ),
-    "an_ufo_attack": (
-        "MUSICIANS/M/Mutetus/An_UFO_Attack_from_Space.sid",
-        "first waveform",
-        "a note of no first waveform after a key off",
-    ),
     "first_night_together": (
         "MUSICIANS/O/Onebitman/Zerozillion/First_Night_Together.sid",
         "noeffects vibrato",
@@ -113,7 +116,17 @@ REFUSED = {
     "i_dont_know": (
         "MUSICIANS/G/Groepaz/I_Dont_Know_What_I_Am_Doing.sid",
         "wrapper",
-        "a play routine flushing a ghost block itself",
+        "a play routine adding a cutoff sweep and a volume xor of its own",
+    ),
+    "commando": (
+        "MUSICIANS/L/Linus/Commando_Take_Me_to_the_Bridge_short.sid",
+        "start state",
+        "a note pending in the channel variables",
+    ),
+    "datatanten": (
+        "DEMOS/A-F/Datatanten_Theme.sid",
+        "funk tempo",
+        "a funk table whose row never ends",
     ),
     "hammurabi": (
         "GAMES/G-L/Hammurabi.sid",

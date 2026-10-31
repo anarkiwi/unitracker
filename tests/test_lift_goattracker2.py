@@ -162,6 +162,28 @@ CASES = {
         "rows": [(24, 1, 0xE, 1), REST, REST, (26, 0, 0xF, 1)] + [REST] * 12,
         "speed": [(0x05, 0x03)],
     },
+    "funk tempo from a calculated speed row": {
+        "wave": WAVE,
+        "rows": [(24, 1, 0xE, 1)] + [REST] * 15,
+        "speed": [(131, 6)],
+    },
+    "a funk byte of one spends a reload": {
+        "wave": WAVE,
+        "rows": [(24, 1, 0xE, 1)] + [REST] * 15,
+        "speed": [(1, 6)],
+    },
+    "a restart whose fetch falls on the previous note's tick": {
+        "wave": WAVE,
+        "instruments": [{"wave_ptr": 1, "gateoff_timer": 3, "sustain_release": 0xF0}],
+        "rows": [(24, 1, 0, 0), (26, 0, 0, 0), (28, 0, 0, 0)] + [REST] * 13,
+        "default_tempo": 3,
+    },
+    "a tempo recall reads the table another voice loaded in its first row": {
+        "wave": WAVE,
+        "rows": [(24, 1, 0xE, 1)] + [REST] * 15,
+        "voice2": [(None, 0, 0, 0)] * 3 + [(26, 1, 0xF, 0)] + [REST] * 12,
+        "speed": [(5, 3)],
+    },
     "a tempo command": {"wave": WAVE, "rows": [(24, 1, 15, 4)] + [REST] * 15},
     "key off and on with an instrument": {
         "wave": WAVE,
@@ -279,3 +301,80 @@ def test_corpus_tunes_are_refused_by_class(tune, request):
 def test_cli(metal_warrior, capsys):
     assert g.main(["--verify", "--frames", "300", str(metal_warrior)]) == 0
     assert ": exact" in capsys.readouterr().out
+
+
+def test_a_recall_with_no_table_loaded_in_a_first_row_is_refused():
+    core = gt_tune(
+        WAVE,
+        rows=[(None, 0, 0, 0)] * 2 + [(24, 1, 0xE, 1)] + [REST] * 13,
+        voice2=[(24, 1, 0xF, 0)] + [REST] * 15,
+        speed=[(5, 3)],
+    )
+    with pytest.raises(g.Refusal) as caught:
+        g.document_text(core)
+    assert caught.value.kind == "funk tempo recall"
+
+
+def test_a_funk_table_whose_rows_do_not_alternate_from_the_start_is_refused():
+    with pytest.raises(g.Refusal, match="alternate"):
+        g.Lift.cadence((131, 6), 1)
+
+
+def test_a_funk_row_of_zero_calls_never_reaches_the_next_row():
+    core = gt_tune(WAVE, rows=[(24, 1, 0xE, 1)] + [REST] * 15, speed=[(0, 0)])
+    with pytest.raises(g.Refusal, match="never ends"):
+        g.document_text(core)
+
+
+@pytest.mark.parametrize(
+    "pair, lengths",
+    [((8, 5), (8, 5)), ((131, 6), (7, 7)), ((1, 6), (7, 7))],
+)
+def test_a_funk_table_gives_the_row_lengths_the_counter_reload_spends(pair, lengths):
+    assert g.Lift.cadence(pair, 0) == lengths
+
+
+class Ins:
+    """An instrument as ``_first_wave`` and the gate helpers read it."""
+
+    def __init__(self, first_wave, legato=False):
+        self.first, self.legato = first_wave, legato
+
+    def raw(self):
+        """The packed fields."""
+        return type("Raw", (), {"first_wave": self.first})
+
+
+HR = {"fixedparams": False, "zeroskip": True, "nofirstwavecmd": False, "hrinstr": True}
+HR |= {"nohrinstr": False, "legato": True, "firstwave": 0}
+
+
+@pytest.mark.parametrize(
+    "first, legato, gate, after",
+    [
+        (0, True, 0, 0),
+        (0, True, 1, 1),
+        (0, False, 1, 0),
+        (9, True, 0, 1),
+        (0xFE, True, 1, 0),
+        (0xFF, False, 0, 1),
+    ],
+)
+def test_the_gate_after_a_note_by_its_first_waveform_and_fetch(first, legato, gate, after):
+    assert g._gate_after(HR, Ins(first, legato), gate) == after
+
+
+def test_only_a_note_with_no_first_waveform_and_no_gate_fetch_keeps_the_gate():
+    assert g._keeps_gate(HR, Ins(0, True))
+    assert not g._keeps_gate(HR, Ins(0, False))
+    assert not g._keeps_gate(HR, Ins(9, True))
+
+
+def test_every_corpus_tune_holds_one_object_per_origin(request):
+    from unitracker.lift import invariants
+
+    for tune in CORPUS:
+        raw = request.getfixturevalue(tune).read_bytes()
+        text, objects = g.checked_text(g.core_of_sid(raw))
+        assert invariants.provenance(text, g.build(g.core_of_sid(raw))[1]) == objects
+        assert all(a >= b for a, b in objects.values())
