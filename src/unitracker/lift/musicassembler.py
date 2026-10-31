@@ -13,7 +13,7 @@ from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
 from pymusicassembler.model import ArpeggioRow
 from pymusicassembler.model import Instrument as ModelInstrument
 from pymusicassembler.model import InstrumentEvent, NoteEvent
-from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp, parse_sid_header
+from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, parse_sid_header
 from pysidtracker.playspec.player import SpecPlayer
 from unitracker_grammar import code as asm
 from unitracker_grammar.document import (
@@ -38,14 +38,14 @@ from unitracker_grammar.document import (
     signature,
 )
 from unitracker_grammar.expr import canonical
-from unitracker_player.player import play
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.invariants import Origin
 from unitracker.lift.macode import ROUTINES, STATE
-from unitracker.lift.macore import Core, Divergence, LiftError, Refusal, core_of_sid, core_of_song
-from unitracker.lift.macore import refuse
-from unitracker.lift.shared import meta_text, note_name
+from unitracker.lift.macore import Core, core_of_sid, core_of_song, refuse
+from unitracker.lift import shared
+from unitracker.lift.shared import Divergence, LiftError, Refusal, calls_of, cells_of
+from unitracker.lift.shared import lifted_text, meta_text, note_name
 
 __all__ = ["Core", "Divergence", "LiftError", "Refusal", "core_of_sid", "core_of_song", "lift"]
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -70,33 +70,22 @@ class Walk:
     loop: int | None
 
 
-class Names:
+class Names(shared.Names):
     """Definitions by kind, numbered in first-use order, each with the native object it stands
     for and the context it was first reached in."""
 
-    def __init__(self):
-        self.kinds, self.seen = {}, {}
+    def name(
+        self, kind: str, prefix: str, value, origin: tuple, context: tuple = ()
+    ) -> str:  # pylint: disable=arguments-renamed
+        """The name of ``value`` among the ``kind`` records, adding it as the lift of the native
+        object ``origin`` reached in ``context``."""
+        return super().name(kind, prefix, value, (origin, context))
 
-    def name(self, kind: str, prefix: str, value, native: tuple, context: tuple = ()) -> str:
-        """The name of ``value`` among the ``kind`` records, adding it as the lift of ``native``
-        reached in ``context``."""
-        store = self.kinds.setdefault(kind, {})
-        for name, held in store.items():
-            if held == value:
-                return name
-        store[name := f"{prefix}{len(store) + 1}"] = value
-        self.seen.setdefault(kind, {})[name] = (native, context)
-        return name
-
-    def section(self, kind: str) -> list:
-        """The records of ``kind``."""
-        return list(self.kinds.get(kind, {}).items())
-
-    def origins(self) -> dict:
+    def by_kind(self) -> dict:
         """``{kind: {name: Origin}}``: the context is named only for a native object that lifts
         to more than one record."""
         out = {}
-        for kind, seen in self.seen.items():
+        for kind, seen in self.origins.items():
             copies = Counter(native for native, _ in seen.values())
             out[KINDS[kind]] = {
                 name: Origin(native, context if copies[native] > 1 else ())
@@ -135,18 +124,6 @@ def _expr(text: str) -> Expr:
 
 def _const(value: int) -> Expr:
     return Expr(f"{value} + 0")
-
-
-def _calls(node):
-    """The names of the calls under ``node``, in its printed order."""
-    if isinstance(node, Call):
-        yield node.name
-    elif isinstance(node, (tuple, list)):
-        for item in node:
-            yield from _calls(item)
-    elif hasattr(node, "__dataclass_fields__"):
-        for name in node.__dataclass_fields__:
-            yield from _calls(getattr(node, name))
 
 
 class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
@@ -770,7 +747,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         defs = [Section(k, tuple(self.names.section(k))) for k in ("ins", "ctrl", "phrase")]
         defs = [d for d in defs if d.records]
         doc = Document(Header(), (), (), defs, init, voices, None)
-        used = list(dict.fromkeys(_calls(doc)))
+        used = list(dict.fromkeys(calls_of(doc)))
         mods = tuple((signature(n, asm.params(ROUTINES[n])), Code(ROUTINES[n])) for n in used)
         return Document(self.header(used), (), mods, defs, init, voices, None)
 
@@ -802,7 +779,7 @@ def build(core: Core) -> tuple:
     """``(text, origins)``: the document of ``core``, printed, and the native object each of its
     named objects stands for."""
     built = Lift(core)
-    return printed(built.document()), built.names.origins()
+    return printed(built.document()), built.names.by_kind()
 
 
 def report(raw: bytes, subtune: int = 0) -> dict:
@@ -864,33 +841,19 @@ def compare(core: Core, frames: int, grid=None) -> tuple:
     """``(cells, text)``: the cells where the document of ``core`` differs from ``grid`` (the
     reference over ``frames`` frames; for a core, its player's)."""
     text = document_text(core)
-    ours = np.asarray(play(text, frames), dtype=np.uint8)
-    if grid is None:
-        grid = np.asarray(player_of(core).render_grid(len(ours)), dtype=np.uint8)
-    return gridcmp.cell_diff(ours, grid[: len(ours)]), text
-
-
-def checked(text_cells: tuple, frames: int) -> str:
-    """The text of ``(cells, text)``, or a Divergence naming the first differing cell."""
-    cells, text = text_cells
-    if cells.size:
-        frame, reg = (int(c) for c in cells[0][:2])
-        raise Divergence(f"frame {frame} register {reg}: {len(cells)} cells over {frames} frames")
-    return text
+    return cells_of(text, frames, grid, player_of(core).render_grid), text
 
 
 def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
     """``(cells, text)`` of a SID: the cells where its document differs from the reference."""
     text = document_text(core_of_sid(raw, subtune))
-    ours = np.asarray(play(text, frames), dtype=np.uint8)
-    return gridcmp.cell_diff(ours, reference(raw, subtune, len(ours))), text
+    return cells_of(text, frames, reference=lambda n: reference(raw, subtune, n)), text
 
 
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
     """The document of a SID's subtune, checked against the reference over ``frames`` frames
     (default :data:`CHECK`); a LiftError otherwise."""
-    frames = frames or CHECK
-    return checked(verify(raw, subtune, frames), frames)
+    return lifted_text(verify, raw, subtune, frames, CHECK)
 
 
 def main(argv=None) -> int:

@@ -1,8 +1,9 @@
 """defMON's stateful units as 6502 modulators, each the matching statements of the spec.
 
 State: ``freq`` ``s`` the pitch slide, ``g`` the voice's detune; ``pw`` ``l h`` the pulse bytes,
-``d`` the sweep depth, ``m`` the slide mirror, ``k`` the detune; ``cut`` ``w z`` the accumulator, ``t u`` its step, ``o`` its operation (0 until
-set, then 1 add or 2 subtract), ``e`` the extra a CP column sets.
+``d`` the sweep depth, ``m`` the slide mirror, ``k`` the detune; ``cut`` ``w z`` the accumulator,
+``t u`` its step, ``o`` its operation (0 until set, then 1 add or 2 subtract), ``e`` the extra a CP
+column sets.
 """
 
 from unitracker_grammar import code

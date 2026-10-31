@@ -12,7 +12,7 @@ from unitracker_grammar.document import Call, Expr, Once, Signed
 from unitracker_grammar.expr import compile_expr
 
 from unitracker.lift import defmon as d
-from unitracker.lift import invariants
+from unitracker.lift import invariants, shared
 
 TICKS = 3000
 FLAGS = dict.fromkeys("uncounted plain_tr or_ctrl floored shifts fixed reduced".split(), False)
@@ -349,12 +349,6 @@ def test_the_header_carries_the_clock_and_the_title():
     assert d.Lift(replace(core(SONG), calls=(1, 0, 0))).header().calls == (1, (1, 0, 0))
 
 
-def test_a_divergence_names_its_first_cell():
-    with pytest.raises(d.Divergence, match="frame 3 register 5"):
-        d.checked((np.array([[3, 5, 0, 1]]), ""), 10)
-    assert d.checked((np.array([]), "text"), 10) == "text"
-
-
 def test_the_command_line_verifies_and_lifts(glow_worm, capsys):
     assert d.main(["--verify", "--frames", "300", str(glow_worm)]) == 0
     assert ": exact" in capsys.readouterr().out
@@ -481,7 +475,7 @@ def test_the_whole_song_is_played_through_the_walk_and_its_loop_once_more():
 
 def test_a_whole_song_check_plays_at_least_the_minimum(glow_worm, monkeypatch):
     played = []
-    monkeypatch.setattr(d, "play", lambda _, n: played.append(n) or np.zeros((n, 25)))
+    monkeypatch.setattr(shared, "play", lambda _, n: played.append(n) or np.zeros((n, 25)))
     monkeypatch.setattr(d, "reference", lambda *_: np.zeros((played[-1], 25), dtype=np.uint8))
     raw = glow_worm.read_bytes()
     assert not d.verify(raw)[0].size and not d.verify(raw, 0, 10, whole=False)[0].size

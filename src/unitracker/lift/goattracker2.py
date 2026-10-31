@@ -13,7 +13,7 @@ from pygoattracker import constants as C
 from pygoattracker import typed as T
 from pygoattracker.canonical import canonical_song
 from pygoattracker.model import PlayPattern, Repeat, Transpose
-from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, gridcmp
+from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format
 from pysidtracker.wrap import count_entries
 from pysidtracker.playspec.tv import TVError
 from pysidtracker.playspec.player import SpecPlayer
@@ -42,11 +42,11 @@ from unitracker_grammar.document import (
 )
 from unitracker_grammar import code as asm
 from unitracker_grammar.expr import canonical
-from unitracker_player.player import play
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.gt2code import ROUTINES, STATE
 from unitracker.lift import gt2tables, gt2wrap
+from unitracker.lift.shared import Names, Refusal, calls_of, cells_of, lifted_text
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -58,22 +58,6 @@ WAVE_FREQ = "wave.freq"
 TICK = "tick.freq"
 CHECK = 20000
 summary = cli.summary
-
-
-class LiftError(ValueError):
-    """A tune the lift cannot state exactly, or whose document differs from the reference."""
-
-
-class Refusal(LiftError):
-    """A construct of a tune the document cannot state; ``kind`` names its class."""
-
-    def __init__(self, kind: str, detail: str = ""):
-        super().__init__(f"{kind}: {detail}" if detail else kind)
-        self.kind = kind
-
-
-class Divergence(LiftError):
-    """The document's grid differs from the reference player's."""
 
 
 @dataclass(frozen=True)
@@ -203,18 +187,6 @@ def _refuse(core: Core):
         raise Refusal("control overlay", str(build.overlay))
 
 
-def _calls(node):
-    """The names of the calls under ``node``, in its printed order."""
-    if isinstance(node, Call):
-        yield node.name
-    elif isinstance(node, (tuple, list)):
-        for item in node:
-            yield from _calls(item)
-    elif hasattr(node, "__dataclass_fields__"):
-        for name in node.__dataclass_fields__:
-            yield from _calls(getattr(node, name))
-
-
 def _late(key: str, value) -> bool:
     return base(key) in ("res", "route", "mode", "vol", "cut") or (
         base(key) == "run" and str(value).startswith("f")
@@ -322,29 +294,6 @@ def native_counts(core: Core) -> dict:
     channels = canonical_song(core.song, core.subtune).subtunes[0].channels
     orders = [channels[c] for c in core.voices]
     return {"song": tuple(2 * len(o.entries) - min(o.restart, len(o.entries)) + 1 for o in orders)}
-
-
-class Names:
-    """Definitions by kind, numbered in first-use order, each with the origin it was first named
-    for."""
-
-    def __init__(self):
-        self.kinds = {}
-        self.origins = {}
-
-    def name(self, kind: str, prefix: str, value, origin: invariants.Origin = None) -> str:
-        """The name of ``value`` among the ``kind`` records, adding it with ``origin``."""
-        store = self.kinds.setdefault(kind, {})
-        for name, held in store.items():
-            if held == value:
-                return name
-        store[name := f"{prefix}{len(store) + 1}"] = value
-        self.origins.setdefault(kind, {})[name] = origin
-        return name
-
-    def section(self, kind: str) -> list:
-        """The records of ``kind``."""
-        return list(self.kinds.get(kind, {}).items())
 
 
 def _program(rows, ptr: int, keys) -> tuple:
@@ -737,9 +686,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         Refusal where a row never ends, which no step of the document's finite lengths states. The
         player reloads its counter at one less than the entry's byte when the counter has gone
         negative, which a counter of 128 or more already is, and moves to the other entry on each
-        reload, so a byte above 129 or of 1 spends reloads before the row counts. The counter and the entry are the whole state of a row: it never ends exactly when
-        a state comes twice before the counter reaches zero. The lengths are the document's when
-        the entry is the same again after two rows."""
+        reload, so a byte above 129 or of 1 spends reloads before the row counts. The counter and
+        the entry are the whole state of a row: it never ends exactly when a state comes twice
+        before the counter reaches zero. The lengths are the document's when the entry is the same
+        again after two rows."""
         t, out, states = start, [], []
         for _ in range(2):
             calls, counter, seen = 0, 0, set()
@@ -1163,7 +1113,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         defs = [d for d in defs if d.records] + [Section("phrase", tuple(phrases))]
         head = self.header(len(voices))
         doc = Document(head, (), (), defs, tuple(init), voices, None)
-        order = [n for n in dict.fromkeys(_calls(doc)) if n in self.calls]
+        order = [n for n in dict.fromkeys(calls_of(doc)) if n in self.calls]
         return Document(head, (), self.mods(order), defs, tuple(init), voices, None)
 
 
@@ -1229,19 +1179,7 @@ def compare(core: Core, frames: int, grid=None) -> tuple:
     """``(cells, text)``: the cells where the document of ``core`` differs from ``grid`` (the
     reference over ``frames`` frames; for a core of a song, its player's)."""
     text, _ = checked_text(core)
-    ours = np.asarray(play(text, frames), dtype=np.uint8)
-    if grid is None:
-        grid = np.asarray(player_of(core).render_grid(len(ours)), dtype=np.uint8)
-    return gridcmp.cell_diff(ours, grid[: len(ours)]), text
-
-
-def checked(text_cells: tuple, frames: int) -> str:
-    """The text of ``(cells, text)``, or a Divergence naming the first differing cell."""
-    cells, text = text_cells
-    if cells.size:
-        frame, reg = (int(c) for c in cells[0][:2])
-        raise Divergence(f"frame {frame} register {reg}: {len(cells)} cells over {frames} frames")
-    return text
+    return cells_of(text, frames, grid, player_of(core).render_grid), text
 
 
 def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
@@ -1249,10 +1187,10 @@ def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
     :func:`check_frames` frames, ``frames`` at least."""
     core = core_of_sid(raw, subtune)
     text, _ = checked_text(core)
-    frames = check_frames(core, frames)
-    ours = np.asarray(play(text, frames), dtype=np.uint8)
-    theirs = reference(raw, subtune, len(ours))
-    return gridcmp.cell_diff(ours, theirs), text
+    return (
+        cells_of(text, check_frames(core, frames), reference=lambda n: reference(raw, subtune, n)),
+        text,
+    )
 
 
 def report(raw: bytes, subtune: int = 0) -> dict:
@@ -1269,8 +1207,7 @@ def report(raw: bytes, subtune: int = 0) -> dict:
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
     """The document of a SID's subtune, checked against the reference over the whole song
     (:func:`check_frames`, ``frames`` at least, default :data:`CHECK`); a LiftError otherwise."""
-    frames = frames or CHECK
-    return checked(verify(raw, subtune, frames), frames)
+    return lifted_text(verify, raw, subtune, frames, CHECK)
 
 
 def main(argv=None) -> int:

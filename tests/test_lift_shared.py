@@ -9,6 +9,12 @@ from unitracker.lift import cli
 from unitracker.lift import shared as s
 
 
+def test_a_divergence_names_its_first_cell():
+    with pytest.raises(s.Divergence, match="frame 3 register 5"):
+        s.checked((np.array([[3, 5, 0, 1]]), ""), 10)
+    assert s.checked((np.array([]), "text"), 10) == "text"
+
+
 def test_note_names():
     assert [s.note_name(k) for k in (0, 24, 37, 95)] == ["C0", "C2", "C#3", "B7"]
 

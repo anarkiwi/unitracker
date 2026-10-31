@@ -10,25 +10,11 @@ from pymusicassembler import playspec
 from pymusicassembler.model import InitState, Song
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, parse_sid_header
 
+from unitracker.lift.shared import Refusal
+
 VOICES = MA.VOICES
 SID = 0xD400
 JMP_ABS = 0x4C
-
-
-class LiftError(ValueError):
-    """A tune the lift cannot state exactly, or whose document differs from the reference."""
-
-
-class Refusal(LiftError):
-    """A construct of a tune the document cannot state; ``kind`` names its class."""
-
-    def __init__(self, kind: str, detail: str = ""):
-        super().__init__(f"{kind}: {detail}" if detail else kind)
-        self.kind = kind
-
-
-class Divergence(LiftError):
-    """The document's grid differs from the reference player's."""
 
 
 @dataclass(frozen=True)

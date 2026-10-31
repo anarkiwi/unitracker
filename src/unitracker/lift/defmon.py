@@ -13,7 +13,7 @@ from pydefmon import DefmonError, DefmonSong, Tune
 from pydefmon.spec import VOICE_STRIDE, build_facts, player_bases, spec
 from pydefmon._layout import STREAMS
 from pydefmon.tune import Jump
-from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, gridcmp
+from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format
 from pysidtracker.cadence import cadence_info
 from pysidtracker.errors import SidParseError
 from pysidtracker.formats import SidFormatError
@@ -39,10 +39,10 @@ from unitracker_grammar.document import (
     signature,
 )
 from unitracker_grammar.expr import canonical
-from unitracker_player.player import play
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.dmcode import ROUTINES, STATE
+from unitracker.lift.shared import Names, Refusal, cells_of, lifted_text
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -62,22 +62,6 @@ CELL_OF = {
 }
 CELL_OF = {t: c for c, names in CELL_OF.items() for t in names.split()}
 CELL_OF |= {t: "cut" for t in ("cp", "acc", "add", "sub", "step", "stepx")}
-
-
-class LiftError(ValueError):
-    """A tune the lift cannot state exactly, or whose document differs from the reference."""
-
-
-class Refusal(LiftError):
-    """A construct of a tune the document cannot state; ``kind`` names its class."""
-
-    def __init__(self, kind: str, detail: str = ""):
-        super().__init__(f"{kind}: {detail}" if detail else kind)
-        self.kind = kind
-
-
-class Divergence(LiftError):
-    """The document's grid differs from the reference player's."""
 
 
 @dataclass(frozen=True)
@@ -309,28 +293,6 @@ class Step(NamedTuple):
     now: int
     last: int
     after: int
-
-
-class Names:
-    """Definitions by kind, numbered in first-use order, each with the origin it first stood
-    for."""
-
-    def __init__(self):
-        self.kinds, self.origins = {}, {}
-
-    def name(self, kind: str, prefix: str, value, origin: invariants.Origin) -> str:
-        """The name of ``value`` among the ``kind`` records, adding it with ``origin``."""
-        store = self.kinds.setdefault(kind, {})
-        for name, held in store.items():
-            if held == value:
-                return name
-        store[name := f"{prefix}{len(store) + 1}"] = value
-        self.origins.setdefault(kind, {})[name] = origin
-        return name
-
-    def section(self, kind: str) -> list:
-        """The records of ``kind``."""
-        return list(self.kinds.get(kind, {}).items())
 
 
 SECTION_OF = (("ins", "ins"), ("ctrl", "ctrl"), ("phrase", "phrase"))
@@ -843,9 +805,7 @@ def verify(raw: bytes, subtune: int = 0, frames: int | None = None, whole: bool 
     _, text, built = lifted(raw, subtune)
     count = frames or MINIMUM
     count = max(count, built.calls_to_play()) if whole else count
-    ours = np.asarray(play(text, count), dtype=np.uint8)
-    theirs = reference(raw, subtune, len(ours))
-    return gridcmp.cell_diff(ours, theirs), text
+    return cells_of(text, count, reference=lambda n: reference(raw, subtune, n)), text
 
 
 def report(raw: bytes, subtune: int = 0) -> dict:
@@ -858,19 +818,10 @@ def report(raw: bytes, subtune: int = 0) -> dict:
     return {"counts": counts, **invariants.sizes(text), "native_bytes": core.native_bytes}
 
 
-def checked(text_cells: tuple, frames: int) -> str:
-    """The text of ``(cells, text)``, or a Divergence naming the first differing cell."""
-    cells, text = text_cells
-    if cells.size:
-        frame, reg = (int(c) for c in cells[0][:2])
-        raise Divergence(f"frame {frame} register {reg}: {len(cells)} cells over {frames} frames")
-    return text
-
-
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
     """The document of a SID's subtune, checked against the reference (see :func:`verify`); a
     LiftError otherwise."""
-    return checked(verify(raw, subtune, frames), frames or MINIMUM)
+    return lifted_text(verify, raw, subtune, frames, MINIMUM)
 
 
 def main(argv=None) -> int:

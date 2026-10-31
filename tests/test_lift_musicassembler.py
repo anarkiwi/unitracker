@@ -22,7 +22,7 @@ from pymusicassembler.model import (
 from pysidtracker.testing import resolve_tune
 from unitracker_grammar.document import read
 
-from unitracker.lift import invariants
+from unitracker.lift import invariants, shared
 from unitracker.lift import musicassembler as lift
 
 BASE = "DEMOS/0-9/3LUX_Intro.sid"
@@ -131,7 +131,7 @@ def test_a_differing_document_is_a_divergence(monkeypatch):
     cells, _ = lift.verify(raw, 0, 50)
     assert cells.size
     with pytest.raises(lift.Divergence, match="frame 0"):
-        lift.checked((cells, ""), 50)
+        shared.checked((cells, ""), 50)
 
 
 def test_the_reference_plays_the_standard_notes_or_the_tunes_own():
@@ -536,14 +536,14 @@ def test_every_named_object_stands_for_a_native_one_and_a_context_only_among_cop
 
 
 def test_a_lift_that_names_an_object_twice_for_one_origin_is_refused(plain, monkeypatch):
-    real = lift.Names.origins
+    real = lift.Names.by_kind
 
     def doubled(self):
         out = real(self)
         out["phrases"] = {n: invariants.Origin(("pattern", 0)) for n in out["phrases"]}
         return out
 
-    monkeypatch.setattr(lift.Names, "origins", doubled)
+    monkeypatch.setattr(lift.Names, "by_kind", doubled)
     with pytest.raises(invariants.ModelError, match="one origin"):
         lift.document_text(lift.core_of_song(plain))
 

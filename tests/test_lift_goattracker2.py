@@ -5,7 +5,6 @@
 # pylint: disable=protected-access,too-few-public-methods
 
 
-import numpy as np
 import pytest
 from pygoattracker import PlayerState
 from pygoattracker import constants as GT
@@ -294,11 +293,6 @@ def test_each_voice_starts_from_the_channel_variables_the_song_init_left():
     cells, text = g.compare(gt_tune(WAVE, state=state), TICKS)
     assert not cells.size
     assert "boot" in text and "lag:1" in text
-
-
-def test_a_divergence_names_its_first_cell():
-    with pytest.raises(g.Divergence, match="frame 3 register 5"):
-        g.checked((np.array([[3, 5, 0, 1]]), ""), 10)
 
 
 def test_metal_warrior(metal_warrior):
