@@ -277,7 +277,7 @@ def test_a_divergence_names_its_first_cell():
 
 def test_metal_warrior(metal_warrior):
     raw = metal_warrior.read_bytes()
-    cells, text = g.verify(raw, 0, 4000)
+    cells, text = g.verify(raw)
     assert not cells.size
     assert text.startswith("unitracker:2.5\n") and "|loop:" in text
     assert g.lift(raw, 0, 400) == g.lift(raw, 0, 400)
@@ -286,7 +286,7 @@ def test_metal_warrior(metal_warrior):
 @pytest.mark.parametrize("tune", list(CORPUS))
 def test_corpus_tunes_lift_exactly(tune, request):
     raw = request.getfixturevalue(tune).read_bytes()
-    cells, _ = g.verify(raw, 0, 3000)
+    cells, _ = g.verify(raw)
     assert not cells.size, g.summary(cells, 3)
 
 
@@ -378,3 +378,16 @@ def test_every_corpus_tune_holds_one_object_per_origin(request):
         text, objects = g.checked_text(g.core_of_sid(raw))
         assert invariants.provenance(text, g.lifted(g.core_of_sid(raw))[1]) == objects
         assert all(a >= b for a, b in objects.values())
+
+
+def test_a_check_runs_until_every_voice_has_looped_once_at_the_slowest_tempo():
+    rows = [(24, 1, 0xF, 15)] + [REST] * 15
+    core = gt_tune(WAVE, rows=rows, default_tempo=5)
+    slowest = 16 * 15
+    assert g.check_frames(core, 10) == slowest
+    assert g.check_frames(core, 4000) == 4000
+
+
+def test_a_check_counts_the_frames_of_a_routine_calling_the_player_twice():
+    assert g.check_frames(gt_tune(WAVE, default_tempo=5, calls=1), 10) == 16 * 6
+    assert g.check_frames(gt_tune(WAVE, default_tempo=5, calls=2), 10) == 16 * 6 // 2

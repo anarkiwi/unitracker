@@ -55,7 +55,7 @@ FREQ = (T.PortamentoUp, T.PortamentoDown, T.TonePortamento, T.Vibrato)
 LOAD = "load.freq"
 WAVE_FREQ = "wave.freq"
 TICK = "tick.freq"
-CHECK = 4000
+CHECK = 20000
 summary = cli.summary
 
 
@@ -441,6 +441,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             raise Refusal("build", "tempo")
         tempos = [max(r.command.tempo, 3) for r in rows if isinstance(r.command, T.SetTempo)]
         self.rowmin = min([self.rowlen, *(min(p) for p in pairs), *tempos])
+        self.tempo_rows = [*(max(p) for p in pairs), *tempos]
 
     # ---- tables -----------------------------------------------------------------------------
 
@@ -935,6 +936,19 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             out.append((segs, entered))
         return out, context
 
+    def span(self) -> int:
+        """The calls of the player after which every voice's orderlist has looped once, at the
+        slowest row length any tempo gives."""
+        rows = 0
+        for c in self.core.voices:
+            units, _ = self.plays(self.song.subtunes[0].channels[c])
+            steps = sum(
+                r.length for n, _, t in units for r in self.song.patterns[n] for _ in range(t)
+            )
+            rows = max(rows, steps)
+        slowest = max([self.rowlen, *self.tempo_rows])
+        return rows * slowest
+
     # ---- the document -----------------------------------------------------------------------
 
     def state(self):
@@ -1108,6 +1122,13 @@ def document_text(core: Core) -> str:
     return lifted(core)[0]
 
 
+def check_frames(core: Core, frames: int = CHECK) -> int:
+    """The frames a check of ``core`` plays: at least ``frames``, and until every voice's
+    orderlist has looped once at the slowest tempo."""
+    lifter = Lift(core)
+    return max(frames, -(-lifter.span() // max(core.build.calls * core.entries, 1)))
+
+
 def checked_text(core: Core) -> tuple:
     """``(text, objects per kind)`` of ``core``'s document, a ModelError where it holds an object
     without its native one or more song entries than the orderlists have."""
@@ -1138,7 +1159,7 @@ def player_of(core: Core, notes: bool = True):
     )
 
 
-def reference(raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = True):
+def reference(raw: bytes, subtune: int = 0, frames: int = CHECK, notes: bool = True):
     """The register grid of the spec player over ``frames`` frames."""
     fmt = find_format(raw)
     model = decompile_sid(raw, subtune)
@@ -1164,18 +1185,20 @@ def checked(text_cells: tuple, frames: int) -> str:
     return text
 
 
-def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
-    """``(cells, text)`` of a SID: the cells where its document differs from the reference."""
+def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
+    """``(cells, text)`` of a SID: the cells where its document differs from the reference over
+    :func:`check_frames` frames, ``frames`` at least."""
     core = core_of_sid(raw, subtune)
     text, _ = checked_text(core)
+    frames = check_frames(core, frames)
     ours = np.asarray(play(text, frames), dtype=np.uint8)
     theirs = reference(raw, subtune, len(ours))
     return gridcmp.cell_diff(ours, theirs), text
 
 
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
-    """The document of a SID's subtune, checked against the reference over ``frames`` frames
-    (default :data:`CHECK`); a LiftError otherwise."""
+    """The document of a SID's subtune, checked against the reference over the whole song
+    (:func:`check_frames`, ``frames`` at least, default :data:`CHECK`); a LiftError otherwise."""
     frames = frames or CHECK
     return checked(verify(raw, subtune, frames), frames)
 
