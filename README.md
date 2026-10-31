@@ -6,6 +6,9 @@ which [unitracker-player](https://github.com/anarkiwi/unitracker-player) plays, 
 optimiser over any such document. The lift is checked against pysidtracker's spec player; the
 optimiser makes a document smaller, every edit proved to keep the register grid.
 
+Language-model learnability, tokenization and constrained decoding of the documents:
+[unitracker-learn](https://github.com/anarkiwi/unitracker-learn).
+
 | doc | content |
 |---|---|
 | [docs/lift/goattracker2.md](docs/lift/goattracker2.md) | the GoatTracker 2 lift (`python -m unitracker.lift.goattracker2`) |
@@ -13,8 +16,6 @@ optimiser makes a document smaller, every edit proved to keep the register grid.
 | [docs/optimiser.md#passes](docs/optimiser.md#passes) | the passes: defaults, merge, transposition folding, the legato snap, templates and their structural names, hoist (`python tools/passes_eval.py`) |
 | [docs/optimiser.md#inline](docs/optimiser.md#inline) | the optimiser's inline forms (`--inline single`, `--inline all`): definitions written at their uses |
 | [docs/optimiser.md#lossy-mode](docs/optimiser.md#lossy-mode) | the lossy mode: code modulators replaced by fitted expressions within a tolerance per cell (`--lossy`) |
-| [docs/learnability.md](docs/learnability.md) | how well language models learn documents: per form and tokenizer from scratch, and Qwen2.5 fine-tuned, in held-out bits per song tick and playable samples (`python tools/learn.py`) |
-| [docs/tokenization.md](docs/tokenization.md) | how documents tokenize, by form, tokenizer and lexical category; printer changes and their savings; a document BPE (`python -m unitracker.optimiser.tokenizer`) |
 
 ## Install
 
@@ -60,14 +61,10 @@ Reuse these before writing a new tool; extend one rather than adding a near copy
 | lift failures over HVSC, by cause | `pysidtracker.survey` with `corpus:render` (above) |
 | the reference player's register grid | `unitracker.lift.goattracker2.reference(raw, subtune, frames)` |
 | what does the lossy mode replace, save and cost per tune; how does it sound? | `python tools/lossy_eval.py DOC.yaml ... [--ticks N] [--wav DIR]` |
-| each tune's lifted and optimised forms, cached, for a corpus study | `python tools/corpus.py forms TUNES_DIR\|LIST.csv [--out out/tokenize] [--forms ...] [--timeout S] [--multi-sid]` |
-| tokens per form, tokenizer and lexical category; what each printer transform saves | `python tools/tokens.py [out/tokenize] [--forms ...] [--encoders ...]` |
 | how large is each lifted document against the tune's bytes, in bytes, tokens and xz, by section | `python tools/liftsize.py CORPUS LIST.csv ... [--hvsc DIR] [--top N] [--out SIZES.json]` |
 | which sounds of each document are percussive (one or two pitches, over and over), and how much each part repeats where a voice interleaves them | `python tools/parts.py DOC.yaml ... [--ticks N] [--out PARTS.json]` |
 | how each tune's voices hard-restart on its native register grid: per note onset, the lead frames' gate, test bit and AD/SR against the onset's, classified, with the envelope rate in effect against the prescaler wrap, per format | `python tools/hardrestart.py LIST.csv\|TUNE.sid ... [--hvsc DIR] [--player RE] [--sample N] [--frames N] [--lead K] [--out HR.json]` |
 | what starts each program (a note, an event's or a row's `run:`, a restart), which starts are replaced before they play a row, what binds and zeroes each modulator's phase, and which programs do nothing | `python tools/triggers.py DOC.yaml\|LIST.txt ... [--ticks N] [--out TRIGGERS.json]` |
-| does a model's sampled text keep to the document grammar; mask sampling to it | `python tools/constrain.py {check,sample,bench,hazards} TOKENIZER [DOCS...]` |
-| how learnable is each form and tokenizer; can a fine-tuned LLM write tunes? (GPU, in Docker, detached) | `python tools/learn.py {launch,status,run} [--preset smoke\|full] [--set KEY=VALUE ...]` |
 | do the docs' links resolve; which lines did coverage lose? | `python tools/maint.py {links,coverage BEFORE.json AFTER.json}` |
 | which generator (semitone offset, `clock_hz`, rounding) reproduces each tracker's native note table, and which entries it misses | `python tools/notetables.py [--json OUT]` |
 | a small synthetic tune for a test | `tests/conftest.py`: `gt_tune`, `table`, `hvsc_tune` |
