@@ -382,9 +382,12 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def wave_command(self, cmd) -> dict:
         """The row keys of a wavetable command."""
         match cmd:
-            case T.PortamentoUp(y) | T.PortamentoDown(y) if not self.vib:
-                step = self.step(y) * (1 if isinstance(cmd, T.PortamentoUp) else -1)
-                return {WAVE_FREQ: Once(_plus(step))}
+            case T.PortamentoUp(y) | T.PortamentoDown(y):
+                up = isinstance(cmd, T.PortamentoUp)
+                step = self.step(y)
+                if self.vib:
+                    return {WAVE_FREQ: Once(self.call("portau" if up else "portad", s=step))}
+                return {WAVE_FREQ: Once(_plus(step * (1 if up else -1)))}
             case (
                 T.SetAD()
                 | T.SetSR()
