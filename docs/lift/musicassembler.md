@@ -20,6 +20,11 @@ it (`holds:{ctrl:[step]}`); what a note triggers happens on the next call, the f
 slots and programs run. A row that stores its duration to a cell other than the voice's counter
 (a build whose `dur_long`, `dur_short` or `dur_note` is apart from `dur`) lasts one row.
 
+## Subtunes
+
+A subtune's init may point the voices at other orderlists and patterns than the file's, so the lift
+reads both from the memory init left, through the pointer tables the binding names.
+
 ## Mapping
 
 | Music Assembler | document |

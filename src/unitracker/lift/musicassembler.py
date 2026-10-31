@@ -4,18 +4,27 @@ the standard note table (docs/lift/musicassembler.md)."""
 
 import sys
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 
 import numpy as np
 from pymusicassembler import constants as MA
 from pymusicassembler import playspec
 from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
 from pymusicassembler.errors import MusicAssemblerError
-from pymusicassembler.grammar import GRAMMAR, PATTERN
+from pymusicassembler.grammar import GRAMMAR, PATTERN, orderlist_rule
+from pymusicassembler.reader import parse_orderlist, parse_pattern
 from pymusicassembler.model import ArpeggioRow, DurationEvent
 from pymusicassembler.model import Instrument as ModelInstrument
 from pymusicassembler.model import InstrumentEvent, NoteEvent, Song
 from pymusicassembler.player import Player
-from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp, parse_sid_header
+from pysidtracker import (
+    NTSC_CLOCK_HZ,
+    PAL_CLOCK_HZ,
+    SidImage,
+    find_format,
+    gridcmp,
+    parse_sid_header,
+)
 from pysidtracker.playspec.player import SpecPlayer
 from unitracker_grammar import code as asm
 from unitracker_grammar.document import (
@@ -112,7 +121,24 @@ def core_of_song(song: Song, subtune: int = 0, bind=playspec.bind, clock: int | 
     booted = Player(song, subtune, bind=bind)
     view = bytes(booted.view())
     spec, found = bind(view, booted.entry)
+    song = replace(song, **_lists(view, dict(found)))
     return Core(song, dict(found), spec, view, clock or _clock_of(song), subtune, bind)
+
+
+def _lists(view: bytes, found: dict) -> dict:
+    """The orderlists and patterns the memory init left reads through the pointer tables: a
+    subtune's init may point the voices at other lists than the file's."""
+    img, lay = SidImage.from_prg(b"\0\0" + view), SimpleNamespace(**found)
+    rule = orderlist_rule(lay)
+    orders = [parse_orderlist(img, lay, voice, rule) for voice in range(VOICES)]
+    reached = {e.pattern_id for o in orders for e in o.entries if e.pattern_id < MA.ORDER_TEMPO}
+    patterns = [None] * (max(reached, default=-1) + 1)
+    for pid in reached:
+        try:
+            patterns[pid] = parse_pattern(img, lay, pid)
+        except MusicAssemblerError:
+            continue
+    return {"orderlists": orders, "patterns": patterns}
 
 
 def core_of_sid(raw: bytes, subtune: int = 0) -> Core:

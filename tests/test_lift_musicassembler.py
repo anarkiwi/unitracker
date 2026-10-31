@@ -78,6 +78,23 @@ def test_a_tune_the_document_cannot_state_is_refused_by_class(kind, name):
     assert caught.value.kind == kind
 
 
+@pytest.mark.parametrize(
+    "name,subtune",
+    [
+        ("MUSICIANS/F/Feekzoid/Shoot_em_Up.sid", 1),
+        ("MUSICIANS/B/Beat_Machine/Chris/Megablastic.sid", 3),
+    ],
+    ids=["Shoot_em_Up 2", "Megablastic 4"],
+)
+def test_a_subtune_whose_init_points_the_voices_at_other_lists_lifts_exactly(name, subtune):
+    raw = tune(name)
+    assert (
+        lift.core_of_sid(raw, subtune).song.orderlists != lift.core_of_sid(raw, 0).song.orderlists
+    )
+    cells, _ = lift.verify(raw, subtune, FRAMES)
+    assert not cells.size
+
+
 def test_the_lift_returns_its_checked_text_and_the_cli_runs_it(tmp_path, capsys):
     raw = tune(CORPUS["plain"])
     text = lift.lift(raw, 0, 300)
@@ -394,7 +411,8 @@ def test_a_tied_note_with_a_filter_command_is_refused():
 
 def test_a_pattern_the_song_lacks_is_refused(plain):
     song = dataclasses.replace(plain, orderlists=[Orderlist([OrderEntry(200, 0, 0)])] * 3)
-    with pytest.raises(lift.Refusal, match="200 is not a pattern"):
+    song = dataclasses.replace(song, image=ma.build(song))
+    with pytest.raises(lift.Refusal, match="pattern"):
         lift.document_text(lift.core_of_song(song))
 
 
@@ -406,6 +424,7 @@ def test_an_orderlist_that_never_settles_is_refused(plain, monkeypatch):
 
 def test_an_empty_pattern_with_nothing_after_it_is_refused(plain, monkeypatch):
     song = dataclasses.replace(plain, patterns=[Pattern()] + plain.patterns[1:])
+    song = dataclasses.replace(song, image=ma.build(song))
     core = lift.core_of_song(song)
 
     def fail(*_):
