@@ -9,6 +9,9 @@ import numpy as np
 from pymusicassembler import constants as MA
 from pymusicassembler import playspec
 from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
+from pymusicassembler.errors import MusicAssemblerError
+from pymusicassembler.grammar import GRAMMAR, PATTERN
+from pymusicassembler.model import DurationEvent
 from pymusicassembler.model import Instrument as ModelInstrument
 from pymusicassembler.model import InstrumentEvent, NoteEvent, Song
 from pymusicassembler.player import Player
@@ -519,14 +522,26 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             raise Refusal("silence", "while a program may run")
         return Event("-", None, cmds)
 
-    def rows(self, pid: int) -> list:
-        """The rows of pattern ``pid`` as ``(select, event)`` pairs."""
+    def events(self, pid: int) -> list:
+        """The rows of pattern ``pid``; an empty one plays its lone ``$FF`` as a hold and reads on
+        into the bytes after it."""
         if pid >= len(self.song.patterns) or self.song.patterns[pid] is None:
             raise Refusal("pattern", f"{pid} is not a pattern")
-        events, out, sel = self.song.patterns[pid].events(), [], None
-        if not events:
-            raise Refusal("pattern", f"{pid} is empty")
-        for ev in events:
+        events = self.song.patterns[pid].events()
+        if events:
+            return events
+        found, view = self.found, self.core.view
+        at = view[found["pattern_lo"] + pid] | view[found["pattern_hi"] + pid] << 8
+        try:
+            rest = GRAMMAR.parse_prefix(bytes(view[at + 1 : at + 257]), PATTERN).model
+        except MusicAssemblerError as exc:
+            raise Refusal("pattern", f"{pid} is empty and no pattern follows") from exc
+        return [DurationEvent(MA.CTL_DUR_MASK, long=True)] + rest
+
+    def rows(self, pid: int) -> list:
+        """The rows of pattern ``pid`` as ``(select, event)`` pairs."""
+        out, sel = [], None
+        for ev in self.events(pid):
             if isinstance(ev, InstrumentEvent):
                 sel = ev.instrument
             else:
