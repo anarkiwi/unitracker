@@ -9,6 +9,7 @@ import numpy as np
 from pymusicassembler import constants as MA
 from pymusicassembler import playspec
 from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
+from pymusicassembler.model import Instrument as ModelInstrument
 from pymusicassembler.model import InstrumentEvent, NoteEvent, Song
 from pymusicassembler.player import Player
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, find_format, gridcmp, parse_sid_header
@@ -248,11 +249,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     # ---- instruments and programs -----------------------------------------------------------
 
-    def record(self, k: int):
-        """Instrument ``k``'s record."""
-        if k >= len(self.song.instruments):
-            raise Refusal("instrument", f"{k} outside the song's")
-        return self.song.instruments[k]
+    def record(self, k: int) -> Instrument:
+        """Instrument ``k``'s record as the memory init left it, where the player reads it."""
+        at = self.found["instr"] + (k << 3)
+        return ModelInstrument.from_bytes(self.core.view[at : at + MA.INSTR_RECORD_SIZE])
 
     @staticmethod
     def call(name: str, **params) -> Call:
