@@ -39,7 +39,7 @@ python tools/lift_corpus.py NAMES.txt
 | portamento, toneporta | `tick.freq` expressions |
 | vibrato, instrument vibrato | `tick.freq` code templates with state `t`, `d`, `ln` |
 | calculated speed | code templates with state `sl`, `sh`: `F(N + 1) - F(N)` shifted by the row's count, `N` the last note loaded (`ln`) |
-| `noeffects`, `nonormalspeed` builds | no tick effects; the speedtable rows as the build reads them |
+| `noeffects`, `nonormalspeed` builds | no tick effects; the speedtable rows as the build reads them. Instrument vibrato in a `noeffects` build binds in the restart program one call after its fetch row, the call the live instrument's parameter first runs in |
 | wavetable note rows | `wave.freq` once binding |
 | full ghosting, start state | `regs`, `lag`, first-tick cells. The song-start call loads each control register as `wave & gate` from the wave the reset zeroes, so the second frame differs from the ghost the init left where a control register is not already that; the document then lags by one call (`lag:1`), the init events carry the control cells, and the first-tick cells move to a middle row of `p0` one call on |
 | channel variables the song start leaves | the song start zeroes `resetlen` + 1 bytes from `songptr` and `initchn` sets `instr`, `counter` and the tempo; `vibtime`, `vibdelay` and `lastnote` keep what the init left. A once binding on the init event loads those that command 0's vibrato reads where they differ from the document's (`t` 0, `d` the first instrument's delay, `ln` 0) |
@@ -60,7 +60,7 @@ Typed `Refusal(kind)`, raised before lifting; `detail` names the construct.
 | `layout` | a speedtable row the song uses that the player reads as other bytes than the typed song holds (none in the corpus since pygoattracker 0.10.2 binds the speedtable) |
 | `restart overlap` | a note whose restart reaches back before the previous note's tick, which the player never fetches |
 | `first waveform` | a gate-keeping note off, whose event also sets a table (`run` is taken) |
-| `noeffects vibrato` | instrument vibrato in a `noeffects` build: the player runs effect 0 each tick with the vibrato parameter of the live `instr`, which the row fetch loads before the note starts, including for a voice's first note and an instrument-only row, which have no restart row to rebind at the fetch |
+| `noeffects vibrato` | a row that changes the live instrument to one of another vibrato in a noeffects build, where the vibrato cannot be bound at the fetch: the player runs effect 0 each tick with the vibrato parameter of the live `instr`, which the row fetch loads a gate timer of the instrument playing before the row, while the instrument's restart program binds it at its own timer (an instrument-only row has no restart program) |
 | `pointer onto a jump row` | a pointer or jump an instrument or command reaches that lands on a wavetable or filter table jump row (the tempo command F, a filter set of every mode bit: no typed row), on the last row of a table, or in a table that runs on past its last row beside such a landing |
 | `funk tempo` | a funk table whose rows do not alternate from the entry |
 | `funk tempo recall` | tempo recall where the table in force is not one: several tables loaded, or none loaded in a first row |

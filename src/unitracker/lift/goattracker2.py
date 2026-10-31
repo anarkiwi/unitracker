@@ -402,12 +402,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.used = used
         self.track = any(_keeps_gate(self.lay, self.song.instrument(n)) for n in used)
         self.insvib = not self.lay["noinstrvib"] and any(self.vib_of(n) for n in used)
-        if self.lay["noeffects"] and self.insvib:
-            raise Refusal(
-                "noeffects vibrato",
-                "the vibrato reads the live instrument from the row fetch, which a first note "
-                "and an instrument-only row have no restart row for",
-            )
         cmds = [r.command for r in rows]
         cmds += [r.command for r in self.song.wavetable if isinstance(r, T.WaveCommand)]
         rates = {c.speed for c in cmds if hasattr(c, "speed")} | {
@@ -633,7 +627,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             init["ctrl"] = wave
         if gate is not None:
             init["gate"] = gate
-        program = Program([Row(fetch), Row(init), Row()])
+        rows = [Row(fetch), Row(init), Row()]
+        if lay["noeffects"] and self.insvib and timer > 1:
+            rows[0:1] = [Row({**fetch, "hold": 1}), Row({"hold": timer - 1, TICK: self.fx0(n)})]
+        program = Program(rows)
         return self.names.name("restart", "r", program, invariants.Origin(("ins", n)))
 
     def instrument(self, n: int) -> str:
@@ -893,9 +890,27 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 ):
                     raise Refusal("restart overlap", "a restart reaches before the previous note")
                 since = 0 if noted else since
+                self.vibrato_fetch(instr, row, noted)
                 self.refetch(instr, row.instrument or instr)
                 instr = row.instrument or instr
                 since = None if since is None else since + self.rowmin * row.length
+
+    def vibrato_fetch(self, before: int, row, noted: bool) -> None:
+        """Refuse an instrument change a noeffects build's vibrato cannot follow. Command 0 reads
+        the vibrato parameter of the live instrument, which the row fetch loads; the fetch falls
+        a gate timer of the instrument playing before the row's tick, and the restart program
+        binds the vibrato at its own instrument's timer, so the two agree only where the timers
+        do. An instrument-only row has no restart program to bind it in. An instrument of the
+        vibrato the live one has changes nothing."""
+        after = row.instrument
+        if not (self.lay["noeffects"] and self.insvib and after and after != before):
+            return
+        if self.fx0(after) == self.fx0(before):
+            return
+        if not noted:
+            raise Refusal("noeffects vibrato", "an instrument-only row changes the live instrument")
+        if self.song.instrument(after).gate_timer != self.song.instrument(before).gate_timer:
+            raise Refusal("noeffects vibrato", "a row changes the instrument to another gate timer")
 
     def refetch(self, before: int, after: int) -> None:
         """Refuse a row change to an instrument of a shorter gate timer in a build that reads the

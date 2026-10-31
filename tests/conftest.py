@@ -114,6 +114,10 @@ CORPUS = {
         "DEMOS/A-F/Datatanten_Theme.sid",
         "a funk row of table bytes 0 that never ends",
     ),
+    "hammurabi": (
+        "GAMES/G-L/Hammurabi.sid",
+        "a noeffects build whose instruments share a gate timer, with a pulse jump onto a jump row",
+    ),
     "dirty_cheater": (
         "MUSICIANS/S/Spider_Jerusalem/Dirty_Cheater.sid",
         "the tune's own init writes",
@@ -131,7 +135,12 @@ REFUSED = {
     "first_night_together": (
         "MUSICIANS/O/Onebitman/Zerozillion/First_Night_Together.sid",
         "noeffects vibrato",
-        "instrument vibrato in a noeffects build",
+        "instrument vibrato in a noeffects build, set by an instrument-only row",
+    ),
+    "foot_in_the_mud": (
+        "MUSICIANS/P/Prestune/Foot_in_the_Mud.sid",
+        "noeffects vibrato",
+        "instrument vibrato in a noeffects build, changed to another gate timer",
     ),
     "i_dont_know": (
         "MUSICIANS/G/Groepaz/I_Dont_Know_What_I_Am_Doing.sid",
