@@ -1,7 +1,9 @@
 """The corpus lift tool and the defMON state trace."""
 
+import corpus_report
 import dmtrace
 import lift_corpus
+import lift_origins
 import numpy as np
 import pytest
 from pysidtracker.testing import resolve_tune
@@ -16,7 +18,7 @@ def test_a_tune_is_exact_refused_or_another_format(glow_worm, timewarp, metal_wa
     assert glow_worm and timewarp and metal_warrior
     exact = lift_corpus.classify(GLOW, 300, 120, "defmon")
     assert (exact["verdict"], exact["detail"]) == ("exact", "")
-    assert exact["sizes"]["native"]["instruments"] == 3
+    assert exact["sizes"]["counts"]["instruments"] == (1, 1)
     refused = lift_corpus.classify(RENT, 300, 120, "defmon")
     assert (refused["verdict"], refused["detail"]) == ("refused", "multi-SID")
     other = lift_corpus.classify(METAL, 300, 120, "defmon")
@@ -52,7 +54,8 @@ def test_the_corpus_prints_its_counts(glow_worm, timewarp, tmp_path, capsys):
     assert lift_corpus.main(argv) == 0
     text = capsys.readouterr().out
     assert "'exact': 1" in text and "'refused': 1" in text and "multi-SID" in text
-    assert "instruments 3/3" in text and "bytes " in text
+    assert "instruments 1/1" in text and "song " in text and "native " in text
+    assert "ctrl: " in text and "copies" in text and "worst " in text
     assert out.read_text().count('"verdict"') == 2
 
 
@@ -77,7 +80,7 @@ def test_every_subtune_is_checked_and_an_oversized_document_is_named(rent_a_cop,
 
     seen = []
 
-    def verify(raw, subtune, frames):
+    def verify(_raw, subtune, _frames):
         seen.append(subtune)
         if subtune == 1:
             raise ModelError("9 lifted phrases > 3 native")
@@ -86,3 +89,60 @@ def test_every_subtune_is_checked_and_an_oversized_document_is_named(rent_a_cop,
     monkeypatch.setattr(defmon, "verify", verify)
     got = lift_corpus.classify(CAR, 10, 10, "defmon", True)
     assert seen == [0, 1] and got["verdict"] == "oversized" and got["detail"].endswith("@1")
+
+
+SIZES = {
+    "counts": {
+        "instruments": (1, 1),
+        "restart": (0, 0),
+        "ctrl": (5, 3),
+        "pw": (0, 0),
+        "filter": (0, 0),
+        "phrases": (4, 4),
+        "song": (6, 8),
+    },
+    "fixed": 100,
+    "song": 900,
+    "native_bytes": 300,
+}
+
+
+def test_a_size_line_and_the_totals_give_objects_native_objects_and_bytes():
+    assert lift_corpus.size_line("a.sid", SIZES) == (
+        "a.sid: instruments 1/1 restart 0/0 ctrl 5/3 pw 0/0 filter 0/0 phrases 4/4 song 6/8"
+        " fixed 100 song 900 native 300"
+    )
+    other = SIZES | {
+        "counts": SIZES["counts"] | {"ctrl": (2, 2)},
+        "song": 1200,
+        "native_bytes": 200,
+    }
+    lines = lift_corpus.totals(
+        [{"name": "a", "sizes": SIZES}, {"name": "b", "sizes": other}, {"name": "c"}]
+    )
+    assert (
+        "ctrl: 7 objects, 5 native, 2 copies" in lines
+        and "song: 12 entries a voice, 16" in lines[6]
+    )
+    assert "song bytes 2100 native song data bytes 500" in lines
+    assert lines[-2:] == ["worst b: 1200/200", "worst a: 900/300"]
+
+
+def test_a_corpus_file_is_summarised(tmp_path, capsys):
+    path = tmp_path / "out.json"
+    path.write_text(
+        '[{"name": "a", "verdict": "exact", "detail": "", "sizes": %s}, '
+        '{"name": "b", "verdict": "refused", "detail": "digi"}]'
+        % str(SIZES).replace("(", "[").replace(")", "]").replace("'", '"')
+    )
+    assert corpus_report.main([str(path)]) == 0
+    text = capsys.readouterr().out
+    assert "'exact': 1" in text and "refused   b: digi" in text and "worst a: 900/300" in text
+
+
+def test_the_copies_of_a_native_object_are_listed_by_their_contexts(glow_worm, capsys):
+    found = lift_origins.copies(glow_worm.read_bytes())
+    assert set(found) == set(lift_corpus.KINDS[:-1])
+    assert all(len(c) > 1 for kind in found.values() for c in kind.values())
+    assert lift_origins.main([GLOW]) == 0
+    assert capsys.readouterr().out.startswith(("instruments", "restart", "ctrl", "phrases", ""))

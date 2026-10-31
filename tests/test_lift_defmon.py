@@ -5,15 +5,14 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from pydefmon import Tune
-from pydefmon.tune import Jump
+from pydefmon import DefmonError, Tune
+from pydefmon.tune import Jump, Play, Row
 from unitracker_grammar import frequency
 from unitracker_grammar.document import Call, Expr, Once, Signed
 from unitracker_grammar.expr import compile_expr
 
 from unitracker.lift import defmon as d
 from unitracker.lift import invariants
-from unitracker.lift.dmmem import Replay
 
 TICKS = 3000
 FLAGS = dict.fromkeys("uncounted plain_tr or_ctrl floored shifts fixed reduced".split(), False)
@@ -33,31 +32,10 @@ STANDARD = {
 }
 
 
-class TuneReplay:
-    """The replay interface over a parsed song, for tests that state a song as text."""
-
-    def __init__(self, tune: Tune):
-        self.tune, self.counted = tune, tune.counted
-
-    def arranger(self, y):
-        node = self.tune.chips[0][y]
-        return (0xFF, node.target, node.count) if isinstance(node, Jump) else node.voices
-
-    def end(self, p):
-        return next((ev.at, ev.end) for ev in self.tune.patterns[p] if ev.end is not None)
-
-    def events(self, p, last):
-        return tuple(ev for ev in self.tune.patterns[p] if ev.at <= last)
-
-    def row(self, y):
-        return self.tune.rows[y]
-
-
 def core(text: str, flags=None, **init) -> d.Core:
     """A core of the song ``text`` (the ``defmon.lark`` grammar) over the standard init state."""
-    tune = Tune.parse(text)
     return d.Core(
-        TuneReplay(tune),
+        Tune.parse(text),
         FLAGS | (flags or {}),
         STANDARD | init,
         tuple(range(128)),
@@ -99,13 +77,14 @@ CORPUS += "rent_a_cop in_memory_of techno_aha triangle svenska anticitizen".spli
 
 
 @pytest.mark.parametrize("tune", CORPUS)
-def test_corpus_tunes_play_exactly_within_the_native_counts(tune, request):
+def test_corpus_tunes_play_exactly_and_every_object_has_an_origin(tune, request):
     raw = request.getfixturevalue(tune).read_bytes()
-    cells, text = d.verify(raw, 0, TICKS)
+    cells, text = d.verify(raw, 0, TICKS, whole=False)
     assert not cells.size, d.summary(cells, 3)
     assert text.startswith("unitracker:2.5\n") and "lag:1" in text and "|loop:" in text
-    core_ = d.core_of_sid(raw)
-    assert invariants.check(text, d.native_counts(core_))["song"][0] > 0
+    _, again, lift = d.lifted(raw)
+    assert again == text and invariants.lifted(text)["song"][0] > 0
+    assert set(lift.origins) == set(invariants.KINDS[:-1])
 
 
 @pytest.mark.parametrize("tune", CORPUS)
@@ -113,7 +92,7 @@ def test_every_subtune_of_a_corpus_tune_is_exact(tune, request):
     raw = request.getfixturevalue(tune).read_bytes()
     songs = d.SidImage.from_bytes(raw).header.songs
     for subtune in range(songs):
-        cells, _ = d.verify(raw, subtune, 600)
+        cells, _ = d.verify(raw, subtune, 600, whole=False)
         assert not cells.size, (subtune, d.summary(cells, 3))
 
 
@@ -127,7 +106,7 @@ def test_the_build_flags_choose_the_document(ponky, glow_worm, higher_scores):
     cores = [d.core_of_sid(t.read_bytes()) for t in (ponky, glow_worm, higher_scores)]
     assert [c.flags["or_ctrl"] for c in cores] == [True, False, False]
     assert [c.flags["plain_tr"] for c in cores] == [True, False, True]
-    assert [c.replay.counted for c in cores] == [False, True, False]
+    assert [c.tune.counted for c in cores] == [False, True, False]
     assert "l.ctrl:" in d.document_text(cores[0]) and "|" in d.document_text(cores[0])
 
 
@@ -214,7 +193,8 @@ def test_the_walk_counts_jumps_by_their_owner():
 
 
 def test_the_walk_takes_a_jump_row_always_when_uncounted():
-    steps, loop = d.Lift(core(SONG.replace("jumps counted", "jumps uncounted"))).walk()
+    text = SONG.replace("jumps counted", "jumps uncounted").replace("x2", "x0")
+    steps, loop = d.Lift(core(text)).walk()
     assert [s[0] for s in steps] == [(1, 2, 3), (1, 2, 3)] and loop == 1
 
 
@@ -302,24 +282,40 @@ def spec_pitch(note: int, mode: int, detune: int) -> tuple:
 
 @pytest.mark.parametrize("flags, span", [({"plain_tr": True}, 256), ({}, 128)])
 @pytest.mark.parametrize("mode", [0, 1, 7, 127])
-@pytest.mark.parametrize("voice", [0, 2])
-def test_pitch_expressions_are_the_pitch_step(flags, span, mode, voice):
-    lift = d.Lift(core(SONG, flags))
+def test_pitch_expressions_are_the_pitch_step(flags, span, mode):
+    lift = d.Lift(core(SONG, flags, detune=(0, 0, 0)))
     space = {"_F": lambda k: frequency(k, d.PAL_CLOCK_HZ), "_T": {}}
-    freq = compile_expr(lift.pitch(voice, mode).text, space, zero=True)
-    carry = compile_expr(lift.carry(voice, mode).text, space, zero=True)
+    freq = compile_expr(lift.pitch(mode).text, space, zero=True)
+    carry = compile_expr(lift.carry(mode).text, space, zero=True)
     for note in range(span):
-        want, cy = spec_pitch(note, mode, STANDARD["detune"][voice])
+        want, cy = spec_pitch(note, mode, 0)
         assert (freq(0, 0, note - 24), carry(0, 0, note - 24)) == (want, int(cy)), note
+
+
+@pytest.mark.parametrize(
+    "flags, names", [({}, ("det7", "cdet7")), ({"plain_tr": True}, ("det", "cdet"))]
+)
+def test_a_detune_is_a_state_a_template_reads_and_the_init_event_sets(flags, names):
+    lift = d.Lift(core(SONG, flags))
+    assert lift.pitch(0) == Call(names[0], ()) and lift.carry(0) == Call(names[1], ())
+    text = d.document_text(core(SONG, flags))
+    assert "tset(1)" in text and "tset(2)" in text and "tset(0)" not in text
+    assert text.count("i.freq:") == 2 and "t.freq" not in text
+    assert "i.freq" not in d.document_text(core(SONG, flags, detune=(0, 0, 0)))
+
+
+def test_the_absolute_build_masks_the_note_of_the_detune_templates():
+    assert d.Lift(core(SONG)).pitch(0) == Call("det7", ())
+    assert d.Lift(core(SONG, {"plain_tr": True})).pitch(0) == Call("det", ())
 
 
 def test_slide_modes_are_templates_over_the_rate_table():
     lift = d.Lift(core(SONG, {"plain_tr": True}))
     rate = lift.core.rates
-    assert lift.pitch(0, 0x81) == Call("up", (rate[2],))
-    assert lift.pitch(0, 0xC1) == Call("dn", (rate[2],))
-    assert lift.carry(0, 0xC1) == Call("cdn", (rate[2],))
-    assert d.Lift(core(SONG)).pitch(0, 0xFF) == Call("dn7", (rate[126],))
+    assert lift.pitch(0x81) == Call("up", (rate[2],))
+    assert lift.pitch(0xC1) == Call("dn", (rate[2],))
+    assert lift.carry(0xC1) == Call("cdn", (rate[2],))
+    assert d.Lift(core(SONG)).pitch(0xFF) == Call("dn7", (rate[126],))
 
 
 def test_the_acid_column_sets_the_accumulator_or_a_step():
@@ -366,100 +362,127 @@ def test_the_command_line_verifies_and_lifts(glow_worm, capsys):
     assert capsys.readouterr().out.startswith("unitracker:2.5\n")
 
 
-TABLES = dict(v1=0x1000, v2=0x1100, v3=0x1200, pat_lo=0x1300, pat_hi=0x1400, rows_lo=0x1500)
-TABLES |= dict(rows_hi=0x1600, dl=0x1700, rowptr_lo=0xFB, rowptr_hi=0xFC, scratch=0x96)
+@pytest.mark.parametrize(
+    "message, kind",
+    [
+        ("no defMON player: not found", "format"),
+        ("pattern $05 has no ending ALT step", "no ending pattern"),
+        ("row $07 is read from cells the replay writes", "jp onto jp"),
+    ],
+)
+def test_a_model_error_is_a_typed_refusal(message, kind):
+    got = d.refusal(DefmonError(message))
+    assert isinstance(got, d.Refusal) and got.kind == kind and message in str(got)
 
 
-def memory(arranger=(), patterns=(), rows=(), fixed=False, counted=True) -> Replay:
-    """A replay over a memory with ``arranger`` rows, ``patterns`` as byte strings laid end to
-    end from $2000 and ``rows`` as ``(page, low, dl)``."""
-    mem = bytearray(0x10000)
-    for y, row in enumerate(arranger):
-        for table, value in zip(("v1", "v2", "v3"), row):
-            mem[TABLES[table] + y] = value
-    at = 0x2000
-    for p, body in enumerate(patterns):
-        mem[TABLES["pat_lo"] + p], mem[TABLES["pat_hi"] + p] = at & 255, at >> 8
-        mem[at : at + len(body)] = body
-        at += len(body)
-    for y, (page, low, dl) in enumerate(rows):
-        mem[TABLES["rows_hi"] + y], mem[TABLES["rows_lo"] + y], mem[TABLES["dl"] + y] = (
-            page,
-            low,
-            dl,
-        )
-    return Replay(bytes(mem), TABLES, fixed, counted)
+def test_a_replay_the_model_cannot_read_is_refused_by_its_class(glow_worm, monkeypatch):
+    def fail(*_):
+        raise DefmonError("pattern $01 has no ending ALT step")
 
-
-def test_a_pattern_is_the_stream_at_its_pointer_up_to_its_alt_step_wherever_that_is():
-    body = bytes([0x40, 5]) + bytes([0x01]) * 40 + bytes([0x12, 0x30]) + bytes([0x8F, 2])
-    replay = memory(patterns=[body], rows=[(1, 0, 0)] * 6)
-    assert replay.end(0) == (126, 15) and replay.size(0) == 45
-    assert [s[0] for s in replay.stream(0)] == [0, 122, 126]
-    assert [(e.at, e.a, e.note) for e in replay.events(0, 122)] == [(0, 5, None), (122, None, 0x30)]
-
-
-def test_a_packed_stream_has_a_payload_byte_a_gate_and_a_fixed_one_four_bytes():
-    packed = bytes([0x70, 1, 2, 3, 0x00, 0x8A])
-    fixed = bytes([0x70, 1, 2, 3, 0x00, 0, 0, 0, 0x8A, 0, 0, 0])
-    one, two = memory(patterns=[packed]), memory(patterns=[fixed], fixed=True)
-    for replay in (one, two):
-        assert replay.stream(0)[0] == (0, 0x70, 1, 2, 3)
-        assert replay.end(0) == (4, 10)
-    assert (one.size(0), two.size(0)) == (6, 12)
-
-
-def test_a_pattern_index_past_the_tables_reads_the_memory_after_them():
-    replay = memory(patterns=[b"\x8f"])
-    mem = bytearray(replay.mem)
-    mem[TABLES["pat_lo"] + 130], mem[TABLES["pat_hi"] + 130] = 0x00, 0x30
-    mem[0x3000:0x3002] = b"\x8a\x00"
-    assert Replay(bytes(mem), TABLES, False, True).end(130) == (0, 10)
-
-
-def test_a_pattern_that_never_ends_is_refused():
+    monkeypatch.setattr(d.Tune, "from_replay", fail)
     with pytest.raises(d.Refusal) as caught:
-        memory(patterns=[b"\x00"]).stream(0)
+        d.core_of_sid(glow_worm.read_bytes())
     assert caught.value.kind == "no ending pattern"
 
 
-def test_a_jp_row_names_its_target_and_a_jp_onto_a_jp_row_is_the_page_zero_row():
-    rows = [(0x20, 0, 0x80), (0, 0, 0), (0, 5, 0)]
-    replay = memory(rows=rows)
-    assert replay.resolve(0) == 0 and replay.resolve(1) == 0 and replay.resolve(2) == 5
-    quiet = memory(rows=[(0, 7, 3), (2, 0, 0)])
-    row = quiet.row(0)
-    assert row.columns == () and row.hold == 4 and row.next == 1
+def test_a_reduced_entry_tune_is_read_through_its_full_entry(triangle):
+    core_ = d.core_of_sid(triangle.read_bytes())
+    assert 0 in core_.calls and 1 in core_.calls and core_.tune.init.cursor == core_.init["cursor"]
+    assert core_.tune.chips[0] and core_.native_bytes > 0
 
 
-def test_a_row_read_from_cells_the_interpreter_writes_is_refused():
-    with pytest.raises(d.Refusal) as caught:
-        memory(rows=[(0, 0xF0, 0)]).row(0)
-    assert caught.value.kind == "jp onto jp"
+def test_song_bytes_are_the_streams_the_byte_grammar_parses():
+    mem = bytearray(0x10000)
+    mem[0x1300:0x1303], mem[0x1400:0x1403] = bytes([0x00, 0x00, 0x00]), bytes([0x20, 0x21, 0x22])
+    mem[0x2000:0x2007] = bytes([0x40, 5, 0x8F, 0xEE, 0xEE, 0xEE, 0xEE])
+    mem[0x2100:0x2107] = bytes([0, 0x12, 0x30, 0xC0, 7, 9, 9])
+    mem[0x1501], mem[0x1601] = 0x00, 0x30
+    mem[0x3000:0x3004] = bytes([0x30, 0x11, 0xF0, 0x00])
+    tables = {"pat_lo": 0x1300, "pat_hi": 0x1400, "rows_lo": 0x1500, "rows_hi": 0x1600}
+    facts = SimpleNamespace(tables=tables, flags={"fixed": False})
+    tune = Tune(
+        chips=({0: Play((0, 1, 1)), 1: Jump(0, 2), 2: Play((0x80, 0, 0))},),
+        patterns={0: (), 1: ()},
+        rows={1: Row()},
+        landed=({2: Play((0x80, 0, 0))},),
+    )
+    assert d.song_bytes(tune, bytes(mem), facts) == 3 * 3 + 3 + 5 + (4 + 1)
+    tune = replace(tune, landed=({1: Play((0, 0, 0))},), patterns={0: ()}, rows={})
+    assert d.song_bytes(tune, bytes(mem), facts) == 3 * 4 + 3
 
 
-def test_a_stop_row_has_neither_hold_nor_next():
-    mem = memory(rows=[(0x20, 0, 0x80)])
-    row = mem.row(0)
-    assert (row.hold, row.next) == (None, None)
+def test_a_programs_scope_is_the_voice_and_layer_its_slots_name():
+    assert not d.scope(["ad", "p.freq", "m.pw"])
+    assert d.scope(["w b.pw".split()[0] + "b.pw"]) == (("layer", "b"),)
+    assert d.scope(["r3a.route", "w a.pw".replace(" ", "")]) == (("layer", "a"), ("voice", 2))
+    assert d.scope(["k1b.cut", "e2a.cut"]) == (
+        ("layer", "a"),
+        ("layer", "b"),
+        ("voice", 0),
+        ("voice", 1),
+    )
 
 
-def test_the_arranger_reaches_a_jump_once_whatever_its_count():
-    rows = [(0, 1, 2), (1, 2, 3), (0x80, 0, 2), (4, 4, 4)]
-    plays, jumps = memory(arranger=rows).reach(0)
-    assert jumps == {2} and plays >= {0, 1, 3}
-    plain, again = memory(arranger=rows, counted=False).reach(0)
-    assert again == {2} and 3 not in plain
+def test_origins_name_the_native_object_and_the_context_a_copy_needs(glow_worm):
+    _, _, lift = d.lifted(glow_worm.read_bytes())
+    origins = lift.origins
+    assert set(origins["instruments"].values()) == {invariants.Origin(("voice", 0))}
+    inits = [o for o in origins["ctrl"].values() if o.native[0] == "init"]
+    assert inits == [invariants.Origin(("init", 0, "a"))]
+    rows = [o for o in origins["ctrl"].values() if o.native[0] == "row"]
+    assert all(set(c for c, _ in o.context) <= {"voice", "layer"} for o in rows)
+    patterns = list(origins["phrases"].values())
+    assert all(
+        o.native[0] == "pattern" and ("last", o.context[0][1]) == o.context[0] for o in patterns
+    )
+    assert all(not o.context or o.context[0][0] == "last" for o in patterns)
 
 
-def test_a_document_reports_its_size_against_its_song_data(glow_worm):
+def test_a_voice_free_row_is_one_program_whatever_voice_and_layer_arm_it():
+    lift = d.Lift(core(SONG))
+    names = {lift.program(1, layer, voice) for layer in "ab" for voice in range(3)}
+    assert len(names) == 1
+    origin = lift.names.origins["ctrl"][names.pop()]
+    assert origin == invariants.Origin(("row", 1), ())
+
+
+def test_a_row_that_routes_is_a_program_a_voice_and_layer():
+    text = SONG.replace("row $02 WGh $41 TR $03 stop", "row $02 RE $f1 stop")
+    lift = d.Lift(core(text))
+    names = {(l, v): lift.program(2, l, v) for l in "ab" for v in (0, 2)}
+    assert len(set(names.values())) == 4
+    origin = lift.names.origins["ctrl"][names["b", 2]]
+    assert origin == invariants.Origin(("row", 2), (("layer", "b"), ("voice", 2)))
+
+
+def test_the_report_counts_objects_against_native_objects_and_bytes(glow_worm):
     sizes = d.report(glow_worm.read_bytes())
-    assert set(sizes) == {"lifted", "native", "bytes", "native_bytes"}
-    assert all(sizes["lifted"][k] <= sizes["native"][k] for k in invariants.KINDS[:-1])
-    assert sizes["native_bytes"] > 0 and sizes["bytes"] > sizes["native_bytes"]
+    assert list(sizes["counts"]) == list(invariants.KINDS)
+    assert all(have >= native for k, (have, native) in sizes["counts"].items() if k != "song")
+    assert sizes["counts"]["instruments"] == (1, 1) and sizes["counts"]["song"][0] > 0
+    assert 0 < sizes["native_bytes"] < sizes["song"]
+    assert sizes["fixed"] > 0
 
 
-def test_a_document_over_the_native_counts_is_refused(glow_worm, monkeypatch):
-    monkeypatch.setattr(d, "native_counts", lambda _: dict.fromkeys(invariants.KINDS[:-1], 0))
+def test_a_document_with_an_unnamed_or_unattributed_object_is_refused(glow_worm, monkeypatch):
+    monkeypatch.setattr(d.Lift, "origins", property(lambda _: {"ctrl": {}}))
     with pytest.raises(invariants.ModelError):
-        d.verify(glow_worm.read_bytes(), 0, 50)
+        d.lifted(glow_worm.read_bytes())
+
+
+def test_the_whole_song_is_played_through_the_walk_and_its_loop_once_more():
+    lift = d.Lift(core(SONG))
+    last = lift.steps[-1]
+    end = last.now + last.delay + last.last + 2
+    assert lift.calls_to_play() >= 2 * end - lift.steps[lift.loop].now
+    slow = d.Lift(replace(core(SONG), calls=(1, 0, 0, 0)))
+    assert slow.calls_to_play() >= 4 * (slow.steps[-1].now + 1)
+
+
+def test_a_whole_song_check_plays_at_least_the_minimum(glow_worm, monkeypatch):
+    played = []
+    monkeypatch.setattr(d, "play", lambda _, n: played.append(n) or np.zeros((n, 25)))
+    monkeypatch.setattr(d, "reference", lambda *_: np.zeros((played[-1], 25), dtype=np.uint8))
+    raw = glow_worm.read_bytes()
+    assert not d.verify(raw)[0].size and not d.verify(raw, 0, 10, whole=False)[0].size
+    assert played == [max(d.MINIMUM, played[0]), 10]

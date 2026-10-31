@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
-from pydefmon import DefmonSong
-from pydefmon.spec import build_facts, player_bases, spec
+from pydefmon import DefmonError, DefmonSong, Tune
+from pydefmon.spec import VOICE_STRIDE, build_facts, player_bases, spec
+from pydefmon._layout import STREAMS
+from pydefmon.tune import Jump
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, gridcmp
 from pysidtracker.cadence import cadence_info
 from pysidtracker.errors import SidParseError
@@ -41,12 +43,13 @@ from unitracker_player.player import play
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.dmcode import ROUTINES, STATE
-from unitracker.lift.dmmem import LiftError, Refusal, Replay
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
-VOICE = 0x31
-CHECK = 4000
+MINIMUM = 20000
+MAX_DELAY = 15
+SPAN = 1 << 16
+ROW = 15
 WINDOW = 64
 TRIGGERS = ("pal_video", "ntsc_video", "cia_timer")
 LIMIT = 1 << 15
@@ -54,11 +57,23 @@ LOW = -24
 ORDER = tuple("events read pulse ctrl filter freq pw cut ctl ad sr res route mode vol".split())
 summary = cli.summary
 CELL_OF = {
-    "freq": "up dn up7 dn7 clr seed",
-    "pw": "cup cdn cup7 cdn7 pclr pseed psw pwinit pwset psset pwps",
+    "freq": "up dn up7 dn7 clr seed tset det det7",
+    "pw": "cup cdn cup7 cdn7 cdet cdet7 pclr pseed psw pwinit pwset psset pwps",
 }
 CELL_OF = {t: c for c, names in CELL_OF.items() for t in names.split()}
 CELL_OF |= {t: "cut" for t in ("cp", "acc", "add", "sub", "step", "stepx")}
+
+
+class LiftError(ValueError):
+    """A tune the lift cannot state exactly, or whose document differs from the reference."""
+
+
+class Refusal(LiftError):
+    """A construct of a tune the document cannot state; ``kind`` names its class."""
+
+    def __init__(self, kind: str, detail: str = ""):
+        super().__init__(f"{kind}: {detail}" if detail else kind)
+        self.kind = kind
 
 
 class Divergence(LiftError):
@@ -67,10 +82,11 @@ class Divergence(LiftError):
 
 @dataclass(frozen=True)
 class Core:  # pylint: disable=too-many-instance-attributes
-    """What a lift needs of a tune: the replay's song tables, the build flags, the state init
-    leaves, the slide rate table, the clock and the title lines."""
+    """What a lift needs of a tune: pydefmon's model of its replay, the build flags, the state
+    init leaves, the slide rate table, the clock, the title lines and the bytes of the song data
+    the model reads."""
 
-    replay: Replay
+    tune: Tune
     flags: dict
     init: dict
     rates: tuple
@@ -78,18 +94,63 @@ class Core:  # pylint: disable=too-many-instance-attributes
     head: tuple
     cp_extra: bool = True
     calls: tuple = (1,)
+    native_bytes: int = 0
 
 
-def _state(mem, binding) -> dict:
-    """The values the replay's init leaves in the cells the first play call continues from."""
-    voices = (
-        "pw_lo pw_hi freq_lo freq_hi sr ad wgh wgl slide_lo slide_hi mode depth detune vbit vmask"
-        " note note_base"
-    ).split()
-    out = {n: tuple(mem[binding[n] + v * VOICE] for v in range(3)) for n in voices}
-    single = "res fv cut_lo cut_hi cut_step_lo cut_step_hi op_lo op_hi extra floor shift".split()
-    single += "trigger cursor owner count".split()
-    return out | {n: mem[binding[n]] for n in single}
+REFUSED = (
+    ("no defMON player", "format"),
+    ("no ending ALT", "no ending pattern"),
+    ("read from cells the replay writes", "jp onto jp"),
+)
+
+
+def refusal(exc: DefmonError) -> Refusal:
+    """The typed refusal of a model error."""
+    text = str(exc)
+    kind = next((k for match, k in REFUSED if match in text), "format")
+    return Refusal(kind, text)
+
+
+VOICE_CELLS = (
+    "pw_lo pw_hi freq_lo freq_hi sr ad wgh wgl slide_lo slide_hi mode depth detune".split()
+)
+VOICE_CELLS += ["note", "note_base"]
+BUILD_CELLS = "op_lo op_hi extra floor shift".split()
+
+
+def _state(tune: Tune, mem, binding) -> dict:
+    """The state init leaves (``Tune.init``), and the build constants the model does not hold:
+    the routing bits and the cutoff's patched operands."""
+    init = tune.init
+    out = {n: tuple(v[n] for v in init.voices) for n in VOICE_CELLS}
+    out |= {
+        n: tuple(mem[binding[n] + v * VOICE_STRIDE] for v in range(3)) for n in ("vbit", "vmask")
+    }
+    out |= {n: mem[binding[n]] for n in BUILD_CELLS}
+    out |= init.cells
+    return out | {n: getattr(init, n) for n in ("trigger", "cursor", "owner", "count")}
+
+
+def song_bytes(tune: Tune, mem, facts) -> int:
+    """The bytes of the song data the model reads: three an arranger row, each pattern's stream
+    to its ALT step and each sidTAB row with its DL, as the byte grammar parses them."""
+    tables, rule = facts.tables, "fixed" if facts.flags["fixed"] else "stream"
+
+    def table(name: str, index: int) -> int:
+        return mem[(tables[name] + index) & 0xFFFF]
+
+    def stream(at: int, rule: str, size: int) -> int:
+        return STREAMS.parse_prefix((mem[at:] + mem[:at])[:size], rule).size
+
+    chip, landed = tune.chips[0], (tune.landed or ({},))[0]
+    rows = len(chip) + sum(isinstance(chip[y], Jump) for y in landed)
+    size = 3 * rows
+    for p in tune.patterns:
+        at = table("pat_lo", p) | table("pat_hi", p) << 8
+        size += stream(at, rule, SPAN)
+    for y in tune.rows:
+        size += 1 + stream(table("rows_hi", y) << 8 | table("rows_lo", y), "row", ROW)
+    return size
 
 
 def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
@@ -109,26 +170,31 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     if (trigger := cadence_info(raw, subtune + 1)["trigger"]) not in TRIGGERS:
         raise Refusal("digi", f"the play source is {trigger}")
     player = fmt.spec_player(song, notes=True)
-    mem = player.memory
+    mem = bytes(player.memory)
     base = player_bases(mem)[0]
-    facts = build_facts(mem, base)
-    replay = Replay(mem, facts.binding, facts.flags["fixed"], not facts.flags["uncounted"])
-    calls = _schedule(_entries_entered(player, WINDOW), mem, base)
-    head = SidImage.from_bytes(raw).header
-    rates = tuple(
-        mem[facts.binding["rate_lo"] + r] | mem[facts.binding["rate_hi"] + r] << 8
-        for r in range(128)
-    )
+    calls, entry = _schedule(_entries_entered(player, WINDOW), mem, base)
+    try:
+        tune = Tune.from_replay(mem, base, entry)
+    except DefmonError as exc:
+        raise refusal(exc) from exc
+    facts = build_facts(mem, base, entry)
+    head, binding = SidImage.from_bytes(raw).header, facts.binding
     return Core(
-        replay,
+        tune,
         dict(facts.flags),
-        _state(mem, facts.binding),
-        rates,
+        _state(tune, mem, binding),
+        _rates(mem, binding),
         NTSC_CLOCK_HZ if head.is_ntsc else PAL_CLOCK_HZ,
         (head.name, head.author, head.released),
-        facts.binding["cp"] == facts.binding["extra"],
+        binding["cp"] == binding["extra"],
         calls,
+        song_bytes(tune, mem, facts),
     )
+
+
+def _rates(mem, binding) -> tuple:
+    """The slide rate table the player's AF modes index (the model does not hold it)."""
+    return tuple(mem[binding["rate_lo"] + r] | mem[binding["rate_hi"] + r] << 8 for r in range(128))
 
 
 def _entries_entered(player, frames: int) -> list:
@@ -152,14 +218,16 @@ def _entries_entered(player, frames: int) -> list:
 
 
 def _schedule(entered: list, mem, base: int) -> tuple:
-    """The repeating pattern of full (1) and sub-tick (0) calls the tune's interrupt makes, from
-    the entry each of its first calls enters."""
+    """``(schedule, entry)``: the repeating pattern of full (1) and sub-tick (0) calls the tune's
+    interrupt makes, from the entry each of its first calls enters, and the first full entry."""
     full = {e: int(not build_facts(mem, base, e).flags["reduced"]) for e in set(entered)}
     calls = [full[e] for e in entered]
     period = next((p for p in range(1, WINDOW // 4 + 1) if calls == calls[:p] * (WINDOW // p)), 0)
     if len(calls) != WINDOW or not period:
         raise Refusal("multispeed", "the calls are not periodic")
-    return tuple(calls[:period])
+    if not (entry := next((e for e in entered if full[e]), None)):
+        raise Refusal("multispeed", "no call runs the arranger")
+    return tuple(calls[:period]), entry
 
 
 def _refuse(core: Core) -> None:
@@ -244,23 +312,28 @@ class Step(NamedTuple):
 
 
 class Names:
-    """Definitions by kind, numbered in first-use order."""
+    """Definitions by kind, numbered in first-use order, each with the origin it first stood
+    for."""
 
     def __init__(self):
-        self.kinds = {}
+        self.kinds, self.origins = {}, {}
 
-    def name(self, kind: str, prefix: str, value) -> str:
-        """The name of ``value`` among the ``kind`` records, adding it."""
+    def name(self, kind: str, prefix: str, value, origin: invariants.Origin) -> str:
+        """The name of ``value`` among the ``kind`` records, adding it with ``origin``."""
         store = self.kinds.setdefault(kind, {})
         for name, held in store.items():
             if held == value:
                 return name
         store[name := f"{prefix}{len(store) + 1}"] = value
+        self.origins.setdefault(kind, {})[name] = origin
         return name
 
     def section(self, kind: str) -> list:
         """The records of ``kind``."""
         return list(self.kinds.get(kind, {}).items())
+
+
+SECTION_OF = (("ins", "ins"), ("ctrl", "ctrl"), ("phrase", "phrase"))
 
 
 def _order(slot: str) -> tuple:
@@ -272,12 +345,30 @@ def _const(value: int) -> Expr:
     return Expr(canonical(f"(0 & v) + {value}"))
 
 
+SCOPE = re.compile(r"(?:[erk](\d)([a-z])|w([a-z]))\.")
+
+
+def scope(keys) -> tuple:
+    """What the slots a program's keys bind name: ``("voice", v)`` and ``("layer", l)``."""
+    found = set()
+    for key in keys:
+        if match := SCOPE.match(key):
+            voice, layer, only = match.groups()
+            found.add(("layer", layer or only))
+            if voice:
+                found.add(("voice", int(voice) - 1))
+    return tuple(sorted(found))
+
+
 class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """One core's document."""
 
     def __init__(self, core: Core):
         _refuse(core)
-        self.core, self.replay, self.st, self.flags = core, core.replay, core.init, core.flags
+        self.core, self.tune, self.st, self.flags = core, core.tune, core.init, core.flags
+        self.chip = core.tune.chips[0]
+        self.landed = core.tune.landed[0] if core.tune.landed else {}
+        self.detuned = any(self.st["detune"])
         self.names, self.calls = Names(), []
         self.extra, self.fulls = int(not core.calls[0]), sum(core.calls)
         self.steps, self.loop = self.walk()
@@ -312,21 +403,24 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         y = f"({self.key} + {mode} & 255)"
         return f"F({y} - 48) - F({y} - 49)"
 
-    def pitch(self, voice: int, mode: int):
-        """The pitch binding of ``mode`` for ``voice``."""
-        d = self.st["detune"][voice]
+    def pitch(self, mode: int):
+        """The pitch binding of ``mode``: the note's word, its low byte plus the voice's detune
+        (state ``g``) in a tune that detunes."""
         if mode == 0:
-            w = self.word()
-            return Expr(canonical(f"({w} & 65280) | ({w} + {d} & 255)" if d else w))
+            if self.detuned:
+                return self.call("det7" if self.mask7 else "det")
+            return Expr(canonical(self.word()))
         if mode < 128:
             return Expr(canonical(f"u16({self.word()} + {self.step(mode)})"))
         return self.slide(mode, "")
 
-    def carry(self, voice: int, mode: int):
+    def carry(self, mode: int):
         """The binding of the pulse sweep's carry from the pitch step of ``mode``."""
         w = self.word()
         if mode == 0:
-            return Expr(canonical(f"(({w} & 255) + {self.st['detune'][voice]}) >> 8"))
+            if self.detuned:
+                return self.call("cdet7" if self.mask7 else "cdet")
+            return _const(0)
         if mode < 128:
             return Expr(canonical(f"({w} + (({self.step(mode)}) & 65535)) >> 16"))
         return self.slide(mode, "c")
@@ -359,9 +453,9 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             t = col["TR"]
             out["note"] = note_name((t & 127) + LOW) if not self.plain and t & 0x80 else Signed(t)
         if "AF" in col:
-            out["p.freq"] = self.pitch(voice, col["AF"])
+            out["p.freq"] = self.pitch(col["AF"])
             if self.ps:
-                out["m.pw"] = self.carry(voice, col["AF"])
+                out["m.pw"] = self.carry(col["AF"])
         self.pulse(col, out, layer)
         if "RE" in col:
             self.filt(col["RE"], out, layer, voice)
@@ -425,17 +519,19 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     def program(self, y: int, layer: str, voice: int) -> str:
         """The ``ctrl`` program name of the cascade armed at row ``y``."""
-        order, loop = chain(self.replay.row, y)
-        rows = [Row(self.keys(self.replay.row(r), layer, voice)) for r in order]
-        return self.names.name("ctrl", "c", Program(tuple(rows), loop))
+        order, loop = chain(self.tune.rows.__getitem__, y)
+        rows = [Row(self.keys(self.tune.rows[r], layer, voice)) for r in order]
+        context = scope(k for row in rows for k, _ in row.keys)
+        origin = invariants.Origin(("row", y), context)
+        return self.names.name("ctrl", "c", Program(tuple(rows), loop), origin)
 
     # ---- patterns and the arranger ----------------------------------------------------------
 
-    def arranger(self, y: int) -> tuple:
-        """The arranger row ``y``: ``(V1, V2, V3)``."""
+    def arranger(self, y: int):
+        """The arranger step at row ``y``: a ``Play`` or a ``Jump``."""
         try:
-            return self.replay.arranger(y)
-        except LookupError as exc:
+            return self.chip[y]
+        except KeyError as exc:
             raise Refusal("arranger", f"row ${y:02x} is not in the song") from exc
 
     def tick(self, t: int) -> int:
@@ -459,46 +555,59 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 return steps, seen[at]
             seen[at] = len(steps)
             row = self.arranger(y)
-            if row[0] & 0x80:
+            if isinstance(row, Jump):
                 y, owner, count = self.jump(row, y, owner, count)
-                row = self.arranger(y)
-            last, delay = self.length(row)
-            steps.append(Step(row, t, now, last, delay))
+                row = self.landed.get(y) or self.arranger(y)
+            last, delay = self.length(row.voices)
+            steps.append(Step(row.voices, t, now, last, delay))
             now += t + last + 2
             t = delay
             y = (y + 1) % 256
         raise Refusal("arranger", "no loop within the limit")
 
-    def jump(self, row: tuple, y: int, owner: int, count: int) -> tuple:
+    @staticmethod
+    def jump(row: Jump, y: int, owner: int, count: int) -> tuple:
         """``(row played, owner, count)`` after the jump row ``y``."""
-        target, n = row[1], row[2]
-        if not self.replay.counted or not n:
-            return target, owner, count
+        if not row.count:
+            return row.target, owner, count
         if owner != y:
-            return target, y, n
+            return row.target, y, row.count
         count = (count - 1) & 255
-        return (target, owner, count) if count else (y + 1, 0, count)
+        return (row.target, owner, count) if count else (y + 1, 0, count)
 
     def length(self, voices: tuple) -> tuple:
         """``(full calls to the ALT step, its delay)`` of the patterns played together: the first
         ALT step, the last voice's delay where several end together."""
-        ends = [self.replay.end(p) for p in voices]
+        ends = [
+            (ev.at, ev.end) for p in voices for ev in self.tune.patterns[p] if ev.end is not None
+        ]
         first = min(at for at, _ in ends)
         return first, [d for at, d in ends if at == first][-1]
+
+    def events(self, p: int, last: int) -> list:
+        """The events of pattern ``p`` at or before the full call ``last``."""
+        return [ev for ev in self.tune.patterns[p] if ev.at <= last]
 
     def applied(self) -> list:
         """The pattern events the walk applies: those at or before each step's ALT step."""
         done = {(p, s.last) for s in self.steps for p in s.patterns}
-        return [ev for p, last in sorted(done) for ev in self.replay.events(p, last)]
+        return [ev for p, last in sorted(done) for ev in self.events(p, last)]
 
     def reached(self, events: list) -> list:
         """The sidTAB rows the events arm and the rows after them."""
         rows = {r for ev in events for y in (ev.a, ev.b) if y is not None for r in self.chain(y)}
-        return [self.replay.row(r) for r in sorted(rows)]
+        return [self.tune.rows[r] for r in sorted(rows)]
 
     def chain(self, y: int) -> list:
         """The rows run from row ``y``."""
-        return chain(self.replay.row, y)[0]
+        return chain(self.tune.rows.__getitem__, y)[0]
+
+    def calls_to_play(self) -> int:
+        """The replay's calls that play every step once and the steps from the loop on again."""
+        last = self.steps[-1]
+        end = last.now + last.delay + last.last + 2
+        full = end + end - self.steps[self.loop].now + MAX_DELAY
+        return -(-full // self.fulls) * len(self.core.calls) + len(self.core.calls)
 
     def event(self, ev, voice: int) -> Event:
         """The document event of a pattern step."""
@@ -517,9 +626,17 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         base = step.now + step.delay
         start = 0 if first else self.tick(base)
         ticks = [Event("-")] * (self.tick(base + step.last + 2 + step.after) - start)
-        for ev in self.replay.events(p, step.last):
+        for ev in self.events(p, step.last):
             ticks[self.tick(base + 1 + ev.at) - start] = self.event(ev, voice)
-        return self.names.name("phrase", "p", tuple(rests(ticks)))
+        runs = {v for t in ticks for k, v in t.commands if k.endswith("run")}
+        origins = self.names.origins.get("ctrl", {})
+        voiced = any(c[0] == "voice" for r in runs for c in origins[r].context)
+        context = (("last", step.last), ("after", step.after))
+        context += (("voice", voice),) * voiced + (("delay", step.delay),) * first
+        context += (("phase", base % self.fulls),) * self.extra
+        return self.names.name(
+            "phrase", "p", tuple(rests(ticks)), invariants.Origin(("pattern", p), context)
+        )
 
     def voices(self) -> tuple:
         """The orderlist of each voice: the steps with each repeated block a group, and the
@@ -534,11 +651,11 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     # ---- the document -----------------------------------------------------------------------
 
-    def instrument(self, voice: int) -> Instrument:
-        """The instrument of ``voice``: its notes restore the pitch mode and clear the slide."""
-        fields = {"p.freq": self.pitch(voice, 0)}
+    def instrument(self) -> Instrument:
+        """The instrument: its notes restore the pitch mode and clear the slide."""
+        fields = {"p.freq": self.pitch(0)}
         if self.ps and "AF" in self.used:
-            fields["m.pw"] = self.carry(voice, 0)
+            fields["m.pw"] = self.carry(0)
         if self.slides:
             fields["n.freq"] = Once(self.call("clr"))
             if self.ps:
@@ -548,23 +665,32 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def start(self, voice: int) -> Event:
         """The init event of ``voice``: the note base, the seeds, then the first tick's program."""
         st = self.st
-        row = {"note": note_name(LOW), "gate": 1, "p.freq": self.pitch(voice, 0)}
+        row = {"note": note_name(LOW), "gate": 1, "p.freq": self.pitch(0)}
         if self.ps:
-            row["m.pw"] = self.carry(voice, 0)
-        prog = self.names.name("ctrl", "c", Program((Row(row),), None))
+            row["m.pw"] = self.carry(0)
+        origin = invariants.Origin(("init", voice, "a"))
+        prog = self.names.name("ctrl", "c", Program((Row(row),), None), origin)
         cmds = {"legato": True, "run": prog}
+        if st["detune"][voice]:
+            cmds["i.freq"] = Once(self.call("tset", p=st["detune"][voice]))
         acc = st["slide_lo"][voice] | st["slide_hi"][voice] << 8
         if self.slides and acc:
             cmds["n.freq"] = Once(self.call("seed", p=acc & 255, q=acc >> 8))
             if self.ps:
                 cmds["n.pw"] = Once(self.call("pseed", p=acc & 255, q=acc >> 8))
         if self.ps:
-            cmds["i.pw"] = Once(self.call("pwinit", p=st["pw_lo"][voice], q=st["pw_hi"][voice]))
+            cmds["i.pw"] = Once(
+                self.call(
+                    "pwinit", p=st["pw_lo"][voice], q=st["pw_hi"][voice], x=st["detune"][voice]
+                )
+            )
         if voice == 0:
             cmds["tempo"] = 1
             if self.seeded:
                 cmds["i.cut"] = Once(self.call("acc", p=self.cut0[0], q=self.cut0[1]))
-        return Event(note_name(st["note_base"][voice] + LOW), f"i{voice + 1}", cmds)
+        origin = invariants.Origin(("voice", voice))
+        ins = self.names.name("ins", "i", self.instrument(), origin)
+        return Event(note_name(st["note_base"][voice] + LOW), ins, cmds)
 
     @property
     def bottom(self) -> int:
@@ -619,7 +745,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         for _, prog in self.names.section("ctrl"):
             for row in prog.rows:
                 bound.update(k.rpartition(".")[::2] for k, _ in row.keys if "." in k)
-        slots = {"freq": [Slot("n")] * self.slides + [Slot("p")]}
+        slots = {"freq": [Slot("i")] * self.detuned + [Slot("n")] * self.slides + [Slot("p")]}
         if self.two:
             slots["ctrl"] = [Slot("h", _const(0)), Slot("l")]
         if self.ps:
@@ -658,79 +784,34 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         """The document of the subtune."""
         voices = self.voices()
         init = tuple(self.start(v) for v in range(3))
-        ins = tuple((f"i{v + 1}", self.instrument(v)) for v in range(3))
-        defs = [Section("ins", ins), Section("ctrl", tuple(self.names.section("ctrl")))]
-        defs += [Section("phrase", tuple(self.names.section("phrase")))]
+        defs = [Section(kind, tuple(self.names.section(name))) for kind, name in SECTION_OF]
         head = self.header()
         mods = tuple((signature(n, asm.params(ROUTINES[n])), Code(ROUTINES[n])) for n in self.calls)
         return Document(head, (), mods, defs, init, voices, None)
 
+    @property
+    def origins(self) -> dict:
+        """The origin of each named object, by the kind :mod:`unitracker.lift.invariants` names."""
+        kinds = {"ins": "instruments", "ctrl": "ctrl", "phrase": "phrases"}
+        found = {kind: dict(self.names.origins.get(name, {})) for name, kind in kinds.items()}
+        return {kind: found.get(kind, {}) for kind in invariants.KINDS[:-1]}
+
+    @property
+    def song(self) -> tuple:
+        """The play entries each voice's orderlist may hold: the arranger's steps, a jump row
+        once."""
+        return (len(self.chip) + sum(isinstance(self.chip[y], Jump) for y in self.landed),) * 3
+
+
+def document_of(core: Core) -> tuple:
+    """``(text, lift)``: the document of ``core``, printed, and the lift that built it."""
+    built = Lift(core)
+    return printed(built.document()), built
+
 
 def document_text(core: Core) -> str:
     """The document of ``core``, printed."""
-    return printed(Lift(core).document())
-
-
-def _contexts(core: Core) -> dict:
-    """The song data the replay can reach from its init state: ``plays`` and ``jumps``, the
-    arranger rows; ``ends``, for each played row the full calls to its ALT step and the delay it
-    sets; ``armed``, the ``(voice, layer, row)`` the played events arm; ``patterns``."""
-    replay = core.replay
-    plays, jumps = replay.reach(core.init["cursor"])
-    ends, armed, patterns = {}, set(), set()
-    for y in plays:
-        row = replay.arranger(y)
-        found = [replay.end(p) for p in row]
-        first = min(at for at, _ in found)
-        ends[y] = first, [d for at, d in found if at == first][-1]
-        patterns.update(row)
-        for v, p in enumerate(row):
-            for ev in replay.events(p, first):
-                armed.update((v, layer, r) for layer, r in zip("ab", (ev.a, ev.b)) if r is not None)
-    return {"plays": plays, "jumps": jumps, "ends": ends, "armed": armed, "patterns": patterns}
-
-
-def native_counts(core: Core) -> dict:
-    """The objects of each kind the replay's own song data has, the most a lift may hold
-    (:mod:`unitracker.lift.invariants`), read from the arranger rows, pattern streams and sidTAB
-    rows the replay can reach from its init state:
-
-    - ``instruments``: 3, one a voice, which holds the voice's detune;
-    - ``ctrl``: a program a ``(voice, layer, row)`` the played events arm, as a program's keys
-      name its voice and layer, and one a voice for the init event's first-tick program, which
-      binds the voice's detuned pitch;
-    - ``restart``, ``pw``, ``filter``: 0, the lift binds the pulse and the cutoff by modulators;
-    - ``phrases``: a phrase is a pattern on a voice (the programs its events run name the
-      voice's slots) cut at its step's ALT step and padded to the next step's, so its distinct
-      values are the ``(voice, pattern, ALT step, delay after)`` of each played
-      row, times the place in the schedule where a full call of the document's own is added
-      (the schedule's full calls), plus one a voice for the first step's calls before its events;
-    - ``song``: an entry a reached arranger row, a jump row once (a counted jump is a group and
-      the walk's return a ``loop``).
-    """
-    found = _contexts(core)
-    row = core.replay.arranger
-    phrases = {(v, p, *found["ends"][y]) for y in found["plays"] for v, p in enumerate(row(y))}
-    phases = sum(core.calls) if not core.calls[0] else 1
-    return {
-        "instruments": 3,
-        "restart": 0,
-        "ctrl": len(found["armed"]) + 3,
-        "pw": 0,
-        "filter": 0,
-        "phrases": len(phrases) * phases + 3,
-        "song": (len(found["plays"]) + len(found["jumps"]),) * 3,
-    }
-
-
-def native_bytes(core: Core) -> int:
-    """The bytes of the song data the replay can reach: three a arranger row, the pattern
-    streams to their ALT steps and the sidTAB rows the played events arm with the rows after
-    them, a row's bitmaps, columns and DL."""
-    found, replay = _contexts(core), core.replay
-    rows = {r for _, _, y in found["armed"] for r in chain(replay.row, y)[0]}
-    size = 3 * (len(found["plays"]) + len(found["jumps"]))
-    return size + sum(replay.size(p) for p in found["patterns"]) + sum(map(replay.row_size, rows))
+    return document_of(core)[0]
 
 
 # ---- the reference --------------------------------------------------------------------------
@@ -744,28 +825,37 @@ def reference(raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = T
     return np.asarray(fmt.spec_player(song, notes=notes).render_grid(frames), dtype=np.uint8)
 
 
-def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
-    """``(cells, text)`` of a SID: the cells where its document differs from the reference; a
-    ModelError where the document holds more of a kind than the replay's song data."""
+def lifted(raw: bytes, subtune: int = 0) -> tuple:
+    """``(core, text, lift)`` of a SID's subtune, the document held to its origins and to the
+    native song entries of each voice (:mod:`unitracker.lift.invariants`)."""
     core = core_of_sid(raw, subtune)
-    text = document_text(core)
-    invariants.check(text, native_counts(core))
-    ours = np.asarray(play(text, frames), dtype=np.uint8)
+    text, built = document_of(core)
+    invariants.provenance(text, built.origins)
+    invariants.check(text, {"song": built.song})
+    return core, text, built
+
+
+def verify(raw: bytes, subtune: int = 0, frames: int | None = None, whole: bool = True) -> tuple:
+    """``(cells, text)`` of a SID: the cells where its document differs from the reference over
+    ``frames`` frames (at least :data:`MINIMUM` by default), and with ``whole`` over every step of
+    the walk and the loop once more; a ModelError where the document has an object without an
+    origin or more song entries than the arranger has steps."""
+    _, text, built = lifted(raw, subtune)
+    count = frames or MINIMUM
+    count = max(count, built.calls_to_play()) if whole else count
+    ours = np.asarray(play(text, count), dtype=np.uint8)
     theirs = reference(raw, subtune, len(ours))
     return gridcmp.cell_diff(ours, theirs), text
 
 
 def report(raw: bytes, subtune: int = 0) -> dict:
-    """The size of a SID's document: ``lifted`` and ``native`` counts of each kind, and the
-    document's ``bytes`` against the ``native_bytes`` of the song data it lifts."""
-    core = core_of_sid(raw, subtune)
-    text = document_text(core)
-    return {
-        "lifted": invariants.lifted(text),
-        "native": native_counts(core),
-        "bytes": len(text.encode()),
-        "native_bytes": native_bytes(core),
-    }
+    """The size of a SID's document: per kind the ``(objects, native objects)`` it lifts
+    (``song``: an orderlist's entries and the arranger's steps), its ``fixed`` and ``song``
+    bytes, and the ``native_bytes`` of the song data they lift."""
+    core, text, built = lifted(raw, subtune)
+    counts = invariants.provenance(text, built.origins)
+    counts["song"] = (max(invariants.lifted(text)["song"]), built.song[0])
+    return {"counts": counts, **invariants.sizes(text), "native_bytes": core.native_bytes}
 
 
 def checked(text_cells: tuple, frames: int) -> str:
@@ -778,10 +868,9 @@ def checked(text_cells: tuple, frames: int) -> str:
 
 
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
-    """The document of a SID's subtune, checked against the reference over ``frames`` frames
-    (default :data:`CHECK`); a LiftError otherwise."""
-    frames = frames or CHECK
-    return checked(verify(raw, subtune, frames), frames)
+    """The document of a SID's subtune, checked against the reference (see :func:`verify`); a
+    LiftError otherwise."""
+    return checked(verify(raw, subtune, frames), frames or MINIMUM)
 
 
 def main(argv=None) -> int:

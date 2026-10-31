@@ -73,15 +73,33 @@ def classify(
 
 
 def size_line(name: str, sizes: dict) -> str:
-    """One tune's lifted/native count of each kind (``song`` its largest voice) and its document
-    bytes against its native song data bytes."""
-    counts = []
+    """One tune's objects/native objects of each kind (``song`` its largest voice's entries over
+    the arranger's steps), its fixed and song bytes and its native song data bytes."""
+    counts = " ".join(f"{kind} {have}/{native}" for kind, (have, native) in sizes["counts"].items())
+    return (
+        f"{name}: {counts} fixed {sizes['fixed']} song {sizes['song']}"
+        f" native {sizes['native_bytes']}"
+    )
+
+
+def totals(results: list) -> list:
+    """The corpus-wide lines: per kind the objects, the native objects they stand for and the
+    copies (objects over the natives), then the song bytes over the native song data bytes and
+    the five tunes whose song bytes are the largest multiple of it."""
+    sized = [(r["name"], r["sizes"]) for r in results if r.get("sizes")]
+    out = []
     for kind in KINDS:
-        have, bound = sizes["lifted"][kind], sizes["native"][kind]
+        have = sum(s["counts"][kind][0] for _, s in sized)
+        native = sum(s["counts"][kind][1] for _, s in sized)
         if kind == "song":
-            have, bound = max(have), max(bound)
-        counts.append(f"{kind} {have}/{bound}")
-    return f"{name}: {' '.join(counts)} bytes {sizes['bytes']}/{sizes['native_bytes']}"
+            out.append(f"song: {have} entries a voice, {native} arranger steps")
+        else:
+            out.append(f"{kind}: {have} objects, {native} native, {have - native} copies")
+    song, native = sum(s["song"] for _, s in sized), sum(s["native_bytes"] for _, s in sized)
+    out.append(f"song bytes {song} native song data bytes {native}")
+    worst = sorted(sized, key=lambda r: -r[1]["song"] / r[1]["native_bytes"])[:5]
+    out += [f"worst {n}: {s['song']}/{s['native_bytes']}" for n, s in worst]
+    return out
 
 
 def main(argv=None) -> int:
@@ -89,7 +107,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("names", type=Path)
     parser.add_argument("--format", help="lift only tunes of this format")
-    parser.add_argument("--frames", type=int, default=6000)
+    parser.add_argument("--frames", type=int, default=20000, help="at least this many frames")
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--subtunes", action="store_true", help="check every subtune")
@@ -114,6 +132,7 @@ def main(argv=None) -> int:
     for r in results:
         if r.get("sizes"):
             print(size_line(r["name"], r["sizes"]))
+    print(*totals(results), sep="\n")
     if args.out:
         args.out.write_text(json.dumps(results, indent=1))
     return 0

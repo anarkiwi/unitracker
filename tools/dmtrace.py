@@ -4,12 +4,10 @@ each frame's value of the layout cells named (per-voice cells with ``@v``)."""
 import sys
 
 from pydefmon import DefmonSong
-from pydefmon.spec import build_facts, player_bases
+from pydefmon.spec import VOICE_STRIDE, build_facts, player_bases
 from pysidtracker import find_format
 from pysidtracker.testing import resolve_tune
 from tqdm import tqdm
-
-VOICE = 0x31
 
 
 def trace(raw: bytes, frames: int, cells: list, subtune: int = 0):
@@ -23,7 +21,7 @@ def trace(raw: bytes, frames: int, cells: list, subtune: int = 0):
     where = []
     for cell in cells:
         name, _, voice = cell.partition("@")
-        where.append(binding[name] + (int(voice) * VOICE if voice else 0))
+        where.append(binding[name] + (int(voice) * VOICE_STRIDE if voice else 0))
     for frame in tqdm(range(frames), unit="frame", disable=frames < 500):
         yield (frame, *(player.memory[a] for a in where))
         player.play_frame()
