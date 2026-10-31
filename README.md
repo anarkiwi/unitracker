@@ -9,6 +9,7 @@ optimiser makes a document smaller, every edit proved to keep the register grid.
 | doc | content |
 |---|---|
 | [docs/lift/goattracker2.md](docs/lift/goattracker2.md) | the GoatTracker 2 lift (`python -m unitracker.lift.goattracker2`) |
+| [docs/lift/defmon.md](docs/lift/defmon.md) | the defMON lift (`python -m unitracker.lift.defmon`) |
 | [docs/optimiser.md](docs/optimiser.md) | the generic optimiser: its driver, guarantee and passes (`python -m unitracker.optimiser`) |
 | [docs/optimiser.md#passes](docs/optimiser.md#passes) | the passes: defaults, merge, transposition folding, the legato snap, templates and their structural names, hoist (`python tools/passes_eval.py`) |
 | [docs/optimiser.md#inline](docs/optimiser.md#inline) | the optimiser's inline forms (`--inline single`, `--inline all`): definitions written at their uses |

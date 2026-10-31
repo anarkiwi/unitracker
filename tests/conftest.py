@@ -40,6 +40,53 @@ metal_warrior = hvsc_tune(
     "Path to the Metal Warrior Title Remix .sid.",
 )
 
+DEFMON = {
+    "glow_worm": (
+        "MUSICIANS/I/Ilkke/Glow_Worm.sid",
+        "a defMON tune of the absolute-note build with counted arranger jumps",
+    ),
+    "tetrapapak": (
+        "MUSICIANS/I/Ilkke/Tetrapapak.sid",
+        "a defMON tune of the relative-note build with counted arranger jumps",
+    ),
+    "higher_scores": (
+        "MUSICIANS/F/Frantic/Higher_Scores.sid",
+        "a defMON tune of the relative-note build with uncounted jumps",
+    ),
+    "ponky": (
+        "MUSICIANS/G/Goto80/Ponky.sid",
+        "a defMON tune whose control byte combines its two wave columns with OR",
+    ),
+    "fading_lights": (
+        "DEMOS/A-F/Fading_Lights.sid",
+        "a defMON tune that alternates full and sub-tick calls",
+    ),
+    "automatas": (
+        "MUSICIANS/G/Goto80/Automatas.sid",
+        "a defMON tune with one full call in eight",
+    ),
+    "syrapaog": ("DEMOS/S-Z/Syrapaog.sid", "a defMON tune whose four calls a frame are all full"),
+    "timewarp": ("MUSICIANS/F/F7sus4/Timewarp_Spheres_2SID.sid", "a stereo defMON tune"),
+    "rent_a_cop": (
+        "MUSICIANS/G/Goto80/Rent-A-Cop.sid",
+        "a defMON tune whose pattern plays past its 32 steps",
+    ),
+    "in_memory_of": (
+        "MUSICIANS/G/Goto80/In_Memory_of.sid",
+        "a defMON tune whose arranger plays patterns past $7f",
+    ),
+    "techno_aha": (
+        "MUSICIANS/G/Goto80/Techno_Aha.sid",
+        "a defMON tune whose arranger row plays no pattern that ends",
+    ),
+    "triangle": (
+        "MUSICIANS/F/F7sus4/Triangle_My_Amelie.sid",
+        "a defMON tune whose first call is a sub-tick call",
+    ),
+}
+for _name, (_tune, _doc) in DEFMON.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_doc}.")
+
 
 def table(*rows) -> Table:
     """A GoatTracker 2 table of ``(left, right)`` ``rows``."""

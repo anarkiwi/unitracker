@@ -97,7 +97,7 @@ class Core:  # pylint: disable=too-many-instance-attributes
     calls: tuple = (1,)
 
 
-def _cause(exc: Exception) -> Refusal:
+def cause(exc: Exception) -> Refusal:
     for pattern, kind in CAUSES:
         if re.search(pattern, str(exc)):
             return Refusal(kind, str(exc))
@@ -135,7 +135,7 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
     try:
         tune = Tune.from_song(song)
     except DefmonError as exc:
-        raise _cause(exc) from exc
+        raise cause(exc) from exc
     if len(tune.chips) > 1:
         raise Refusal("multi-SID", "stereo")
     player = fmt.spec_player(song, notes=True)
@@ -200,7 +200,7 @@ def _refuse(core: Core) -> None:
         raise Refusal("init", "cutoff operation or extra")
 
 
-def _chain(rows: dict, y: int) -> tuple:
+def chain(rows: dict, y: int) -> tuple:
     """``(rows reached from y, loop index)``: follow ``next`` until a stop or a revisit."""
     order, at = [], {}
     while y is not None and y not in at:
@@ -210,7 +210,7 @@ def _chain(rows: dict, y: int) -> tuple:
     return order, at.get(y)
 
 
-def _first_cutoff(sub: bool, bottom: int, shift: bool) -> tuple:
+def first_cutoff(sub: bool, bottom: int, shift: bool) -> tuple:
     """``(accumulator low, high, output)`` after the first cutoff step from the cleared state: the
     accumulator stays, or a subtraction borrows through it and its high byte falls to the floor."""
     lo, hi = (255, bottom) if sub else (0, 0)
@@ -397,7 +397,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     def program(self, y: int, layer: str, voice: int) -> str:
         """The ``ctrl`` program name of the cascade armed at row ``y``."""
-        order, loop = _chain(self.tune.rows, y)
+        order, loop = chain(self.tune.rows, y)
         rows = [Row(self.keys(self.tune.rows[r], layer, voice)) for r in order]
         return self.names.name("ctrl", "c", Program(tuple(rows), loop))
 
@@ -521,7 +521,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     @property
     def cut0(self) -> tuple:
         """``(accumulator low, high, output)`` after the first call's cutoff step."""
-        return _first_cutoff(self.st["op_lo"] == 0xE9, self.bottom, self.shift)
+        return first_cutoff(self.st["op_lo"] == 0xE9, self.bottom, self.shift)
 
     @property
     def seeded(self) -> bool:
