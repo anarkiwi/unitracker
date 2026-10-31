@@ -1,7 +1,6 @@
 """Shared fixtures: HVSC tunes by path, and synthetic GoatTracker 2 tunes."""
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from pygoattracker import (
@@ -9,7 +8,6 @@ from pygoattracker import (
     Instrument,
     Orderlist,
     Pattern,
-    Player,
     PlayPattern,
     Row,
     Song,
@@ -19,6 +17,8 @@ from pygoattracker import (
 )
 from pygoattracker import constants as GT
 from pysidtracker.testing import resolve_tune
+
+from unitracker.lift import goattracker2
 
 
 def hvsc_tune(name: str, tune: str, doc: str):
@@ -47,18 +47,19 @@ def table(*rows) -> Table:
 
 
 def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voice2=None, **opts):
-    """A one-pattern GoatTracker 2 tune on voice 1 as ``(decompiled tune, native player)``.
+    """A one-pattern GoatTracker 2 tune on voice 1 as a lift core.
 
     ``wave``, ``speed``, ``pulse`` and ``filt`` are the tables' ``(left, right)`` rows;
     ``instruments`` keyword dicts of :class:`pygoattracker.Instrument` (default one instrument
-    on the wavetable's first row); ``rows`` the pattern's ``(note, instrument, command, data)``
-    rows, a note as an offset from ``FIRSTNOTE`` or None for a rest; ``voice2`` voice 2's, which
-    otherwise keys off; ``opts`` the build's ``state`` (a ``pygoattracker.packed.PlayerState``)
-    and :class:`pygoattracker.Build` fields (``pulse_step``, ``optimize_realtime``, ``voices``,
-    ``idle``, ``calls`` and the like).
+    on the wavetable's first row, gate on); ``rows`` the pattern's ``(note, instrument, command,
+    data)`` rows, a note as an offset from ``FIRSTNOTE`` or None for a rest; ``voice2`` voice 2's,
+    which otherwise keys off; ``opts`` the build's ``state`` (a
+    ``pygoattracker.packed.PlayerState``) and :class:`pygoattracker.Build` fields
+    (``pulse_step``, ``optimize_realtime``, ``voices``, ``idle``, ``calls`` and the like).
     """
     # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
-    instruments = instruments or [{"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0}]
+    base = {"wave_ptr": 1, "gateoff_timer": 2, "sustain_release": 0xF0, "first_wave": 0xFF}
+    instruments = [base | i for i in instruments or [{}]]
     rows = rows or [(24, 1, 0, 0)] + [(None, 0, 0, 0)] * 15
 
     def pattern(rows):
@@ -84,14 +85,4 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
         speedtable=table(*speed),
     )
     state = opts.pop("state", None)
-    build = Build(**opts)
-    info = SimpleNamespace(playback=build, state=state, note_read=GT.FREQ_TABLE)
-    header = SimpleNamespace(name="synthetic", author="", released="", flags=0)
-
-    def player():
-        return Player(song, build=build, state=state, freq_table=GT.FREQ_TABLE)
-
-    dec = SimpleNamespace(
-        info=info, typed=TypedSong.from_song(song), subtune=0, header=header, player=player
-    )
-    return dec, player()
+    return goattracker2.core_of_song(TypedSong.from_song(song), Build(**opts), state)
