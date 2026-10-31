@@ -294,6 +294,13 @@ def test_a_chain_follows_next_to_a_stop_or_a_loop():
     assert d.chain(again, 1) == ([1, 2], 0)
 
 
+def test_the_header_carries_the_clock_and_the_title():
+    head = d.Lift(replace(core(SONG), clock=d.NTSC_CLOCK_HZ)).header()
+    assert head.clock == (17095, d.NTSC_CLOCK_HZ) and head.lag == 1 and head.calls is None
+    assert dict(head.meta) == {"title": "title", "author": "author", "released": "released"}
+    assert d.Lift(replace(core(SONG), calls=(1, 0, 0))).header().calls == (1, (1, 0, 0))
+
+
 def test_a_divergence_names_its_first_cell():
     with pytest.raises(d.Divergence, match="frame 3 register 5"):
         d.checked((np.array([[3, 5, 0, 1]]), ""), 10)
