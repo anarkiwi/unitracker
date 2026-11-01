@@ -183,22 +183,11 @@ def _rates(mem, binding) -> tuple:
 
 
 def _entries_entered(player, frames: int) -> list:
-    """The entry each of the player's first ``frames`` calls enters.
-
-    pysidtracker's ``SpecPlayer`` has no public hook for this: it runs a call through its private
-    ``_run(entry)`` and keeps no record of the entries, so ``_run`` is wrapped here. A public
-    per-call entry observer on ``SpecPlayer`` would replace this function.
-    """
+    """The entry each of the player's first ``frames`` calls enters."""
     entered = []
-    run = player._run  # pylint: disable=protected-access
-
-    def trace(entry):
-        entered.append(entry)
-        return run(entry)
-
-    player._run = trace  # pylint: disable=protected-access
     for _ in range(frames):
         player.play_frame()
+        entered += player.entered
     return entered
 
 
