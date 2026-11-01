@@ -92,3 +92,32 @@ def test_main_reports_a_failure(tmp_path, capsys):
     sid.write_bytes(b"ok")
     assert cli.main(["--verify", str(sid)], "d", lifted, failing) == 0
     assert f"{sid}: ValueError: bad" in capsys.readouterr().out
+
+
+def _song(end: str) -> str:
+    return (
+        "unitracker:2.3\nmeta:{title:T}\nvoices:1\nins:\n"
+        " i1:{ad:9,sr:240,ctrl:[{ctrl:65,note:+0},end]}"
+        f"\nphrase:\n p1:[C4.i1,-*3]\nsong:\n - play:[p1]\n - {end}\n"
+    )
+
+
+def _grid(text: str, n: int) -> np.ndarray:
+    return np.asarray(s.play(text, n), dtype=np.uint8)
+
+
+@pytest.mark.parametrize("end, played", [("{loop:0}", 40), ("end", 24)])
+def test_a_looping_document_is_checked_against_a_reference_played_alongside(end, played):
+    """The reference of a looping document is asked for exactly the frames checked, in a worker;
+    one that ends is asked for the frames it played."""
+    text = _song(end)
+
+    def reference(n):
+        assert n == played
+        return _grid(text, 40)[:n]
+
+    assert not s.cells_of(text, 40, reference=reference).size
+    bad = _grid(text, 40)
+    bad[3, 2] ^= 1
+    cells = s.cells_of(text, 40, reference=lambda n: bad[:n])
+    assert [tuple(int(x) for x in c[:2]) for c in cells] == [(3, 2)]

@@ -1,12 +1,14 @@
 """What the format lifts share: their errors, definition names, the check against a reference
 grid, note names, quoted meta values, bare rest runs and repeat detection."""
 
+import multiprocessing
 import re
+import warnings
 
 import numpy as np
 from pysidtracker import gridcmp
 from unitracker_grammar.document import Call, Event
-from unitracker_player.player import play
+from unitracker_player.player import load, play
 
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 REST = Event("-")
@@ -102,10 +104,31 @@ def calls_of(node):
             yield from calls_of(getattr(node, name))
 
 
+_JOB = []
+
+
+def _run_job(frames: int) -> np.ndarray:
+    """The registered reference over ``frames`` frames, run in a forked worker."""
+    return np.asarray(_JOB[0](frames), dtype=np.uint8)
+
+
 def cells_of(text: str, frames: int, grid=None, reference=None) -> np.ndarray:
     """The cells where the document ``text`` played over ``frames`` frames differs from ``grid``,
-    or from ``reference(n)`` over the ``n`` frames it played."""
-    ours = np.asarray(play(text, frames), dtype=np.uint8)
+    or from ``reference(n)`` over the ``n`` frames it played. A looping document plays exactly
+    ``frames`` frames, so its reference is played in a forked worker alongside it."""
+    song = load(text)
+    if grid is None and song.looping:
+        _JOB[:] = [reference]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            pool = multiprocessing.get_context("fork").Pool(1)
+        with pool:
+            pending = pool.apply_async(_run_job, (frames,))
+            ours = np.asarray(play(song, frames), dtype=np.uint8)
+            grid = pending.get()
+        _JOB.clear()
+    else:
+        ours = np.asarray(play(song, frames), dtype=np.uint8)
     if grid is None:
         grid = np.asarray(reference(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, grid[: len(ours)])
