@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 import numpy as np
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, parse_sid_header
+from pysidtracker.cadence import cadence_info
 from pysidtracker.errors import SidParseError
 from pysidtracker.notes import frequency
 from pysidwizard import End, Loop, PlayPattern, RawSequenceByte, SWMFile, Transpose
@@ -48,6 +49,7 @@ CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
 PRE = 2
 CHECK = 20000
 LIMIT = 1 << 17
+TRIGGERS = ("pal_video", "ntsc_video", "cia_timer")
 VOICES = 3
 STRIDE = 7
 summary = cli.summary
@@ -84,6 +86,8 @@ def core_of_sid(raw: bytes, subtune: int = 0) -> Core:
         raise Refusal("multi-SID", "a second or third SID")
     if not head.play_address:
         raise Refusal("interrupt", "play address 0")
+    if (trigger := cadence_info(raw, subtune + 1)["trigger"]) not in TRIGGERS:
+        raise Refusal("digi", f"the play source is {trigger}")
     fmt = find_format(raw)
     swm = fmt.load(raw, subtune)
     if swm.sid_amount != 1:

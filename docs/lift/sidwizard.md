@@ -59,6 +59,7 @@ Typed `Refusal(kind)`, raised before the document is built; `detail` names the c
 |---|---|
 | `multi-SID` | a second or third SID |
 | `interrupt` | play address 0 |
+| `digi` | a play source other than the video or CIA 1 timer |
 | `partly relocated` | a player relocated in part (the spec does not state it) |
 | `player` | no modelled play entry |
 | `build` | a release or driver the lift does not state: ghost registers, multispeed, SFX, SWP exports, `portavibra`, fast speed, ... |

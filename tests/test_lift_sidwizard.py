@@ -267,3 +267,11 @@ def test_the_document_is_what_the_cli_verifies(tmp_path):
     assert sw.main([str(path), "--verify", "--frames", "100"]) == 0
     cells = sw.verify(raw, 0, 60)[0]
     assert not cells.size and np.asarray(play(sw.lift(raw, 0, 60), 20)).shape == (20, 25)
+
+
+def test_a_tune_off_the_player_clock_source_is_a_digi_tune(monkeypatch):
+    raw = raw_of([DUMMY], [note(49, 1)] + [Row()] * 3)
+    monkeypatch.setattr(sw, "cadence_info", lambda *_: {"trigger": "nmi_timer"})
+    with pytest.raises(sw.Refusal, match="digi") as caught:
+        sw.core_of_sid(raw)
+    assert caught.value.kind == "digi"
