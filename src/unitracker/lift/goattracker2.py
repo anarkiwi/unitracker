@@ -47,6 +47,7 @@ from unitracker.lift import cli, invariants
 from unitracker.lift.gt2code import ROUTINES, STATE
 from unitracker.lift import gt2tables, gt2wrap
 from unitracker.lift.shared import Names, Reference, Refusal, calls_of, cells_of, lifted_text
+from unitracker.lift.shared import spec_played
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -1166,13 +1167,15 @@ def player_of(core: Core, notes: bool = True):
     )
 
 
-def reference(raw: bytes, subtune: int = 0, frames: int = CHECK, notes: bool = True):
-    """The register grid of the spec player over ``frames`` frames."""
+def reference(
+    raw: bytes, subtune: int = 0, frames: int = CHECK, notes: bool = True, both: bool = False
+):
+    """The register grid of the spec player over ``frames`` frames; with ``both``, ``(grid,
+    edges)`` (:func:`~unitracker.lift.shared.spec_played`)."""
     fmt = find_format(raw)
     model = decompile_sid(raw, subtune)
-    return np.asarray(
-        fmt.spec_player(model, notes=notes or None).render_grid(frames), dtype=np.uint8
-    )
+    player = fmt.spec_player(model, notes=notes or None)
+    return spec_played(player, frames) if both else np.asarray(player.render_grid(frames), np.uint8)
 
 
 def compare(core: Core, frames: int, grid=None) -> tuple:
@@ -1187,7 +1190,7 @@ def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
     :func:`check_frames` frames, ``frames`` at least."""
     core = core_of_sid(raw, subtune)
     count = check_frames(core, frames)
-    job = Reference(lambda n: reference(raw, subtune, n), count)
+    job = Reference(lambda n: reference(raw, subtune, n, both=True), count)
     try:
         text, _ = checked_text(core)
         return cells_of(text, count, reference=job), text

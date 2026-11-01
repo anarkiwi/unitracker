@@ -43,6 +43,7 @@ from unitracker_grammar.expr import canonical
 from unitracker.lift import cli, invariants
 from unitracker.lift.dmcode import ROUTINES, STATE
 from unitracker.lift.shared import Names, Reference, Refusal, cells_of, lifted_text
+from unitracker.lift.shared import spec_played
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -779,12 +780,16 @@ def document_text(core: Core) -> str:
 # ---- the reference --------------------------------------------------------------------------
 
 
-def reference(raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = True):
-    """The register grid of the spec player over ``frames`` frames."""
+def reference(
+    raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = True, both: bool = False
+):
+    """The register grid of the spec player over ``frames`` frames; with ``both``, ``(grid,
+    edges)`` (:func:`~unitracker.lift.shared.spec_played`)."""
     fmt = find_format(raw)
     song = DefmonSong.from_sid_bytes(raw)
     song.subtune = subtune
-    return np.asarray(fmt.spec_player(song, notes=notes).render_grid(frames), dtype=np.uint8)
+    player = fmt.spec_player(song, notes=notes)
+    return spec_played(player, frames) if both else np.asarray(player.render_grid(frames), np.uint8)
 
 
 def lifted(raw: bytes, subtune: int = 0) -> tuple:
@@ -811,7 +816,7 @@ def verify(raw: bytes, subtune: int = 0, frames: int | None = None, whole: bool 
     text, built = document_of(core)
     count = frames or MINIMUM
     count = max(count, built.calls_to_play()) if whole else count
-    job = Reference(lambda n: reference(raw, subtune, n), count)
+    job = Reference(lambda n: reference(raw, subtune, n, both=True), count)
     try:
         held(text, built)
         return cells_of(text, count, reference=job), text

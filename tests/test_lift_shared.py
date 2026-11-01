@@ -153,3 +153,77 @@ def test_a_started_reference_ends_when_the_document_cannot_be_played(monkeypatch
     with pytest.raises(RuntimeError, match="no play"):
         s.cells_of(_song("end"), 4, reference=job)
     assert closed == [job]
+
+
+def test_edges_are_the_retriggers_and_test_pulses_a_frame_end_does_not_show():
+    """Writes are ``(frame, register, value)``; a frame flags 1 where the gate ends set after
+    being clear at its start or a write, 2 where TEST was set at either."""
+    writes = [
+        (0, 4, 0x41),
+        (1, 4, 0x40),
+        (1, 5, 0x0F),
+        (1, 4, 0x41),
+        (2, 4, 0x41),
+        (3, 4, 0x49),
+        (3, 4, 0x41),
+        (4, 4, 0x40),
+        (5, 4, 0x41),
+        (5, 4, 0x40),
+        (2, 11, 0x11),
+        (3, 11, 0x10),
+        (4, 11, 0x11),
+    ]
+    w = np.array(sorted(writes, key=lambda r: r[0]))
+    assert s.edges(w[:, 0], w[:, 1], w[:, 2], 7).tolist() == [
+        [1, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [2, 0, 0],
+        [0, 1, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+    ]
+    assert not s.edges(np.array([0]), np.array([5]), np.array([1]), 2).any()
+
+
+def _env(trigger: str) -> str:
+    version = 5 if trigger.startswith("env") else 3
+    return (
+        f"unitracker:2.{version}\nmeta:{{title:T}}\nvoices:1\nins:\n"
+        f" i1:{{ctrl:[{{{trigger}}},{{ctrl:65}},end]}}"
+        "\nphrase:\n p1:[C4.i1*3,C4.i1*3]\nsong:\n - play:[p1]\n - end\n"
+    )
+
+
+def test_a_retrigger_within_a_call_is_checked_as_an_edge():
+    """A document's in-call gate edges are checked against a ``(grid, edges)`` reference: an env
+    clearing the gate within the call and a plain control write end the call alike, so only the
+    edges tell them apart, at the control register of the retriggered voice."""
+    retrigger, plain = _env("env:240.9.64/_._.65"), _env("ctrl:65,ad:9,sr:240")
+    grid = _grid(plain, 24)
+    assert (_grid(retrigger, 24) == grid).all()
+    flags = s.document_edges(s.load(retrigger), grid)
+    assert np.flatnonzero(flags[:, 0]).tolist() == [0, 18]
+    assert not s.cells_of(retrigger, 24, reference=lambda n: (grid[:n], flags[:n])).size
+    cells = s.cells_of(plain, 24, reference=lambda n: (grid[:n], flags[:n]))
+    assert [tuple(int(x) for x in c) for c in cells] == [(18, 4, 0, 1)]
+
+
+def test_spec_played_closes_each_frame_with_its_grid():
+    """A spec player's frame writes are closed by the grid's control registers, so a write the
+    stores do not report still reaches the edges."""
+
+    class Spec:  # pylint: disable=too-few-public-methods
+        """Plays the gate on in frame 1 by no reported write, then retriggers it in frame 3."""
+
+        writes: list = []
+        frame = 0
+
+        def render_grid(self, _):
+            self.frame += 1
+            self.writes = [(4, 0x40), (4, 0x41)] if self.frame == 4 else []
+            return [[0x41 * (self.frame > 1) if r == 4 else 0 for r in range(25)]]
+
+    grid, flags = s.spec_played(Spec(), 5)
+    assert grid[:, 4].tolist() == [0, 0x41, 0x41, 0x41, 0x41]
+    assert flags[:, 0].tolist() == [0, 1, 0, 1, 0]

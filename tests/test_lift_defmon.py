@@ -476,7 +476,7 @@ def test_the_whole_song_is_played_through_the_walk_and_its_loop_once_more():
 def test_a_whole_song_check_plays_at_least_the_minimum(glow_worm, monkeypatch):
     played = []
     monkeypatch.setattr(shared, "play", lambda _, n: played.append(n) or np.zeros((n, 25)))
-    monkeypatch.setattr(d, "reference", lambda _, __, n: np.zeros((n, 25), dtype=np.uint8))
+    monkeypatch.setattr(d, "reference", lambda _, __, n, **___: np.zeros((n, 25), np.uint8))
     raw = glow_worm.read_bytes()
     assert not d.verify(raw)[0].size and not d.verify(raw, 0, 10, whole=False)[0].size
     assert played == [max(d.MINIMUM, played[0]), 10]

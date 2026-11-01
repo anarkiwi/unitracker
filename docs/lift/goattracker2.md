@@ -75,6 +75,8 @@ the player; a tune whose player the song does not describe is refused rather tha
 
 `verify` plays the document with unitracker-player and compares its grid with the spec player's at
 the standard note table; `lift` raises `Divergence` naming the first differing frame and register.
+The grid and the gate and TEST edges within each frame are compared
+([verification](verification.md)).
 
 ## Objects and sizes
 
