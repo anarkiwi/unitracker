@@ -8,7 +8,6 @@ docs/writeorder.md.
 import sys
 from collections import Counter, defaultdict
 
-import numpy as np
 from pysidtracker.jobs import deadline
 from vagrant_moses import memmap as mm
 from vagrant_moses import sidorder as S

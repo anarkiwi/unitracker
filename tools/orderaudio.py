@@ -23,7 +23,7 @@ import writeorder as W
 RATE = 44100.0
 
 
-class Replay:
+class Replay:  # pylint: disable=too-few-public-methods
     """A chip playing a timeline's stream with audio, for the state at each frame start in turn."""
 
     def __init__(self, tl):
@@ -46,25 +46,30 @@ def render(snapshot: bytes, writes: np.ndarray, until: int) -> np.ndarray:
     return sid.run(writes, until)
 
 
+def listen(replay: Replay, case: dict, run: tuple) -> np.ndarray:
+    """The native frame and the order's, from the chip's state at the case's frame."""
+    _, natives, reordered, until = run
+    snapshot = replay.state(case["frame"])
+    gap = np.zeros(int(RATE / 10), np.int16)
+    pair = [render(snapshot, natives, until), gap, render(snapshot, reordered, until)]
+    return np.concatenate(pair).astype(np.int16)
+
+
 def measure(row: dict, hvsc, args) -> dict:
     """Each (frame, voice) the order changes: its pattern pair and how the envelopes differ over
     that frame and the ``args.horizon`` - 1 after it (the same native writes in both)."""
     init, frames = W.capture(row, hvsc, args)
-    order, out, heard = tuple(args.order.split(",")), [], set()
+    out, heard = [], set()
     tl = S.Timeline(init, frames, mm.PAL.clock_hz)
     replay = Replay(tl) if args.wav else None
     if args.wav:
         args.wav.mkdir(parents=True, exist_ok=True)
-    for case, (_, natives, reordered, until) in S.order_cases(tl, order, args.horizon):
+    for case, run in S.order_cases(tl, tuple(args.order.split(",")), args.horizon):
         key = (case["native"], case["ordered"])
         if args.wav and case["ms"] and key not in heard:
             heard.add(key)
-            name = f"{Path(row['path']).stem}-f{case['frame']}v{case['voice']}.wav"
-            gap = np.zeros(int(RATE / 10), np.int16)
-            snapshot = replay.state(case["frame"])
-            pair = [render(snapshot, natives, until), gap, render(snapshot, reordered, until)]
-            write_wav(args.wav / name, np.concatenate(pair).astype(np.int16), RATE)
-            case["wav"] = name
+            case["wav"] = f"{Path(row['path']).stem}-f{case['frame']}v{case['voice']}.wav"
+            write_wav(args.wav / case["wav"], listen(replay, case, run), RATE)
         out.append(case)
     return {"cases": out}
 

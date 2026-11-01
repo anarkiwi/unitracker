@@ -21,11 +21,13 @@ def arguments(tmp_path, **kw):
 
 
 def test_measure_lists_the_changed_cases(metal_warrior, tmp_path):
+    """Without a wav directory no audio is rendered."""
     cases = A.measure({"path": str(metal_warrior)}, None, arguments(tmp_path))["cases"]
     assert cases and all("wav" not in c and c["ms"] >= 0 for c in cases)
 
 
 def test_replay_state_is_the_chip_at_the_frame_start(metal_warrior, tmp_path):
+    """The state is that of a chip playing the stream to the frame start."""
     args = arguments(tmp_path)
     tl = S.Timeline(*A.W.capture({"path": str(metal_warrior)}, None, args), A.mm.PAL.clock_hz)
     replay = A.Replay(tl)
@@ -39,6 +41,7 @@ def test_replay_state_is_the_chip_at_the_frame_start(metal_warrior, tmp_path):
 
 
 def test_wav_is_written_for_a_differing_pair(metal_warrior, tmp_path):
+    """Each differing pattern pair gets one non-empty wav."""
     args = arguments(tmp_path, jobs=1)
     args.wav = tmp_path / "wav"
     cases = A.measure({"path": str(metal_warrior)}, None, args)["cases"]
