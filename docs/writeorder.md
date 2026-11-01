@@ -8,6 +8,7 @@ streams; these tools capture the streams of tunes and drive it over a corpus:
   the kept writes changes it (fast, no emulation);
 - `tools/ordercover.py`: the fewest orders that keep every frame's envelope exactly, and how
   tunes' hard restarts behave;
+- `tools/solvertime.py`: the solver's time on captured tunes as a multiple of real time;
 - `tools/orderaudio.py`: one order's differences measured and rendered at a fixed pitch;
 - `tools/samecall.py`: registers a player writes more than once in one call.
 
@@ -17,6 +18,7 @@ streams; these tools capture the streams of tunes and drive it over a corpus:
 python tools/writeorder.py TUNES.csv|TUNE.sid ... [--frames N] [--top K] [--out F.json]
 python tools/ordercover.py TUNES.csv|TUNE.sid ... [--frames N] [--horizon N] [--out F.json]
 python tools/orderaudio.py TUNES.csv|TUNE.sid ... [--order ORDER] [--wav DIR]
+python tools/solvertime.py TUNES.csv|TUNE.sid ... [--per-player N] [--horizon N]
 ```
 
 Writes come from the in-process emulator (`--backend jennings`, tunes with a play address) or the
