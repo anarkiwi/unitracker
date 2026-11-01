@@ -16,6 +16,13 @@ def test_a_tune_is_lifted_by_its_format_and_verified(metal_warrior, tmp_path, ca
     assert capsys.readouterr().out == out.read_text()
 
 
+def test_a_sidwizard_tune_is_lifted_by_its_format(must_dash):
+    raw = must_dash.read_bytes()
+    assert cli.lifter(raw)[0] == "sidwizard"
+    assert cli.verify(raw, 0, 200).size == 0
+    assert cli.lift(raw, 0, 200).startswith("unitracker:2.5\n")
+
+
 def test_a_tune_is_lifted_and_optimised(metal_warrior, tmp_path, capsys):
     out = tmp_path / "out.yaml"
     argv = [str(metal_warrior), "-o", str(out), "--optimise", "--ticks", "64"]

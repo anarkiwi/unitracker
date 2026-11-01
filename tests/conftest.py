@@ -258,3 +258,38 @@ def gt_tune(wave, instruments=None, rows=None, speed=(), pulse=(), filt=(), voic
     )
     state = opts.pop("state", None)
     return goattracker2.core_of_song(TypedSong.from_song(song), Build(**opts), state)
+
+
+SIDWIZARD = {
+    "must_dash": (
+        "MUSICIANS/D/DAM/Must_Dash.sid",
+        "a SID-Wizard tune with tempo effects, slides, legato notes, chords and a jump onto a "
+        "repeat row",
+    ),
+    "gubbrock": (
+        "MUSICIANS/B/Batsman/Gubbrock_Is_Law.sid",
+        "a SID-Wizard tune with pulse keyboard tracking and a vibrato note effect",
+    ),
+    "friendly_fire": (
+        "MUSICIANS/C/Chabee/Friendly_Fire.sid",
+        "a SID-Wizard tune in which two voices take over the filter on one call",
+    ),
+}
+SIDWIZARD_REFUSED = {
+    "phonky": ("MUSICIANS/H/Hermit/Phonky_2SID.sid", "multi-SID", "a stereo SID-Wizard tune"),
+    "club64": (
+        "MUSICIANS/M/Mario64/Club64.sid",
+        "partly relocated",
+        "an export relocated in part",
+    ),
+    "sirius": ("MUSICIANS/M/Max_F3H/Sirius-Eye_in_the_Sky.sid", "build", "a ghost register build"),
+    "beltram": (
+        "MUSICIANS/U/Uneksija/Bring_Back_Beltram.sid",
+        "build",
+        "a multispeed build",
+    ),
+}
+for _name, (_tune, _doc) in SIDWIZARD.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_tune}, {_doc}.")
+for _name, (_tune, _kind, _doc) in SIDWIZARD_REFUSED.items():
+    globals()[_name] = hvsc_tune(_name, _tune, f"Path to {_tune}, {_doc}.")

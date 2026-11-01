@@ -23,7 +23,7 @@ from tqdm import tqdm
 from unitracker.cli import lift
 from unitracker.lift.shared import LiftError
 
-PLAYERS = {"GoatTracker_V2.x", "Music_Assembler", "DefMon"}
+PLAYERS = {"GoatTracker_V2.x", "Music_Assembler", "DefMon", "Hermit/SidWizard_V1.x"}
 ROOT = Path("/scratch/datasets/hvsc/C64Music")
 TOP = 5
 
