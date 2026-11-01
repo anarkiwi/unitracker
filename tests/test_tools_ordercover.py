@@ -47,11 +47,18 @@ def test_settle_is_a_wrap_and_a_release():
 
 
 def test_hard_restarts_count_note_ons(metal_warrior):
-    args = SimpleNamespace(backend="auto", frames=300, settle=39566)
+    args = SimpleNamespace(backend="auto", frames=300, settle=39566, horizon=5)
     notes = C.hard_restarts({"path": str(metal_warrior)}, None, args)["notes"]
-    assert notes and all(n > 0 and frames >= 0 for _, frames, n in notes)
+    assert notes and all(n > 0 and frames >= 0 for _, frames, _, n in notes)
+    assert any(kept is not None for *_, kept, _ in notes)
     lines = C.hard_restart_lines([{"player": "p", "hr": {"notes": notes}}], 39566)
     assert "3 PAL frames" in lines[0] and lines[1].startswith("    p: ")
+
+
+def test_neutral_clears_values_from_the_hard_restart_on():
+    rows = np.array([(0, 5, 0x2A), (10, 5, 0x0F), (10, 6, 0xF3), (20, 4, 0x20)], np.int64)
+    out = C.neutral(rows, 10)
+    assert out[:, 2].tolist() == [0x2A, 0x00, 0x03, 0x20]
 
 
 def test_summary_reports_covers():

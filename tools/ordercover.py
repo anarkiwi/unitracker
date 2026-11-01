@@ -6,7 +6,7 @@ docs/writeorder.md.
 """
 
 import sys
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from itertools import combinations
 
 import numpy as np
@@ -37,32 +37,55 @@ def settle_cycles(clock: float) -> int:
     return 0x7FFF + int(silent[0] - start)
 
 
+def neutral(rows: np.ndarray, since: int) -> np.ndarray:
+    """Voice-1 ``rows`` with every AD write from cycle ``since`` on set to 0 and every SR write
+    from then on to its release nibble alone."""
+    out = rows.copy()
+    late = out[:, 0] >= since
+    out[late & (out[:, 1] == 5), 2] = 0
+    sr = late & (out[:, 1] == 6)
+    out[sr, 2] &= 0x0F
+    return out
+
+
 def hard_restarts(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
-    """Each note-on (a gate-on from gate off): how many cycles before its frame's first write the
-    gate had been off with SR's release nibble 0, counted by whole frames, and whether that is
-    at least :func:`settle_cycles`."""
+    """Each note-on (a gate-on from gate off): the whole frames before its frame's first write
+    that the gate had been off with SR's release nibble 0, whether that is at least
+    :func:`settle_cycles`, and whether the AD and SR values written meanwhile matter."""
     init, frames = W.capture(row, hvsc, args)
-    settle = args.settle
-    since, regs = [None] * 3, np.zeros(W.REGS, np.int64)
+    starts = [s for s, _ in frames]
+    sids = A.chips(mm.PAL.clock_hz, 8000.0, "decimate")
+    rows = [[A.voice_writes(w, v) for v in range(3)] for _, w in frames]
+    for v, sid in enumerate(sids):
+        sid.run(A.voice_writes(init[init[:, 0] >= sid.cycle], v), starts[0])
+    regs = np.zeros(W.REGS, np.int64)
     regs[init[:, 1]] = init[:, 2]
-    found = Counter()
-    for _, w in frames:
-        for v in range(3):
-            ctrl, sr = int(regs[7 * v + 4]), int(regs[7 * v + 6])
-            mine = w[(w[:, 1] >= 7 * v + 4) & (w[:, 1] <= 7 * v + 6)]
-            ons = mine[(mine[:, 1] == 7 * v + 4) & (mine[:, 2] & W.GATE != 0)]
+    since, past, found = [None] * 3, [deque(maxlen=5) for _ in range(3)], Counter()
+    for f in range(len(frames) - args.horizon):
+        for v, sid in enumerate(sids):
+            past[v].append((f, sid.copy()))
+            mine, ctrl, sr = rows[f][v], int(regs[7 * v + 4]), int(regs[7 * v + 6])
+            ons = mine[(mine[:, 1] == 4) & (mine[:, 2] & W.GATE != 0)]
             if len(ons) and not ctrl & W.GATE:
-                first = int(mine[0, 0])
-                held = first - since[v] if since[v] is not None else 0
-                found[(held >= settle, held // 19656)] += 1
+                held = int(mine[0, 0]) - since[v] if since[v] is not None else 0
+                kept = None
+                begun = int(np.searchsorted(starts, since[v], side="right")) - 1 if held else f
+                base = next((c for g, c in past[v] if g == begun), None)
+                if base is not None:
+                    writes = np.concatenate([rows[g][v] for g in range(begun, f + args.horizon)])
+                    until = starts[f + args.horizon]
+                    ref = base.envelope_trace(0, writes, until)
+                    trial = neutral(writes, since[v] if held else int(mine[0, 0]))
+                    trial[trial[:, 0] >= int(mine[0, 0])] = writes[writes[:, 0] >= int(mine[0, 0])]
+                    kept = same(base.envelope_trace(0, trial, until), ref)
+                found[(held >= args.settle, held // 19656, kept)] += 1
             for cycle, reg, value in mine.tolist():
-                ctrl, sr = (
-                    (value, sr) if reg == 7 * v + 4 else (ctrl, value if reg == 7 * v + 6 else sr)
-                )
+                ctrl, sr = (value, sr) if reg == 4 else (ctrl, value if reg == 6 else sr)
                 quiet = not ctrl & W.GATE and not sr & 0x0F
                 since[v] = (since[v] if since[v] is not None else cycle) if quiet else None
-        regs[w[:, 1]] = w[:, 2]
-    return {"notes": [[int(s), int(k), n] for (s, k), n in found.items()]}
+            sid.run(mine, starts[f + 1])
+        regs[frames[f][1][:, 1]] = frames[f][1][:, 2]
+    return {"notes": [[int(s), int(k), i, n] for (s, k, i), n in found.items()]}
 
 
 def measure(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
@@ -126,27 +149,30 @@ def covers(masks: dict, most: int) -> tuple:
 
 
 def hard_restart_lines(recs: list, settle: int) -> list:
-    """Per player: the note-ons, how many had a settled hard restart, and the frames of hard
-    restart (gate off, release 0) the unsettled ones had."""
+    """Per player: the note-ons by whole frames of hard restart (gate off, release 0) before
+    their frame, settled or not, and how many of each the AD and SR values written meanwhile
+    leave identical (checked where the hard restart began within the last four frames)."""
     lines = [
-        f"  hard restart template: gate off and SR release 0 from at least {settle} cycles "
-        f"({-(-settle // 19656)} PAL frames) before the note's frame"
+        f"  hard restart: gate off and SR release 0; settled from {settle} cycles "
+        f"({-(-settle // 19656)} PAL frames) before the note's frame whatever came before"
     ]
-    by = defaultdict(Counter)
+    by, top = defaultdict(Counter), -(-settle // 19656)
     for r in recs:
-        for settled, frames, n in r.get("hr", {}).get("notes", []):
-            by[r.get("player", "")][(settled, frames)] += n
+        for settled, frames, kept, n in r.get("hr", {}).get("notes", []):
+            by[r.get("player", "")][(settled, min(frames, top), kept)] += n
     for player, notes in sorted(by.items()):
-        total = sum(notes.values())
-        good = sum(n for (s, _), n in notes.items() if s)
-        short = Counter()
-        for (s, k), n in notes.items():
-            if not s:
-                short[k] += n
-        lines.append(
-            f"    {player}: {total} note-ons, {good} settled; unsettled by frames of hard restart: "
-            + " ".join(f"{k}:{n}" for k, n in sorted(short.items()))
-        )
+        lines.append(f"    {player}: {sum(notes.values())} note-ons")
+        for frames in sorted({k for _, k, _ in notes}):
+            row = {key: n for key, n in notes.items() if key[1] == frames}
+            total = sum(row.values())
+            same_values = sum(n for (_, _, i), n in row.items() if i)
+            checked = sum(n for (_, _, i), n in row.items() if i is not None)
+            settled = sum(n for (s, _, _), n in row.items() if s)
+            label = f"{frames}+" if frames == top else str(frames)
+            lines.append(
+                f"      {label:>2} frames: {total:6} notes, {settled:6} settled, "
+                f"values irrelevant in {same_values} of {checked} checked"
+            )
     return lines
 
 
