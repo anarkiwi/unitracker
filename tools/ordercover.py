@@ -148,7 +148,7 @@ def covers(masks: dict, most: int) -> tuple:
     return None, []
 
 
-def hard_restart_lines(recs: list, settle: int) -> list:
+def hard_restart_lines(recs: list, settle: int) -> list:  # pylint: disable=too-many-locals
     """Per player: the note-ons by whole frames of hard restart (gate off, release 0) before
     their frame, settled or not, and how many of each the AD and SR values written meanwhile
     leave identical (checked where the hard restart began within the last four frames)."""
