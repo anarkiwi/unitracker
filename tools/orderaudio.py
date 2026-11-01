@@ -68,11 +68,11 @@ def render(sid: SID, writes: np.ndarray, until: int) -> np.ndarray:
     return sid.copy().run(writes, until)
 
 
-def chips(clock: float) -> list:
+def chips(clock: float, rate: float = RATE, method: str = "resample") -> list:
     """One chip per voice playing voice 1 at :data:`PITCH` and full volume."""
     out = []
     for _ in range(3):
-        sid = SID(clock_hz=clock, sampling_hz=RATE, method="resample")
+        sid = SID(clock_hz=clock, sampling_hz=rate, method=method)
         sid.run([(0, 24, 15), (0, 0, PITCH & 0xFF), (0, 1, PITCH >> 8)], 1)
         out.append(sid)
     return out

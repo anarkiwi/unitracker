@@ -41,6 +41,19 @@ def test_measure_finds_orders_keeping_each_case(metal_warrior):
     assert any(int(m, 16) for m, _, _ in rec["masks"])
 
 
+def test_settle_is_a_wrap_and_a_release():
+    settle = C.settle_cycles(985248)
+    assert 0x7FFF < settle < 0x7FFF + 19656
+
+
+def test_hard_restarts_count_note_ons(metal_warrior):
+    args = SimpleNamespace(backend="auto", frames=300, settle=39566)
+    notes = C.hard_restarts({"path": str(metal_warrior)}, None, args)["notes"]
+    assert notes and all(n > 0 and frames >= 0 for _, frames, n in notes)
+    lines = C.hard_restart_lines([{"player": "p", "hr": {"notes": notes}}], 39566)
+    assert "3 PAL frames" in lines[0] and lines[1].startswith("    p: ")
+
+
 def test_summary_reports_covers():
     recs = [{"player": "p", "masks": [[hex(mask(2, 3)), 4, "g+t-"], ["0x0", 1, "a00 g+t-"]]}]
     text = C.summary(recs, 2)
