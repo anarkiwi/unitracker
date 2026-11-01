@@ -1,20 +1,20 @@
+# pylint: disable=too-many-lines
 """A SID-Wizard tune as a format 2.5 document, from pysidwizard's typed module and the layout of its
 bound playroutine spec; ``verify`` plays the document against the spec player with the standard
 note table (docs/lift/sidwizard.md)."""
 
 import sys
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, parse_sid_header
 from pysidtracker.errors import SidParseError
+from pysidtracker.notes import frequency
 from pysidwizard import End, Loop, PlayPattern, RawSequenceByte, Transpose
 from pysidwizard import typed as T
 from pysidwizard.playspec import binding
 from unitracker_grammar import code as asm
-from unitracker_grammar.expr import canonical
-from unitracker_player.compiler import load
-from unitracker_player.player import Player
 from unitracker_grammar.document import (
     HOLD,
     NONE,
@@ -36,11 +36,13 @@ from unitracker_grammar.document import (
     printed,
     signature,
 )
+from unitracker_grammar.expr import canonical
+from unitracker_player.compiler import load as load_song
+from unitracker_player.player import Player
 
 from unitracker.lift import cli, invariants, swcode
 from unitracker.lift.shared import Names, Reference, Refusal, cells_of, lifted_text
 from unitracker.lift.shared import meta_text, note_name, rests, spec_played
-from pysidtracker.notes import frequency
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
 PRE = 2
@@ -145,11 +147,36 @@ def refuse_build(lay: dict) -> None:
             raise Refusal("build", f"no {name}")
 
 
+class Ctx(NamedTuple):
+    """What a voice carries between rows: its instrument, whether a portamento note effect awaits
+    its note, the instrument its next event restores after a first note, and whether a note has
+    started."""
+
+    cur: int = 0
+    pend: bool = False
+    restore: int = 0
+    begun: bool = False
+
+
+class Step(NamedTuple):
+    """What a row does to its voice: the instrument it selects and plays, its note column, and
+    whether the note starts, slides to its pitch, is the voice's first or keeps the filter."""
+
+    select: int
+    cur: int
+    ins: object
+    note: object
+    started: bool
+    legato: bool
+    first: bool
+    tied: bool
+
+
 def _plus(step: int) -> Expr:
     return Expr(canonical(f"v + {step}"))
 
 
-def plays(core: Core, voice: int) -> tuple:
+def plays(core: Core, voice: int) -> tuple:  # pylint: disable=too-many-branches
     """``(units, loop)`` of a voice's orderlist: the ``(pattern, transpose)`` each step starts,
     and the unit index the orderlist loops to (None where it ends). A Refusal for an entry this
     lift does not state."""
@@ -206,7 +233,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     def __init__(self, core: Core, firsts: dict | None = None):
         refuse_build(core.lay)
-        self.firsts, self.booted = firsts or {}, set()
+        self.firsts, self.booted, self.voice_now = firsts or {}, set(), 0
         self.core, self.lay, self.swm = core, core.lay, core.swm
         self.names = Names()
         self.entered, self.defined, self.rows = {}, {}, []
@@ -251,14 +278,16 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             raise Refusal("table jump", "onto a jump row")
         return index
 
-    def chord(self, ins, number: int):
+    def chord(self, number: int):
         """The chord ``number`` of the module, a Refusal where there is none."""
         chords = self.swm.chords
         if not 0 < number <= len(chords):
             raise Refusal("chord", f"chord {number} of {len(chords)}")
         return chords[number - 1]
 
-    def wave_rows(self, ins, start: int = 0, number: int = 0) -> tuple:
+    def wave_rows(  # pylint: disable=too-many-locals
+        self, ins, start: int = 0, number: int = 0
+    ) -> tuple:
         """``(program rows, loop)`` of the waveform table of ``ins`` from row ``start`` with
         chord ``number`` (the instrument's by default): a row lasts the arpeggio speed's calls, a
         repeat row its count's, and a chord row one call for each interval."""
@@ -282,7 +311,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             if isinstance(row.pitch, T.ChordPitch):
                 if row.detune != 0:
                     raise Refusal("detune", "a chord row loads a detune")
-                chord = self.chord(ins, number or ins.default_chord)
+                chord = self.chord(number or ins.default_chord)
                 for interval in chord.intervals:
                     shift = T.RelativePitch(interval & 255)
                     out.append(Row(keys | self.pitch(shift) | hold))
@@ -329,13 +358,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             return [first, *out[1:]], loop
         return [first, *out[1:], out[0]], 1
 
-    def wave(self, n: int, start: int = 0, number: int = 0) -> str:
+    def wave(self, n: int, start: int = 0, number: int = 0, wait: int = 1) -> str:
         """The ``ctrl`` program name of instrument ``n``'s waveform table from row ``start`` with
-        chord ``number`` (the instrument's by default)."""
+        chord ``number`` (the instrument's by default), whose first row applies ``wait`` calls
+        after it starts."""
         ins = self.ins(n)
         out, loop = self.wave_rows(ins, start, number)
-        out, loop = self.entered_at(out, loop)
-        origin = invariants.Origin(("wave", n, start, number))
+        out, loop = self.entered_at(out, loop) if wait else (out, loop)
+        origin = invariants.Origin(("wave", n, start, number, wait))
         return self.names.name("ctrl", "c", Program(out, loop), origin)
 
     def pulse_rows(self, ins, start: int = 0, entry: bool = True) -> tuple:
@@ -377,21 +407,22 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             return {}
         return {"set.pw": Once(self.call("pkset", column))}
 
-    def pulse(self, n: int, start: int = 0) -> str:
-        """The ``pw`` program name of instrument ``n``'s pulse table from row ``start``, run from
-        the tick after a note starts or the tick a table position is set."""
+    def pulse(self, n: int, start: int = 0, fresh: bool = False) -> str:
+        """The ``pw`` program name of instrument ``n``'s pulse table from row ``start``; ``fresh``
+        where the table position is set with the sweep count reset, as a note's start does."""
         ins = self.ins(n)
-        out, loop = self.pulse_rows(ins, start, not start)
+        out, loop = self.pulse_rows(ins, start, not fresh)
         if not out or self.pwkey not in dict(out[0].keys):
             out = [Row({self.pwkey: NONE}), *out[1:]] if out else [Row({self.pwkey: NONE})]
-        origin = invariants.Origin(("pulse", n, start))
+        origin = invariants.Origin(("pulse", n, start, fresh))
         return self.names.name("pw", "pw", Program(out, loop), origin)
 
-    def filter_rows(self, ins, start: int = 0) -> tuple:
-        """``(program rows, loop)`` of the filter table of ``ins`` from row ``start``."""
+    def filter_rows(self, ins, start: int = 0, entry: bool = True) -> tuple:
+        """``(program rows, loop)`` of the filter table of ``ins`` from row ``start``; ``entry``
+        where the cursor comes to it with the sweep count the last table left."""
         rows = ins.filter_rows
         base = 0x10 + len(ins.wf_table) + len(ins.pw_table) + 2
-        out, seen, i, entry = [], {}, start, True
+        out, seen, i = [], {}, start
         while i < len(rows):
             if i in seen:
                 return out, seen[i]
@@ -428,14 +459,15 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             return {"route": column & 15}
         raise Refusal("filter keytrack", "a filter table row tracks the keyboard")
 
-    def filter(self, n: int) -> str:
-        """The ``filter`` program name of instrument ``n``'s filter table."""
-        self.filtered = True
+    def filter(self, n: int, start: int = 0, fresh: bool = False) -> str:
+        """The ``filter`` program name of instrument ``n``'s filter table from row ``start``;
+        ``fresh`` where the table position is set with the sweep count reset."""
         ins = self.ins(n)
-        out, loop = self.filter_rows(ins)
+        out, loop = self.filter_rows(ins, start, not fresh)
         if not out or "cut" not in dict(out[0].keys):
             out = [Row({"cut": NONE}), *out[1:]] if out else [Row({"cut": NONE})]
-        return self.names.name("filter", "f", Program(out, loop), invariants.Origin(("filter", n)))
+        origin = invariants.Origin(("filter", n, start, fresh))
+        return self.names.name("filter", "f", Program(out, loop), origin)
 
     def garbage(self, voice: int, tick: int) -> tuple:
         """``(before, [(freq, pw, ctrl)] at the two restart ticks)`` of ``voice`` whose first note
@@ -453,7 +485,9 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             raise Refusal("start state", "the first note gates the voice on within its restart")
         return out[0], out[1:]
 
-    def restart(self, n: int, boot: tuple | None = None) -> str:
+    def restart(  # pylint: disable=too-many-locals
+        self, n: int, boot: tuple | None = None, tied: bool = False
+    ) -> str:
         """The ``restart`` program name of instrument ``n``: the hard restart on the ticks its
         control byte selects, then the note's first tick; ``boot`` for a voice's first note, whose
         two restart ticks also run the player's empty instrument."""
@@ -470,7 +504,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             first["first.freq"] = Once(
                 self.call("fixb" if self.lay["first_frame_freq_by_track"] else "fix")
             )
-        first |= self.routing(ins)
+        first |= {} if tied else self.routing(ins)
         rows = []
         have, ticks = self.garbage(*boot) if boot else ((0, 0, 0), [])
         for tick in (0, 1):
@@ -483,40 +517,26 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 have = (freq, pw, ctrl)
             rows.append(Row(keys))
         program = Program([*rows, Row({"hold": 0}), Row(first)])
-        return self.names.name("restart", "r", program, invariants.Origin(("ins", n), boot or ()))
+        origin = invariants.Origin(("ins", n), (boot or ()) + ("tied",) * tied)
+        return self.names.name("restart", "r", program, origin)
 
     def routing(self, ins) -> dict:
         """The row keys routing the voice through the filter, or not, as the instrument's filter
         table does: any first row but the end routes it, the end also stops the filter program
         the voice controls in a build that rewinds it."""
-        if ins.control & 0x80:
-            raise Refusal("tied filter", "an instrument keeps the filter table across notes")
         if ins.filter_rows:
             return {"route_on": 0}
         return {"route_off": 0} | ({"cut": HOLD} if self.lay["filter_stop_rewinds"] else {})
 
-    def controls(self, ins) -> bool:
-        """Whether the instrument's note starts the filter program of its table."""
+    @staticmethod
+    def controls(ins) -> bool:
+        """Whether the instrument's note starts the filter program of its table. A table that
+        filters the voice without control leaves the program running on the tables of this
+        instrument, which the lift does not state."""
         rows = ins.filter_rows
-        return bool(rows) and not (isinstance(rows[0], T.FilterSweep) and rows[0].frames == 0)
-
-    def define(self, n: int, boot: tuple | None = None) -> str:
-        """The name of instrument ``n``, defined on first use; ``boot`` for the copy a voice's
-        first note starts, whose restart runs the player's empty instrument too."""
-        if (n, boot) in self.defined:
-            return self.defined[n, boot]
-        ins = self.ins(n)
-        fields = {"ctrl": self.wave(n), "restart": self.restart(n, boot)}
-        fields["set.freq"] = Once(self.vibrato(ins, ins.vibrato & 15, ins.vibrato >> 4, True))
-        fields["pw"] = self.pulse(n)
-        if self.controls(ins):
-            fields["filter"] = self.filter(n)
-        origin = invariants.Origin(("ins", n), boot or ())
-        name = self.names.name("ins", "i", Instrument(fields), origin)
-        self.defined[n, boot] = name
-        return name
-
-    # ---- rows -------------------------------------------------------------------------------
+        if rows and isinstance(rows[0], T.FilterSweep) and rows[0].frames == 0:
+            raise Refusal("filter without control", "a filter table that takes no control")
+        return bool(rows)
 
     def vibrato(self, ins, freq: int, amp: int, delay: bool = False) -> Call:
         """The call setting ``ins``'s vibrato of period ``freq`` and amplitude ``amp``: its
@@ -539,6 +559,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         """Adds the commands of small effect ``effect`` of instrument ``ins`` to ``cmds``; the
         nibble effects set a nibble of the instrument's byte."""
         n, v = effect.effect, effect.value
+        if ins is None and n != 0xA:
+            raise Refusal("pattern effect", "a small effect before any instrument")
         ad, sr = ins.attack << 4 | ins.decay, ins.sustain << 4 | ins.release
         match n:
             case 2:
@@ -560,7 +582,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     def big(self, n: int, value: int, cmds: dict) -> None:
         """Adds the commands of big effect ``n`` of ``value`` to ``cmds``."""
-        if n in (1, 2, 3, 8):
+        if n in (1, 2, 3, 8, 9, 0xA, 0xB):
             return
         if n == 7:
             cmds["_chord"] = value
@@ -575,95 +597,177 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         else:
             raise Refusal("pattern effect", f"big effect {n:#x}")
 
-    def effects(self, row, note, ins) -> tuple:
-        """``(commands, frequency call)`` of a row's effects, the note column's first."""
-        column, fx, value = row.instrument, row.fx, row.fx_value or 0
-        cmds, calls = {}, []
-        if isinstance(note, T.VibratoAmplitude):
-            calls.append(self.vibrato(ins, ins.vibrato & 15, note.amplitude))
-        if isinstance(column, T.SmallEffect):
-            self.small(ins, column, cmds)
-        if isinstance(fx, T.SmallEffect):
-            self.small(ins, fx, cmds)
-            if fx.effect == 8:
-                calls.append(self.vibrato(ins, ins.vibrato & 15, fx.value))
-        if isinstance(fx, T.BigEffect):
-            self.big(int(fx), value, cmds)
-            if fx in (1, 2, 3):
-                calls.append(self.slide(0x80 + int(fx), value))
-            if fx == 8:
-                calls.append(self.vibrato(ins, value & 15, value >> 4))
-        if note.__class__.__name__ in WAVE_FX:
-            cmds["ctrl"] = Once(Expr(WAVE_FX[note.__class__.__name__]))
-        if len(calls) > 1:
-            raise Refusal("pattern effect", "two effects on the frequency in one row")
-        return cmds, (calls or [None])[0]
-
-    def event(self, row, ctx: tuple) -> tuple:
-        """``(event, context after)`` of a pattern row played in ``ctx``: the instrument and
-        whether a portamento note effect awaits its note."""
-        cur0, pend, restore, rows, begun = ctx
+    def step(self, row, ctx: Ctx) -> Step:
+        """The :class:`Step` of ``row`` in ``ctx``; a Refusal for a row that selects an instrument
+        but starts no note, which leaves running tables to read the new instrument's."""
         column, fx = row.instrument, row.fx
         select = int(column) if isinstance(column, T.SelectInstrument) else 0
-        cur = select or cur0
+        cur = select or ctx.cur
         ins = self.ins(cur) if cur else None
         note = row.note if ins is not None or isinstance(row.note, T.Note) else None
         started = isinstance(note, T.Note)
         if started and ins is None:
             raise Refusal("note without instrument", "a note before any instrument")
-        cmds, sets = self.effects(row, note, ins)
-        porta = isinstance(note, T.Portamento) or type(note) is T.NoteEffect
         tone = isinstance(fx, T.BigEffect) and fx == 3
-        legato = started and (tone or pend or isinstance(column, T.Legato))
-        first = started and not legato and not begun
-        boot = (self.voice_now, self.firsts.get(self.voice_now, 0)) if first else None
-        if first:
-            self.booted.add(self.voice_now)
-        name = self.define(cur, boot) if select or first else None
-        if restore and not name:
-            name = self.define(restore)
-        restore = cur if first else 0
-        if legato and sets is None:
-            sets = self.call("tone" if pend or not isinstance(column, T.Legato) else "leg")
-        elif legato and isinstance(column, T.Legato) and not (tone or pend):
-            raise Refusal("pattern effect", "an effect on the frequency of a legato note")
+        legato = started and (tone or ctx.pend or isinstance(column, T.Legato))
+        if select and ctx.begun and not (started and not legato):
+            raise Refusal("instrument change", "an instrument selected without a note start")
+        first = started and not legato and not ctx.begun
+        tied = started and not (legato or select) and bool(ins.control & 0x80)
+        return Step(select, cur, ins, note, started, legato, first, tied)
+
+    def effects(self, row, k: Step) -> tuple:
+        """``(commands, frequency call)`` of a row's effects, the note column's first."""
+        column, fx, value = row.instrument, row.fx, row.fx_value or 0
+        cmds, calls = {}, []
+        if isinstance(k.note, T.VibratoAmplitude):
+            calls.append(self.vibrato(k.ins, k.ins.vibrato & 15, k.note.amplitude))
+        if isinstance(column, T.SmallEffect):
+            self.small(k.ins, column, cmds)
+        if isinstance(fx, T.SmallEffect):
+            self.small(k.ins, fx, cmds)
+            if fx.effect == 8:
+                calls.append(self.vibrato(k.ins, k.ins.vibrato & 15, fx.value))
+        if isinstance(fx, T.BigEffect):
+            self.big(int(fx), value, cmds)
+            self.jump(k, row, cmds)
+            if fx in (1, 2, 3):
+                calls.append(self.slide(0x80 + int(fx), value))
+            if fx == 8:
+                calls.append(self.vibrato(k.ins, value & 15, value >> 4))
+        if k.note.__class__.__name__ in WAVE_FX:
+            cmds["ctrl"] = Once(Expr(WAVE_FX[k.note.__class__.__name__]))
+        if len(calls) > 1:
+            raise Refusal("pattern effect", "two effects on the frequency in one row")
+        return cmds, (calls or [None])[0]
+
+    def position(self, ins, offset: int, base: int, rows: int) -> int:
+        """The row of a table of ``rows`` rows from instrument offset ``base`` at ``offset``; a
+        Refusal where the cursor can land on no row or the arpeggio speed puts the next step off
+        the next call."""
+        if ins.arp_speed & 63:
+            raise Refusal("table position", "a table position set between steps of an arpeggio")
+        index, rest = divmod(offset - base, 3)
+        if rest or not 0 <= index < rows:
+            raise Refusal("table position", f"offset {offset} is no row")
+        return index
+
+    def jump(self, k: Step, row, cmds: dict) -> None:
+        """Adds to ``cmds`` the program starts of the table positions a row sets."""
+        fx, ins = row.fx, k.ins
+        if not (isinstance(fx, T.BigEffect) and fx in (9, 0xA, 0xB)):
+            return
+        if ins is None or fx == 9 and self.lay["bigfx_v10"]:
+            raise Refusal("table position", "a table position set before any instrument")
+        runs, value, wf, pw = (
+            cmds.setdefault("runs", []),
+            row.fx_value or 0,
+            ins.wf_table,
+            ins.pw_table,
+        )
+        if fx == 9:
+            at = self.position(ins, 0x10 + 3 * value, 0x10, len(ins.wf_rows))
+            runs.append(self.wave(k.cur, at, 0, int(k.note is not None)))
+            return
+        if not self.lay["table_fx_resets"]:
+            raise Refusal("table position", "a table position set without its sweep count")
+        base = 0x10 + len(wf) + 1 + (len(pw) + 1) * (fx == 0x0B)
+        rows = ins.pw_rows if fx == 0x0A else ins.filter_rows
+        at = self.position(ins, base + 3 * value, base, len(rows))
+        runs.append(self.pulse(k.cur, at, True) if fx == 0x0A else self.filter(k.cur, at, True))
+
+    def gate(self, k: Step, cmds: dict) -> None:
+        """Adds to ``cmds`` what a gate note effect does: the gate, or the instrument's gate off
+        table positions where it has them."""
+        runs, ins = cmds.setdefault("runs", []), k.ins
+        if isinstance(k.note, T.GateOn):
+            cmds["ctrl"] = Once(self.call("gon"))
+            return
+        if ins is None:
+            return
+        pointers = self.lay["gateoffptr"]
+        if ins.gateoff_filt and pointers:
+            raise Refusal("gate off pointer", "a gate off position of the filter table")
+        if ins.gateoff_wf and pointers:
+            at = self.position(ins, ins.gateoff_wf, 0x10, len(ins.wf_rows))
+            runs.append(self.wave(k.cur, at, 0, 0))
+        else:
+            cmds["ctrl"] = Once(self.call("goff"))
+        if ins.gateoff_pw and pointers:
+            base = 0x10 + len(ins.wf_table) + 1
+            at = self.position(ins, ins.gateoff_pw, base, len(ins.pw_rows))
+            runs.append(self.pulse(k.cur, at))
+
+    def names_of(self, k: Step, ctx: Ctx) -> str | None:
+        """The name of the instrument an event plays, None where the voice's last one stands: a
+        selected one, a voice's first note's copy and a note that keeps the filter table's."""
+        boot = (self.voice_now, self.firsts.get(self.voice_now, 0)) if k.first else None
+        self.booted |= {self.voice_now} if k.first else set()
+        if k.select or k.first or k.tied:
+            return self.define(k.cur, boot, k.tied)
+        return self.define(ctx.restore) if ctx.restore else None
+
+    def event(self, row, ctx: Ctx) -> tuple:
+        """``(event, context after)`` of a pattern row played in ``ctx``."""
+        k = self.step(row, ctx)
+        cmds, sets = self.effects(row, k)
+        porta = isinstance(k.note, T.Portamento) or k.note.__class__ is T.NoteEffect
+        if k.legato and sets is None:
+            sets = self.call(
+                "leg" if isinstance(row.instrument, T.Legato) and not ctx.pend else "tone"
+            )
         if porta:
             sets = self.slide(0xFF, 110)
-        pend = porta or (pend and sets is None and not started)
         keep, atom = {}, "-"
-        if started:
-            atom = note_name(int(note) - 1 + ins.octave_shift)
-            if not (legato or select):
+        if k.started:
+            atom = note_name(int(k.note) - 1 + k.ins.octave_shift)
+            if not (k.legato or k.select):
                 keep = {
-                    "keep_pw": bool(ins.control & 0x40),
-                    "keep_filter": bool(ins.control & 0x80),
+                    "keep_pw": bool(k.ins.control & 0x40),
+                    "keep_filter": bool(k.ins.control & 0x80),
                 }
-        elif isinstance(note, T.GateOff | T.GateOn):
-            if ins is not None and any((ins.gateoff_wf, ins.gateoff_pw, ins.gateoff_filt)):
-                raise Refusal("gate off pointer", "a gate off table position")
-            on = isinstance(note, T.GateOn)
-            cmds["ctrl"] = Once(self.call("gon" if on else "goff"))
-        elif note is not None and not isinstance(note, T.VibratoAmplitude) and not porta:
-            if note.__class__.__name__ not in WAVE_FX:
-                raise Refusal("note column", type(note).__name__)
+        elif isinstance(k.note, T.GateOff | T.GateOn):
+            self.gate(k, cmds)
+        elif k.note is not None and not (porta or isinstance(k.note, T.VibratoAmplitude)):
+            if k.note.__class__.__name__ not in WAVE_FX:
+                raise Refusal("note column", type(k.note).__name__)
         if "_chord" in cmds:
-            if not started or legato:
+            if not k.started or k.legato:
                 raise Refusal("pattern effect", "a chord change but at a note start")
-            cmds["run"] = self.wave(cur, 0, cmds.pop("_chord"))
+            cmds.setdefault("runs", []).append(self.wave(k.cur, 0, cmds.pop("_chord")))
         if sets is not None:
             self.call("tick")
             cmds["eff.freq"] = Once(sets)
-        if legato:
-            cmds["legato"] = True
-        return Event(atom, name, cmds, **keep), (cur, pend, restore, rows + 1, begun or started)
+        cmds |= {"legato": True} if k.legato else {}
+        name = self.names_of(k, ctx)
+        runs = cmds.pop("runs", [])
+        event = Event(atom, name, [*cmds.items(), *[("run", r) for r in runs]], **keep)
+        pend = porta or (ctx.pend and sets is None and not k.started)
+        return event, Ctx(k.cur, pend, k.cur if k.first else 0, ctx.begun or k.started)
 
-    def events(self, rows, ctx: tuple) -> tuple:
+    def events(self, rows, ctx: Ctx) -> tuple:
         """``(events, context after)`` of pattern ``rows`` played in ``ctx``."""
         events = []
         for row in rows:
             event, ctx = self.event(row, ctx)
             events.append(event)
         return tuple(events), ctx
+
+    def define(self, n: int, boot: tuple | None = None, tied: bool = False) -> str:
+        """The name of instrument ``n``, defined on first use; ``boot`` for the copy a voice's
+        first note starts, whose restart runs the player's empty instrument too."""
+        if (n, boot, tied) in self.defined:
+            return self.defined[n, boot, tied]
+        ins = self.ins(n)
+        fields = {"ctrl": self.wave(n), "restart": self.restart(n, boot, tied)}
+        fields["set.freq"] = Once(self.vibrato(ins, ins.vibrato & 15, ins.vibrato >> 4, True))
+        fields["pw"] = self.pulse(n)
+        if self.controls(ins):
+            fields["filter"] = self.filter(n)
+        origin = invariants.Origin(("ins", n), (boot or ()) + ("tied",) * tied)
+        name = self.names.name("ins", "i", Instrument(fields), origin)
+        self.defined[n, boot, tied] = name
+        return name
 
     # ---- orderlists -------------------------------------------------------------------------
 
@@ -682,7 +786,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         entering it in another context changes what it plays."""
         units, loop = plays(self.core, v)
         self.voice_now = v
-        walks, ctx = self.segments(units, (0, False, 0, 0, False))
+        walks, ctx = self.segments(units, Ctx())
         if loop is not None:
             again, _ = self.segments(units[loop:], ctx)
             if [w[1] for w in again] != [w[1] for w in walks[loop:]]:
@@ -694,7 +798,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             if index == 0 and v == 0:
                 events = (self.timed(events[0]), *events[1:])
             name = self.names.name("phrase", "p", tuple(rests(list(events))))
-            self.entered.setdefault(name, (num, ctx + ("tempo",) * (index == 0 and v == 0)))
+            self.entered.setdefault(name, (num, (*ctx, *(["tempo"] * (index == 0 and v == 0)))))
             items.append(Play(name, Signed(trans) if trans else None))
         return Voice(tuple(items), None if loop is None else starts[loop])
 
@@ -842,7 +946,7 @@ def first_notes(text: str, voices: set) -> dict:
         if kind == "event" and args[0] in voices and isinstance(args[1].note, int):
             found.setdefault(args[0], player.call)
 
-    player = Player(load(text), observe)
+    player = Player(load_song(text), observe)
     while len(found) < len(voices) and player.call < LIMIT and player.step() is not None:
         pass
     return found
@@ -911,7 +1015,7 @@ def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:
 def main(argv=None) -> int:
     """Lift a SID, or verify SIDs against the spec player."""
     argv = sys.argv[1:] if argv is None else argv
-    return cli.main(argv, __doc__.split("\n", 1)[0], lambda raw, st: lift(raw, st), verify)
+    return cli.main(argv, __doc__.split("\n", 1)[0], lift, verify)
 
 
 if __name__ == "__main__":

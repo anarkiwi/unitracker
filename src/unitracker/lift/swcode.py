@@ -51,8 +51,8 @@ def routines(exp_end: int) -> dict:
     step = STEP.replace("#END1", f"#{exp_end + 1}").replace("#END", f"#{exp_end}")
     return {
         "un": "lda v\nsec\nsbc pl\nsta v\nlda v+1\nsbc ph\nsta v+1\nrts\n",
-        "out": "lda cw\nsta pl\nlda #0\nsta ph\nsta cw\nlda v\nclc\nadc pl\nsta v\nlda v+1\nadc ph\n"
-        "sta v+1\nrts\n",
+        "out": "lda cw\nsta pl\nlda #0\nsta ph\nsta cw\nlda v\nclc\nadc pl\nsta v\n"
+        "lda v+1\nadc ph\nsta v+1\nrts\n",
         "ld": LOAD + "lda #c\nsta cw\nrts\n",
         "ldr": LOAD + "sec\nlda ne\nadc #p\nlda #0\nrol\nsta cw\nrts\n",
         "kp": "lda #1\nsta cw\nrts\n",
