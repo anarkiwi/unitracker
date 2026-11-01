@@ -105,4 +105,5 @@ the native objects with more than one object and the contexts that tell the copi
 with `fmt.spec_player(song, notes=True).render_grid`: the replay's play routine spec with every
 read of the note table answered with the standard word at the tune's clock. It plays at least 20000
 frames and every step of the walk and the loop once more (`whole=False` plays the frames asked
-for). `lift` raises `Divergence` naming the first differing frame and register.
+for). `lift` raises `Divergence` naming the first differing frame and register. The grid and
+the gate and TEST edges within each frame are compared ([verification](verification.md)).

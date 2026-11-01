@@ -38,6 +38,7 @@ from unitracker_grammar.document import (
     signature,
 )
 from unitracker_grammar.expr import canonical
+from unitracker_grammar.model import Env
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.invariants import Origin
@@ -45,6 +46,7 @@ from unitracker.lift.macode import ROUTINES, STATE
 from unitracker.lift.macore import Core, core_of_sid, core_of_song, refuse
 from unitracker.lift import shared
 from unitracker.lift.shared import Divergence, LiftError, Reference, Refusal, calls_of, cells_of
+from unitracker.lift.shared import spec_played
 from unitracker.lift.shared import lifted_text, meta_text, note_name
 
 __all__ = ["Core", "Divergence", "LiftError", "Refusal", "core_of_sid", "core_of_song", "lift"]
@@ -260,9 +262,13 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         """The name of the control program a note of instrument ``k`` on voice ``x`` runs: the
         trigger's row, then the instrument's inner program; with ``mask`` false the trigger
         keeps the rest's gate mask, which binds from the inner program's first row on."""
-        rec = self.record(k)
-        keys = [("ad", rec.attack_decay), ("sr", rec.sustain_release)]
-        keys += [("m.ctrl", NONE)] * mask + [("ctrl", rec.waveform)]
+        rec, wave = self.record(k), self.record(k).waveform
+        keys = [("m.ctrl", NONE)] * mask
+        if mask and wave & 1:
+            env = ((rec.sustain_release, rec.attack_decay, wave & 0xFE), (None, None, wave))
+            keys += [("env", Env(env))]
+        else:
+            keys = [("ad", rec.attack_decay), ("sr", rec.sustain_release)] + keys + [("ctrl", wave)]
         rows, loop = [Row(keys)], None
         prog = self.program_of(rec.porta)
         if prog is not None:
@@ -828,13 +834,15 @@ def player_of(core: Core, notes: bool = True) -> SpecPlayer:
     )
 
 
-def reference(raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = True):
-    """The register grid of the spec player over ``frames`` frames."""
+def reference(
+    raw: bytes, subtune: int = 0, frames: int = 20000, notes: bool = True, both: bool = False
+):
+    """The register grid of the spec player over ``frames`` frames; with ``both``, ``(grid,
+    edges)`` (:func:`~unitracker.lift.shared.spec_played`)."""
     fmt = find_format(raw)
     tune = fmt.parser.parse(raw, subtune)
-    return np.asarray(
-        fmt.spec_player(tune, notes=True if notes else None).render_grid(frames), dtype=np.uint8
-    )
+    player = fmt.spec_player(tune, notes=True if notes else None)
+    return spec_played(player, frames) if both else np.asarray(player.render_grid(frames), np.uint8)
 
 
 def compare(core: Core, frames: int, grid=None) -> tuple:
@@ -847,7 +855,7 @@ def compare(core: Core, frames: int, grid=None) -> tuple:
 def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
     """``(cells, text)`` of a SID: the cells where its document differs from the reference."""
     core = core_of_sid(raw, subtune)
-    job = Reference(lambda n: reference(raw, subtune, n), frames)
+    job = Reference(lambda n: reference(raw, subtune, n, both=True), frames)
     try:
         text = document_text(core)
         return cells_of(text, frames, reference=job), text

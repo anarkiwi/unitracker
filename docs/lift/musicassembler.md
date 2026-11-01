@@ -57,7 +57,7 @@ carry:
 | tied note (`$40`) | `legato`, the frequency and mask rebound, no trigger |
 | rest | `-`, `m.ctrl:'v & 254'` for the gate mask |
 | hold, select | `-`; `.iK` and the sweeps' new steps for a select |
-| instrument trigger | `ctrl` program: row `ad`, `sr`, `ctrl`, then the inner program |
+| instrument trigger | `ctrl` program: row `env:SR.AD.W&254/_._.W` where the waveform `W` sets the gate and no rest mask holds (`trigger` writes the previous control byte with the gate clear before the waveform, so the gate is cleared and set again within the call; the cleared segment's other bits are not compared), else `ad`, `sr`, `ctrl`; then the inner program |
 | inner program row | read from the bytes the program pointer leads to; `ctrl:wave`, `freq:'F((n + p) & 127)'` (`F(p & 127)` absolute); `end`, `{loop:k}` |
 | pulse flag `$40` or always | `pw:'ite(phi == 0, init, v + 257 * s)'`, rebound `'v + 257 * s'` on a select |
 | pulse flag `$20` | code template `pong(p,s,k)`, `pongs(s,k)` after a select |
@@ -96,7 +96,8 @@ Typed `Refusal(kind)`, raised before lifting where the tune's binding shows it:
 
 `verify` plays the document with unitracker-player and compares its grid with the spec player's at
 the standard note table (`fmt.spec_player(tune, notes=True)`, index `i` of `freq_lo`/`freq_hi` is
-standard note `i`); `lift` raises `Divergence` naming the first differing frame and register.
+standard note `i`); `lift` raises `Divergence` naming the first differing frame and register. The grid and
+the gate and TEST edges within each frame are compared ([verification](verification.md)).
 `python tools/lift_corpus.py` lifts any registered format's tunes and counts exact, refused (by
 class), diverged and erroring ones.
 

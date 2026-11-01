@@ -127,7 +127,12 @@ def test_the_lift_returns_its_checked_text_and_the_cli_runs_it(tmp_path, capsys)
 def test_a_differing_document_is_a_divergence(monkeypatch):
     raw = tune(CORPUS["plain"])
     real = lift.reference
-    monkeypatch.setattr(lift, "reference", lambda *a, **k: real(*a, **k) + np.uint8(1))
+
+    def off(*args, **kwargs):
+        grid, edges = real(*args, **kwargs)
+        return grid + np.uint8(1), edges
+
+    monkeypatch.setattr(lift, "reference", off)
     cells, _ = lift.verify(raw, 0, 50)
     assert cells.size
     with pytest.raises(lift.Divergence, match="frame 0"):

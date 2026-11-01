@@ -1,5 +1,5 @@
 """What the format lifts share: their errors, definition names, the check against a reference
-grid, note names, quoted meta values, bare rest runs and repeat detection."""
+grid and its gate edges, note names, quoted meta values, bare rest runs and repeat detection."""
 
 import multiprocessing
 import re
@@ -8,7 +8,7 @@ import warnings
 import numpy as np
 from pysidtracker import gridcmp
 from unitracker_grammar.document import Call, Event
-from unitracker_player.player import load, play
+from unitracker_player.player import Player, load, play
 
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 REST = Event("-")
@@ -104,17 +104,79 @@ def calls_of(node):
             yield from calls_of(getattr(node, name))
 
 
+CONTROLS = np.array([4, 11, 18])
+
+
+def edges(frame, reg, value, frames: int) -> np.ndarray:
+    """``(frames, 3)`` of what each voice's control writes, ``(frame, register, value)`` in write
+    order from power-on with every frame's last write its end state, do in a frame beyond that
+    end state: 1 where the gate ends set but was clear at the frame's start or a write (the
+    envelope attacks again), 2 where TEST was set at either (the oscillator is reset)."""
+    keep = np.isin(reg, CONTROLS)
+    f, v, s = np.asarray(frame)[keep], (np.asarray(reg)[keep] - 4) // 7, np.asarray(value)[keep]
+    order = np.lexsort((np.arange(len(f)), f, v))
+    f, v, s = f[order], v[order], s[order].astype(np.uint8)
+    out = np.zeros((frames, 3), np.uint8)
+    if not f.size:
+        return out
+    key = v * frames + f
+    first = np.flatnonzero(np.r_[True, key[1:] != key[:-1]])
+    start = np.r_[np.uint8(0), s[first[1:] - 1]]
+    start[np.r_[True, v[first[1:]] != v[first[:-1]]]] = 0
+    clear = (np.minimum.reduceat(s & 1, first) & start & 1) ^ 1
+    test = (np.maximum.reduceat(s & 8, first) | start & 8) >> 2
+    out[f[first], v[first]] = clear & s[np.r_[first[1:], len(s)] - 1] | test
+    return out
+
+
+def spec_played(player, frames: int) -> tuple:
+    """``(grid, edges)`` of a spec player over ``frames`` frames (:func:`edges`), each frame's
+    writes closed by its control registers as the grid has them, so writes the spec's stores do
+    not make (a ghost copied in, a ``native`` block) still reach the frame's end state."""
+    grid, writes = np.zeros((frames, 25), np.uint8), []
+    for t in range(frames):
+        grid[t] = player.render_grid(1)[0]
+        writes += [(t, r, v) for r, v in player.writes]
+        writes += [(t, r, grid[t, r]) for r in CONTROLS]
+    w = np.asarray(writes, np.int64).reshape(-1, 3)
+    return grid, edges(w[:, 0], w[:, 1], w[:, 2], frames)
+
+
+def document_edges(song, grid: np.ndarray) -> np.ndarray:
+    """:func:`edges` of a document's Song over the frames of its ``grid``, its writes as late as
+    its registers (``lag`` calls of whole frames), each frame closed by its ``grid``."""
+    if song.lag % song.frame:
+        raise Refusal("lag", "a lag of part of a frame")
+    player, rows, late = Player(song), [], song.lag // song.frame
+    for t in range(len(grid)):
+        player.step()
+        rows += [
+            (t + late, 4 + 7 * v, s[2]) for v, segs in enumerate(player.segments) for s in segs
+        ]
+        rows += [(t, r, grid[t, r]) for r in CONTROLS]
+    w = np.asarray(rows, np.int64).reshape(-1, 3)
+    w = w[w[:, 0] < len(grid)]
+    return edges(w[:, 0], w[:, 1], w[:, 2], len(grid))
+
+
+def edge_cells(ours: np.ndarray, theirs: np.ndarray) -> np.ndarray:
+    """``(frame, control register, ours, theirs)`` where two :func:`edges` codes differ."""
+    n = min(len(ours), len(theirs))
+    f, v = np.nonzero(ours[:n] != theirs[:n])
+    return np.c_[f, CONTROLS[v], ours[f, v].astype(np.int64), theirs[f, v].astype(np.int64)]
+
+
 _JOB = []
 
 
-def _run_job(frames: int) -> np.ndarray:
+def _run_job(frames: int):
     """The registered reference over ``frames`` frames, run in a forked worker."""
-    return np.asarray(_JOB[0](frames), dtype=np.uint8)
+    return _JOB[0](frames)
 
 
 class Reference:
-    """The grid of ``reference(frames)`` played in a forked worker from construction on, so it
-    runs alongside whatever the lifter does before it needs the grid."""
+    """The grid, or ``(grid, edges)``, of ``reference(frames)`` played in a forked worker from
+    construction on, so it runs alongside whatever the lifter does before it needs the grid."""
 
     def __init__(self, reference, frames: int):
         _JOB[:] = [reference]
@@ -124,8 +186,8 @@ class Reference:
         _JOB.clear()
         self._pending = self._pool.apply_async(_run_job, (frames,))
 
-    def grid(self) -> np.ndarray:
-        """The reference grid, waiting for the worker; the worker ends."""
+    def grid(self):
+        """The reference grid or ``(grid, edges)``, waiting for the worker; the worker ends."""
         try:
             return self._pending.get()
         finally:
@@ -140,7 +202,9 @@ def cells_of(text: str, frames: int, grid=None, reference=None) -> np.ndarray:
     """The cells where the document ``text`` played over ``frames`` frames differs from ``grid``,
     or from ``reference(n)`` over the ``n`` frames it played, or from the grid of a started
     :class:`Reference`. A looping document plays exactly ``frames`` frames, so its reference is
-    played in a forked worker alongside it."""
+    played in a forked worker alongside it. A reference of ``(grid, edges)`` also has each
+    voice-frame whose gate and TEST edges differ (:func:`edge_cells`) as a cell of its control
+    register."""
     song = load(text)
     job = reference if isinstance(reference, Reference) else None
     if job is None and grid is None and song.looping:
@@ -154,8 +218,14 @@ def cells_of(text: str, frames: int, grid=None, reference=None) -> np.ndarray:
     if job is not None:
         grid = job.grid()
     if grid is None:
-        grid = np.asarray(reference(len(ours)), dtype=np.uint8)
-    return gridcmp.cell_diff(ours, grid[: len(ours)])
+        grid = reference(len(ours))
+    grid, theirs = grid if isinstance(grid, tuple) else (grid, None)
+    cells = gridcmp.cell_diff(ours, np.asarray(grid, dtype=np.uint8)[: len(ours)])
+    if theirs is None:
+        return cells
+    cells = np.r_[cells, edge_cells(document_edges(song, ours), theirs)]
+    _, first = np.unique(cells[:, :2], axis=0, return_index=True)
+    return cells[first]
 
 
 def checked(text_cells: tuple, frames: int) -> str:
