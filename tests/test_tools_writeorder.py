@@ -14,10 +14,14 @@ def test_orders_are_every_per_voice_order_of_the_kept_writes():
 
 
 def test_events_are_edges_with_the_envelope_in_effect():
-    assert W.events((0x40, 0x0F, 0x00), GT2_NOTE) == ((0x09, 0x09, 0x00, 0xE5),)
-    pulse = ((0x01, 0x00, 0x08, 0x48), (0x01, 0x01, 0x08, 0x48))
-    assert W.events((0x41, 0x08, 0x48), MA_PULSE) == pulse
-    assert not W.events((0x41, 0, 0), [(4, 0x21), (4, 0x41), (5, 0x0A)])
+    assert W.events((0x40, 0x0F, 0x00), GT2_NOTE) == ((5, 0x00), (6, 0xE5), (4, 0x09))
+    assert W.events((0x41, 0x08, 0x48), MA_PULSE) == ((4, 0x00), (4, 0x01))
+    assert W.events((0x41, 0, 0), [(4, 0x21), (4, 0x41), (5, 0x0A)]) == ((5, 0x0A),)
+    assert W.events((0x40, 0x0F, 0x00), [(4, 0x41), (5, 0x0A), (5, 0x0F)]) == (
+        (4, 0x01),
+        (5, 0x0A),
+        (5, 0x0F),
+    )
 
 
 def test_kept_takes_the_last_writes_in_the_orders_sequence():
@@ -41,8 +45,7 @@ def test_orders_that_keep_or_change_a_pattern():
 
 def test_text():
     assert W.text(()) == "-"
-    pattern = ((0x09, 0x09, 0x0F, 0x00), (0x01, 0x00, 0x0F, 0x00))
-    assert W.text(pattern) == "+g+t(0F,00) -g(0F,00)"
+    assert W.text(((5, 0x0A), (6, 0x88), (4, 0x09), (4, 0x00))) == "a0A s88 g+t+ g-t-"
 
 
 def test_measure_counts_pattern_changes(metal_warrior):

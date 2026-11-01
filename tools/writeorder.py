@@ -1,6 +1,6 @@
 """The SID register write order that keeps what tunes' players command: each frame's control, AD
-and SR writes to a voice reduced to their event pattern (gate and test edges, each with the AD and
-SR in effect at it), the pattern every per-voice order of the kept writes gives, and how often each
+and SR writes to a voice reduced to their event pattern (every gate or test edge and AD or SR
+change, in order), the pattern every per-voice order of the kept writes gives, and how often each
 differs from the native one over a corpus.
 
 ``python tools/writeorder.py TUNES.csv|TUNE.sid ... [--frames N] [--top K] [--out F.json]``; see
@@ -32,21 +32,18 @@ ORDERS = [o for o in permutations(ITEMS) if o.index("ctrl:2") < o.index("ctrl")]
 
 def events(start: tuple, writes: list) -> tuple:
     """A voice's event pattern from its ``start`` ``(ctrl, ad, sr)`` through ``writes``
-    ``(register offset within the voice, value)`` in order: each gate or test edge as
-    ``(edge bits, new control bits, ad, sr)``. Values superseded before an edge, and any timing,
-    leave no trace."""
-    ctrl, ad, sr = start
+    ``(register offset within the voice, value)`` in order: every write that changes what reaches
+    its envelope generator or resets its oscillator, in order, as ``(offset, value)`` (a control
+    write only where it changes the gate or test bit). An AD or SR write changes the active rate
+    at once when its nibble is the one in effect, so none is dropped as superseded; only writes of
+    the value already held, and timing, leave no trace."""
+    held = dict(zip((4, 5, 6), start))
     out = []
     for reg, value in writes:
-        if reg == 4:
-            edge = (ctrl ^ value) & (GATE | TEST)
-            if edge:
-                out.append((edge, value & (GATE | TEST), ad, sr))
-            ctrl = value
-        elif reg == 5:
-            ad = value
-        else:
-            sr = value
+        changed = (held[reg] ^ value) & (GATE | TEST) if reg == 4 else held[reg] != value
+        if changed:
+            out.append((reg, value & (GATE | TEST) if reg == 4 else value))
+        held[reg] = value
     return tuple(out)
 
 
@@ -64,16 +61,15 @@ def kept(writes: list, order: tuple) -> list:
 
 
 def text(pattern: tuple) -> str:
-    """A pattern readably: each edge as its signed bits (``+g``, ``-t``) with the AD and SR."""
-    parts = []
-    for edge, bits, ad, sr in pattern:
-        sign = "".join(
-            ("+" if bits & bit else "-") + name
-            for bit, name in ((GATE, "g"), (TEST, "t"))
-            if edge & bit
-        )
-        parts.append(f"{sign}({ad:02X},{sr:02X})")
-    return " ".join(parts) or "-"
+    """A pattern readably: control writes as their gate and test bits (``g+t-``), AD and SR as
+    ``a0A`` and ``s88``."""
+    out = []
+    for reg, value in pattern:
+        if reg == 4:
+            out.append("".join(n + "-+"[bool(value & b)] for b, n in ((GATE, "g"), (TEST, "t"))))
+        else:
+            out.append(f"{'as'[reg - 5]}{value:02X}")
+    return " ".join(out) or "-"
 
 
 def jennings_writes(image: SidImage, subtune: int, frames: int, cpf: int) -> tuple:

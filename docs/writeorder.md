@@ -6,20 +6,19 @@ cycle timing, so the comparison abstracts timing away entirely.
 
 ## Event patterns
 
-A voice's sound depends on the order of its writes only through its envelope generator and the
-oscillator resets:
+A voice's envelope reacts to its control, AD and SR writes in the order they arrive. A gate edge
+switches between release and attack, and so which rate nibble is active; an AD or SR write changes
+the active rate at once when its nibble is the one in effect (attack or decay after a gate-on,
+release before it). The rate counter is not reset by either, so the order of gate, AD and SR writes
+decides which rate the counter runs against when the attack starts and when it switches: a player
+can lengthen or shorten the attack this way on purpose. A test-bit edge resets the oscillator.
 
-- a gate edge starts attack or release with the AD and SR then in effect;
-- a test-bit edge resets the oscillator (and the noise shift register).
-
-Anything else in a frame (frequency, pulse width, filter, volume, waveform bits without an edge,
-an AD or SR value overwritten before the next edge) changes the sound only through when it is
-written, which the document does not carry.
-
-So each frame's control, AD and SR writes to a voice, from the registers it starts with, reduce
-to an **event pattern**: the sequence of gate and test edges, each with the AD and SR in effect at
-it. `+g+t(00,E5)` is a gate-on with the test bit set, AD `$00`, SR `$E5`;
-`-g(08,48) +g+t(08,48)` is a gate pulse within the frame.
+So each frame's control, AD and SR writes to a voice, from the registers it starts with, reduce to
+an **event pattern**: every write that changes the gate or test bit, the AD or the SR, in order.
+Only writes of the value already held are dropped; nothing is collapsed as superseded. Frequency,
+pulse width, filter and volume writes, and the cycles between writes, are not part of it: a
+document carries the order of writes, not their timing. `a0A s88 g+t+` is AD `$0A`, SR `$88`, then a
+gate-on with the test bit set; `g-t- g+t-` is a gate pulse within the frame.
 
 ## Orders
 
