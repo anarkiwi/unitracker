@@ -23,4 +23,4 @@ python tools/solvertime.py TUNES.csv|TUNE.sid ... [--per-player N] [--horizon N]
 
 Writes come from the in-process emulator (`--backend jennings`, tunes with a play address) or the
 sidtrace oracle (`--backend sidtrace`); `auto` picks per tune. The tools need
-`vagrant-moses[sidorder]` (the `dev` extra pins its `sidorder` branch until it is released).
+`vagrant-moses[sidorder]>=0.8.0` (in the `dev` extra).
