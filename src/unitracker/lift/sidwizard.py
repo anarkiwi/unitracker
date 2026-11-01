@@ -11,7 +11,7 @@ import numpy as np
 from pysidtracker import NTSC_CLOCK_HZ, PAL_CLOCK_HZ, SidImage, find_format, parse_sid_header
 from pysidtracker.errors import SidParseError
 from pysidtracker.notes import frequency
-from pysidwizard import End, Loop, PlayPattern, RawSequenceByte, Transpose
+from pysidwizard import End, Loop, PlayPattern, RawSequenceByte, SWMFile, Transpose
 from pysidwizard import typed as T
 from pysidwizard.playspec import binding
 from unitracker_grammar import code as asm
@@ -58,7 +58,7 @@ class Core:  # pylint: disable=too-many-instance-attributes
     """What a lift needs of a tune: the typed module, the bound spec layout, the memory and
     registers its init left, the clock and the title lines."""
 
-    swm: object
+    swm: SWMFile
     lay: dict
     mem: bytes
     regs: tuple
@@ -117,7 +117,7 @@ def row_lengths(core: Core, voice: int, rows: int) -> list:
             out.append(run)
             run = 0
         count, run = (count + 1) & 255, run + 1
-    return out
+    return out[:rows]
 
 
 def cadence(lengths: list) -> int | tuple:
