@@ -6,8 +6,9 @@ import argparse
 import sys
 
 from pysidtracker import find_format
-from pysidtracker.testing import resolve_tune
 from tqdm import tqdm
+
+from shared import tune
 
 STRIDE = 7
 
@@ -37,7 +38,7 @@ def main(argv=None) -> int:
     parser.add_argument("--subtune", type=int, default=0)
     parser.add_argument("--regs", type=int, help="also this 0-based voice's registers")
     args = parser.parse_args(argv)
-    raw = resolve_tune(args.tune).read_bytes()
+    raw = tune(args.tune).read_bytes()
     print(
         "frame",
         *args.cells,
