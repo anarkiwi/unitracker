@@ -24,3 +24,7 @@ python tools/solvertime.py TUNES.csv|TUNE.sid ... [--per-player N] [--horizon N]
 Writes come from the in-process emulator (`--backend jennings`, tunes with a play address) or the
 sidtrace oracle (`--backend sidtrace`); `auto` picks per tune. The tools need
 `vagrant-moses[sidorder]>=0.8.0` (in the `dev` extra).
+
+The corpus covers are exact per frame; `vagrant_moses.sidspace` (vagrant-moses docs/sidorder.md)
+shows that order within a frame only matters where the rate counter matches between writes, so
+the canonical output is `sr,ad,ctrl` per gate segment.
