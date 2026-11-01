@@ -14,7 +14,7 @@ def test_orders_are_every_per_voice_order_of_the_kept_writes():
 
 
 def test_events_are_edges_with_the_envelope_in_effect():
-    assert W.events((0x40, 0x0F, 0x00), GT2_NOTE) == ((5, 0x00), (6, 0xE5), (4, 0x09))
+    assert W.events((0x40, 0x0F, 0x00), GT2_NOTE) == ((6, 0xE5), (5, 0x00), (4, 0x09))
     assert W.events((0x41, 0x08, 0x48), MA_PULSE) == ((4, 0x00), (4, 0x01))
     assert W.events((0x41, 0, 0), [(4, 0x21), (4, 0x41), (5, 0x0A)]) == ((5, 0x0A),)
     assert W.events((0x40, 0x0F, 0x00), [(4, 0x41), (5, 0x0A), (5, 0x0F)]) == (
@@ -22,6 +22,12 @@ def test_events_are_edges_with_the_envelope_in_effect():
         (5, 0x0A),
         (5, 0x0F),
     )
+    gate_off = (0x40, 0x00, 0x00)
+    hard_restart = W.events(gate_off, [(6, 0x00), (5, 0x0F)])
+    assert hard_restart == W.events(gate_off, [(5, 0x0F), (6, 0x00)]) == ((5, 0x0F),)
+    note = W.events(gate_off, [(5, 0x0A), (6, 0x88), (5, 0x0B), (4, 0x41)])
+    assert note == ((6, 0x88), (5, 0x0B), (4, 0x01))
+    assert W.events(gate_off, [(4, 0x41), (5, 0x0A)]) == ((4, 0x01), (5, 0x0A))
 
 
 def test_kept_takes_the_last_writes_in_the_orders_sequence():

@@ -15,7 +15,10 @@ can lengthen or shorten the attack this way on purpose. A test-bit edge resets t
 
 So each frame's control, AD and SR writes to a voice, from the registers it starts with, reduce to
 an **event pattern**: every write that changes the gate or test bit, the AD or the SR, in order.
-Only writes of the value already held are dropped; nothing is collapsed as superseded. Frequency,
+With the gate off only SR's release nibble is in use, so an AD write then takes effect at the next
+gate-on: it is placed just before that edge (or at the frame's end), its last value only. The gate
+reaches the envelope's state within 2-3 cycles, less than one 6502 store, so a player's next write
+always meets the new state. Otherwise only writes of the value already held are dropped. Frequency,
 pulse width, filter and volume writes, and the cycles between writes, are not part of it: a
 document carries the order of writes, not their timing. `a0A s88 g+t+` is AD `$0A`, SR `$88`, then a
 gate-on with the test bit set; `g-t- g+t-` is a gate pulse within the frame.

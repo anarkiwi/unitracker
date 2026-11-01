@@ -32,19 +32,29 @@ ORDERS = [o for o in permutations(ITEMS) if o.index("ctrl:2") < o.index("ctrl")]
 
 def events(start: tuple, writes: list) -> tuple:
     """A voice's event pattern from its ``start`` ``(ctrl, ad, sr)`` through ``writes``
-    ``(register offset within the voice, value)`` in order: every write that changes what reaches
-    its envelope generator or resets its oscillator, in order, as ``(offset, value)`` (a control
-    write only where it changes the gate or test bit). An AD or SR write changes the active rate
-    at once when its nibble is the one in effect, so none is dropped as superseded; only writes of
-    the value already held, and timing, leave no trace."""
+    ``(register offset within the voice, value)`` in order: every write that changes what its
+    envelope generator uses, or resets its oscillator, in order, as ``(offset, value)`` (a control
+    write by its gate and test bits). With the gate on, AD and SR set the rate and sustain in
+    effect at once; with it off only SR's release is in effect, so an AD write waits for the next
+    gate-on and is placed just before it (or at the end), its last value only. Writes of the value
+    already held, and timing, leave no trace."""
     held = dict(zip((4, 5, 6), start))
-    out = []
+    out, latent = [], None
     for reg, value in writes:
-        changed = (held[reg] ^ value) & (GATE | TEST) if reg == 4 else held[reg] != value
-        if changed:
-            out.append((reg, value & (GATE | TEST) if reg == 4 else value))
+        if reg == 4:
+            edge = (held[4] ^ value) & (GATE | TEST)
+            if edge & GATE and value & GATE and latent is not None:
+                out.append((5, latent))
+                latent = None
+            if edge:
+                out.append((4, value & (GATE | TEST)))
+        elif held[reg] != value:
+            if reg == 5 and not held[4] & GATE:
+                latent = value
+            else:
+                out.append((reg, value))
         held[reg] = value
-    return tuple(out)
+    return tuple(out + [(5, latent)] * (latent is not None))
 
 
 def kept(writes: list, order: tuple) -> list:
