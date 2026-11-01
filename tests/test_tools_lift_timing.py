@@ -35,7 +35,8 @@ def test_the_tool_writes_the_table_and_prints_the_slow_tunes(glow_worm, tmp_path
         writer.writerow([root / GLOW, "DMC"])
     argv = [str(table), "--root", str(root), "--jobs", "1", "--slow", "0", "--out", str(tmp_path)]
     assert lift_timing.main(argv) == 0
-    rows = list(csv.DictReader(open(tmp_path / "lift_times.csv", encoding="utf-8")))
+    with open(tmp_path / "lift_times.csv", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
     assert [r["path"] for r in rows] == [GLOW] and rows[0]["verdict"] == "ok"
     assert GLOW in (tmp_path / "profiles.txt").read_text()
     assert "tunes 1 max" in capsys.readouterr().out
