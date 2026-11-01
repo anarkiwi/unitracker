@@ -16,6 +16,7 @@ LIFTERS = {
     "defmon": "unitracker.lift.defmon",
     "goattracker2": "unitracker.lift.goattracker2",
     "musicassembler": "unitracker.lift.musicassembler",
+    "sidwizard": "unitracker.lift.sidwizard",
 }
 
 

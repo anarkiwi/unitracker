@@ -5,6 +5,13 @@ the waveform table adds to the written register off and on again around the othe
 from unitracker_grammar import code as asm
 
 STATE = tuple((name, 1) for name in "ml mh vd vf vk sv tl cw pl ph fb".split())
+CTRL_STATE = (("pg", 1),)
+CTRL = {
+    "wv": "lda #w\nand pg\nsta v\nrts\n",
+    "goff": "lda #254\nsta pg\nlda v\nand #254\nsta v\nrts\n",
+    "gon": "lda #255\nsta pg\nlda v\nora #1\nsta v\nrts\n",
+    "arm": "lda #255\nsta pg\nrts\n",
+}
 SUB = "sb:\nlda v\nsec\nsbc ml\nsta v\nlda v+1\nsbc mh\nsta v+1\nrts\n"
 ADD = "ad:\nlda v\nclc\nadc ml\nsta v\nlda v+1\nadc mh\nsta v+1\nrts\n"
 LOAD = "ldy nn\nlda F.lo,y\nsta v\nlda F.hi,y\nsta v+1\n"
@@ -54,4 +61,4 @@ def routines(exp_end: int) -> dict:
 
 def assembled(exp_end: int) -> dict:
     """The routines read as code."""
-    return {name: asm.read(text) for name, text in routines(exp_end).items()}
+    return {name: asm.read(text) for name, text in (routines(exp_end) | CTRL).items()}

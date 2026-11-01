@@ -209,8 +209,9 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.firsts, self.booted = firsts or {}, set()
         self.core, self.lay, self.swm = core, core.lay, core.swm
         self.names = Names()
-        self.entered, self.defined, self.takes, self.rows = {}, {}, set(), []
+        self.entered, self.defined, self.rows = {}, {}, []
         self.tempos = [cadence(row_lengths(core, v, 16)) for v in range(VOICES)]
+        self.slowest = max(max(t) if isinstance(t, tuple) else t for t in self.tempos)
         if len(set(self.tempos)) > 1:
             raise Refusal("tempo program", "the voices run different tempos")
         self.filtered = False
@@ -268,7 +269,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             seen[i, jumped] = len(out)
             repeat = isinstance(row, T.RepeatRow)
             wave = row.waveform if not repeat else row.count if jumped else None
-            keys = {} if wave is None else {"wf.ctrl": wave}
+            keys = {} if wave is None else {"wf.ctrl": Once(self.call("wv", wave))}
             hold = row.count + 1 if repeat and not jumped else speed
             hold = {"hold": hold} if hold != 1 else {}
             if isinstance(row.pitch, T.ChordPitch):
@@ -312,8 +313,8 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     @staticmethod
     def entered_at(out: list, loop) -> tuple:
-        """``(rows, loop)`` of a program that applies its first row a call after it starts: the
-        row's own wait, or where the loop returns to it a copy of it ends the rows."""
+        """``(rows, loop)`` of a program that applies its first row a call after it starts: its
+        own wait, or where the loop returns to it a copy of the row without it ends the rows."""
         if not out:
             return out, loop
         first = Row({**dict(out[0].keys), "wait": 1})
@@ -326,7 +327,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         chord ``number`` (the instrument's by default)."""
         ins = self.ins(n)
         out, loop = self.wave_rows(ins, start, number)
-        out = [Row({**dict(out[0].keys), "gate": 1}), *out[1:]] if out else [Row({"gate": 1})]
         out, loop = self.entered_at(out, loop)
         origin = invariants.Origin(("wave", n, start, number))
         return self.names.name("ctrl", "c", Program(out, loop), origin)
@@ -445,9 +445,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         two restart ticks also run the player's empty instrument."""
         ins = self.ins(n)
         ctl = ins.control
-        hard = {"gate": 0, "ad": ins.hr_attack << 4 | ins.hr_decay}
+        hard = {"ctrl": Once(self.call("goff")), "ad": ins.hr_attack << 4 | ins.hr_decay}
         hard["sr"] = ins.hr_sustain << 4 | ins.hr_release
-        first = {"ad": ins.attack << 4 | ins.decay, "sr": ins.sustain << 4 | ins.release}
+        first = {"ctrl": Once(self.call("arm"))}
+        first |= {"ad": ins.attack << 4 | ins.decay, "sr": ins.sustain << 4 | ins.release}
         if ctl & 4:
             hard["wf.ctrl"] = 0x18
         if ctl & 8:
@@ -503,11 +504,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     # ---- rows -------------------------------------------------------------------------------
 
-    def gate(self, on: int) -> str:
-        """The ``ctrl`` program setting the gate state ``on`` (0 or 1)."""
-        origin = invariants.Origin(("gate", on))
-        return self.names.name("ctrl", "c", Program([Row({"gate": on})]), origin)
-
     def vibrato(self, ins, freq: int, amp: int, delay: bool = False) -> Call:
         """The call setting ``ins``'s vibrato of period ``freq`` and amplitude ``amp``: its
         delay too where ``delay``, a note's start."""
@@ -548,8 +544,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             case _:
                 raise Refusal("pattern effect", f"small effect {int(effect):#x}")
 
-    @staticmethod
-    def big(n: int, value: int, cmds: dict) -> None:
+    def big(self, n: int, value: int, cmds: dict) -> None:
         """Adds the commands of big effect ``n`` of ``value`` to ``cmds``."""
         if n in (1, 2, 3, 8):
             return
@@ -559,8 +554,10 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             cmds["ad" if n == 5 else "sr"] = value
         elif n == 0x10 and value & 0x7F >= 3:
             cmds["tempo"] = value & 0x7F
+            self.slowest = max(self.slowest, value & 0x7F)
         elif n == 0x11 and min(value >> 4, value & 15) >= 3:
             cmds["tempo"] = (value >> 4, value & 15)
+            self.slowest = max(self.slowest, value >> 4, value & 15)
         else:
             raise Refusal("pattern effect", f"big effect {n:#x}")
 
@@ -609,8 +606,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         if first:
             self.booted.add(self.voice_now)
         name = self.define(cur, boot) if select or first else None
-        if select and self.controls(self.ins(select)):
-            self.takes.add(self.voice_now)
         if restore and not name:
             name = self.define(restore)
         restore = cur if first else 0
@@ -633,8 +628,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             if ins is not None and any((ins.gateoff_wf, ins.gateoff_pw, ins.gateoff_filt)):
                 raise Refusal("gate off pointer", "a gate off table position")
             on = isinstance(note, T.GateOn)
-            cmds["ctrl"] = Once(Expr("v | 1" if on else "v & 254"))
-            cmds["b.run"] = self.gate(int(on))
+            cmds["ctrl"] = Once(self.call("gon" if on else "goff"))
         elif note is not None and not isinstance(note, T.VibratoAmplitude) and not porta:
             if note.__class__.__name__ not in WAVE_FX:
                 raise Refusal("note column", type(note).__name__)
@@ -644,7 +638,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             cmds["run"] = self.wave(cur, 0, cmds.pop("_chord"))
         if sets is not None:
             self.call("tick")
-            cmds["set.freq"] = Once(sets)
+            cmds["eff.freq"] = Once(sets)
         if legato:
             cmds["legato"] = True
         return Event(atom, name, cmds, **keep), (cur, pend, restore, rows + 1, begun or started)
@@ -711,7 +705,7 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         core, regs = self.core, self.header_regs()
         name, author, released = (meta_text(s) for s in core.head)
         quiet = ("note", "legato")
-        freq = [Slot("boot"), Slot("set"), Slot("first")]
+        freq = [Slot("boot"), Slot("set"), Slot("first"), Slot("eff")]
         freq += [Slot("un", Call("un"), hold=quiet)] if self.carry else []
         freq += [Slot("tick", Call("tick"), hold=NOTE_HOLDS)] if "tick" in used else []
         freq += [Slot("wave")]
@@ -720,13 +714,15 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         slots["ctrl"] = (Slot("fx"), Slot("wf"))
         names = {x for n in used for x in asm.symbols(self.code[n])}
         state = tuple((k, n) for k, n in swcode.STATE if k in names)
+        states = ((("freq", state),) if state else ()) + (
+            (("ctrl", swcode.CTRL_STATE),) if any(n in swcode.CTRL for n in used) else ()
+        )
         return Header(
             (("title", name), ("author", author), ("released", released)),
             clock=(CYCLES[core.clock], core.clock),
             slots=slots | {"freq": tuple(freq)},
-            layers={"ctrl": ("a", "b")},
             holds={"pw": NOTE_HOLDS, "filter": NOTE_HOLDS, "ctrl": ("legato",)},
-            state=(("freq", state),) if state else None,
+            state=states or None,
             regs=tuple(regs) if any(regs) else None,
         )
 
@@ -749,8 +745,6 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
     def document(self) -> Document:
         """The document of the subtune."""
         voices = [self.voice(v) for v in range(VOICES)]
-        if len(self.takes) > 1:
-            raise Refusal("filter order", "several voices take over the filter")
         intro = self.names.name("phrase", "p", (Event("-"),))
         voices = [Voice((Play(intro), *v.play[1:]), v.loop) for v in voices]
         kinds = ("restart", "ins", "ctrl", "pw", "filter", "phrase")
@@ -788,6 +782,16 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
                 context = (self.entered[name][1],) if len(names) > 1 else ()
                 out["phrases"][name] = invariants.Origin(("pattern", num), context)
         return out
+
+    def span(self) -> int:
+        """The calls after which every voice's orderlist has played through and looped once
+        more, at the slowest tempo of the tune."""
+        rows = 0
+        for v in range(VOICES):
+            units, loop = plays(self.core, v)
+            count = [len(self.swm.patterns[n - 1].rows) for n, _ in units]
+            rows = max(rows, sum(count) + sum(count[loop or 0 :]) * (loop is not None))
+        return rows * self.slowest
 
     def song(self) -> tuple:
         """The play entries each voice's orderlist may hold: its steps, the loop body once more
@@ -844,9 +848,10 @@ def reference(
 
 def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
     """``(cells, text)`` of a SID: the cells where its document differs from the reference over
-    ``frames`` frames."""
+    ``frames`` frames, or the song and its loop once more where that is longer."""
     core = core_of_sid(raw, subtune)
     text, built = document_of(core)
+    frames = max(frames, built.span())
     job = Reference(lambda n: reference(raw, subtune, n, both=True), frames)
     try:
         held(text, built)
