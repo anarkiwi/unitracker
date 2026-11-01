@@ -211,6 +211,13 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         self.names = Names()
         self.entered, self.defined, self.rows = {}, {}, []
         self.tempos = [cadence(row_lengths(core, v, 16)) for v in range(VOICES)]
+        self.pwkt = any(
+            r.keytrack
+            for i in core.swm.instruments
+            for r in i.pw_rows
+            if not isinstance(r, T.TableJump)
+        )
+        self.pwkey = "walk.pw" if self.pwkt else "pw"
         self.slowest = max(max(t) if isinstance(t, tuple) else t for t in self.tempos)
         if len(set(self.tempos)) > 1:
             raise Refusal("tempo program", "the voices run different tempos")
@@ -331,47 +338,54 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         origin = invariants.Origin(("wave", n, start, number))
         return self.names.name("ctrl", "c", Program(out, loop), origin)
 
-    def pulse_rows(self, ins, start: int = 0) -> tuple:
-        """``(program rows, loop)`` of the pulse table of ``ins`` from row ``start``."""
-        rows = ins.pw_rows
+    def pulse_rows(self, ins, start: int = 0, entry: bool = True) -> tuple:
+        """``(program rows, loop)`` of the pulse table of ``ins`` from row ``start``; ``entry``
+        where the cursor comes to it with the sweep count the last table left, which a sweep may
+        not use."""
+        rows, key = ins.pw_rows, self.pwkey
         base = 0x10 + len(ins.wf_table) + 1
-        out, seen, i, entry = [], {}, start, True
+        out, seen, i = [], {}, start
         while i < len(rows):
             if i in seen:
                 return out, seen[i]
             row = rows[i]
             if isinstance(row, T.TableJump):
                 j = self.row_of(rows, row.target, base, i)
-                if j == i:
-                    break
-                if j >= len(rows):
+                if j == i or j >= len(rows):
                     break
                 if isinstance(rows[j], T.PulseSweep):
                     out.append(Row({}))
                 i, entry = j, False
                 continue
-            if row.keytrack:
-                raise Refusal("pulse keytrack", "a pulse table row tracks the keyboard")
             seen[i] = len(out)
+            track = self.pulse_track(row.keytrack)
             if isinstance(row, T.PulseSet):
-                out.append(Row({"pw": (row.high << 8 | row.low) & 0xFFF}))
+                out.append(Row({key: (row.high << 8 | row.low) & 0xFFF} | track))
             else:
                 if entry:
                     raise Refusal("pulse sweep", "a pulse table starts on a sweep")
                 if row.frames:
-                    out.append(Row({"hold": row.frames, "pw": _plus(row.step)}))
-                out.append(Row({"pw": NONE}))
+                    out.append(Row({"hold": row.frames, key: _plus(row.step)}))
+                out.append(Row({key: NONE} | track))
             entry = False
             i += 1
         return out, None
 
-    def pulse(self, n: int) -> str:
-        """The ``pw`` program name of instrument ``n``'s pulse table."""
+    def pulse_track(self, column: int) -> dict:
+        """The row key setting the keyboard track of a pulse table row's column."""
+        if not self.pwkt:
+            return {}
+        return {"set.pw": Once(self.call("pkset", column))}
+
+    def pulse(self, n: int, start: int = 0) -> str:
+        """The ``pw`` program name of instrument ``n``'s pulse table from row ``start``, run from
+        the tick after a note starts or the tick a table position is set."""
         ins = self.ins(n)
-        out, loop = self.pulse_rows(ins)
-        if not out or "pw" not in dict(out[0].keys):
-            out = [Row({"pw": NONE}), *out[1:]] if out else [Row({"pw": NONE})]
-        return self.names.name("pw", "pw", Program(out, loop), invariants.Origin(("pulse", n)))
+        out, loop = self.pulse_rows(ins, start, not start)
+        if not out or self.pwkey not in dict(out[0].keys):
+            out = [Row({self.pwkey: NONE}), *out[1:]] if out else [Row({self.pwkey: NONE})]
+        origin = invariants.Origin(("pulse", n, start))
+        return self.names.name("pw", "pw", Program(out, loop), origin)
 
     def filter_rows(self, ins, start: int = 0) -> tuple:
         """``(program rows, loop)`` of the filter table of ``ins`` from row ``start``."""
@@ -691,6 +705,16 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
 
     # ---- the document -----------------------------------------------------------------------
 
+    def tables(self, used: tuple) -> tuple:
+        """The tables the routines in ``used`` read: the vibrato steps ``V``, the keyboard track
+        tables ``E`` and ``M``."""
+        mem, lay = self.core.mem, self.lay
+        want = {x for n in used for x in asm.symbols(self.code[n])}
+        found = {"V": self.vtable}
+        found["E"] = lambda: tuple(mem[lay["exptabh"] : lay["exptabh"] + 256])
+        found["M"] = lambda: tuple(mem[lay["exptabh_m1"] : lay["exptabh_m1"] + 256])
+        return tuple((k, f()) for k, f in found.items() if f"{k}.lo" in want)
+
     def vtable(self) -> tuple:
         """The vibrato step table ``V``: the player's fine steps, then its note steps."""
         lay, mem = self.lay, self.core.mem
@@ -711,18 +735,28 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
         freq += [Slot("wave")]
         freq += [Slot("out", Call("out"), hold=quiet)] if self.carry else []
         slots = {"pw": (Slot("pw", hold=NOTE_HOLDS),), "cut": (Slot("cut", hold=NOTE_HOLDS),)}
+        if self.pwkt:
+            slots["pw"] = (
+                Slot("un", Call("pun"), hold=NOTE_HOLDS),
+                Slot("walk", hold=NOTE_HOLDS),
+                Slot("set"),
+                Slot("out", Call("pout"), hold=NOTE_HOLDS),
+            )
         slots["ctrl"] = (Slot("fx"), Slot("wf"))
-        names = {x for n in used for x in asm.symbols(self.code[n])}
-        state = tuple((k, n) for k, n in swcode.STATE if k in names)
-        states = ((("freq", state),) if state else ()) + (
-            (("ctrl", swcode.CTRL_STATE),) if any(n in swcode.CTRL for n in used) else ()
-        )
+        states = []
+        for cell, group, variables in (
+            ("freq", swcode.routines(0), swcode.STATE),
+            ("pw", swcode.PW, swcode.PW_STATE),
+            ("ctrl", swcode.CTRL, swcode.CTRL_STATE),
+        ):
+            names = {x for n in used if n in group for x in asm.symbols(self.code[n])}
+            states += [(cell, tuple((k, n) for k, n in variables if k in names))] * bool(names)
         return Header(
             (("title", name), ("author", author), ("released", released)),
             clock=(CYCLES[core.clock], core.clock),
             slots=slots | {"freq": tuple(freq)},
             holds={"pw": NOTE_HOLDS, "filter": NOTE_HOLDS, "ctrl": ("legato",)},
-            state=states or None,
+            state=tuple(states) or None,
             regs=tuple(regs) if any(regs) else None,
         )
 
@@ -753,17 +787,14 @@ class Lift:  # pylint: disable=too-many-instance-attributes,too-many-public-meth
             Event("-", None, ({"tempo": PRE} if v == 0 else {}) | self.seeds(v))
             for v in range(VOICES)
         ]
-        for name in ("un", "out") * self.carry:
+        for name in ("un", "out") * self.carry + ("pun", "pout") * self.pwkt:
             self.call(name)
         used = tuple(n for n in self.code if n in self.calls)
         mods = tuple((signature(n, asm.params(self.code[n])), Code(self.code[n])) for n in used)
-        tables = (
-            (("V", self.vtable()),)
-            if any("V.lo" in asm.symbols(self.code[n]) for n in used)
-            else ()
-        )
         defs = [d for d in defs if d.records]
-        return Document(self.header(used), tables, mods, defs, tuple(init), tuple(voices), None)
+        return Document(
+            self.header(used), self.tables(used), mods, defs, tuple(init), tuple(voices), None
+        )
 
     def origins(self) -> dict:
         """Each named object's :class:`~unitracker.lift.invariants.Origin`."""

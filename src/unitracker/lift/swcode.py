@@ -6,6 +6,15 @@ from unitracker_grammar import code as asm
 
 STATE = tuple((name, 1) for name in "ml mh vd vf vk sv tl cw pl ph fb".split())
 CTRL_STATE = (("pg", 1),)
+PW_STATE = (("pk", 1), ("pr", 1))
+PW = {
+    "pun": "lda v+1\nsec\nsbc pr\nsta v+1\nrts\n",
+    "pout": (
+        "lda pk\nbeq z\nsec\nadc ne\ntay\nlda E.lo,y\nsbc M.lo,y\nadc v+1\ntax\nsec\nsbc v+1\n"
+        "sta pr\nstx v+1\nrts\nz:\nlda #0\nsta pr\nrts\n"
+    ),
+    "pkset": "lda #t\nsta pk\nrts\n",
+}
 CTRL = {
     "wv": "lda #w\nand pg\nsta v\nrts\n",
     "goff": "lda #254\nsta pg\nlda v\nand #254\nsta v\nrts\n",
@@ -61,4 +70,4 @@ def routines(exp_end: int) -> dict:
 
 def assembled(exp_end: int) -> dict:
     """The routines read as code."""
-    return {name: asm.read(text) for name, text in (routines(exp_end) | CTRL).items()}
+    return {name: asm.read(text) for name, text in (routines(exp_end) | CTRL | PW).items()}
