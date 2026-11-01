@@ -1,5 +1,7 @@
 """What the lifts share: note names, meta quoting, rest runs, repeat detection and the CLI."""
 
+import os
+
 import numpy as np
 import pytest
 import yaml
@@ -121,3 +123,33 @@ def test_a_looping_document_is_checked_against_a_reference_played_alongside(end,
     bad[3, 2] ^= 1
     cells = s.cells_of(text, 40, reference=lambda n: bad[:n])
     assert [tuple(int(x) for x in c[:2]) for c in cells] == [(3, 2)]
+
+
+def test_a_started_reference_is_played_in_its_worker_before_the_document_is():
+    """A Reference runs its function over the frames asked at construction, in another process,
+    and cells_of takes its grid however many frames the document played."""
+    text = _song("{loop:0}")
+    parent = os.getpid()
+    good = _grid(text, 40)
+
+    def reference(n):
+        assert os.getpid() != parent
+        return good[:n]
+
+    job = s.Reference(reference, 40)
+    assert not s.cells_of(text, 40, reference=job).size
+    bad = good.copy()
+    bad[5, 0] ^= 4
+    job = s.Reference(lambda n: bad[:n], 40)
+    assert [tuple(int(x) for x in c[:2]) for c in s.cells_of(text, 40, reference=job)] == [(5, 0)]
+
+
+def test_a_started_reference_ends_when_the_document_cannot_be_played(monkeypatch):
+    closed = []
+    close = s.Reference.close
+    monkeypatch.setattr(s.Reference, "close", lambda self: (closed.append(self), close(self)))
+    monkeypatch.setattr(s, "play", lambda *_: (_ for _ in ()).throw(RuntimeError("no play")))
+    job = s.Reference(lambda n: np.zeros((n, 25), dtype=np.uint8), 4)
+    with pytest.raises(RuntimeError, match="no play"):
+        s.cells_of(_song("end"), 4, reference=job)
+    assert closed == [job]

@@ -46,7 +46,7 @@ from unitracker_grammar.expr import canonical
 from unitracker.lift import cli, invariants
 from unitracker.lift.gt2code import ROUTINES, STATE
 from unitracker.lift import gt2tables, gt2wrap
-from unitracker.lift.shared import Names, Refusal, calls_of, cells_of, lifted_text
+from unitracker.lift.shared import Names, Reference, Refusal, calls_of, cells_of, lifted_text
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -1186,11 +1186,13 @@ def verify(raw: bytes, subtune: int = 0, frames: int = CHECK) -> tuple:
     """``(cells, text)`` of a SID: the cells where its document differs from the reference over
     :func:`check_frames` frames, ``frames`` at least."""
     core = core_of_sid(raw, subtune)
-    text, _ = checked_text(core)
-    return (
-        cells_of(text, check_frames(core, frames), reference=lambda n: reference(raw, subtune, n)),
-        text,
-    )
+    count = check_frames(core, frames)
+    job = Reference(lambda n: reference(raw, subtune, n), count)
+    try:
+        text, _ = checked_text(core)
+        return cells_of(text, count, reference=job), text
+    finally:
+        job.close()
 
 
 def report(raw: bytes, subtune: int = 0) -> dict:

@@ -42,7 +42,7 @@ from unitracker_grammar.expr import canonical
 
 from unitracker.lift import cli, invariants
 from unitracker.lift.dmcode import ROUTINES, STATE
-from unitracker.lift.shared import Names, Refusal, cells_of, lifted_text
+from unitracker.lift.shared import Names, Reference, Refusal, cells_of, lifted_text
 from unitracker.lift.shared import meta_text, note_name, rests
 
 CYCLES = {PAL_CLOCK_HZ: 19656, NTSC_CLOCK_HZ: 17095}
@@ -792,9 +792,14 @@ def lifted(raw: bytes, subtune: int = 0) -> tuple:
     native song entries of each voice (:mod:`unitracker.lift.invariants`)."""
     core = core_of_sid(raw, subtune)
     text, built = document_of(core)
+    held(text, built)
+    return core, text, built
+
+
+def held(text: str, built) -> None:
+    """The document held to its origins and to the native song entries of each voice."""
     invariants.provenance(text, built.origins)
     invariants.check(text, {"song": built.song})
-    return core, text, built
 
 
 def verify(raw: bytes, subtune: int = 0, frames: int | None = None, whole: bool = True) -> tuple:
@@ -802,10 +807,16 @@ def verify(raw: bytes, subtune: int = 0, frames: int | None = None, whole: bool 
     ``frames`` frames (at least :data:`MINIMUM` by default), and with ``whole`` over every step of
     the walk and the loop once more; a ModelError where the document has an object without an
     origin or more song entries than the arranger has steps."""
-    _, text, built = lifted(raw, subtune)
+    core = core_of_sid(raw, subtune)
+    text, built = document_of(core)
     count = frames or MINIMUM
     count = max(count, built.calls_to_play()) if whole else count
-    return cells_of(text, count, reference=lambda n: reference(raw, subtune, n)), text
+    job = Reference(lambda n: reference(raw, subtune, n), count)
+    try:
+        held(text, built)
+        return cells_of(text, count, reference=job), text
+    finally:
+        job.close()
 
 
 def report(raw: bytes, subtune: int = 0) -> dict:
