@@ -9,8 +9,9 @@ MA_PULSE = [(6, 0x48), (5, 0x08), (4, 0x40), (4, 0x41)]
 
 
 def test_orders_are_every_per_voice_order_of_the_kept_writes():
-    assert len(W.ORDERS) == len(set(W.ORDERS)) == 18
-    assert all(o.index("ctrl:2") < o.index("ctrl") for o in W.ORDERS if "ctrl:2" in o)
+    assert len(W.ORDERS) == len(set(W.ORDERS)) == 6 + 12 + 12 + 30
+    for a, b in W.PAIRS:
+        assert all(o.index(a) < o.index(b) for o in W.ORDERS if a in o)
 
 
 def test_events_are_edges_with_the_envelope_in_effect():
@@ -34,6 +35,7 @@ def test_kept_takes_the_last_writes_in_the_orders_sequence():
     assert W.kept(GT2_NOTE, ("ad", "sr", "ctrl")) == [(5, 0x00), (6, 0xE5), (4, 0x09)]
     assert W.kept(GT2_NOTE, ("ctrl:2", "ctrl", "sr", "ad")) == [(4, 0x09), (6, 0xE5), (5, 0x00)]
     assert W.kept(GT2_NOTE + [(4, 0x08)], ("ctrl:2", "ad", "sr", "ctrl"))[0] == (4, 0x09)
+    assert W.kept([(6, 0x93), (6, 0x20)], ("sr:2", "sr")) == [(6, 0x93), (6, 0x20)]
     expect = [(5, 0x08), (6, 0x48), (4, 0x40), (4, 0x41)]
     assert W.kept(MA_PULSE, ("ad", "sr", "ctrl:2", "ctrl")) == expect
 
@@ -66,7 +68,7 @@ def test_measure_counts_pattern_changes(metal_warrior):
 def test_summary_ranks_orders_and_lists_pairs():
     pairs = [["+g(00,00)", "-", 17, 4]]
     recs = [
-        {"player": "p", "frames": 10, "changed": [0] * 17 + [4], "pairs": pairs},
+        {"player": "p", "frames": 10, "changed": [0] * 17 + [4] * 43, "pairs": pairs},
         {"player": "p", "error": "x"},
     ]
     text = W.summary(recs, 5)

@@ -24,10 +24,13 @@ import shared
 
 REGS = 25
 GATE, TEST = 0x01, 0x08
-ITEMS = ("ctrl:2", "ad", "sr", "ctrl")
-ORDERS = [o for o in permutations(ITEMS) if o.index("ctrl:2") < o.index("ctrl")] + list(
-    permutations(ITEMS[1:])
-)
+PAIRS = (("ctrl:2", "ctrl"), ("sr:2", "sr"))
+ORDERS = [
+    o
+    for extra in ((), ("ctrl:2",), ("sr:2",), ("ctrl:2", "sr:2"))
+    for o in permutations(("ad", "sr", "ctrl", *extra))
+    if all(o.index(a) < o.index(b) for a, b in PAIRS if a in o)
+]
 
 
 def events(start: tuple, writes: list) -> tuple:
@@ -59,9 +62,10 @@ def events(start: tuple, writes: list) -> tuple:
 
 def kept(writes: list, order: tuple) -> list:
     """The writes ``order`` keeps of a voice's ``writes`` ``(offset, value)``, in its order: the
-    last control, AD and SR writes, and the control write before the last where it names it."""
+    last control, AD and SR writes, and the control or SR write before the last where it names
+    it (``ctrl:2``, ``sr:2``)."""
     last = {reg: [v for r, v in writes if r == reg] for reg in (4, 5, 6)}
-    pick = {"ctrl": (4, -1), "ctrl:2": (4, -2), "ad": (5, -1), "sr": (6, -1)}
+    pick = {"ctrl": (4, -1), "ctrl:2": (4, -2), "ad": (5, -1), "sr": (6, -1), "sr:2": (6, -2)}
     out = []
     for item in order:
         reg, k = pick[item]
@@ -132,7 +136,7 @@ def sidtrace_writes(path: Path, subtune: int, frames: int, cache: Path) -> tuple
 
 
 def capture(row: dict, hvsc, args) -> tuple:
-    """``(init writes, [frame writes])`` of a tune row, in order."""
+    """``(init writes, [(start, frame writes)])`` of a tune row, cycles from 1 at its first."""
     path = shared.tune(row["path"], hvsc)
     image = SidImage.from_bytes(path.read_bytes())
     head, subtune = image.header, int(row.get("subtune") or 0)
@@ -144,7 +148,8 @@ def capture(row: dict, hvsc, args) -> tuple:
         init, frames = jennings_writes(image, subtune, args.frames, cpf)
     else:
         init, frames = sidtrace_writes(path, subtune, args.frames, args.cache)
-    return init, [w for _, w in frames]
+    base = np.array([min([*init[:1, 0], *(s for s, _ in frames[:1])]) - 1, 0, 0], np.int64)
+    return init - base, [(int(s - base[0]), w - base) for s, w in frames]
 
 
 def measure(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
@@ -155,7 +160,7 @@ def measure(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
     regs[init[:, 1]] = init[:, 2]
     changed = np.zeros(len(ORDERS), np.int64)
     pairs = Counter()
-    for w in frames:
+    for _, w in frames:
         for v in range(3):
             mine = [(r - 7 * v, x) for _, r, x in w.tolist() if 7 * v + 4 <= r <= 7 * v + 6]
             if not mine:
@@ -173,6 +178,17 @@ def measure(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
         "changed": changed.tolist(),
         "pairs": [[a, b, i, n] for (a, b, i), n in pairs.items()],
     }
+
+
+def capture_arguments(ap):
+    """``ap`` with the options :func:`capture` and a corpus run take."""
+    ap.add_argument("--backend", choices=("auto", "jennings", "sidtrace"), default="auto")
+    ap.add_argument("--frames", type=int, default=3000)
+    ap.add_argument("--cache", type=Path, default=Path("out/writeorder/sidtrace"))
+    ap.add_argument("--timeout", type=float, default=600, help="seconds per tune")
+    ap.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) - 2))
+    ap.add_argument("--out", type=Path, help="write each tune's record as JSON")
+    return ap
 
 
 def timed(row: dict, hvsc, args) -> dict:
@@ -209,14 +225,8 @@ def summary(recs: list, top: int) -> str:  # pylint: disable=too-many-locals
 
 def main(argv=None) -> int:
     """Parse the command line, measure the tunes in parallel and print the summary."""
-    ap = shared.corpus_parser(__doc__)
-    ap.add_argument("--backend", choices=("auto", "jennings", "sidtrace"), default="auto")
-    ap.add_argument("--frames", type=int, default=3000)
+    ap = capture_arguments(shared.corpus_parser(__doc__))
     ap.add_argument("--top", type=int, default=30, help="pattern pairs printed")
-    ap.add_argument("--cache", type=Path, default=Path("out/writeorder/sidtrace"))
-    ap.add_argument("--timeout", type=float, default=600, help="seconds per tune")
-    ap.add_argument("--jobs", type=int, default=max(1, len(os.sched_getaffinity(0)) - 2))
-    ap.add_argument("--out", type=Path, help="write each tune's record as JSON")
     args = ap.parse_args(argv)
     rows = shared.rows(args.sources, args.player)
     tasks = [(r, args.hvsc, args) for r in rows]
