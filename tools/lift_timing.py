@@ -64,7 +64,7 @@ def profile(raw: bytes, limit: int) -> str:
     signal.alarm(limit)
     try:
         prof.runcall(lift, raw)
-    except (Expired, LiftError):
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
     finally:
         signal.alarm(0)
