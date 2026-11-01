@@ -30,16 +30,16 @@ def song_bytes(name: str):
 
 
 def test_no_fixture_grows_past_its_baseline():
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     have = {n: got for n in EXACT if (got := song_bytes(n)) is not None}
-    if not have:
+    if have:
+        assert invariants.grown(have, baseline) == []
+    else:
         pytest.skip("no fixture available")
-    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    assert invariants.grown(have, baseline) == []
 
 
-def test_the_baseline_names_only_fixtures_that_lift():
-    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    assert set(baseline) <= set(EXACT)
+def test_the_baseline_is_every_fixture_that_lifts_exactly():
+    assert set(json.loads(BASELINE.read_text(encoding="utf-8"))) == set(EXACT)
 
 
 def main() -> None:
