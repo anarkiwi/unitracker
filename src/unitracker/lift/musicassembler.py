@@ -44,7 +44,7 @@ from unitracker.lift.invariants import Origin
 from unitracker.lift.macode import ROUTINES, STATE
 from unitracker.lift.macore import Core, core_of_sid, core_of_song, refuse
 from unitracker.lift import shared
-from unitracker.lift.shared import Divergence, LiftError, Refusal, calls_of, cells_of
+from unitracker.lift.shared import Divergence, LiftError, Reference, Refusal, calls_of, cells_of
 from unitracker.lift.shared import lifted_text, meta_text, note_name
 
 __all__ = ["Core", "Divergence", "LiftError", "Refusal", "core_of_sid", "core_of_song", "lift"]
@@ -846,8 +846,13 @@ def compare(core: Core, frames: int, grid=None) -> tuple:
 
 def verify(raw: bytes, subtune: int = 0, frames: int = 20000) -> tuple:
     """``(cells, text)`` of a SID: the cells where its document differs from the reference."""
-    text = document_text(core_of_sid(raw, subtune))
-    return cells_of(text, frames, reference=lambda n: reference(raw, subtune, n)), text
+    core = core_of_sid(raw, subtune)
+    job = Reference(lambda n: reference(raw, subtune, n), frames)
+    try:
+        text = document_text(core)
+        return cells_of(text, frames, reference=job), text
+    finally:
+        job.close()
 
 
 def lift(raw: bytes, subtune: int = 0, frames: int | None = None) -> str:

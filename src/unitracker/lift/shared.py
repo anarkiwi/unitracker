@@ -112,23 +112,47 @@ def _run_job(frames: int) -> np.ndarray:
     return np.asarray(_JOB[0](frames), dtype=np.uint8)
 
 
-def cells_of(text: str, frames: int, grid=None, reference=None) -> np.ndarray:
-    """The cells where the document ``text`` played over ``frames`` frames differs from ``grid``,
-    or from ``reference(n)`` over the ``n`` frames it played. A looping document plays exactly
-    ``frames`` frames, so its reference is played in a forked worker alongside it."""
-    song = load(text)
-    if grid is None and song.looping:
+class Reference:
+    """The grid of ``reference(frames)`` played in a forked worker from construction on, so it
+    runs alongside whatever the lifter does before it needs the grid."""
+
+    def __init__(self, reference, frames: int):
         _JOB[:] = [reference]
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            pool = multiprocessing.get_context("fork").Pool(1)
-        with pool:
-            pending = pool.apply_async(_run_job, (frames,))
-            ours = np.asarray(play(song, frames), dtype=np.uint8)
-            grid = pending.get()
+            self._pool = multiprocessing.get_context("fork").Pool(1)
         _JOB.clear()
-    else:
+        self._pending = self._pool.apply_async(_run_job, (frames,))
+
+    def grid(self) -> np.ndarray:
+        """The reference grid, waiting for the worker; the worker ends."""
+        try:
+            return self._pending.get()
+        finally:
+            self.close()
+
+    def close(self):
+        """Ends the worker, whether or not its grid was taken."""
+        self._pool.terminate()
+
+
+def cells_of(text: str, frames: int, grid=None, reference=None) -> np.ndarray:
+    """The cells where the document ``text`` played over ``frames`` frames differs from ``grid``,
+    or from ``reference(n)`` over the ``n`` frames it played, or from the grid of a started
+    :class:`Reference`. A looping document plays exactly ``frames`` frames, so its reference is
+    played in a forked worker alongside it."""
+    song = load(text)
+    job = reference if isinstance(reference, Reference) else None
+    if job is None and grid is None and song.looping:
+        job = Reference(reference, frames)
+    try:
         ours = np.asarray(play(song, frames), dtype=np.uint8)
+    except BaseException:
+        if job is not None:
+            job.close()
+        raise
+    if job is not None:
+        grid = job.grid()
     if grid is None:
         grid = np.asarray(reference(len(ours)), dtype=np.uint8)
     return gridcmp.cell_diff(ours, grid[: len(ours)])

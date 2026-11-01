@@ -1,0 +1,32 @@
+bringing up nodes...
+bringing up nodes...
+
+.........................................................ss.........s... [ 12%]
+..s..................................................................... [ 24%]
+........................................................................ [ 36%]
+........................................................................ [ 48%]
+........................................................................ [ 60%]
+...s.....................................s.....s........................ [ 72%]
+....s................................................................... [ 84%]
+........................................................................ [ 96%]
+........................                                                 [100%]
+=============================== warnings summary ===============================
+tests/test_lift_goattracker2.py::test_cli
+tests/test_tools_lift_corpus.py::test_the_corpus_prints_its_counts
+tests/test_tools_lift_corpus.py::test_the_corpus_prints_its_counts
+tests/test_tools_lift_timing.py::test_the_tool_writes_the_table_and_prints_the_slow_tunes
+  /usr/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=731009) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_lift_defmon.py::test_the_command_line_verifies_and_lifts
+tests/test_lift_musicassembler.py::test_the_lift_returns_its_checked_text_and_the_cli_runs_it
+  /usr/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=730993) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_lift_shared.py::test_main_verifies_each_sid
+tests/test_lift_shared.py::test_main_reports_a_failure
+  /usr/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=731001) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+592 passed, 8 skipped, 8 warnings in 66.18s (0:01:06)
