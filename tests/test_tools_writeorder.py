@@ -1,59 +1,8 @@
-"""tools/writeorder.py: voices' event patterns and the per-voice orders that keep them."""
+"""tools/writeorder.py: capture and corpus summary over the moved pattern logic."""
 
 from types import SimpleNamespace
 
 import writeorder as W
-
-GT2_NOTE = [(5, 0x00), (6, 0xE5), (4, 0x09)]
-MA_PULSE = [(6, 0x48), (5, 0x08), (4, 0x40), (4, 0x41)]
-
-
-def test_orders_are_every_per_voice_order_of_the_kept_writes():
-    assert len(W.ORDERS) == len(set(W.ORDERS)) == 6 + 12 + 12 + 30
-    for a, b in W.PAIRS:
-        assert all(o.index(a) < o.index(b) for o in W.ORDERS if a in o)
-
-
-def test_events_are_edges_with_the_envelope_in_effect():
-    assert W.events((0x40, 0x0F, 0x00), GT2_NOTE) == ((6, 0xE5), (5, 0x00), (4, 0x09))
-    assert W.events((0x41, 0x08, 0x48), MA_PULSE) == ((4, 0x00), (4, 0x01))
-    assert W.events((0x41, 0, 0), [(4, 0x21), (4, 0x41), (5, 0x0A)]) == ((5, 0x0A),)
-    assert W.events((0x40, 0x0F, 0x00), [(4, 0x41), (5, 0x0A), (5, 0x0F)]) == (
-        (4, 0x01),
-        (5, 0x0A),
-        (5, 0x0F),
-    )
-    gate_off = (0x40, 0x00, 0x00)
-    hard_restart = W.events(gate_off, [(6, 0x00), (5, 0x0F)])
-    assert hard_restart == W.events(gate_off, [(5, 0x0F), (6, 0x00)]) == ((5, 0x0F),)
-    note = W.events(gate_off, [(5, 0x0A), (6, 0x88), (5, 0x0B), (4, 0x41)])
-    assert note == ((6, 0x88), (5, 0x0B), (4, 0x01))
-    assert W.events(gate_off, [(4, 0x41), (5, 0x0A)]) == ((4, 0x01), (5, 0x0A))
-
-
-def test_kept_takes_the_last_writes_in_the_orders_sequence():
-    assert W.kept(GT2_NOTE, ("ad", "sr", "ctrl")) == [(5, 0x00), (6, 0xE5), (4, 0x09)]
-    assert W.kept(GT2_NOTE, ("ctrl:2", "ctrl", "sr", "ad")) == [(4, 0x09), (6, 0xE5), (5, 0x00)]
-    assert W.kept(GT2_NOTE + [(4, 0x08)], ("ctrl:2", "ad", "sr", "ctrl"))[0] == (4, 0x09)
-    assert W.kept([(6, 0x93), (6, 0x20)], ("sr:2", "sr")) == [(6, 0x93), (6, 0x20)]
-    expect = [(5, 0x08), (6, 0x48), (4, 0x40), (4, 0x41)]
-    assert W.kept(MA_PULSE, ("ad", "sr", "ctrl:2", "ctrl")) == expect
-
-
-def test_orders_that_keep_or_change_a_pattern():
-    start = (0x41, 0x08, 0x48)
-    native = W.events(start, MA_PULSE)
-    keeps = {o for o in W.ORDERS if W.events(start, W.kept(MA_PULSE, o)) == native}
-    assert ("ad", "sr", "ctrl:2", "ctrl") in keeps
-    assert ("ad", "sr", "ctrl") not in keeps
-    gt2 = W.events((0x40, 0x0F, 0x00), GT2_NOTE)
-    assert W.events((0x40, 0x0F, 0x00), W.kept(GT2_NOTE, ("ad", "sr", "ctrl"))) == gt2
-    assert W.events((0x40, 0x0F, 0x00), W.kept(GT2_NOTE, ("ctrl", "ad", "sr"))) != gt2
-
-
-def test_text():
-    assert W.text(()) == "-"
-    assert W.text(((5, 0x0A), (6, 0x88), (4, 0x09), (4, 0x00))) == "a0A s88 g+t+ g-t-"
 
 
 def test_measure_counts_pattern_changes(metal_warrior):

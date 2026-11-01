@@ -6,146 +6,40 @@ docs/writeorder.md.
 """
 
 import sys
-from collections import Counter, defaultdict, deque
-from itertools import combinations
+from collections import Counter, defaultdict
 
 import numpy as np
 from pysidtracker.jobs import deadline
 from vagrant_moses import memmap as mm
+from vagrant_moses import sidorder as S
 
-import orderaudio as A
 import shared
 import writeorder as W
 
 
-def same(a, b) -> bool:
-    """Whether two envelope traces are identical."""
-    return len(a) == len(b) and all(
-        np.array_equal(a[k], b[k]) for k in ("cycle", "envelope", "state")
-    )
-
-
-def settle_cycles(clock: float) -> int:
-    """The most cycles a hard restart (gate off, release rate 0) takes to leave a voice in the
-    same state whatever came before: a full wrap of the rate counter, during which the envelope
-    does not step, then the release from the highest level to 0 at rate 0."""
-    sid = A.chips(clock, 8000.0, "decimate")[0]
-    sid.run([(1, 5, 0x00), (2, 6, 0xF0), (3, 4, A.SAW | W.GATE)], 2 * 19656)
-    start = sid.cycle
-    trace = sid.envelope_trace(0, [(start, 6, 0x00), (start, 4, A.SAW)], start + 19656)
-    silent = trace.cycle[trace.envelope == 0]
-    return 0x7FFF + int(silent[0] - start)
-
-
-def neutral(rows: np.ndarray, since: int) -> np.ndarray:
-    """Voice-1 ``rows`` with every AD write from cycle ``since`` on set to 0 and every SR write
-    from then on to its release nibble alone."""
-    out = rows.copy()
-    late = out[:, 0] >= since
-    out[late & (out[:, 1] == 5), 2] = 0
-    sr = late & (out[:, 1] == 6)
-    out[sr, 2] &= 0x0F
-    return out
-
-
-def hard_restarts(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
+def hard_restarts(tl, args) -> dict:
     """Each note-on (a gate-on from gate off): the whole frames before its frame's first write
     that the gate had been off with SR's release nibble 0, whether that is at least
-    :func:`settle_cycles`, and whether the AD and SR values written meanwhile matter."""
-    init, frames = W.capture(row, hvsc, args)
-    starts = [s for s, _ in frames]
-    sids = A.chips(mm.PAL.clock_hz, 8000.0, "decimate")
-    rows = [[A.voice_writes(w, v) for v in range(3)] for _, w in frames]
-    for v, sid in enumerate(sids):
-        sid.run(A.voice_writes(init[init[:, 0] >= sid.cycle], v), starts[0])
-    regs = np.zeros(W.REGS, np.int64)
-    regs[init[:, 1]] = init[:, 2]
-    since, past, found = [None] * 3, [deque(maxlen=5) for _ in range(3)], Counter()
-    for f in range(len(frames) - args.horizon):
-        for v, sid in enumerate(sids):
-            past[v].append((f, sid.copy()))
-            mine, ctrl, sr = rows[f][v], int(regs[7 * v + 4]), int(regs[7 * v + 6])
-            ons = mine[(mine[:, 1] == 4) & (mine[:, 2] & W.GATE != 0)]
-            if len(ons) and not ctrl & W.GATE:
-                held = int(mine[0, 0]) - since[v] if since[v] is not None else 0
-                kept = None
-                begun = int(np.searchsorted(starts, since[v], side="right")) - 1 if held else f
-                base = next((c for g, c in past[v] if g == begun), None)
-                if base is not None:
-                    writes = np.concatenate([rows[g][v] for g in range(begun, f + args.horizon)])
-                    until = starts[f + args.horizon]
-                    ref = base.envelope_trace(0, writes, until)
-                    trial = neutral(writes, since[v] if held else int(mine[0, 0]))
-                    trial[trial[:, 0] >= int(mine[0, 0])] = writes[writes[:, 0] >= int(mine[0, 0])]
-                    kept = same(base.envelope_trace(0, trial, until), ref)
-                found[(held >= args.settle, held // 19656, kept)] += 1
-            for cycle, reg, value in mine.tolist():
-                ctrl, sr = (value, sr) if reg == 4 else (ctrl, value if reg == 6 else sr)
-                quiet = not ctrl & W.GATE and not sr & 0x0F
-                since[v] = (since[v] if since[v] is not None else cycle) if quiet else None
-            sid.run(mine, starts[f + 1])
-        regs[frames[f][1][:, 1]] = frames[f][1][:, 2]
+    ``args.settle`` cycles, and whether the AD and SR values written meanwhile matter."""
+    found = S.hard_restarts(tl, args.settle, args.horizon)
     return {"notes": [[int(s), int(k), i, n] for (s, k, i), n in found.items()]}
 
 
-def measure(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
+def measure(tl, args) -> dict:
     """Each distinct set of orders that keeps a (frame, voice) envelope identical over
     ``args.horizon`` frames, as a mask over :data:`writeorder.ORDERS`, with its count and an
     example native pattern."""
-    init, frames = W.capture(row, hvsc, args)
-    sids, regs, found = A.chips(mm.PAL.clock_hz), np.zeros(W.REGS, np.int64), Counter()
-    examples = {}
-    regs[init[:, 1]] = init[:, 2]
-    for v, sid in enumerate(sids):
-        sid.run(A.voice_writes(init[init[:, 0] >= sid.cycle], v), frames[0][0])
-    for f, (_, w) in enumerate(frames[: -args.horizon]):
-        for v, sid in enumerate(sids):
-            mine = A.voice_writes(w, v)
-            start = tuple(int(x) for x in regs[7 * v + 4 : 7 * v + 7])
-            native = W.events(start, [(r, x) for _, r, x in mine.tolist()])
-            if native:
-                tail = [A.voice_writes(frames[g][1], v) for g in range(f + 1, f + args.horizon)]
-                until = frames[f + args.horizon][0]
-                ref = sid.envelope_trace(0, np.concatenate([mine, *tail]), until)
-                ok, seen = [], {}
-                for order in W.ORDERS:
-                    new = A.ordered(mine, order)
-                    key = new.tobytes()
-                    if key not in seen:
-                        seen[key] = np.array_equal(new, mine) or same(
-                            sid.envelope_trace(0, np.concatenate([new, *tail]), until), ref
-                        )
-                    ok.append(seen[key])
-                mask = int("".join("1" if x else "0" for x in ok), 2)
-                found[mask] += 1
-                examples.setdefault(mask, W.text(native))
-            sid.run(mine, frames[f + 1][0])
-        regs[w[:, 1]] = w[:, 2]
-    return {"masks": [[hex(m), n, examples[m]] for m, n in found.items()]}
+    return {"masks": [[hex(m), n, ex] for m, (n, ex) in S.order_masks(tl, args.horizon).items()]}
 
 
 def timed(row: dict, hvsc, args) -> dict:
-    """:func:`measure` of a tune row within ``args.timeout`` seconds."""
+    """One tune's cases and hard restarts within ``args.timeout`` seconds."""
     with deadline(args.timeout):
-        return measure(row, hvsc, args) | {"hr": hard_restarts(row, hvsc, args)}
+        tl = S.Timeline(*W.capture(row, hvsc, args))
+        return measure(tl, args) | {"hr": hard_restarts(tl, args)}
 
 
-def bits(mask: int) -> np.ndarray:
-    """``mask`` as a boolean array over :data:`writeorder.ORDERS`."""
-    return np.array([c == "1" for c in format(mask, f"0{len(W.ORDERS)}b")])
-
-
-def covers(masks: dict, most: int) -> tuple:
-    """``(size, [cover])``: every smallest set of orders (at most ``most``) such that each mask
-    with any order in it has one of them."""
-    needed = np.array([bits(m) for m in masks if m])
-    for size in range(1, most + 1):
-        found = [
-            c for c in combinations(range(len(W.ORDERS)), size) if needed[:, c].any(axis=1).all()
-        ]
-        if found:
-            return size, found
-    return None, []
+bits, covers = S.bits, S.covers
 
 
 def hard_restart_lines(recs: list, settle: int) -> list:  # pylint: disable=too-many-locals
@@ -211,7 +105,7 @@ def main(argv=None) -> int:
     ap.add_argument("--horizon", type=int, default=10, help="frames compared from each case")
     ap.add_argument("--most", type=int, default=4, help="largest cover searched")
     args = ap.parse_args(argv)
-    args.settle = settle_cycles(mm.PAL.clock_hz)
+    args.settle = S.settle_cycles(mm.PAL.clock_hz)
     rows = shared.rows(args.sources, args.player)
     tasks = [(r, args.hvsc, args) for r in rows]
     recs = shared.run_corpus(timed, rows, tasks, args.jobs, args.out)

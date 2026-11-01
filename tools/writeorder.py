@@ -1,7 +1,7 @@
-"""The SID register write order that keeps what tunes' players command: each frame's control, AD
-and SR writes to a voice reduced to their event pattern (every gate or test edge and AD or SR
-change, in order), the pattern every per-voice order of the kept writes gives, and how often each
-differs from the native one over a corpus.
+"""The SID register write order that keeps what tunes' players command, over a corpus: the tunes'
+writes are captured here and measured by :mod:`vagrant_moses.sidorder` (each frame's event
+patterns, the pattern every per-voice order of the kept writes gives, and how often each differs
+from the native one).
 
 ``python tools/writeorder.py TUNES.csv|TUNE.sid ... [--frames N] [--top K] [--out F.json]``; see
 docs/writeorder.md.
@@ -10,7 +10,6 @@ docs/writeorder.md.
 import os
 import sys
 from collections import Counter, defaultdict
-from itertools import permutations
 from pathlib import Path
 
 import numpy as np
@@ -19,71 +18,12 @@ from pysidtracker.emu import call_play, observe_data_access
 from pysidtracker.jobs import deadline
 from pysidtracker.oracle import boot_flat, cached_sidtrace, play_source, raise_cycles
 from pysidtracker.registers import cycles_per_frame_for_flags
+from vagrant_moses import sidorder as S
 
 import shared
 
-REGS = 25
-GATE, TEST = 0x01, 0x08
-PAIRS = (("ctrl:2", "ctrl"), ("sr:2", "sr"))
-ORDERS = [
-    o
-    for extra in ((), ("ctrl:2",), ("sr:2",), ("ctrl:2", "sr:2"))
-    for o in permutations(("ad", "sr", "ctrl", *extra))
-    if all(o.index(a) < o.index(b) for a, b in PAIRS if a in o)
-]
-
-
-def events(start: tuple, writes: list) -> tuple:
-    """A voice's event pattern from its ``start`` ``(ctrl, ad, sr)`` through ``writes``
-    ``(register offset within the voice, value)`` in order: every write that changes what its
-    envelope generator uses, or resets its oscillator, in order, as ``(offset, value)`` (a control
-    write by its gate and test bits). With the gate on, AD and SR set the rate and sustain in
-    effect at once; with it off only SR's release is in effect, so an AD write waits for the next
-    gate-on and is placed just before it (or at the end), its last value only. Writes of the value
-    already held, and timing, leave no trace."""
-    held = dict(zip((4, 5, 6), start))
-    out, latent = [], None
-    for reg, value in writes:
-        if reg == 4:
-            edge = (held[4] ^ value) & (GATE | TEST)
-            if edge & GATE and value & GATE and latent is not None:
-                out.append((5, latent))
-                latent = None
-            if edge:
-                out.append((4, value & (GATE | TEST)))
-        elif held[reg] != value:
-            if reg == 5 and not held[4] & GATE:
-                latent = value
-            else:
-                out.append((reg, value))
-        held[reg] = value
-    return tuple(out + [(5, latent)] * (latent is not None))
-
-
-def kept(writes: list, order: tuple) -> list:
-    """The writes ``order`` keeps of a voice's ``writes`` ``(offset, value)``, in its order: the
-    last control, AD and SR writes, and the control or SR write before the last where it names
-    it (``ctrl:2``, ``sr:2``)."""
-    last = {reg: [v for r, v in writes if r == reg] for reg in (4, 5, 6)}
-    pick = {"ctrl": (4, -1), "ctrl:2": (4, -2), "ad": (5, -1), "sr": (6, -1), "sr:2": (6, -2)}
-    out = []
-    for item in order:
-        reg, k = pick[item]
-        if len(last[reg]) >= -k:
-            out.append((reg, last[reg][k]))
-    return out
-
-
-def text(pattern: tuple) -> str:
-    """A pattern readably: control writes as their gate and test bits (``g+t-``), AD and SR as
-    ``a0A`` and ``s88``."""
-    out = []
-    for reg, value in pattern:
-        if reg == 4:
-            out.append("".join(n + "-+"[bool(value & b)] for b, n in ((GATE, "g"), (TEST, "t"))))
-        else:
-            out.append(f"{'as'[reg - 5]}{value:02X}")
-    return " ".join(out) or "-"
+REGS, ORDERS, PAIRS, GATE, TEST = S.REGS, S.ORDERS, S.PAIRS, S.GATE, S.TEST
+events, kept, text = S.events, S.kept, S.text
 
 
 def jennings_writes(image: SidImage, subtune: int, frames: int, cpf: int) -> tuple:
@@ -152,27 +92,11 @@ def capture(row: dict, hvsc, args) -> tuple:
     return init - base, [(int(s - base[0]), w - base) for s, w in frames]
 
 
-def measure(row: dict, hvsc, args) -> dict:  # pylint: disable=too-many-locals
+def measure(row: dict, hvsc, args) -> dict:
     """One tune's frames and, per order (:data:`ORDERS`), the (frame, voice) cases whose event
     pattern it changes, with each distinct ``(native, ordered)`` pattern pair and its count."""
     init, frames = capture(row, hvsc, args)
-    regs = np.zeros(REGS, np.int64)
-    regs[init[:, 1]] = init[:, 2]
-    changed = np.zeros(len(ORDERS), np.int64)
-    pairs = Counter()
-    for _, w in frames:
-        for v in range(3):
-            mine = [(r - 7 * v, x) for _, r, x in w.tolist() if 7 * v + 4 <= r <= 7 * v + 6]
-            if not mine:
-                continue
-            start = tuple(int(x) for x in regs[7 * v + 4 : 7 * v + 7])
-            native = events(start, mine)
-            for i, order in enumerate(ORDERS):
-                new = events(start, kept(mine, order))
-                if new != native:
-                    changed[i] += 1
-                    pairs[(text(native), text(new), i)] += 1
-        regs[w[:, 1]] = w[:, 2]
+    changed, pairs = S.pattern_changes(init, frames)
     return {
         "frames": len(frames),
         "changed": changed.tolist(),
