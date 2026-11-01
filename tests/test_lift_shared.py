@@ -125,7 +125,7 @@ def test_a_looping_document_is_checked_against_a_reference_played_alongside(end,
     assert [tuple(int(x) for x in c[:2]) for c in cells] == [(3, 2)]
 
 
-def test_a_started_reference_is_played_in_its_worker_before_the_document_is(monkeypatch):
+def test_a_started_reference_is_played_in_its_worker_before_the_document_is():
     """A Reference runs its function over the frames asked at construction, in another process,
     and cells_of takes its grid however many frames the document played."""
     text = _song("{loop:0}")
