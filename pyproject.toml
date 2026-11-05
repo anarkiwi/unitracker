@@ -23,7 +23,7 @@ dependencies = [
     "unitracker-player>=0.30.0",
     "tiktoken>=0.14.0",
     "lark>=1.1",
-    "music21>=9",
+    "music21>=10.5.2",
 ]
 
 [project.optional-dependencies]
